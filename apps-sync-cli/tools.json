@@ -1,0 +1,6 @@
+{
+  "codex": "%LOCALAPPDATA%\\Programs\\OpenAI\\Codex\\bin\\codex.exe",
+  "claude": "%USERPROFILE%\\.local\\bin\\claude.exe",
+  "vitePlus": "%USERPROFILE%\\.vite-plus\\bin\\vp.exe",
+  "pnpm": "%USERPROFILE%\\.vite-plus\\bin\\pnpm.exe"
+}

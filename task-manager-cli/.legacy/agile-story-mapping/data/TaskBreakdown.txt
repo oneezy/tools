@@ -1,0 +1,7 @@
+Create a task breakdown that contains task division, task descriptions (with practical guidance), estimated hours, and learning link references. 
+
+You will advise me on what I should do, provide detailed guidance for each task (with any examples available), and estimate the time necessary for each action. 
+
+For each task that I need to do, identify a relevant reference source that can help with learning and deepening my understanding. 
+
+First, ask me what I'm planning to do.

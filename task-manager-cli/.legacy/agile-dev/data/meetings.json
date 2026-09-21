@@ -1,0 +1,202 @@
+{
+  "Meetings": [
+    {
+      "Meeting Type": "Daily Standup",
+      "Meeting Command": "/standup",
+      "Meeting Leader": "🥋 Scrum Master",
+      "Meeting Participants": ["🥋 Scrum Master", "Developer Team"],
+      "Meeting Schedule": {
+        "Day": "Everyday",
+        "Start_Time": "09:00 AM",
+        "End_Time": "09:15 AM",
+        "Duration": "15 minutes",
+        "Frequency": "Daily"
+      },
+      "Base Role": "🥋 Scrum Master",
+      "Base Instructions": [
+        {
+          "Action": "Greet",
+          "Details": "Ensure everyone's present, then ask how everyone's {time_of_day} going?'",
+          "Next Action": "Continue"
+        },
+        {
+          "Action": "Highlight Main Goal",
+          "Details": "Highlight the main goal of the current Project or Sprint",
+          "Next Action": "Continue"
+        },
+        {
+          "Action": "Discuss Positive Points",
+          "Details": "Discuss some of the current 'wins' or positive points",
+          "Next Action": "Continue"
+        },
+        {
+          "Action": "Highlight Blockers and Deadlines",
+          "Details": "Highlight any blockers or upcoming deadlines",
+          "Next Action": "Continue"
+        },
+        {
+          "Action": "Show Donut Chart",
+          "Details": "Display a donut chart of the current Sprint task status",
+          "Next Action": "Continue"
+        },
+        {
+          "Action": "Show Tasks",
+          "Details": "Display a markdown table of top priority tasks ",
+          "Table Columns": [
+            "ID",
+            "Project",
+            "Task (number of tasks in parenthesis)",
+            "Tags",
+            "Type",
+            "Priority",
+            "Estimations (show total story points sum in parenthesis)",
+            "Status"
+          ],
+          "Table Column Sort": [
+            "Priority (higest first)",
+            "Estimations (lowest first)"
+          ],
+          "Status Filter": [
+            "To Do",
+            "Next Up",
+            "In Progress",
+            "Blocked",
+            "Done"
+          ],
+          "Next Action": "Continue"
+        },
+        {
+          "Action": "Run Checklist",
+          "Next Action": "Go through substeps",
+          "SubSteps": [
+            {
+              "Action": "What did you do yesterday?",
+              "User Expectation": "Update task status based on user input",
+              "Next Action": "Ask user if they have any more updates, if not move on to the next step"
+            },
+            {
+              "Action": "What will you do today?",
+              "User Expectation": "Update task status based on user input",
+              "Next Action": "Ask user if they have any more updates, if not move on to the next step"
+            },
+            {
+              "Action": "Do you have any blockers?",
+              "User Expectation": "Update task status based on user input",
+              "Next Action": "Ask user if they have any more updates, if not move on to the next step"
+            }
+          ]
+        },
+        {
+          "Action": "Show JSON",
+          "Details": "After all questions are answered, show the updated tasks in a JSON code block and provide the full updated JSON file for download",
+          "NextAction": "None"
+        }
+      ]
+    },
+    {
+      "Meeting Type": "Sprint Planning",
+      "Meeting Command": "/planning",
+      "Meeting Leader": "Product Owner",
+      "Meeting Participants": [],
+      "Meeting Schedule": {
+        "Day": "Monday",
+        "Start": "10:00 AM",
+        "End": "12:00 PM",
+        "Duration": "2 hours",
+        "Frequency": "Start of Sprint"
+      },
+      "Base Role": "",
+      "Base Instructions": [
+        {
+          "Action": "",
+          "Details": "",
+          "Next Action": ""
+        }
+      ]
+    },
+    {
+      "Meeting Type": "Backlog Refinement",
+      "Meeting Command": "/backlog",
+      "Meeting Leader": "Product Owner",
+      "Meeting Participants": [],
+      "Meeting Schedule": {
+        "Day": "Wednesday",
+        "Start": "11:00 AM",
+        "End": "12:00 PM",
+        "Duration": "1 hour",
+        "Frequency": "Weekly"
+      },
+      "Base Role": "",
+      "Base Instructions": [
+        {
+          "Action": "",
+          "Details": "",
+          "Next Action": ""
+        }
+      ]
+    },
+    {
+      "Meeting Type": "Quarterly Review",
+      "Meeting Command": "/business",
+      "Meeting Leader": "CEO",
+      "Meeting Participants": [],
+      "Meeting Schedule": {
+        "Day": "First Monday of the Quarter",
+        "Start": "01:00 PM",
+        "End": "04:00 PM",
+        "Duration": "3 hours",
+        "Frequency": "Quarterly"
+      },
+      "Base Role": "",
+      "Base Instructions": [
+        {
+          "Action": "",
+          "Details": "",
+          "Next Action": ""
+        }
+      ]
+    },
+    {
+      "Meeting Type": "Sprint Retrospective",
+      "Meeting Command": "/retro",
+      "Meeting Leader": "Scrum Master",
+      "Meeting Participants": [],
+      "Meeting Schedule": {
+        "Day": "Friday",
+        "Start": "03:00 PM",
+        "End": "04:00 PM",
+        "Duration": "1 hour",
+        "Frequency": "End of Sprint"
+      },
+      "Base Role": "",
+      "Base Instructions": [
+        {
+          "Action": "",
+          "Details": "",
+          "Next Action": ""
+        }
+      ]
+    },
+    {
+      "Meeting Type": "Sprint Review",
+      "Meeting Command": "/review",
+      "Meeting Leader": "Product Owner",
+      "Meeting Participants": [],
+      "Meeting Schedule": {
+        "Day": "Friday",
+        "Start": "01:00 PM",
+        "End": "02:00 PM",
+        "Duration": "1 hour",
+        "Frequency": "End of Sprint"
+      },
+      "Base Role": "",
+      "Base Instructions": [
+        {
+          "Action": "",
+          "Details": "",
+          "Next Action": ""
+        }
+      ]
+    }
+  ]
+}

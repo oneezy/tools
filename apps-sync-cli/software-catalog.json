@@ -1,0 +1,587 @@
+{
+  "schemaVersion": 2,
+  "wslDistro": "Ubuntu-26.04",
+  "tools": [
+    {
+      "id": "codex",
+      "name": "Codex CLI",
+      "source": {
+        "kind": "json",
+        "url": "https://releases.openai.com/codex/channels/latest",
+        "field": "tag_name",
+        "channel": "publisher latest"
+      },
+      "hosts": {
+        "windows": {
+          "provider": "native",
+          "path": "%LOCALAPPDATA%/Programs/OpenAI/Codex/bin/codex.exe",
+          "updateArgs": [
+            "update"
+          ],
+          "installUrl": "https://chatgpt.com/codex/install.ps1",
+          "channel": "stable",
+          "versionFromPath": true,
+          "verifyArgs": [
+            "--version"
+          ]
+        },
+        "wsl": {
+          "provider": "native",
+          "path": "~/.local/bin/codex",
+          "updateArgs": [
+            "update"
+          ],
+          "installUrl": "https://chatgpt.com/codex/install.sh",
+          "channel": "stable",
+          "versionFromPath": true,
+          "verifyArgs": [
+            "--version"
+          ]
+        }
+      }
+    },
+    {
+      "id": "claude",
+      "name": "Claude Code CLI",
+      "source": {
+        "kind": "text",
+        "url": "https://downloads.claude.ai/claude-code-releases/latest",
+        "field": "version",
+        "channel": "publisher latest"
+      },
+      "hosts": {
+        "windows": {
+          "provider": "native",
+          "path": "%USERPROFILE%/.local/bin/claude.exe",
+          "updateArgs": [
+            "install",
+            "{version}"
+          ],
+          "installUrl": "https://claude.ai/install.ps1",
+          "installArgs": [
+            "latest"
+          ],
+          "channel": "stable",
+          "verifyArgs": [
+            "--version"
+          ]
+        },
+        "wsl": {
+          "provider": "native",
+          "path": "~/.local/bin/claude",
+          "updateArgs": [
+            "install",
+            "{version}"
+          ],
+          "installUrl": "https://claude.ai/install.sh",
+          "installArgs": [
+            "latest"
+          ],
+          "channel": "stable",
+          "versionFromPath": true,
+          "verifyArgs": [
+            "--version"
+          ]
+        }
+      }
+    },
+    {
+      "id": "vite-plus",
+      "name": "Vite Plus",
+      "source": {
+        "kind": "json",
+        "url": "https://registry.npmjs.org/vite-plus/latest",
+        "field": "version"
+      },
+      "hosts": {
+        "windows": {
+          "provider": "native",
+          "path": "%USERPROFILE%/.vite-plus/bin/vp.exe",
+          "updateArgs": [
+            "upgrade",
+            "{version}"
+          ],
+          "installUrl": "https://vite.plus/ps1",
+          "channel": "stable",
+          "verifyArgs": [
+            "--version"
+          ]
+        },
+        "wsl": {
+          "provider": "native",
+          "path": "~/.vite-plus/bin/vp",
+          "updateArgs": [
+            "upgrade",
+            "{version}"
+          ],
+          "installUrl": "https://vite.plus",
+          "channel": "stable",
+          "verifyArgs": [
+            "--version"
+          ]
+        }
+      }
+    },
+    {
+      "id": "pnpm",
+      "name": "pnpm global default",
+      "source": {
+        "kind": "json",
+        "url": "https://registry.npmjs.org/pnpm/latest",
+        "field": "version"
+      },
+      "hosts": {
+        "windows": {
+          "provider": "pnpm",
+          "path": "%USERPROFILE%/.vite-plus/bin/pnpm.exe",
+          "vp": "%USERPROFILE%/.vite-plus/bin/vp.exe",
+          "channel": "stable"
+        },
+        "wsl": {
+          "provider": "pnpm",
+          "path": "~/.vite-plus/bin/pnpm",
+          "vp": "~/.vite-plus/bin/vp",
+          "channel": "stable"
+        }
+      }
+    },
+    {
+      "id": "herdr",
+      "name": "Herdr",
+      "source": {
+        "kind": "json",
+        "url": "https://herdr.dev/latest.json",
+        "field": "version"
+      },
+      "hosts": {
+        "windows": {
+          "provider": "native",
+          "path": "%USERPROFILE%/.herdr/packages/standalone/current/herdr.exe",
+          "updateArgs": [
+            "update"
+          ],
+          "installUrl": "https://herdr.dev/install.ps1",
+          "channel": "stable",
+          "versionFromPath": true,
+          "verifyArgs": [
+            "--version"
+          ]
+        },
+        "wsl": {
+          "provider": "native",
+          "path": "~/.local/bin/herdr",
+          "updateArgs": [
+            "update"
+          ],
+          "installUrl": "https://herdr.dev/install",
+          "channel": "stable",
+          "verifyArgs": [
+            "--version"
+          ]
+        }
+      }
+    },
+    {
+      "id": "hermes",
+      "name": "Hermes Agent",
+      "source": {
+        "kind": "manual"
+      },
+      "hosts": {
+        "windows": {
+          "provider": "manual",
+          "path": "%LOCALAPPDATA%/hermes/hermes-agent/venv/Scripts/hermes.exe",
+          "note": "Source checkout on main contains a locally carried commit. Review its branch/customization before using hermes update. Bulk updates leave it alone.",
+          "channel": "stable",
+          "checkout": "%LOCALAPPDATA%/hermes/hermes-agent"
+        }
+      }
+    },
+    {
+      "id": "gh",
+      "name": "GitHub CLI",
+      "source": {
+        "kind": "json",
+        "url": "https://api.github.com/repos/cli/cli/releases/latest",
+        "field": "tag_name"
+      },
+      "hosts": {
+        "windows": {
+          "provider": "publisher",
+          "path": "C:/Program Files/GitHub CLI/gh.exe",
+          "asset": "gh_[0-9.]+_windows_amd64\\.msi",
+          "channel": "stable",
+          "scope": "machine"
+        },
+        "wsl": {
+          "provider": "apt",
+          "path": "/usr/bin/gh",
+          "channel": "stable",
+          "package": "gh",
+          "dpkg": "gh",
+          "source": {
+            "kind": "apt",
+            "package": "gh"
+          },
+          "note": "Preserve the registered dpkg/APT installation. Candidate is from local APT indexes, not publisher latest."
+        }
+      }
+    },
+    {
+      "id": "git",
+      "name": "Git / Git Bash",
+      "source": {
+        "kind": "json",
+        "url": "https://api.github.com/repos/git-for-windows/git/releases/latest",
+        "field": "tag_name"
+      },
+      "hosts": {
+        "windows": {
+          "provider": "publisher",
+          "path": "C:/Program Files/Git/cmd/git.exe",
+          "asset": "Git-[0-9.]+-64-bit\\.exe",
+          "channel": "stable",
+          "scope": "machine",
+          "installerArgs": [
+            "/NORESTART"
+          ]
+        },
+        "wsl": {
+          "provider": "apt",
+          "package": "git",
+          "path": "/usr/bin/git",
+          "source": {
+            "kind": "apt",
+            "package": "git"
+          },
+          "note": "Full Debian version including epoch/revision. APT candidate uses dated local indexes; no implicit index refresh.",
+          "channel": "stable",
+          "dpkg": "git"
+        }
+      }
+    },
+    {
+      "id": "zed",
+      "name": "Zed",
+      "source": {
+        "kind": "json",
+        "url": "https://api.github.com/repos/zed-industries/zed/releases/latest",
+        "field": "tag_name"
+      },
+      "hosts": {
+        "windows": {
+          "provider": "publisher",
+          "registry": "^Zed$",
+          "asset": "Zed-x86_64\\.exe",
+          "channel": "stable",
+          "scope": "user",
+          "installerArgs": [
+            "/NORESTART"
+          ]
+        }
+      }
+    },
+    {
+      "id": "cursor",
+      "name": "Cursor",
+      "source": {
+        "kind": "json",
+        "url": "https://www.cursor.com/api/download?platform=win32-x64-user&releaseTrack=stable",
+        "field": "version"
+      },
+      "hosts": {
+        "windows": {
+          "provider": "publisher",
+          "registry": "^Cursor(?: |$)",
+          "urlField": "downloadUrl",
+          "signer": "Anysphere",
+          "channel": "stable",
+          "scope": "user",
+          "installerArgs": [
+            "/NORESTART"
+          ]
+        }
+      }
+    },
+    {
+      "id": "vscode",
+      "name": "Visual Studio Code",
+      "source": {
+        "kind": "json",
+        "url": "https://update.code.visualstudio.com/api/update/win32-x64-user/stable/latest",
+        "field": "productVersion"
+      },
+      "hosts": {
+        "windows": {
+          "provider": "publisher",
+          "registry": "^Microsoft Visual Studio Code \\(User\\)$",
+          "urlField": "url",
+          "hashField": "sha256hash",
+          "channel": "stable",
+          "scope": "user",
+          "installerArgs": [
+            "/NORESTART"
+          ]
+        }
+      }
+    },
+    {
+      "id": "vscode-insiders",
+      "name": "Visual Studio Code Insiders",
+      "source": {
+        "kind": "json",
+        "url": "https://update.code.visualstudio.com/api/update/win32-x64-user/insider/latest",
+        "field": "productVersion"
+      },
+      "hosts": {
+        "windows": {
+          "provider": "publisher",
+          "registry": "^Microsoft Visual Studio Code Insiders \\(User\\)$",
+          "urlField": "url",
+          "hashField": "sha256hash",
+          "hold": true,
+          "note": "Insiders is a rolling preview channel. Use Help > Check for Updates in the app; build commits can change without a version change.",
+          "channel": "insider",
+          "scope": "user"
+        }
+      }
+    },
+    {
+      "id": "docker",
+      "name": "Docker Desktop",
+      "source": {
+        "kind": "winget",
+        "id": "Docker.DockerDesktop"
+      },
+      "hosts": {
+        "windows": {
+          "provider": "winget",
+          "id": "Docker.DockerDesktop",
+          "scope": "user",
+          "registry": "^Docker Desktop$",
+          "note": "WinGet catalog version; upstream freshness not independently checked. Keep one Windows Desktop installation with WSL integration.",
+          "channel": "stable"
+        }
+      }
+    },
+    {
+      "id": "t3",
+      "name": "T3 Code (Alpha)",
+      "source": {
+        "kind": "json",
+        "url": "https://api.github.com/repos/pingdotgg/t3code/releases/latest",
+        "field": "tag_name"
+      },
+      "hosts": {
+        "windows": {
+          "provider": "publisher",
+          "registry": "^T3 Code \\(Alpha\\)",
+          "asset": "T3-Code-[0-9.]+-x64\\.exe",
+          "channel": "alpha",
+          "scope": "user"
+        }
+      }
+    },
+    {
+      "id": "buzz",
+      "name": "Buzz by Block",
+      "source": {
+        "kind": "json",
+        "url": "https://api.github.com/repos/block/buzz/releases/latest",
+        "field": "tag_name"
+      },
+      "hosts": {
+        "windows": {
+          "provider": "publisher",
+          "registry": "^Buzz$",
+          "asset": "Buzz_[0-9.]+_x64-setup_alpha-unsigned\\.exe",
+          "channel": "alpha",
+          "scope": "user"
+        }
+      }
+    },
+    {
+      "id": "wispr",
+      "name": "Wispr Flow",
+      "source": {
+        "kind": "manual"
+      },
+      "hosts": {
+        "windows": {
+          "provider": "manual",
+          "registry": "^Wispr Flow$",
+          "note": "Uses its built-in updater. A newer staged app folder may require quitting/reopening Flow; registry version is not a verified running version.",
+          "channel": "stable",
+          "scope": "user"
+        }
+      }
+    },
+    {
+      "id": "gemini",
+      "name": "Gemini CLI",
+      "source": {
+        "kind": "json",
+        "url": "https://registry.npmjs.org/@google/gemini-cli/latest",
+        "field": "version"
+      },
+      "hosts": {
+        "windows": {
+          "provider": "vp-global",
+          "managerPath": "%USERPROFILE%/.vite-plus/bin/vp.exe",
+          "channel": "stable"
+        },
+        "wsl": {
+          "provider": "vp-global",
+          "managerPath": "~/.vite-plus/bin/vp",
+          "channel": "stable"
+        }
+      },
+      "package": "@google/gemini-cli"
+    },
+    {
+      "id": "clasp",
+      "name": "Google clasp",
+      "source": {
+        "kind": "json",
+        "url": "https://registry.npmjs.org/@google/clasp/latest",
+        "field": "version",
+        "channel": "stable (comparison only; installed alpha pin is held)"
+      },
+      "hosts": {
+        "windows": {
+          "provider": "vp-global",
+          "managerPath": "%USERPROFILE%/.vite-plus/bin/vp.exe",
+          "hold": true,
+          "note": "Existing Windows version is explicitly pinned to 3.0.6-alpha. Review stable/preview choice before changing this package.",
+          "channel": "pinned-alpha"
+        },
+        "wsl": {
+          "provider": "vp-global",
+          "managerPath": "~/.vite-plus/bin/vp",
+          "hold": true,
+          "note": "Existing Windows version is explicitly pinned to 3.0.6-alpha. Review stable/preview choice before changing this package.",
+          "channel": "pinned-alpha"
+        }
+      },
+      "package": "@google/clasp"
+    },
+    {
+      "id": "degit",
+      "name": "degit",
+      "source": {
+        "kind": "json",
+        "url": "https://registry.npmjs.org/degit/latest",
+        "field": "version"
+      },
+      "hosts": {
+        "windows": {
+          "provider": "vp-global",
+          "managerPath": "%USERPROFILE%/.vite-plus/bin/vp.exe",
+          "channel": "stable"
+        },
+        "wsl": {
+          "provider": "vp-global",
+          "managerPath": "~/.vite-plus/bin/vp",
+          "channel": "stable"
+        }
+      },
+      "package": "degit"
+    },
+    {
+      "id": "turbo",
+      "name": "Turborepo CLI",
+      "source": {
+        "kind": "json",
+        "url": "https://registry.npmjs.org/turbo/latest",
+        "field": "version"
+      },
+      "hosts": {
+        "windows": {
+          "provider": "vp-global",
+          "managerPath": "%USERPROFILE%/.vite-plus/bin/vp.exe",
+          "channel": "stable"
+        },
+        "wsl": {
+          "provider": "vp-global",
+          "managerPath": "~/.vite-plus/bin/vp",
+          "channel": "stable"
+        }
+      },
+      "package": "turbo"
+    },
+    {
+      "id": "vercel",
+      "name": "Vercel CLI",
+      "source": {
+        "kind": "json",
+        "url": "https://registry.npmjs.org/vercel/latest",
+        "field": "version"
+      },
+      "hosts": {
+        "windows": {
+          "provider": "vp-global",
+          "managerPath": "%USERPROFILE%/.vite-plus/bin/vp.exe",
+          "channel": "stable"
+        },
+        "wsl": {
+          "provider": "vp-global",
+          "managerPath": "~/.vite-plus/bin/vp",
+          "channel": "stable"
+        }
+      },
+      "package": "vercel"
+    },
+    {
+      "id": "copilot",
+      "name": "GitHub Copilot CLI",
+      "source": {
+        "kind": "json",
+        "url": "https://registry.npmjs.org/@github/copilot/latest",
+        "field": "version"
+      },
+      "hosts": {
+        "windows": {
+          "provider": "vp-global",
+          "managerPath": "%USERPROFILE%/.vite-plus/bin/vp.exe",
+          "channel": "stable"
+        },
+        "wsl": {
+          "provider": "npm-global",
+          "managerPath": "~/.vite-plus/bin/npm",
+          "channel": "stable"
+        }
+      },
+      "package": "@github/copilot"
+    },
+    {
+      "id": "claude-desktop",
+      "name": "Claude Desktop",
+      "source": {
+        "kind": "manual"
+      },
+      "hosts": {
+        "windows": {
+          "provider": "manual",
+          "appx": "Claude",
+          "channel": "installed package",
+          "note": "Preserve this Windows app-package identity. Use the app or its original installation source to update; automated package migration is not enabled."
+        }
+      }
+    },
+    {
+      "id": "codex-desktop",
+      "name": "Codex Desktop",
+      "source": {
+        "kind": "manual"
+      },
+      "hosts": {
+        "windows": {
+          "provider": "manual",
+          "appx": "OpenAI.Codex",
+          "channel": "installed package",
+          "note": "Preserve this Windows app-package identity. Use the app or its original installation source to update; automated package migration is not enabled."
+        }
+      }
+    }
+  ]
+}

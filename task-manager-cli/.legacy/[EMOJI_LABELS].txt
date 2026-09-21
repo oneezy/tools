@@ -1,0 +1,17 @@
+Tasks:
+🔲Todo ✅Done ⭐Important ❤️Fav
+
+Priority:
+🟩Low 🟨Medium 🟧High 🟥Critical
+
+Kanban:
+⚪Todo 🔵Next 🟡Doing 🟠Review 🔴Blocked 🟢Done
+
+Phase:
+🟦Development 🟪Staging ⬛Production
+
+Log:
+ℹ️Info ❇️Success ⚠️Warning ❗Danger
+
+Tags:
+✨AI 🚀Product 🌱Idea ✏️Writing 🎓Learning ⌨️Development 🎨Design 📽️Video 🎶Audio 📢Social 🐛Bugs 💡Feature 👋Support ❓Question 📄Docs ⚡Performance💲Finances 💼Legal 🤑Sales 📆Deadline 🚩Milestone 🏁Goal 🧠🤯🤔💭 Thinking/ Planning

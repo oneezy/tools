@@ -1,0 +1,572 @@
+0:00
+Kanban boards, Agile boards Scrum boards whatever you call them we're going deep on them I'm talking column
+0:05
+naming process columns buffer colums Swim Lanes blocked items WIP limits card aging everything from the basics to
+0:13
+some rather nifty tips and tricks Welcome back to the shed at the bottom of the garden where we are for the very
+0:20
+first time attempting a fancy 2 camera setup. And no: what's coming is not a rant
+0:27
+about physical boards versus Agile boards. Most of what I'm going to be talking about today can be done on both
+0:34
+but I will be highlighting things that can only be done on a physical board and one or two things that can only be done
+0:41
+on an electronic board That said what are we looking at here
+0:47
+well we're looking at a Kanban board that's probably the most correct word
+0:52
+for it name for it Agile board I think is probably become quite common Scrum
+0:59
+board as as well often used by Scrum teams surprising that whatever you call
+1:04
+it I would recommend it for any Agile team regardless of framework or
+1:11
+methodology. Three columns - not three Swim Lanes by the way: I'll say more about
+To Do, Doing, Done
+1:17
+Swim Lanes later. Three columns To Do Doing and Done. This is the only column
+1:24
+where work gets done - you could call that an active column I call it a
+1:30
+process column. I'm not even sure that's the right term if you know of if you
+1:35
+know of the correct or better term please let me know in the comments The board of course is for tracking work the
+1:42
+very first board I had any dealings with was was one very much like this it
+1:47
+was using a whiteboard with drawn on columns and index cards to track
+1:54
+individual backlog items across the board aided and a beted of course by a Blog of BluTak other brands available the
+2:03
+second board I had dealings with was printed on a big sheet of paper with columns just wide enough for a single
+2:14
+PostIt and this is how the board might look for a Scrum team if this was right
+2:19
+at the beginning of the Sprint the items here are essentially the Sprint Backlog
+2:25
+That's of course not the case for Kanban more on that in a moment when an item is picked up it's moved into
+2:32
+this column to indicate that it's now being actively worked on and it's at that point and know earlier that this
+2:38
+item should be assigned to a person as time goes on items get pulled in from
+2:45
+to-do and eventually items may get all the way across to the done column and by
+Triggering
+2:51
+the time if this is again if this is still the Scrum team by the time we get into the middle of the Sprint that the
+2:57
+board looks pretty much as it would for a Kanban team
+3:03
+Going back to the to-do column as I said Scrum teams have a Sprint they have
+3:08
+Sprint planning they have a way of generating work for this column. In Kanban
+3:15
+things are a little different in Kanban the the work pretty much drives
+3:20
+everything and we can enable that with another line on this
+3:25
+[Music] board this in Kanban is called called a trigger point. It's very much like a
+3:32
+reorder point that supermarkets and such like will use to let them know that
+3:38
+they're running short on a particular item and that they should go on and order more stock and that's exactly how
+3:45
+it works on the board in this position there were three items still left in to
+3:51
+do well nothing to do at the moment but when this item gets picked up and now
+3:58
+these two items move move up above this trigger point that's the time to call a
+4:05
+meeting and and typically it takes a while to get the meeting together to run the meeting to the result of which
+4:12
+will be more items for the to-do column and the idea being is that if this is
+4:20
+the state when the meeting is called there's enough work to carry on with if
+4:25
+it takes say a day or perhaps ABS two days to get that meeting organized so
+4:31
+maybe this one gets picked up in the meantime this one gets Al also gets picked up and then finally the result of
+4:38
+that planning meeting would be some extra work that would
+4:44
+hopefully fill up this column again trigger point
+Release me
+4:50
+In these days of continuous integration has been a long time since I packaged multiple items into a release
+4:58
+but back in the old days when when I used a board like this this was a nice little trick to create a like to use an
+5:04
+index card to represent a release and to use it to gather together items that
+5:11
+would be part of that release making it easy for the person whose job it was
+5:17
+to to handle the release to pick up this index card check that everything was
+5:22
+okay with all of the items that were part of that release and package it up and send it on its way
+5:30
+we've got our board and we're able to track work across it but the board can do a lot more for us than that and I've
+5:38
+cleaned most of the work off the board just to make the point that if we can take items from to-do get them into
+5:46
+doing and get them over to done if we can do that in the shor Test possible
+5:52
+time well you can't really get any better than this that's what in Kanban is called single piece flow and it's kind
+5:59
+of what we're always trying to get to in the real world though we often end up in
+6:04
+a situation that's very different than that with a doing column that just gets
+6:11
+longer and oops and longer and longer and it's easy to see
+6:19
+how this can happen we are after all doing Agile we're solving difficult problems chances are from time to time
+6:26
+we're going to get stucked out items are going to get blocked and what we what we tend to do is reach for another card
+6:33
+that's why the doing column left unchecked can continue to grow and grow
+6:39
+and that's a problem because we end up with a situation where things hang around a long time in the doing column
+6:47
+the very opposite of the single piece flow that I described before and here's
+Ageism
+6:53
+one thing that I can't easily represent on this physical board but some electronic boards can do do and that is
+7:00
+to indicate the age of cards it was actually the reason I upgraded to a paid
+7:06
+Trello subscription was to have this kind of visual aging where the cards
+7:12
+kind of fade away over time and card age is actually a pretty powerful parameter
+7:19
+we're going to get into work in progress limit in a second but you're going to essentially extrapolate all of Kanban
+7:27
+from this idea of minimizing in the age of all of the work items powerful
+7:33
+powerful stuff. Let's move on Red pen at the ready let's go ahead
+WIP Limits
+7:40
+and impose a WIP limit and because I've got a physical board and my column is
+7:45
+just one Post-it wide I can do this rather night nifty trick putting a
+7:50
+horizontal line to indicate that work in progress limit WIP limit for short four
+7:56
+cards being the maxim that is allowed for another electronic board it's more typical that the number is written at
+8:02
+the top of the column somewhere and a breach of that whd limit reach of that WIP limit it's quite hard to say is
+8:10
+typically indicated by turning the entire column red now if you're using an
+8:15
+electronic board but it doesn't support work in progress limits I have a little bit of a hack for you let's say just
+8:23
+to fit on my board that this is the work in progress limit just three items a of
+8:29
+indicating that work in progress limit and remember I did say this was kind of hacky is to create a dummy card ideally
+8:38
+change its color and it gets positioned at the bottom of the the list here the
+8:46
+idea being that if another card is picked up it ends up here and it's visually obvious that the WIP limit has
+8:55
+been breached now the problem of course is when this card is mov moved then
+9:00
+these all Ripple up and it's a manual operation then to
+9:06
+reposition this one in the fourth position in this column as for coming up with a number
+9:14
+for that work in progress limit my rule of thumb is to take the number of people
+9:19
+doing the doing and multiply it by somewhere between one and a half and two
+9:26
+maybe start at twice the number of people and over time attempt to reduce
+9:31
+that number down Remember the board I mentioned earlier the one printed on a big sheet
+9:38
+of paper well the first thing I noticed about it was that it was made of paper
+More columns
+9:43
+the second thing I noticed about it is that it had many many columns many more
+9:50
+than the three columns you see here before you so yeah let's talk about adding more columns into the mix so I've
+9:57
+redrawn the board it's starts with To Do ends with done but in place of Doing I
+10:03
+now have three active three process columns we'll talk about what they are
+10:08
+in just a moment but the big question is do we need extra columns and how do we
+10:14
+know if we need one two or three and the way to determine that is to figure out
+10:24
+if and how often work changes hands so if work goes from too and is picked
+10:31
+up by this guy and this guy takes it all
+10:37
+the way to done then one column is enough if and if that's how all of the
+10:44
+team operate everyone picks up their own ticket and sticks with it all the way to
+10:51
+the end one column is enough the the board that we were just looking at before the doing column in the middle
+10:58
+perfect however oops that person shouldn't have been I early assigned someone there
+11:04
+shouldn't shouldn't be assigned at this point if however this person picks up the ticket assigns himself or herself to
+11:12
+it and then passes on to someone else
+11:17
+then it looks like we need two columns and I I'm sure you can see where this is going if this person then passes on to
+11:25
+another person Bend three columns is the right number so let's fill in a possible
+11:32
+set of three processes for this particular team I hope I'm not going to
+11:37
+upset anyone by having Test as a as a separate process I know
+11:44
+there's a little bit of a problem with with that in Agile I'm using it as an example possibly because it's actually
+11:51
+quite common to find teams with a with a Test function if you have concerns
+11:56
+about that I hope I will lay some of them in a second going to say that
+12:02
+this process is Dev and the first one is
+12:09
+Design three processes three columns going to move this one back here and put
+12:15
+these guys at the top of their um processors actually let's let's give Dev
+12:22
+a helping hand three quick points before we move on first of all what I've drawn
+12:29
+here as a little bit unfair we'll be fixing the fairness factor in just a
+12:34
+moment secondly I hope you got the message when I talked about handing
+12:40
+work passing work it's almost like passing the bat on from one person to another across the
+12:46
+board that I hope you can see is is very team specific in a company with multiple
+12:54
+teams it's unlikely they're going to be having the same structure of work or
+12:59
+workflow across all of their teams and yet what I see too often is companies
+13:05
+that have standardized their Agile boards again probably using jir or
+13:10
+similar giving everyone the same structure even though it probably doesn't match the team so keep a team my
+13:19
+advice here would be to keep a team specific two team sitting right beside one another one might have three columns
+13:25
+here one might be happy with just a single column should be team specific
+13:31
+final thing to say and then we'll move on when naming these columns I've tried all kinds of naming strategies the
+13:39
+one that works the best is to use the imperative voice the imperative because
+13:45
+I do sound like something of a of a grammar nerd here (and I kind of am) the imperative is the is the thing that you
+13:52
+use when you're giving instructions like Jump! Run! Stop! Go! that kind of word so
+13:59
+Design it's like a command Develop! it's like a command. Test ! - like a command
+14:05
+This works well in pretty much every situation I've come across and tends to be shorter terser easier to write on a
+14:12
+board like this than options such as Design ing Developing Testing or even
+14:18
+something like In Progress In Design In Dev In Test. Keep it imperative
+14:25
+We have a board now that accurately reflects the way this team
+Driving a wedge?
+14:32
+works it reflects its workflow: Design into Dev into Test. Now concern you may
+14:38
+be having and it's certainly one that a colleague of mine had back in the day the first time we went for a multicolumn
+14:44
+board like this and his concern was doesn't this drive a wedge between the
+14:49
+individual functions between Dev and Test between Design and Dev and yeah
+14:56
+I mean that kind of makes sense what I hope I'm going to show you that actually the opposite may be true that it might
+15:03
+help the various parts of the team to work more closely together we'll get to
+15:09
+that in a moment what is a valid concern is to do with working progress I hope
+15:15
+you can see that even if we restricted every column to just one item they'd
+15:22
+still be three times as work three times as much work potentially in progress
+15:28
+than we had in our single column setup so yes we have paid a price in terms of
+15:35
+work in progress when moving from a single process column to three process
+15:41
+columns and we do it willingly because of some of the benefits that are crew as
+15:47
+I hope again you will soon see and the first of those benefits come when we add
+15:53
+back those work in progress limits going to go for here here here and here
+16:00
+reflect them at the top for the electronic version let's go for two here
+16:05
+four here and two here now an experiened
+16:11
+team might be able to operate here with a minim of work in progress but any
+16:19
+real world team that I've ever dealt with certainly that have been a part of will sooner or later get to a
+16:27
+point where where everything is at its
+16:32
+work in progress limits question for you looking at this
+16:39
+board and the work in progress limits which of these cards can move well it's
+16:47
+only these two here Dev is stuck it can neither move items into Test nor pick up
+16:55
+new work from Design . Similarly Design can't move into Dev nor can it pick up
+17:01
+more work from To Do so what's a poor developer to do? Well one thing they
+17:07
+could do is nothing that's certainly better than magically introducing more work in progress into the system but
+17:14
+what they really should do is walk over to Test and ask if they can help out
+17:22
+that's the positive thing to do and that's the response to aren't we driving a wedge no we're not those work in
+17:29
+progress limits have actually led to Dev moving across to ask Test if they can
+17:35
+help out if anything this board and those work in progress limits have drawn
+17:42
+different members of the team together powerful powerful stuff and just to
+17:48
+see that things really do unblock. Once an item moves here then this one can
+17:54
+move all of these move up we can pull in another item here if we're ready and
+18:01
+Design also unblocked we can pull things in a quick word about card value in
+18:09
+terms of value delivered to the customer none of these cards have delivered any
+18:17
+none of them will until they make it to the done column and they get released that's when value is delivered having
+18:26
+said that I think it's true to say that this card all other things being equal
+18:32
+is potentially more important than all of the other cards here only because
+18:38
+it's likely to be the first that gets entered on and then gets to deliver its
+18:44
+value so as things go across the board it could be argued that things get more
+18:49
+valuable and that's one reason that in Daily standup provided we're using the walk the wall process otherwise known as
+18:57
+walk the board that's the reason why we start at the top it's one of the reasons
+19:02
+why we start at the top right of the board in order to make sure that we talk
+19:08
+about the most important items first so we started here move down this column
+19:15
+over to Dev go all the way down this column into Design if we run out of time
+19:20
+if we exceed that time box 15 minutes and we don't get to these tickets it's not the end of the world we covered the
+19:27
+most important ones there's also a really practical reason that we start at the top right if I
+19:32
+again load this board up put everything at its work in progress limit as we saw
+19:38
+before these are the only cards that can move if we start at the top during our daily standup we find this one can move
+19:45
+well we've opened things up if I started to move cards starting here things would have got messy very very
+Blocked items
+19:53
+quickly did I mention blocked items let's talk about them now several ways
+19:59
+that we can indicate blocked items on a board the first way that I see a lot um
+20:05
+which doesn't make me happy I don't think it's a very good method but I can see why it's simple and it kind of
+20:11
+works and that is to create a dedicated column for blocked items either just
+20:17
+before done or just after to
+20:22
+do yeah it kind of works but there are better ways on a physical board and I
+20:29
+wish I'd known this back in the day when I used a physical boards this is something that someone told me about much more recently is that if this card
+20:37
+gets blocked pick it up put it down like that we now have a strong indication
+20:43
+that this card is different so that's another way of doing it the electronic
+20:49
+version of doing that is to tag the card in some way and I guess ideally oops
+20:58
+reaching for another postage this is the this is the blocked item you get gets
+21:03
+tagged ideally you change this color and again visual indication on the electronic board that this one is
+21:10
+blocked one other way of doing this which is the first way that I used I
+21:17
+don't like it as much as this I'll say that straight away have a row that was specifically
+21:24
+for blocked items if this was the item that was blocked got moved into this row
+21:30
+to indicate that it's blocked now there's a subtle but important difference between this approach moving
+21:36
+it down here versus turning on it on its Edge or tagging it with a yeah with a
+21:43
+tag and that is what it strongly applies about work in progress if I leave it
+21:49
+here if I move it on a diagonal or tag it it's still taking up work in progress
+21:55
+It's still not possible for Dev to pull in some new work it's part of that oh I
+22:00
+think we we said it was four but yeah it looks smaller than that just at the moment so I don't have a big enough Bo
+22:05
+I'm really sorry about that however if we move it into this dedicated Row for blocked it looks well it's more than
+22:13
+strongly suggested doesn't it the dev now just has two items in progress we've not only moved it into this role but
+22:20
+we've removed it from the work in progress for that process column and my
+22:25
+question to you is which is correct or at least which is more correct let me
+Swim Lanes
+22:30
+know in those comments right back at the beginning
+22:35
+which is quite a long time ago now I mentioned Swim Lanes I would argue that there are no Swim Lanes here in the same
+22:42
+way I think as in a Swimming pool which I think is where the term comes from and before they put any ropes in I don't
+22:49
+think we talk about there being just one Swim Lane it's like they put the rope in and now there's one or two Swim Lanes
+22:56
+depending on how you look at it anyway let's add a Swim Lane to this board I'm going to start by squishing everything
+23:02
+up and kind of creating some space for
+23:07
+it so here is our Swim
+23:12
+Lane probably doesn't need to run across done what that gives us is effectively
+23:17
+another route across the board from to do into time through to Dev Test and
+23:24
+done and there is a number of reasons that you might want to do this and several reasons why you wouldn't I've
+23:31
+used it in the past when the team was trying to add more unit tests to the code base and we decided to track that
+23:37
+separately from other work on the board the most common use for this is as a kind of an express route across the
+23:44
+board for super urgent items I think this is sometimes called a silver bullet Swim
+23:51
+Lane is that good for items in the silver ballet Swim Lane yes it is is it
+23:57
+good for the work on this board as a whole no it isn't this could take us
+24:02
+into a discussion about curing Theory and I don't really know enough about that but yeah the message here is use
+24:08
+them sparingly if at all when I added the extra columns I
+Not fair!
+24:14
+said there's a little bit of unfairness hiding here indeed there is and it's time for me to address it if I look at
+24:22
+Design Design can pull items in from to
+24:28
+do that is good but what about when Design finishes work what does it do
+24:35
+with it well the only move available to it is for it to push push its work into
+24:43
+Dev now if you know anything about Kanban you know it's all about the pull and not
+24:49
+the push this is really I've always thought this was really unfair that all of a sudden Deb's got another item
+24:55
+another another item this contrib buting to its work in progress that it never
+25:00
+asked for that's the unfairness we need to set things up that so the dev has the
+25:06
+same rights and privileges as design Design is able to pull Dev should also
+25:12
+be able to pull I guess a hack on a physical board like this would be maybe to put the card halfway across the two
+25:19
+columns of course for an electronic board that's not going to work so let's do this properly we're going to have to
+25:25
+add in a few more columns I've got a board to clean so I've introduced two new columns
+25:33
+which I hope are going to sort out the fairness issue both of the columns I added are buffer columns let's just
+25:40
+indicate that with a buffer column is a column where no work gets done this
+25:49
+is where work sits waiting to be picked up by the next stage so let's see if we
+25:57
+really have solved the fairness problem so item into Todo Design can pull
+26:05
+from from that column that's fine that was always fine when Design is finished
+26:11
+it can move it into this buffer column that's a change of state that's not a
+26:17
+push Dev now has has been given the right the privilege the privilege the
+26:23
+Design always has to pull work in when
+26:28
+Dev is ready for it so that's a pull it happens when Dev wants it and not a
+26:33
+moment before and again Dev when this item is complete it moves it into this
+26:40
+buffer column where it waits until Test is ready to pull it in in its turn
+26:47
+and again Test now has the same privileges as Design and now Dev to be
+26:53
+able to pull when it is ready the being as this sticker says we want to be
+27:00
+pulling no pushing final step. Test doesn't need its own buffer column
+27:06
+because the done column that we've had right from the beginning serves the same
+27:12
+purpose when it comes to WIP limits I guess I can add back the WIP limits that we had before if I can remember
+27:18
+them I think we had two there four there and two here and I guess we could do the
+27:25
+same for these new buffer columns I might add a one here and maybe two
+27:31
+here but we can do better than that by using something called Shared WIP
+27:37
+shared work in progress but to do that we need to figure out who owns these new
+27:43
+columns who owns these buffer columns so is this column owned by Design or is it
+27:49
+owned by Dev and the answer of that kind of comes down to well it's a question of
+27:54
+control when Design has pulled in - as we said and that's fair and proper and when
+28:01
+Design is finished it needs a place to put it and it moves it over here all of
+28:06
+that all of those actions were in Design's control everything that we did here
+28:12
+pulling it in moving across to buffer is in designs control and it owns therefore
+28:18
+owns both of those columns if Dev owned this column well Design would have been messing with it and that's not what we
+28:25
+want that wouldn't have be fair so the way the column split up by the way you always end up with an odd number when
+28:31
+you set up a thing like this is that there's a to-do column and then it goes
+28:36
+pair pair develop owns this buffer column and Test and I guess in a way
+28:43
+done as a buffer column and it is owned by Test now establish a work in progress
+28:50
+limit that is shared across these two I believe it was two before when we only
+28:55
+had Design so let's make it three and here's where that flexibility comes in we could have three items here or two
+29:03
+and one one and two or all three in that
+29:08
+buffer column let's do a similar thing over
+29:15
+here Dev was four before so maybe five or even six would work there and for the
+29:22
+sake of completeness six items here 5 and one 4 and two three and three two
+29:29
+and four one and five or all six in that buffer column Test we haven't really
+29:34
+changed so we just leave that unaltered establishing the ownership
+29:40
+also helps us name these columns the long hand would be Design
+29:46
+and Design Done, Dev and Dev Done. One final wrinkle this kind of a conventional way of laying this out
+29:52
+which removes repetition adds clarity and emphasizes the pairing of
+29:59
+columns. And that's it everything I know and probably a few things I shouldn't about Agile Boards. Did I miss anything?
+30:06
+Did I get anything wrong? Do you have any top tips? Share them please - you
+30:13
+know where: them there comments below!

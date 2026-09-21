@@ -1,0 +1,60 @@
+{ 
+  "Team Members": [
+    {
+      "Name": "Justin",
+      "Role": ["Developer","Design"],
+      "Description": "Justin's an overall bad ass.",
+      "Phone": "5126635940",
+      "Email": "justinoneill2007@gmail.com",
+      "Website": "https://oneezy.com",
+      "WIP Limits (work in progress limits)": {
+        "⬜ To Do": "No Limit",
+        "🟦 Next Up": 3,
+        "🟨 In Progress": "3-5",
+        "🟥 Blocked": 2,
+        "🟩 Done": "No Limit",
+        "🟧 In Review": 2,
+        "🟪 Complete": "No Limit"
+      },
+      "Story Points Per Week": 20,
+      "Story Point Estimation Examples": [
+        {
+          "Points": 1,
+          "Time": "5-10 minutes",
+          "Complexity": "Very easy",
+          "Examples": "Quick tasks"
+        },
+        {
+          "Points": 2,
+          "Time": "20-30 minutes",
+          "Complexity": "Easy",
+          "Examples": "Small CSS tweaks"
+        },
+        {
+          "Points": 3,
+          "Time": "1-2 hours",
+          "Complexity": "Moderate",
+          "Examples": "Creating simple components"
+        },
+        {
+          "Points": 5,
+          "Time": "4-8 hours",
+          "Complexity": "Moderate to Hard",
+          "Examples": "Designing logos or ads"
+        },
+        {
+          "Points": 8,
+          "Time": "2-3 days",
+          "Complexity": "Hard",
+          "Examples": "Features needing research"
+        },
+        {
+          "Points": 13,
+          "Time": "1-2 weeks",
+          "Complexity": "Needs Refinement",
+          "Examples": "High-level features"
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,72 @@
+1. 📁 [CLIENT_TEMPLATE]
+   1. 📁 Assets
+      1. 📁 +Shared
+         1. 📄 Icon.ai
+         2. 📄 Logo.ai
+         3. 📄 Background.psd
+         4. 📄 Contact.ai
+         5. 📄 Services.ai
+      2. 📁 Branding
+         1. 📄 +BRANDING-MASTER.ai
+         2. 📁 Logos
+            1. 📄 Primary Logo.ai
+            2. 📄 Secondary Logo.ai
+         3. 📁 Color Palettes
+            1. 📄 Brand Colors.ai
+         4. 📁 Typography
+            1. 📄 Brand Fonts.ai
+      3. 📁 Marketing Materials
+         1. 📁 Print
+            1. 📄 +PRINT-MASTER.ai
+            2. 📄 Business Cards.ai
+            3. 📄 Flyers & Brochures.ai
+            4. 📄 T-Shirts.ai
+            5. 📄 Decals.ai
+            6. 📄 Stickers.ai
+         2. 📁 Digital
+            1. 📄 +DIGITAL-MASTER.ai
+            2. 📁 Social Media
+               1. 📄 Facebook.ai
+               2. 📄 Instagram.ai
+               3. 📄 Twitter.ai
+               4. 📄 YouTube.ai
+            3. 📁 Website
+               1. 📁 Design
+               2. 📁 Content
+               3. 📁 Development
+            4. 📁 Email
+               1. 📁 Campaigns
+               2. 📁 Templates
+      4. 📁 Photos
+         1. 📁 Raw
+         2. 📁 Edited
+         3. 📁 Published
+      5. 📁 Videos
+         1. 📁 Raw Footage
+         2. 📁 Edits
+         3. 📁 Final Cuts
+   2. 📁 Financial
+      1. 📁 Invoices
+         1. 📄 2024-Q1.xlsx
+         2. 📄 2024-Q2.xlsx
+      2. 📁 Contracts
+         1. 📄 Service Agreement.pdf
+         2. 📄 NDA.pdf
+   3. 📁 Communications
+      1. 📁 Meetings
+         1. 📄 Agenda_2024-01-01.docx
+         2. 📄 Minutes_2024-01-01.docx
+      2. 📁 Correspondence
+         1. 📄 Email_2024-01-01.pdf
+   4. 📁 Project Management
+      1. 📁 Plans
+      2. 📁 Timelines
+   5. 📁 Client Documentation
+   6. 📁 Reviews and Feedback
+   7. 📁 Legal
+   8. 📁 Reports
+   9. 📁 Proposals
+   10. 📁 Campaigns
+   11. 📁 Competitors
+       1. 📄 Map.pdf
+   12. 📄 README.txt

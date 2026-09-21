@@ -1,0 +1,3 @@
+# UI-only dependencies. The core and Ubuntu worker use the standard library.
+prompt_toolkit==3.0.52
+wcwidth==0.2.13

@@ -1,0 +1,94 @@
+{
+  "collections": [
+    {
+      "id": 1,
+      "collection": "",
+      "organizations": [
+        {
+          "id": 1,
+          "organization": "",
+          "projects": [
+            {
+              "id": 1,
+              "project": "",
+              "tasks": [
+                {
+                  "id": 1,
+                  "title": "",
+                  "short title": "",
+                  "tags": [],
+                  "type": "",
+                  "views": [],
+                  "sprint": "",
+                  "priority": {
+                    "developer": "",
+                    "business": null,
+                    "customer": ""
+                  },
+                  "estimation": null,
+                  "status": "",
+                  "date": {
+                    "created": "",
+                    "modified": "",
+                    "due": ""
+                  },
+                  "user": {
+                    "created": "",
+                    "assigned": "",
+                    "owned": ""
+                  },
+                  "phase": "",
+                  "details": {
+                    "summary": "",
+                    "description": "",
+                    "steps": [
+                      {
+                        "id": 1,
+                        "step": ""
+                      }
+                    ],
+                    "checklist": [
+                      {
+                        "id": 1,
+                        "item": "",
+                        "complete": false
+                      }
+                    ],
+                    "requirements": [
+                      {
+                        "id": 1,
+                        "requirement": ""
+                      }
+                    ],
+                    "comments": [
+                      {
+                        "id": 1,
+                        "time": "",
+                        "user": "",
+                        "comment": ""
+                      }
+                    ]
+                  },
+                  "team": [],
+                  "version": "0.0.1",
+                  "dependencies": {
+                    "total": null,
+                    "before": [],
+                    "after": []
+                  },
+                  "frequency": "",
+                  "archived": false,
+                  "location": "",
+                  "action": {
+                    "type": null,
+                    "action": ""
+                  }
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}
