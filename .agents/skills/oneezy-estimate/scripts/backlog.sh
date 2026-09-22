@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Print the repo's GitHub project and its open issues, one JSON object per line.
+# Print the repo's GitHub project and every issue on its board, open or closed, one JSON object per line.
 # Usage: backlog.sh [owner/repo]   (default: the current clone)
 # Needs: gh, authenticated with a token that can read the project (PROJECT_PAT in CI).
 set -euo pipefail
@@ -32,7 +32,7 @@ printf '%s\n' "$project_line"
 
 project_id=$(printf '%s' "$project_line" | grep -oE '"id":"PVT_[^"]+"' | head -1 | cut -d'"' -f4)
 
-# Then one line per open issue on the board. Bodies are cut at 2000 characters.
+# Then one line per issue on the board, open or closed (closed ones get sized too, once). Bodies are cut at 2000 characters.
 gh api graphql --paginate -f id="$project_id" -f query='
 query($id:ID!,$endCursor:String){ node(id:$id){ ... on ProjectV2{
   items(first:50, after:$endCursor){ pageInfo{ hasNextPage endCursor }
@@ -45,10 +45,11 @@ query($id:ID!,$endCursor:String){ node(id:$id){ ... on ProjectV2{
         assignees(first:5){ nodes{ login } }
         deps:issueDependenciesSummary{ blockedBy blocking } } } } } } } }' \
   --jq '.data.node.items.nodes[]
-        | select(.content.state == "OPEN")
+        | select(.content.number != null)
         | {kind:"issue",
            number:.content.number,
            title:.content.title,
+           state:.content.state,
            status:([.fieldValues.nodes[] | select(.field.name=="Status")   | .name][0]),
            estimate:([.fieldValues.nodes[] | select(.field.name=="Estimate") | .number][0]),
            priority:([.fieldValues.nodes[] | select(.field.name=="Priority") | .name][0]),

@@ -149,6 +149,9 @@ jobs:
             watching, so never ask a question or wait for one; when a write is refused, drop that one
             write and keep going. Finish with the report table the skill asks for.
           claude_args: --allowedTools Bash,Read,Glob,Grep --max-turns 120
+          # Print the agent's messages, including its report table, in the run log. The repo and its
+          # issues are public already; tokens stay masked.
+          show_full_output: true
           # The step env above reaches Claude's Bash tool; the settings env is the same token said the
           # way Claude Code itself reads it, so `gh` holds PROJECT_PAT either way.
           settings: '{"env":{"GH_TOKEN":"${{ secrets.PROJECT_PAT }}"}}'

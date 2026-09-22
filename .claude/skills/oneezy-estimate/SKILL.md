@@ -1,6 +1,6 @@
 ---
 name: oneezy-estimate
-description: Estimate the open backlog of the current repo's GitHub project: Estimate, Priority and Type on every unsized open issue, one comment each. Run by the task-manager workflow after issues open, or by hand to backfill a repo.
+description: Estimate the current repo's GitHub project: Estimate, Priority and Type on every unsized issue, open or closed, one comment each. Run by the task-manager workflow after issues open, or by hand to backfill a repo.
 disable-model-invocation: true
 ---
 
@@ -10,9 +10,9 @@ The whole open backlog is in context on every run so each size is **relative** t
 
 ## Steps
 
-1. **Load the backlog.** Run `scripts/backlog.sh` (beside this file) from the repo clone. Its first line is the project and its field ids; every other line is one open issue: number, title, body, labels, status, estimate, priority, assignees, blocked-by and blocks counts. `gh` needs a token that can reach the project (`PROJECT_PAT`, a classic PAT with `project` + `repo`, in CI). Done when every line has been read.
+1. **Load the backlog.** Run `scripts/backlog.sh` (beside this file) from the repo clone. Its first line is the project and its field ids; every other line is one issue on the board, open or closed: number, title, state, body, labels, status, estimate, priority, assignees, blocked-by and blocks counts. `gh` needs a token that can reach the project (`PROJECT_PAT`, a classic PAT with `project` + `repo`, in CI). Done when every line has been read.
 2. **List the work.** Two lists, written in your reply:
-   - **Unsized**: open issues with no Estimate, minus `wayfinder:map` and `phase` issues.
+   - **Unsized**: issues with no Estimate, open or closed and in any Status, minus `wayfinder:map` and `phase` issues. A closed one is sized from what was done, so the board carries a number for it; it gets no Type.
    - **Re-rank**: issues in Todo or Next Up whose Priority no longer fits their rank against the rest of the backlog.
    Done when both lists are on screen, even if one is empty.
 3. **Decide per issue.** Estimate from [Points](#points), Priority from [Priority](#priority), Type from [Type](#type). Write one line of reasoning per issue; that line is the comment.
@@ -80,4 +80,4 @@ Estimate 5, Priority High, Type feature: blocks the two caller-file tickets and 
 Priority Medium (was High): the ticket it was blocking closed on Tuesday; nothing waits on it now.
 ```
 
-Done when every unsized open issue outside maps and phases carries an Estimate and a Priority, every Priority change has its comment, and the report table is on screen.
+Done when every unsized issue outside maps and phases, open or closed, carries an Estimate and a Priority, every Priority change has its comment, and the report table is on screen.
