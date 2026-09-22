@@ -68,7 +68,11 @@ case ";$pri_options;" in
   *";$priority="*) pri_option=";$pri_options;"; pri_option="${pri_option#*;$priority=}"; pri_option="${pri_option%%;*}" ;;
 esac
 
-[ "$state" = "OPEN" ] || refuse "issue #$number is $state; only open issues are sized"
+# Closed issues are sized too, once: a first Estimate or Priority lands in any state and any Status.
+if [ "$state" != "OPEN" ]; then
+  [ -n "$estimate$priority" ] || refuse "issue #$number is $state; only Estimate and Priority are set on a closed issue"
+  [ -z "$type" ] || refuse "issue #$number is $state; Type is only set on open issues"
+fi
 [ "$item" != "-" ] || refuse "issue #$number is on no open project"
 case ",$labels," in
   *,wayfinder:map,*) refuse "issue #$number is a wayfinder map; maps are never sized" ;;

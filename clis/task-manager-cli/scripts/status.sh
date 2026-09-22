@@ -34,7 +34,7 @@
 #   backfill                             -> closed: Done; open and assigned: Next Up from Todo or none;
 #                                           open and unassigned with no Status: Todo; everything else kept
 # A PR's linked issues are its closing references plus the issue its branch is named after.
-# Closed issues are never moved except to Done or Complete.
+# Closed issues are never moved except to Done or Complete; wayfinder maps and phases are never moved.
 # Needs: gh with a token that can write the project (PROJECT_PAT in CI). No jq: gh's --jq does the parsing.
 set -euo pipefail
 
@@ -110,6 +110,8 @@ move() {
   local n=$1 to=$2; shift 2
   local item status state node labels assignees
   IFS=$'\t' read -r item status state node labels assignees < <(issue_info "$n")
+  case ",$labels," in *,wayfinder:map,*|*,phase,*)
+    say "kept  #$n: maps and phases are never moved"; return 0 ;; esac
   if [ "$state" = "CLOSED" ] && [ "$to" != "Done" ] && [ "$to" != "Complete" ]; then
     say "kept  #$n: closed, only Done or Complete may move a closed issue"; return 0
   fi
