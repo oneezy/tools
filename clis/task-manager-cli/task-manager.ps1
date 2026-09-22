@@ -501,8 +501,15 @@ function Start-Backfill($owner, $repo) {
   try { $exists = Invoke-Rest $owner 'GET' "repos/$name/contents/${path}?ref=$ref" } catch { }
   if (-not $exists) { Step 'skipped' "backfill: $path is not on $ref yet"; return }
   $file = Split-Path $path -Leaf
-  $null = Invoke-Gh $owner @('workflow', 'run', $file, '-R', $name, '--ref', $ref, '-f', 'backfill=true')
-  Step 'ran' "$file on $ref with backfill=true"
+  # GitHub only registers a workflow for dispatch once the file is on the default branch, so a
+  # repo whose caller is still on dev reports the dispatch left for after the promotion.
+  try {
+    $null = Invoke-Gh $owner @('workflow', 'run', $file, '-R', $name, '--ref', $ref, '-f', 'backfill=true')
+    Step 'ran' "$file on $ref with backfill=true"
+  } catch {
+    if ("$_" -match 'not found on the default branch') { Step 'left' "backfill: $file dispatches once it is on $default; promote, then rerun" }
+    else { throw }
+  }
 }
 
 function Wait-AutoAdd($owner, $project, $repo) {
