@@ -4,8 +4,10 @@ and shows everything else on this machine that a phone can reach.
 
   double-click remote-control.cmd          # interactive picker (default)
   pwsh remote-control.ps1                  # same
-  pwsh remote-control.ps1 start            # start every folder, no prompt (used by the logon shortcut)
+  pwsh remote-control.ps1 start            # start every folder, no prompt
+  pwsh remote-control.ps1 start -Only tools,tridentcubed   # start just those folders (also works from a phone session)
   pwsh remote-control.ps1 stop             # stop every server this script started
+  pwsh remote-control.ps1 stop -Only tools # stop just those
   pwsh remote-control.ps1 status           # print what's running
 
 Picker keys:  up/down move   space toggle   a all/none   enter start checked   x stop checked
@@ -28,7 +30,8 @@ ChatGPT desktop app's own server is reported only; it is paired inside that app
 param(
   [ValidateSet('menu', 'start', 'stop', 'status')]
   [string]$Action = 'menu',
-  [string]$Root = 'V:\dev'
+  [string]$Root = 'V:\dev',
+  [string[]]$Only = @()      # start/stop: limit to these folder names (comma-separated)
 )
 
 $StateFile  = Join-Path $Root '.remote-control.json'
@@ -53,6 +56,15 @@ function Is-Alive($pid_) {
 
 function Get-Projects {
   Get-ChildItem -Path $Root -Directory | Where-Object { $_.Name -notmatch '^[._]' } | Sort-Object Name
+}
+
+function Get-Selected {
+  # Projects named in -Only, or all of them when -Only is empty. Unknown names are reported, not ignored.
+  $all = @(Get-Projects)
+  if ($Only.Count -eq 0) { return $all }
+  $names = @($Only | ForEach-Object { $_ -split ',' } | ForEach-Object { $_.Trim() } | Where-Object { $_ })
+  foreach ($n in $names) { if (-not ($all | Where-Object Name -eq $n)) { Write-Host "  unknown  $n (not a folder in $Root)" } }
+  @($all | Where-Object { $names -contains $_.Name })
 }
 
 function Log-Path($name) { Join-Path $LogDir "$name.log" }
@@ -110,14 +122,16 @@ function Stop-Project($name, $state) {
 
 function Start-All {
   $state = Read-State
-  foreach ($p in Get-Projects) { Start-Project $p $state }
+  foreach ($p in Get-Selected) { Start-Project $p $state }
   Write-State $state
 }
 
 function Stop-All {
   $state = Read-State
-  foreach ($name in @($state.Keys)) { Stop-Project $name $state }
+  $names = if ($Only.Count) { @(Get-Selected | ForEach-Object Name) } else { @($state.Keys) }
+  foreach ($name in $names) { Stop-Project $name $state }
   Write-State $state
+  if ($Only.Count) { return }
   # Fallback: servers started by hand have no pid on file.
   Get-Process pwsh -ErrorAction SilentlyContinue |
     Where-Object { $_.Id -ne $PID -and $_.CommandLine -match 'claude remote-control' } |
