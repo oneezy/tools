@@ -67,7 +67,7 @@ open_url() {
   local url="$1"
   printf '  %s↗ opening%s %s\n' "$GREEN" "$RESET" "$url"
   { if   command -v wslview     >/dev/null 2>&1; then wslview "$url"
-    elif command -v explorer.exe >/dev/null 2>&1; then explorer.exe "$url"
+    elif command -v explorer.exe >/dev/null 2>&1; then explorer.exe "$url" || true   # exits 1 even after opening
     elif command -v xdg-open    >/dev/null 2>&1; then xdg-open "$url"
     elif command -v open        >/dev/null 2>&1; then open "$url"
     else warn "couldn't open a browser; visit it manually: $url"; fi
@@ -189,15 +189,18 @@ finish() {
 # to GitHub Actions secrets on oneezy/tools; never into code.
 
 TOTAL_STAGES=7
-ENV_FILE="${ENV_FILE:-$HOME/.oneezy/secrets.env}"
+ENV_FILE="$HOME/.oneezy/secrets.env"   # set outright: the library already defaulted ENV_FILE to .env
 mkdir -p "$(dirname "$ENV_FILE")"
 cd "$(dirname "$0")/../.."          # repo root, so gh secret set targets oneezy/tools
 REPO="oneezy/tools"
 PROJECT_URL="https://github.com/users/oneezy/projects/4"
 
 autoadd_on() {
-  gh api graphql -f query='{ user(login:"oneezy"){ projectV2(number:4){ workflows(first:20){ nodes { name enabled } } } } }' \
-    --jq '.data.user.projectV2.workflows.nodes[] | select(.name=="Auto-add to project" and .enabled) | .name' 2>/dev/null | grep -q . || return 1
+  # No grep -q: under pipefail it can close the pipe early and make gh exit non-zero.
+  local hit
+  hit=$(gh api graphql -f query='{ user(login:"oneezy"){ projectV2(number:4){ workflows(first:20){ nodes { name enabled } } } } }' \
+    --jq '.data.user.projectV2.workflows.nodes[] | select(.name=="Auto-add to project" and .enabled) | .name' 2>/dev/null || true)
+  [[ -n "$hit" ]]
 }
 
 # verify_pat TOKEN LOGIN: the token belongs to LOGIN and carries project + repo.
@@ -241,6 +244,9 @@ step "Click Edit. Repository: oneezy/tools. Filter: is:issue"
 step "Click 'Save and turn on workflow'."
 if autoadd_on; then
   say "Already on."
+elif ! err=$(gh api user --jq .login 2>&1); then
+  warn "gh cannot reach GitHub from this shell, so the check is skipped: ${err%%$'\n'*}"
+  pause "Do the clicks, then press Enter."
 else
   printf '  %swaiting for the API to report it on (Ctrl-C stops)%s' "$DIM" "$RESET"
   until autoadd_on; do sleep 5; printf '.'; done
