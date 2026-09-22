@@ -1,0 +1,5 @@
+interface:
+  display_name: "Oneezy Estimate"
+  short_description: "Set Estimate, Priority and Type on the open backlog"
+policy:
+  allow_implicit_invocation: false

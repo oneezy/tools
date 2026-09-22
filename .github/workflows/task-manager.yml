@@ -1,0 +1,154 @@
+# task-manager: moves tickets on a repo's GitHub Project from git events, and sizes new issues.
+# Decided on oneezy/tools#7 (sections 3 and 4), built on oneezy/tools#17.
+#
+# This one file is both the workflow oneezy/tools runs on its own events and the reusable workflow
+# every other bootstrapped repo calls (`uses: oneezy/tools/.github/workflows/task-manager.yml@main`)
+# from the thin caller that clis/task-manager-cli writes (clis/task-manager-cli/caller.yml). When
+# called, the `github` context is the caller's, so github.event is the caller's event.
+#
+# Two jobs, chosen by the event:
+#   status    every event but "issue opened": clis/task-manager-cli/scripts/status.sh moves the
+#             issue's Status (assigned -> Next Up, branch -> In Progress, PR ready -> Review, merged
+#             into dev -> closed and Done, push to main -> Complete, ...). A dispatch with
+#             backfill=true recomputes the whole board from git facts.
+#   estimate  "issue opened", debounced two minutes in a cancel-in-progress group so a burst of new
+#             issues collapses into one run, then /oneezy-estimate (from this repo's skill layers)
+#             sizes every unsized open issue with the whole backlog in context. A dispatch with
+#             estimate=true runs it by hand.
+#
+# Secrets per repo: PROJECT_PAT (classic PAT, project + repo, held by the account that owns the
+# project; GITHUB_TOKEN, fine-grained PATs and GitHub Apps cannot reach user-owned projects) and
+# CLAUDE_CODE_OAUTH_TOKEN (Claude Code subscription token for the estimate job).
+name: task-manager
+
+on:
+  workflow_call:
+    inputs:
+      backfill:
+        description: Recompute every issue's Status from git facts
+        type: boolean
+        default: false
+      estimate:
+        description: Size every unsized open issue now
+        type: boolean
+        default: false
+      integration-branch:
+        description: Merging a pull request into this branch closes its linked issues
+        type: string
+        default: dev
+      release-branch:
+        description: Pushing to this branch moves every Done item to Complete
+        type: string
+        default: main
+    secrets:
+      PROJECT_PAT:
+        required: true
+      CLAUDE_CODE_OAUTH_TOKEN:
+        required: false
+  issues:
+    types: [opened, assigned, unassigned, reopened, labeled]
+  create:
+  pull_request:
+    types: [opened, ready_for_review, converted_to_draft, closed]
+  pull_request_review:
+    types: [submitted]
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      backfill:
+        description: Recompute every issue's Status from git facts
+        type: boolean
+        default: false
+      estimate:
+        description: Size every unsized open issue now
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+  issues: write
+  pull-requests: read
+  id-token: write
+
+jobs:
+  status:
+    if: >-
+      ${{ !(github.event_name == 'issues' && github.event.action == 'opened')
+          && !(github.event_name == 'workflow_dispatch' && !inputs.backfill) }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out the task-manager scripts
+        uses: actions/checkout@v4
+        with:
+          repository: oneezy/tools
+          ref: ${{ github.job_workflow_sha || github.sha }}
+          sparse-checkout: clis/task-manager-cli/scripts
+          persist-credentials: false
+      - name: Move Status
+        run: bash clis/task-manager-cli/scripts/status.sh
+        env:
+          GH_TOKEN: ${{ secrets.PROJECT_PAT }}
+          REPO: ${{ github.repository }}
+          EVENT: ${{ github.event_name }}
+          ACTION: ${{ github.event.action }}
+          ISSUE: ${{ github.event.issue.number }}
+          LABEL: ${{ github.event.label.name }}
+          REF_TYPE: ${{ github.event.ref_type }}
+          REF: ${{ github.event.ref }}
+          PR: ${{ github.event.pull_request.number }}
+          PR_BASE: ${{ github.event.pull_request.base.ref }}
+          PR_DRAFT: ${{ github.event.pull_request.draft }}
+          PR_MERGED: ${{ github.event.pull_request.merged }}
+          REVIEW_STATE: ${{ github.event.review.state }}
+          PUSH_REF: ${{ github.ref }}
+          BACKFILL: ${{ inputs.backfill || false }}
+          INTEGRATION_BRANCH: ${{ inputs.integration-branch || 'dev' }}
+          RELEASE_BRANCH: ${{ inputs.release-branch || 'main' }}
+
+  estimate:
+    if: >-
+      ${{ (github.event_name == 'issues' && github.event.action == 'opened')
+          || (github.event_name == 'workflow_dispatch' && inputs.estimate) }}
+    runs-on: ubuntu-latest
+    concurrency:
+      group: estimate-${{ github.repository }}
+      cancel-in-progress: true
+    steps:
+      - name: Debounce
+        if: github.event_name == 'issues'
+        run: sleep 120
+      - name: Check out the repo
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Check out /oneezy-estimate
+        uses: actions/checkout@v4
+        with:
+          repository: oneezy/tools
+          ref: ${{ github.job_workflow_sha || github.sha }}
+          path: .task-manager
+          sparse-checkout: .claude/skills/oneezy-estimate
+          persist-credentials: false
+      - name: Put the skill where Claude Code reads it
+        run: |
+          mkdir -p .claude/skills
+          rm -rf .claude/skills/oneezy-estimate
+          cp -r .task-manager/.claude/skills/oneezy-estimate .claude/skills/oneezy-estimate
+          chmod +x .claude/skills/oneezy-estimate/scripts/*.sh
+      - name: Run /oneezy-estimate
+        uses: anthropics/claude-code-action@v1
+        env:
+          GH_TOKEN: ${{ secrets.PROJECT_PAT }}
+        with:
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          prompt: |
+            Read .claude/skills/oneezy-estimate/SKILL.md and carry it out, start to finish, for the
+            repository ${{ github.repository }}. Its scripts are at .claude/skills/oneezy-estimate/scripts/
+            and `gh` already holds a token that can write the project. This is an AFK run: nobody is
+            watching, so never ask a question or wait for one; when a write is refused, drop that one
+            write and keep going. Finish with the report table the skill asks for.
+          claude_args: --allowedTools Bash,Read,Glob,Grep --max-turns 120
+          # The step env above reaches Claude's Bash tool; the settings env is the same token said the
+          # way Claude Code itself reads it, so `gh` holds PROJECT_PAT either way.
+          settings: '{"env":{"GH_TOKEN":"${{ secrets.PROJECT_PAT }}"}}'
