@@ -52,7 +52,7 @@ The one message `/oneezy-status` produces. One template; each slot names its sou
 <Two or three sentences: take item 1 because <why>; what 2 and 3 unblock; what can run in parallel; whether this differs from the board's Next Up column.>
 
 ```text
-<opening skill per the table in SKILL.md> … Do not touch main or persist. Commit only when I say so, then run /oneezy-merge into <base>.
+<opening skill per the table in SKILL.md> … Do not touch main. Commit only when I say so, then run /oneezy-merge into <base>.
 ```
 ````
 
