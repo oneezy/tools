@@ -22,9 +22,20 @@ States: `no project`, `ok`, `needs clicks` (only Auto-add is missing), `drifted`
 - `gh` logged in to each account with the `project`, `repo` and `workflow` scopes. The tool picks the owner's token per call, so the active account never changes.
 - The two accounts are `oneezy` and `layerdbiz` (`-Owners` to change).
 
+## The workflow
+
+Once a repo is bootstrapped, its board moves by itself. The workflow is [`.github/workflows/task-manager.yml`](../../.github/workflows/task-manager.yml) in this repo, which runs directly on this repo's events and is what every other repo calls from a thin caller (`caller.yml` here is the template; the tool opens a pull request that adds it). Built on [#17](https://github.com/oneezy/tools/issues/17); the events and statuses were decided on [#7](https://github.com/oneezy/tools/issues/7).
+
+- **Status moves** (`scripts/status.sh`). Every event but "issue opened" moves the issue's Status: assigned to Next Up; a branch named `<type>/<n>-<slug>` created on GitHub to In Progress; a PR opened or marked ready to Review for its linked issues (closing references plus the branch's issue; `wayfinder:research` never goes to Review); a PR converted to draft or a changes-requested review back to In Progress; a PR merged into `dev` closes its linked issues (and drops `needs-changes`), then Done; a push to `main` moves every Done item to Complete; reopening or labelling `needs-changes` puts a ticket back In Progress; unassigning the last assignee returns a ticket to Todo. Closed issues are only ever moved to Done or Complete. "Opened to Todo" is the built-in "Item added", so it is not here.
+- **Estimate agent.** "Issue opened" waits two minutes in a cancel-in-progress concurrency group per repo, so a burst of new issues collapses into one run, then runs `/oneezy-estimate` (this repo's copy of the skill) under Claude Code with the subscription token; `gh` inside it holds `PROJECT_PAT`. The skill's `set.sh` enforces every write rule (Estimate write-once, Priority only in Todo and Next Up, one type label), so the agent decides and the script refuses.
+- **Backfill.** `workflow_dispatch` with `backfill=true` recomputes the whole board from git facts (closed: Done; open and assigned: Next Up from Todo or nothing; open and unassigned with no Status: Todo; everything else kept) and adds open issues missing from the board. `estimate=true` runs the estimate agent by hand. The tool dispatches a backfill at the end of every bootstrap.
+
+Secrets per repo: `PROJECT_PAT`, a classic PAT (`project` + `repo`) of the account that owns the project, one per account (`GITHUB_TOKEN`, fine-grained PATs and GitHub Apps cannot reach user-owned projects), and `CLAUDE_CODE_OAUTH_TOKEN`. `setup-secrets.sh` mints and stores them.
+
+Issue, branch and push events run from the repo's default branch, so the file must be on `main` before the board moves by itself; `pull_request` events and `workflow_dispatch -r dev` work from `dev`. `scripts/status.sh` reads everything from environment variables, so it runs by hand: `REPO=oneezy/tools EVENT=issues ACTION=assigned ISSUE=17 DRY_RUN=1 clis/task-manager-cli/scripts/status.sh` prints what it would move.
+
 ## Not here yet
 
-- The caller workflow file (`.github/workflows/task-manager.yml`) and the backfill run wait on the `oneezy/workflows` repo ([#15](https://github.com/oneezy/tools/issues/15), [#17](https://github.com/oneezy/tools/issues/17)). Until then the backfill step reports itself skipped.
 - Roadmap date fields and milestone markers have no API; pick Start, Due and Milestones once in the Roadmap view's settings.
 - `.legacy/` is reference only: the 2023 task schema and the Favro label vocabulary. Never written to.
 

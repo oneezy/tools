@@ -26,7 +26,10 @@ What enter does per repo, in order, each step idempotent:
   labels         type and state labels with the decided colours (gh label create --force)
   workflows      "Auto-close issue" deleted (it is on at creation); the five other built-ins are left on
   import         every issue of the repo added to the project
-  backfill       the caller workflow is dispatched when the repo has one (waits on oneezy/workflows)
+  caller         .github/workflows/task-manager.yml (caller.yml here is the template) put on the repo's
+                 dev or default branch through a pull request when it is missing or different; it calls
+                 oneezy/tools/.github/workflows/task-manager.yml@main, the workflow itself
+  backfill       the caller workflow is dispatched with backfill=true once the file is on that branch
   auto-add       opens <project>/workflows in the browser and polls until "Auto-add to project" is on
 
 Facts this relies on, checked 2026-09-22 on a throwaway project (oneezy/tools#16):
@@ -439,14 +442,67 @@ function Import-Issues($owner, $repo, $project) {
   if ($moved) { Step 'backfilled' "Status on $moved item(s) from issue state and assignees" }
 }
 
+# The caller file is caller.yml beside this script: a thin workflow that sends the repo's events to
+# oneezy/tools/.github/workflows/task-manager.yml@main. A repo whose copy is missing or different
+# gets a pull request into its integration branch (dev when it has one, else the default branch);
+# nothing is pushed to a branch anyone works on. Issue events only fire once the file is on the
+# default branch, which is Justin's promotion, so the step reports the PR and moves on. oneezy/tools
+# itself is the host: its file carries the whole workflow, so it is left alone.
+function Get-CallerTemplate {
+  $file = Join-Path $PSScriptRoot 'caller.yml'
+  if (-not (Test-Path $file)) { throw "caller template missing: $file" }
+  (Get-Content $file -Raw) -replace "`r`n", "`n"
+}
+
+function Get-BranchSha($owner, $nameWithOwner, $branch) {
+  try { (Invoke-Rest $owner 'GET' "repos/$nameWithOwner/git/ref/heads/$branch").object.sha } catch { $null }
+}
+
+function Ensure-Caller($owner, $repo) {
+  $path = $Spec.CallerWorkflow
+  $wanted = Get-CallerTemplate
+  $name = $repo.nameWithOwner
+  $default = (Invoke-Rest $owner 'GET' "repos/$name").default_branch
+  $base = if (Get-BranchSha $owner $name 'dev') { 'dev' } else { $default }
+  $live = $null
+  try { $live = Invoke-Rest $owner 'GET' "repos/$name/contents/${path}?ref=$base" } catch { }
+  if ($live) {
+    $have = [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String(($live.content -replace '\s', ''))) -replace "`r`n", "`n"
+    if ($have -match '(?m)^\s+workflow_call:') { Step 'ok' "$path is the host workflow itself"; return $true }
+    if ($have -eq $wanted) { Step 'ok' "$path on $base"; return $true }
+  }
+  $branch = 'chore/task-manager-caller'
+  $open = @((Invoke-Gh $owner @('pr', 'list', '-R', $name, '--head', $branch, '--state', 'open', '--json', 'number,url')) | ConvertFrom-Json)
+  if ($open.Count -gt 0) { Step 'waiting' "PR #$($open[0].number) adds $path; merge it, then rerun: $($open[0].url)"; return $false }
+  if (-not (Get-BranchSha $owner $name $branch)) {
+    $null = Invoke-Rest $owner 'POST' "repos/$name/git/refs" @{ ref = "refs/heads/$branch"; sha = (Get-BranchSha $owner $name $base) }
+  }
+  $body = @{
+    message = "chore(task-manager): $(if ($live) { 'update' } else { 'add' }) the task-manager caller workflow"
+    content = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($wanted))
+    branch  = $branch
+  }
+  $onBranch = $null
+  try { $onBranch = Invoke-Rest $owner 'GET' "repos/$name/contents/${path}?ref=$branch" } catch { }
+  if ($onBranch) { $body.sha = $onBranch.sha }
+  $null = Invoke-Rest $owner 'PUT' "repos/$name/contents/$path" $body
+  $prBody = "Calls ``oneezy/tools/.github/workflows/task-manager.yml@main`` on issue, branch, pull request and push events, and on ``workflow_dispatch`` for backfill and estimate runs.`n`nNeeds the repo secrets ``PROJECT_PAT`` and ``CLAUDE_CODE_OAUTH_TOKEN``. Written by task-manager (oneezy/tools, ``clis/task-manager-cli``)."
+  $url = Invoke-Gh $owner @('pr', 'create', '-R', $name, '--base', $base, '--head', $branch, '--title', "chore(task-manager): add the task-manager caller workflow", '--body', $prBody)
+  Step 'opened' "PR adds $path into ${base}: $url"
+  $false
+}
+
 function Start-Backfill($owner, $repo) {
   $path = $Spec.CallerWorkflow
+  $name = $repo.nameWithOwner
+  $default = (Invoke-Rest $owner 'GET' "repos/$name").default_branch
+  $ref = if (Get-BranchSha $owner $name 'dev') { 'dev' } else { $default }
   $exists = $null
-  try { $exists = Invoke-Rest $owner 'GET' "repos/$($repo.nameWithOwner)/contents/$path" } catch { }
-  if (-not $exists) { Step 'skipped' "backfill: $path not in the repo yet (waits on oneezy/workflows)"; return }
+  try { $exists = Invoke-Rest $owner 'GET' "repos/$name/contents/${path}?ref=$ref" } catch { }
+  if (-not $exists) { Step 'skipped' "backfill: $path is not on $ref yet"; return }
   $file = Split-Path $path -Leaf
-  $null = Invoke-Gh $owner @('workflow', 'run', $file, '-R', $repo.nameWithOwner, '-f', 'backfill=true')
-  Step 'ran' "$file with backfill=true"
+  $null = Invoke-Gh $owner @('workflow', 'run', $file, '-R', $name, '--ref', $ref, '-f', 'backfill=true')
+  Step 'ran' "$file on $ref with backfill=true"
 }
 
 function Wait-AutoAdd($owner, $project, $repo) {
@@ -487,6 +543,7 @@ function Invoke-Bootstrap($row) {
     Ensure-Labels $owner $repo (Get-Labels $owner $repo.nameWithOwner)
     Ensure-Workflows $owner $project
     Import-Issues $owner $repo $project
+    $null = Ensure-Caller $owner $repo
     Start-Backfill $owner $repo
     $project = Get-Project $owner $project.number
     $null = Wait-AutoAdd $owner $project $repo

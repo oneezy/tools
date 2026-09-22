@@ -1,0 +1,42 @@
+# Written by task-manager (clis/task-manager-cli in oneezy/tools). The work happens in
+# oneezy/tools/.github/workflows/task-manager.yml; this file only says which events to send it.
+# Secrets: PROJECT_PAT (classic PAT, project + repo, held by the account that owns the project) and
+# CLAUDE_CODE_OAUTH_TOKEN (Claude Code subscription token for the estimate job).
+name: task-manager
+
+on:
+  issues:
+    types: [opened, assigned, unassigned, reopened, labeled]
+  create:
+  pull_request:
+    types: [opened, ready_for_review, converted_to_draft, closed]
+  pull_request_review:
+    types: [submitted]
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      backfill:
+        description: Recompute every issue's Status from git facts
+        type: boolean
+        default: false
+      estimate:
+        description: Size every unsized open issue now
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+  issues: write
+  pull-requests: read
+  id-token: write
+
+jobs:
+  task-manager:
+    uses: oneezy/tools/.github/workflows/task-manager.yml@main
+    with:
+      backfill: ${{ inputs.backfill || false }}
+      estimate: ${{ inputs.estimate || false }}
+    secrets:
+      PROJECT_PAT: ${{ secrets.PROJECT_PAT }}
+      CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
