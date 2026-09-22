@@ -1,0 +1,3 @@
+interface:
+  display_name: "Oneezy Status"
+  short_description: "Status report for the branch, its PR and its builds"

@@ -1,0 +1,5 @@
+interface:
+  display_name: "Oneezy Merge"
+  short_description: "Land the current branch: PR and previews, or merge into a named branch"
+policy:
+  allow_implicit_invocation: false
