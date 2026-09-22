@@ -21,7 +21,8 @@ What enter does per repo, in order, each step idempotent:
   project        gh project create (title = repo name), visibility = repo visibility, gh project link
   fields         Priority (single select), Estimate (number), Start and Due (date) via GraphQL
   status         the six options, re-sending existing option ids so item values survive
-  views          Backlog (table), Board (columns by Status), Roadmap via the REST create-view endpoint,
+  views          Backlog (table, sorted by Priority), Board (columns by Status, cards sorted by Priority),
+                 Roadmap via the REST create-view endpoint; a view whose sort drifts is recreated,
                  then the default "View 1" is deleted
   labels         type and state labels with the decided colours (gh label create --force)
   workflows      "Auto-close issue" deleted (it is on at creation); the five other built-ins are left on
@@ -74,9 +75,10 @@ $Spec = @{
     @{ Name = 'Due';      DataType = 'DATE' }
   )
   Views    = @(
+    # The Backlog keeps the wayfinder map: it is the parent row, the tickets nest under it. The Board hides it.
     @{ Name = 'Backlog'; Layout = 'table';   Filter = 'is:open -label:phase'; Sort = 'Priority'; Columns = $null
        Fields = @('Title', 'Status', 'Priority', 'Estimate', 'Labels', 'Assignees', 'Linked pull requests') }
-    @{ Name = 'Board';   Layout = 'board';   Filter = '-label:phase';         Sort = $null;       Columns = 'Status'
+    @{ Name = 'Board';   Layout = 'board';   Filter = '-label:phase -label:"wayfinder:map"'; Sort = 'Priority'; Columns = 'Status'
        Fields = @('Title', 'Priority', 'Estimate', 'Labels', 'Assignees', 'Linked pull requests') }
     @{ Name = 'Roadmap'; Layout = 'roadmap'; Filter = 'label:phase';          Sort = $null;       Columns = $null
        Fields = @() }
@@ -342,17 +344,27 @@ function Ensure-Views($owner, $project) {
   $idOf = @{}; foreach ($f in $restFields) { $idOf[$f.name] = $f.id }
   foreach ($v in $Spec.Views) {
     $live = $project.views.nodes | Where-Object name -eq $v.Name
+    if ($live -and $v.Sort -and (@($live.sortByFields.nodes.field.name) -join ',') -ne $v.Sort) {
+      # No API sets sort on an existing view, so the view is deleted and made again below with it.
+      # A view holds no data, only its layout, filter, fields and sort, all of which come from $Spec.
+      $null = Invoke-Graphql $owner 'mutation($v: ID!) { deleteProjectV2View(input: { viewId: $v }) { clientMutationId } }' @{ v = $live.id }
+      Step 'deleted' "view $($v.Name): sort was not $($v.Sort), recreating it"
+      $live = $null
+    }
     if ($live) {
       $fix = @{}
       if ($live.layout -ne $LayoutEnum[$v.Layout]) { $fix.layout = $LayoutEnum[$v.Layout] }
       if ([string]$live.filter -ne $v.Filter) { $fix.filter = $v.Filter }
       if ($fix.Count) {
-        $set = ($fix.Keys | ForEach-Object { if ($_ -eq 'layout') { "layout: $($fix[$_])" } else { "$($_): `"$($fix[$_])`"" } }) -join ', '
-        $q = "mutation(`$v: ID!) { updateProjectV2View(input: { viewId: `$v, $set }) { projectV2View { id } } }"
-        $null = Invoke-Graphql $owner $q @{ v = $live.id }
+        # filter goes in as a variable: it may hold quotes (-label:"wayfinder:map"); layout is an enum.
+        $vars = @{ v = $live.id }
+        $set = @()
+        if ($fix.layout) { $set += "layout: $($fix.layout)" }
+        if ($fix.ContainsKey('filter')) { $set += 'filter: $f'; $vars.f = $fix.filter }
+        $q = "mutation(`$v: ID!, `$f: String) { updateProjectV2View(input: { viewId: `$v, $($set -join ', ') }) { projectV2View { id } } }"
+        $null = Invoke-Graphql $owner $q $vars
         Step 'fixed' "view $($v.Name) $($fix.Keys -join ', ')"
       }
-      if ($v.Sort -and (@($live.sortByFields.nodes.field.name) -join ',') -ne $v.Sort) { Step 'left' "view $($v.Name) sort is not $($v.Sort); no API sets sort on an existing view, delete the view and rerun" }
       continue
     }
     $body = @{ name = $v.Name; layout = $v.Layout; filter = $v.Filter }
@@ -400,7 +412,7 @@ function Get-Items($owner, $project) {
   $q = 'query($login: String!, $n: Int!, $after: String) { user(login: $login) { projectV2(number: $n) { items(first: 100, after: $after) {
     pageInfo { hasNextPage endCursor }
     nodes { id status: fieldValueByName(name: "Status") { ... on ProjectV2ItemFieldSingleSelectValue { name } }
-      content { ... on Issue { url state assignees(first: 1) { totalCount } } ... on PullRequest { url } } } } } } }'
+      content { ... on Issue { url state assignees(first: 1) { totalCount } labels(first: 20) { nodes { name } } } ... on PullRequest { url } } } } } } }'
   $after = $null
   do {
     $page = (Invoke-Graphql $owner $q @{ login = $owner; n = $project.number; after = $after }).user.projectV2.items
@@ -422,8 +434,9 @@ function Import-Issues($owner, $repo, $project) {
   if ($added) { Start-Sleep -Seconds 6 }   # let the built-in "Item added -> Todo" land before it is corrected
 
   # Backfill Status from what git already says, the same rules the status workflow applies going
-  # forward: closed -> Done; open and assigned -> Next Up; open and unassigned -> Todo. Tickets already
-  # past Next Up are left where they are.
+  # forward: closed -> Done (Complete stays Complete: that is the push-to-main promotion, never undone
+  # here); open and assigned -> Next Up; open and unassigned -> Todo. Tickets already past Next Up are
+  # left where they are. Maps and phases are never moved.
   $status = $project.fields.nodes | Where-Object name -eq 'Status'
   $optId = @{}; foreach ($o in $status.options) { $optId[$o.name] = $o.id }
   $q = 'mutation($p: ID!, $i: ID!, $f: ID!, $o: String!) { updateProjectV2ItemFieldValue(input: { projectId: $p, itemId: $i, fieldId: $f, value: { singleSelectOptionId: $o } }) { projectV2Item { id } } }'
@@ -431,7 +444,8 @@ function Import-Issues($owner, $repo, $project) {
   foreach ($item in Get-Items $owner $project) {
     if (-not $item.content.state) { continue }   # not an issue
     $now = $item.status.name
-    $want = if ($item.content.state -eq 'CLOSED') { 'Done' }
+    if (@($item.content.labels.nodes.name) -match '^(wayfinder:map|phase)$') { continue }
+    $want = if ($item.content.state -eq 'CLOSED') { if ($now -eq 'Complete') { 'Complete' } else { 'Done' } }
             elseif ($now -and $now -notin @('Todo', 'Next Up')) { $now }
             elseif ($item.content.assignees.totalCount -gt 0) { 'Next Up' }
             else { 'Todo' }
