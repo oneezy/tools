@@ -19,6 +19,7 @@
 # Secrets per repo: PROJECT_PAT (classic PAT, project + repo, held by the account that owns the
 # project; GITHUB_TOKEN, fine-grained PATs and GitHub Apps cannot reach user-owned projects) and
 # CLAUDE_CODE_OAUTH_TOKEN (Claude Code subscription token for the estimate job).
+
 name: task-manager
 
 on:
@@ -76,13 +77,14 @@ jobs:
     if: >-
       ${{ !(github.event_name == 'issues' && github.event.action == 'opened')
           && !(github.event_name == 'workflow_dispatch' && !inputs.backfill) }}
+
     runs-on: ubuntu-latest
     steps:
       - name: Check out the task-manager scripts
         uses: actions/checkout@v4
         with:
           repository: oneezy/tools
-          ref: ${{ github.job_workflow_sha || github.sha }}
+          ref: ${{ github.repository == 'oneezy/tools' && github.sha || 'main' }}
           sparse-checkout: clis/task-manager-cli/scripts
           persist-credentials: false
       - name: Move Status
@@ -110,6 +112,7 @@ jobs:
     if: >-
       ${{ (github.event_name == 'issues' && github.event.action == 'opened')
           || (github.event_name == 'workflow_dispatch' && inputs.estimate) }}
+
     runs-on: ubuntu-latest
     concurrency:
       group: estimate-${{ github.repository }}
@@ -126,7 +129,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           repository: oneezy/tools
-          ref: ${{ github.job_workflow_sha || github.sha }}
+          ref: ${{ github.repository == 'oneezy/tools' && github.sha || 'main' }}
           path: .task-manager
           sparse-checkout: .claude/skills/oneezy-estimate
           persist-credentials: false
