@@ -1,2 +1,5 @@
 .env
 .env.*
+
+# Git worktree checkouts made by Claude; never commit them.
+.claude/worktrees/
