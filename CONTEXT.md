@@ -38,6 +38,10 @@ Any issue on a repo that has a GitHub project. Justin also says feature, bug, ta
 
 Where a ticket sits on the board: **Todo**, **Next Up**, **In Progress**, **Review**, **Done**, **Complete**. Next Up means someone owns it (assigned), never a hand-placed queue. In Progress means its branch exists on GitHub. Review means a pull request is ready for a human. Done means merged into `dev`. Complete means promoted to `main`, live in production. A staging branch changes nothing here.
 
+## Session status
+
+The colored circle a **picker** row shows for one Claude session: working, idle (waiting for Justin), stopped (resumable), live in another **surface**, new (a placeholder for a first task), history, error (needs a decision), and merged (reserved for the cleanup sweep, which sets it; nothing does yet). The picker's Status column means this, never a ticket's **Status**.
+
 ## Needs changes
 
 A Done ticket the client or Justin sent back. A red label on the reopened issue; the ticket returns to In Progress and the label drops when new work merges.
