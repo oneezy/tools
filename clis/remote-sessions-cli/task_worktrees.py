@@ -42,6 +42,22 @@ def slug(text):
 # The cleanup sweep's last report, in the repo's Git directory: which worktrees it removed and which it kept, and why.
 SWEEP_REPORT = 'worktree-sweep.json'
 
+
+def sweep_report(project):
+    """The one place the sweep saves its report and the picker reads it: the repo's common Git directory. Found from the
+    files rather than by running Git, because the picker asks for every repo on every refresh. A .git file (a linked
+    worktree, or a Git directory kept elsewhere) points at the Git directory; a linked worktree's commondir file points
+    on to the shared one."""
+    git_dir = Path(project) / '.git'
+    if git_dir.is_file():
+        pointer = git_dir.read_text(encoding='utf-8').strip()
+        if pointer.startswith('gitdir:'):
+            git_dir = Path(project) / pointer.removeprefix('gitdir:').strip()
+            common = git_dir / 'commondir'
+            if common.is_file():
+                git_dir = git_dir / common.read_text(encoding='utf-8').strip()
+    return Path(os.path.abspath(git_dir)) / SWEEP_REPORT
+
 # Branch types (see CONTEXT.md): the first word of a task branch, not a ticket's Type.
 BRANCH_TYPES = ('feature', 'fix', 'research', 'prototype', 'wayfinder', 'chore', 'docs')
 

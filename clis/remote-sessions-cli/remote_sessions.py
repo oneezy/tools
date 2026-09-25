@@ -186,7 +186,7 @@ def sweep_flags(project):
     """What the cleanup sweep last kept in a repo, by folder: the branch it judged and the status it gave, merged when only
     an open app keeps the folder, error when unsaved work does. Empty when the repo has never been swept."""
     try:
-        report = read_json(Path(project) / '.git' / wt.SWEEP_REPORT, {})
+        report = read_json(wt.sweep_report(project), {})
     except (OSError, ValueError):
         return {}
     kept = report.get('Kept') if isinstance(report, dict) else None
@@ -264,6 +264,18 @@ class Manager:
         self.state_path = self.root / '.remote-sessions.json'
         # Session IDs the desktop app has archived, as of the last saved() scan; never listed or resumed.
         self.archived = set()
+
+    @classmethod
+    def for_root(cls, root, claude=None, config=None):
+        """A Manager for another tool, such as the cleanup sweep, rather than the command line: the command line's
+        defaults, with this root, and this Claude executable and configuration folder when given."""
+        options = parser().parse_args([])
+        options.root = str(root)
+        if claude:
+            options.claude = str(claude)
+        if config:
+            options.config = str(config)
+        return cls(options)
 
     def projects(self):
         projects = {p.name: p for p in sorted(self.root.iterdir()) if p.is_dir() and not p.name.startswith(('.', '_'))}

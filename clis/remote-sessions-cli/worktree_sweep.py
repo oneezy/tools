@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """Cleanup sweep for one repo's task worktrees. A worktree under .claude/worktrees whose branch has a PR merged into dev,
 or whose ticket is closed, is removed with its local branch, provided nothing unsaved would be lost: no uncommitted
-changes, no unpushed commits and no session live in another app. Background sessions there are stopped first.
-prototype/* branches are kept. The WorktreeCreate hook starts it in the background after each creation; it never polls.
-Python 3.10+ standard library, Git, gh and Claude Code."""
+changes, no unpushed commits and no session live in another app. Background sessions there are stopped first, and the
+worktree is judged again after they stop. prototype/* branches are kept. The WorktreeCreate hook starts it in the
+background after each creation; it never polls. Python 3.10+ standard library, Git, gh and Claude Code."""
 import argparse
 from datetime import datetime, timezone
 import json
@@ -12,6 +12,7 @@ from pathlib import Path
 import subprocess
 import sys
 import time
+from typing import NamedTuple
 
 from locks import file_lock
 import remote_sessions as rs
@@ -39,12 +40,37 @@ class GitHub:
         return json.loads(out)
 
     def ticket_closed(self, number):
-        code, out, err = self.ask('issue', 'view', str(number), '--json', 'state')
-        if code and 'Could not resolve' in err:
-            return False  # No such ticket: nothing to go by.
+        """Whether ticket #number is closed. A number GitHub does not know (404) or has deleted (410), or one that names a
+        PR, is no ticket. Told by GitHub's own answer, which gh prints on stdout even when it fails, never by gh's
+        wording."""
+        code, out, err = self.ask('api', f'repos/{{owner}}/{{repo}}/issues/{number}')
         if code:
+            try:
+                answer = json.loads(out)
+            except ValueError:
+                answer = None
+            if isinstance(answer, dict) and str(answer.get('status')) in ('404', '410'):
+                return False
             raise RuntimeError(f'gh could not read ticket #{number}: {err}')
-        return json.loads(out).get('state') == 'CLOSED'
+        answer = json.loads(out)
+        return 'pull_request' not in answer and answer.get('state') == 'closed'
+
+
+class Tree(NamedTuple):
+    """One linked worktree as the sweep judges it: its folder, its branch, the branch's tip and the branch's merged PRs."""
+    folder: str
+    branch: str
+    tip: str
+    pulls: list
+
+
+class Keep(Exception):
+    """Something keeps a finished worktree. status is error when unsaved work does, merged when only an open app does,
+    and None when the branch has moved on to work that no merge or closed ticket covers (nothing to flag)."""
+
+    def __init__(self, status=None, detail=None):
+        super().__init__(detail)
+        self.status, self.detail = status, detail
 
 
 def contains(project, commit, tip):
@@ -56,29 +82,63 @@ def known(project, commit):
     return wt.git(project, 'cat-file', '-e', f'{commit}^{{commit}}', check=False).returncode == 0
 
 
-def reason_to_remove(project, github, branch, tip, pulls):
+def tip_of(project, branch):
+    return wt.git(project, 'rev-parse', f'refs/heads/{branch}').stdout.strip()
+
+
+def reason_to_remove(project, github, tree):
     """Why a branch's worktree is done, or None: a PR merged into dev that holds the branch as it is now, else its closed
     ticket (the issue number in <type>/<issue>-<desc>). Work committed after the merge keeps it."""
-    pull = next((p for p in pulls if p.get('baseRefName') == 'dev' and p.get('headRefOid') and contains(project, p['headRefOid'], tip)), None)
+    pull = next((p for p in tree.pulls if p.get('baseRefName') == 'dev' and p.get('headRefOid')
+                 and contains(project, p['headRefOid'], tree.tip)), None)
     if pull:
         return f"PR #{pull['number']} merged into dev"
-    task = wt.parse_task(branch)
+    task = wt.parse_task(tree.branch)
     if task and task.number and github.ticket_closed(task.number):
         return f'ticket #{task.number} closed'
     return None
 
 
-def unsaved(project, folder, tip, pulls):
+def unsaved(project, tree):
     """What removing the worktree would lose: uncommitted changes (untracked files count; ignored ones do not), and
     commits that neither origin nor a merged PR holds. A squash-merged PR holds the commits its head had."""
     lost = []
-    if wt.git(folder, 'status', '--porcelain').stdout.strip():
+    if wt.git(tree.folder, 'status', '--porcelain').stdout.strip():
         lost.append('uncommitted changes')
-    heads = [p['headRefOid'] for p in pulls if p.get('headRefOid') and known(project, p['headRefOid'])]
-    count = int(wt.git(project, 'rev-list', '--count', tip, '--not', '--remotes', *heads).stdout.strip() or 0)
+    heads = [p['headRefOid'] for p in tree.pulls if p.get('headRefOid') and known(project, p['headRefOid'])]
+    count = int(wt.git(project, 'rev-list', '--count', tree.tip, '--not', '--remotes', *heads).stdout.strip() or 0)
     if count:
         lost.append(f"{count} unpushed commit{'s' if count > 1 else ''}")
     return lost
+
+
+def judge(project, manager, tree):
+    """The sessions running in a finished worktree, or Keep when unsaved work (error) or a session live in another app
+    (merged) keeps it. Claude is asked afresh each time: a session may open in another app while the sweep runs."""
+    lost = unsaved(project, tree)
+    if lost:
+        raise Keep('error', ', '.join(lost))
+    here = [a for a in manager.agents() if rs.active(a) and wt.inside(a['cwd'], tree.folder)]
+    if any(rs.live_elsewhere(a) for a in here):
+        raise Keep('merged', 'a session is live in another app')
+    return here
+
+
+def retire(project, github, manager, tree):
+    """Stop the background sessions in a finished worktree, then remove it and its branch; return the IDs stopped.
+    A session may commit or write as it stops, and another may open meanwhile, so the worktree is judged again after the
+    stop, under the repo's creation lock that removal takes, and kept (Keep) if anything changed."""
+    here = judge(project, manager, tree)
+    for agent in here:
+        manager.claude(['stop', agent['id']])
+    with wt.creation_lock(project):
+        now = tree._replace(tip=tip_of(project, tree.branch))
+        if now.tip != tree.tip and not reason_to_remove(project, github, now):
+            raise Keep()
+        if judge(project, manager, now):
+            raise Keep('error', 'a background session there is still running after stop')
+        remove(project, now)
+    return [a['sessionId'] for a in here]
 
 
 def candidates(project, keep):
@@ -89,18 +149,17 @@ def candidates(project, keep):
             and not any(wt.inside(k, t['Path']) for k in keep)]
 
 
-def remove(project, folder, branch):
-    """Remove a clean worktree and delete its branch, under the repo's creation lock so no creation plans around it.
-    Windows may hold a just-stopped session's folder for a moment, so removal is retried briefly."""
-    with wt.creation_lock(project):
-        for attempt in range(5):
-            result = wt.git(project, 'worktree', 'remove', folder, check=False)
-            if not result.returncode:
-                break
-            if attempt == 4:
-                raise RuntimeError(result.stderr.strip() or result.stdout.strip())
-            time.sleep(1)
-        wt.git(project, 'branch', '-D', branch)
+def remove(project, tree):
+    """Remove a clean worktree and delete its branch; the caller holds the repo's creation lock, so no creation plans
+    around it. Windows may hold a just-stopped session's folder for a moment, so removal is retried briefly."""
+    for attempt in range(5):
+        result = wt.git(project, 'worktree', 'remove', tree.folder, check=False)
+        if not result.returncode:
+            break
+        if attempt == 4:
+            raise RuntimeError(result.stderr.strip() or result.stdout.strip())
+        time.sleep(1)
+    wt.git(project, 'branch', '-D', tree.branch)
 
 
 def sweep(repo, keep=(), gh='gh', claude=None, config=None):
@@ -112,8 +171,8 @@ def sweep(repo, keep=(), gh='gh', claude=None, config=None):
         return report
     if not candidates(project, keep):
         return report  # Nothing to ask GitHub about; the last report's flags name folders that are gone or kept.
-    common = wt.common_dir(project)
-    with file_lock(common / 'worktree-sweep.lock', 600, 'Another sweep of this repo is still running.'):
+    saved = wt.sweep_report(project)
+    with file_lock(saved.with_suffix('.lock'), 600, 'Another sweep of this repo is still running.'):
         try:
             trees = candidates(project, keep)  # Again: a sweep that held the lock may have removed some.
             # Prune first: a remote branch deleted since the last fetch no longer counts as holding the work.
@@ -121,42 +180,27 @@ def sweep(repo, keep=(), gh='gh', claude=None, config=None):
             if fetch.returncode:
                 raise RuntimeError(f'Could not fetch origin: {fetch.stderr.strip()}')
             github = GitHub(gh, project)
-            options = rs.parser().parse_args(['status', '--root', str(project.parent),
-                                              *(['--claude', claude] if claude else []), *(['--config', config] if config else [])])
-            manager = rs.Manager(options)
-            agents = None
-            for tree in trees:
-                folder, branch = tree['Path'], tree['Branch']
-                tip = wt.git(project, 'rev-parse', f'refs/heads/{branch}').stdout.strip()
-                pulls = github.merged_pulls(branch)
-                why = reason_to_remove(project, github, branch, tip, pulls)
+            manager = rs.Manager.for_root(project.parent, claude=claude, config=config)
+            for found in trees:
+                branch = found['Branch']
+                tree = Tree(found['Path'], branch, tip_of(project, branch), github.merged_pulls(branch))
+                why = reason_to_remove(project, github, tree)
                 if not why:
                     continue
-                entry = dict(Path=folder, Branch=branch, Why=why)
-                lost = unsaved(project, folder, tip, pulls)
-                if lost:
-                    report['Kept'].append(dict(entry, Status='error', Detail=', '.join(lost)))
-                    continue
-                agents = manager.agents() if agents is None else agents
-                here = [a for a in agents if rs.active(a) and wt.inside(a['cwd'], folder)]
-                if any(rs.live_elsewhere(a) for a in here):
-                    report['Kept'].append(dict(entry, Status='merged', Detail='a session is live in another app'))
-                    continue
+                entry = dict(Path=tree.folder, Branch=branch, Why=why)
                 try:
-                    for agent in here:
-                        manager.claude(['stop', agent['id']])
-                    if here:
-                        agents = manager.agents()
-                        if any(rs.active(a) and wt.inside(a['cwd'], folder) for a in agents):
-                            raise RuntimeError('a background session there is still running after stop')
-                    remove(project, folder, branch)
+                    stopped = retire(project, github, manager, tree)
+                except Keep as kept:
+                    if kept.status:
+                        report['Kept'].append(dict(entry, Status=kept.status, Detail=kept.detail))
+                    continue
                 except (OSError, RuntimeError, ValueError) as error:
                     report['Kept'].append(dict(entry, Status='error', Detail=f'removal failed: {error}'))
                     continue
-                report['Removed'].append(dict(entry, Stopped=[a['sessionId'] for a in here]))
+                report['Removed'].append(dict(entry, Stopped=stopped))
         except (OSError, RuntimeError, ValueError) as error:
             report['Error'] = str(error)
-        rs.write_json(common / wt.SWEEP_REPORT, report)
+        rs.write_json(saved, report)
     return report
 
 

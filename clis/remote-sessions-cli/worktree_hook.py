@@ -2,7 +2,8 @@
 """Claude Code WorktreeCreate hook. Reads the hook input JSON on stdin, creates (or reuses) the worktree
 with a readable name cut from local dev, and prints its absolute path as the last line of stdout.
 Everything else goes to stderr. After a creation it starts the cleanup sweep (worktree_sweep.py) for that repo in the
-background and returns without waiting for it. Python 3.10+ standard library and Git only."""
+background and returns without waiting for it; REMOTE_SESSIONS_SWEEP=off turns that off. The hook itself needs the
+Python 3.10+ standard library and Git; the sweep it starts also runs gh and Claude Code."""
 import json
 import os
 from pathlib import Path
@@ -10,7 +11,6 @@ import re
 import sys
 
 import task_worktrees as wt
-import worktree_sweep
 
 
 def next_new(project):
@@ -52,12 +52,13 @@ def worktree_for(cwd, name, note=lambda message: None):
         asked = f"'{name}' does not start with a branch type ({', '.join(wt.BRANCH_TYPES)})" if name else 'No name was given'
         note(f'{asked}; created {names.folder} on {names.branch}. Rename the branch to <type>/<issue>-<desc> once the task is known.')
     path = str(Path(os.path.abspath(workspace['WorkingDirectory'])))
-    if workspace['Operation'] != 'reuse':
+    if workspace['Operation'] != 'reuse' and os.environ.get('REMOTE_SESSIONS_SWEEP', '').strip().lower() != 'off':
         # A creation sweeps this repo's finished worktrees, in the background, never the new one or the requester's.
         try:
+            import worktree_sweep  # Loaded only here, so a sweep that cannot even load leaves the creation standing.
             worktree_sweep.start(project, keep=(path, cwd))
-        except OSError as error:
-            note(f'The cleanup sweep did not start: {error}')  # The worktree stands; the next creation sweeps.
+        except Exception as error:  # Whatever stops the sweep, the worktree stands; the next creation sweeps.
+            note(f'The cleanup sweep did not start: {error}')
     return path
 
 

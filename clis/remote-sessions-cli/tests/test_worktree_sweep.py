@@ -3,6 +3,7 @@ it flags. GitHub is a fake gh executable, Claude the fake claude; the repos, the
 import json
 import os
 from pathlib import Path
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -38,13 +39,13 @@ class SweepFixture(unittest.TestCase):
                         REMOTE_SESSIONS_GH=str(FAKE_GH), REMOTE_SESSIONS_CLAUDE=str(FAKE_CLAUDE), PYTHONIOENCODING='utf-8')
         self.repo = self.make_repo('brain')
 
-    def make_repo(self, name):
-        """A main checkout on dev whose origin is a bare repo on disk."""
+    def make_repo(self, name, git_dir=None):
+        """A main checkout on dev whose origin is a bare repo on disk; its Git directory lives at git_dir when given."""
         origin = self.temp / f'{name}.git'
         git(self.temp, 'init', '-q', '--bare', '-b', 'dev', str(origin))
         repo = self.temp / 'projects' / name
         repo.mkdir(parents=True)
-        git(repo, 'init', '-q', '-b', 'dev')
+        git(repo, 'init', '-q', '-b', 'dev', *(['--separate-git-dir', str(git_dir)] if git_dir else []))
         git(repo, 'config', 'user.name', 'Fixture')
         git(repo, 'config', 'user.email', 'fixture@example.invalid')
         (repo / '.gitignore').write_text('.claude/worktrees/\nnode_modules/\n')
@@ -103,11 +104,11 @@ class SweepFixture(unittest.TestCase):
         listing = git(repo or self.repo, 'worktree', 'list', '--porcelain')
         return any(Path(line.removeprefix('worktree ')) == folder for line in listing.splitlines() if line.startswith('worktree '))
 
-    def live(self, folder, kind):
+    def live(self, folder, kind, **extra):
         """A session Claude lists as live in the folder: a background one, or one open in another app."""
         data = json.loads((self.config / 'fake-native.json').read_text())
         agent = dict(sessionId=f'0000000{len(data["Agents"])}-0000-4000-8000-000000000000', kind=kind, cwd=str(folder),
-                     pid=7000 + len(data['Agents']))
+                     pid=7000 + len(data['Agents']), **extra)
         if kind == 'background':
             agent.update(id=agent['sessionId'][:8], state='idle')
         else:
@@ -223,6 +224,62 @@ class SweepTests(SweepFixture):
         self.assertEqual(self.native()['Agents'][0]['state'], 'stopped')
         self.assertEqual(report['Removed'][0]['Stopped'], [self.native()['Agents'][0]['sessionId']])
 
+    def test_commit_a_background_session_makes_as_it_stops_keeps_the_worktree_and_its_branch(self):
+        # The session was judged clean, then committed during its last turn, before the stop took effect.
+        folder = self.task('fix/31-picker-speed')
+        self.merged(folder, 12)
+        self.live(folder, 'background', OnStop='commit')
+        report = self.swept()
+        self.assertEqual(self.native()['Stops'], 1)
+        self.assertTrue((folder / 'last-turn.txt').exists())
+        self.assertEqual(git(self.repo, 'log', '-1', '--format=%s', 'fix/31-picker-speed'), 'last turn')
+        self.assertEqual(report['Removed'], [])
+
+    def test_file_a_background_session_writes_as_it_stops_keeps_the_worktree_flagged(self):
+        folder = self.task('fix/31-picker-speed')
+        self.merged(folder, 12)
+        self.live(folder, 'background', OnStop='write')
+        report = self.swept()
+        self.assertTrue((folder / 'last-turn.txt').exists())
+        self.assertEqual([(k['Branch'], k['Status']) for k in report['Kept']], [('fix/31-picker-speed', 'error')])
+        self.assertIn('uncommitted', report['Kept'][0]['Detail'])
+
+    def test_session_that_opens_in_another_app_during_the_sweep_keeps_its_worktree(self):
+        first = self.task('fix/31-picker-speed')
+        self.merged(first, 12)
+        second = self.task('fix/32-tray')
+        self.merged(second, 13)
+        hold = self.temp / 'github-is-slow'
+        hold.write_text('')
+        self.set_github(Hold=str(hold), HoldAfter=1)  # The sweep finishes one worktree, then waits on GitHub.
+        sweep = subprocess.Popen([sys.executable, str(SWEEP), str(self.repo), '--json'], stdout=subprocess.PIPE,
+                                 stderr=subprocess.PIPE, text=True, encoding='utf-8', env=self.env)
+        self.addCleanup(sweep.kill)
+        deadline = time.monotonic() + 30
+        while len(self.github_data()['Calls']) < 2 and time.monotonic() < deadline:
+            time.sleep(.1)
+        args = self.github_data()['Calls'][1]['Args']
+        held = args[args.index('--head') + 1]
+        folder = first if held == 'fix/31-picker-speed' else second
+        self.live(folder, 'interactive')  # Opened in VS Code while the sweep waited.
+        hold.unlink()
+        out, err = sweep.communicate(timeout=60)
+        self.assertEqual(sweep.returncode, 0, err)
+        report = json.loads(out)
+        self.assertTrue(folder.exists())
+        self.assertEqual([(k['Branch'], k['Status']) for k in report['Kept']], [(held, 'merged')])
+        self.assertEqual(len(report['Removed']), 1)
+
+    def test_missing_ticket_is_told_by_githubs_answer_not_by_the_wording_of_gh(self):
+        gone = self.task('fix/99-deleted-ticket')
+        done = self.task('fix/31-picker-speed')
+        self.merged(done, 12)
+        self.set_github(Wording='gh: Nicht gefunden (HTTP 404)')
+        report = self.swept()
+        self.assertTrue(gone.exists())
+        self.assertFalse(done.exists())
+        self.assertIsNone(report['Error'])
+
     def test_session_live_in_another_app_keeps_the_worktree_as_merged(self):
         folder = self.task('fix/31-picker-speed')
         self.merged(folder, 12)
@@ -260,8 +317,8 @@ class SweepTests(SweepFixture):
 class PickerFlagTests(SweepFixture):
     """The picker shows what the last sweep kept: 🔴 when unsaved work blocks removal, ✅ when only an open app does."""
 
-    def status(self):
-        result = subprocess.run([sys.executable, str(HERE.parent / 'remote_sessions.py'), 'status', '--json', '--only', 'brain',
+    def status(self, only='brain'):
+        result = subprocess.run([sys.executable, str(HERE.parent / 'remote_sessions.py'), 'status', '--json', '--only', only,
                                  '--root', str(self.repo.parent), '--config', str(self.config), '--claude', str(FAKE_CLAUDE),
                                  '--desktop-sessions', str(self.temp / 'no-desktop')],
                                 capture_output=True, text=True, encoding='utf-8', env=self.env)
@@ -291,6 +348,15 @@ class PickerFlagTests(SweepFixture):
         self.assertEqual((rows[waiting.name]['Status'], rows[waiting.name]['Circle']), ('merged', '✅'))
         self.assertTrue(rows[waiting.name]['ViewOnly'])
         self.assertEqual(rows[active.name]['Circle'], '🔵')
+
+    def test_flags_show_for_a_repo_whose_git_directory_lives_elsewhere(self):
+        repo = self.make_repo('notes', git_dir=self.temp / 'notes-git')
+        unsaved = self.task('fix/31-picker-speed', repo=repo)
+        self.merged(unsaved, 12)
+        (unsaved / 'draft.txt').write_text('not committed')
+        self.conversation('11111111-1111-4111-8111-111111111111', unsaved)
+        self.swept(repo)
+        self.assertEqual(self.status('notes')[unsaved.name]['Circle'], '🔴')
 
     def test_flag_lapses_once_the_folder_has_another_branch_checked_out(self):
         unsaved = self.task('fix/31-picker-speed')
@@ -373,6 +439,30 @@ class HookSweepTests(SweepFixture):
         hold.unlink()
         self.wait_for_report()
         self.assertFalse(done.exists())
+
+    def test_hook_creates_the_worktree_even_when_the_sweep_cannot_be_loaded(self):
+        tool = self.temp / 'broken tool'
+        tool.mkdir()
+        for name in ('worktree_hook.py', 'task_worktrees.py', 'locks.py'):
+            shutil.copy(HERE.parent / name, tool / name)
+        (tool / 'worktree_sweep.py').write_text('def (\n')  # A half-saved edit.
+        payload = json.dumps(dict(session_id='abc123', cwd=str(self.repo), hook_event_name='WorktreeCreate', name='fix-32-tray'))
+        result = subprocess.run([sys.executable, str(tool / 'worktree_hook.py')], input=payload, capture_output=True, text=True,
+                                encoding='utf-8', cwd=str(self.repo), env=self.env, timeout=30)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertTrue(Path(result.stdout.strip().splitlines()[-1]).is_dir())
+        self.assertIn('cleanup sweep did not start', result.stderr)
+
+    def test_hook_starts_no_sweep_when_the_sweep_is_turned_off(self):
+        done = self.task('fix/31-picker-speed')
+        self.merged(done, 12)
+        self.env['REMOTE_SESSIONS_SWEEP'] = 'off'
+        created, _ = self.hook('fix-32-tray')
+        self.assertTrue(created.is_dir())
+        time.sleep(5)  # Longer than a sweep takes to reach GitHub.
+        self.assertEqual(self.github_data()['Calls'], [])
+        self.assertTrue(done.exists())
+        self.assertIsNone(self.report())
 
     def test_the_new_worktree_and_the_requesting_session_folder_are_never_swept(self):
         requester = self.task('fix/31-picker-speed')

@@ -7,6 +7,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from unittest import mock
 
 HOOK = Path(__file__).resolve().parents[1] / 'worktree_hook.py'
 
@@ -33,8 +34,11 @@ def git(directory, *args):
 
 class WorktreeHookTests(unittest.TestCase):
     def setUp(self):
-        # The hook starts a background sweep that may still be looking at the repo when a test ends.
-        temp = tempfile.TemporaryDirectory(prefix="hook test's ", ignore_cleanup_errors=True)
+        # Naming and creation only: no background sweep (test_worktree_sweep.py covers it) outlives a test here.
+        environment = mock.patch.dict(os.environ, REMOTE_SESSIONS_SWEEP='off')
+        environment.start()
+        self.addCleanup(environment.stop)
+        temp = tempfile.TemporaryDirectory(prefix="hook test's ")
         self.addCleanup(temp.cleanup)
         self.repo = Path(temp.name) / 'brain'
         self.repo.mkdir()

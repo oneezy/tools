@@ -70,6 +70,15 @@ elif args[0] == 'stop':
     matches = [a for a in data['Agents'] if a.get('id') == args[1]]
     assert len(matches) == 1
     data['Stops'] += 1
+    # A session that commits or writes a file as it winds down, after the cleanup sweep judged its folder.
+    last = matches[0].get('OnStop')
+    if last:
+        import subprocess
+        folder = Path(matches[0]['cwd'])
+        (folder / 'last-turn.txt').write_text('written as the session stopped')
+        if last == 'commit':
+            for command in (['add', '.'], ['commit', '-q', '-m', 'last turn']):
+                subprocess.run(['git', '-C', str(folder), *command], check=True, capture_output=True)
     if data.get('Mode') != 'stop-no-effect':
         matches[0].update(state='stopped', pid=None)
     save()

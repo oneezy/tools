@@ -230,7 +230,10 @@ keep it while another session still uses it.
 
 `worktree_sweep.py` removes one repo's finished worktrees. The `WorktreeCreate` hook
 starts it in the background after each creation, in that repo only; nothing polls.
-Run it by hand with `python3 worktree_sweep.py <repo folder> [--keep FOLDER] [--json]`.
+Set `REMOTE_SESSIONS_SWEEP=off` in the hook's environment to create worktrees without
+sweeping. The hook loads the sweep only when it starts one, so a sweep that fails to
+load or start never fails the creation; the hook notes it on stderr. Run it by hand
+with `python3 worktree_sweep.py <repo folder> [--keep FOLDER] [--json]`.
 
 For each linked worktree under `.claude/worktrees` that is on a branch, it asks `gh`,
 run in the repo, whether the branch is finished:
@@ -238,13 +241,20 @@ run in the repo, whether the branch is finished:
 - a PR from the branch merged into `dev` whose head holds the branch as it is now
   (`gh pr list --head <branch> --state merged`), so work committed after the merge
   keeps the worktree; or
-- its ticket is closed (`gh issue view <n>`), the issue number read from the branch
-  name `<type>/<issue>-<desc>`. Branches without one (`new/<n>`, `codex/*`,
-  `worktree-bridge-cse_*`) go by their PRs only.
+- its ticket is closed (`gh api repos/{owner}/{repo}/issues/<n>`), the issue number
+  read from the branch name `<type>/<issue>-<desc>`. Branches without one (`new/<n>`,
+  `codex/*`, `worktree-bridge-cse_*`) go by their PRs only. A number GitHub answers
+  with 404 or 410, or one that names a PR, is no ticket; that is read from GitHub's
+  JSON answer, never from the wording of gh's error.
 
 A finished worktree is removed with `git worktree remove` (no `--force`) and its local
 branch deleted, after any background session there is stopped, only when nothing
-unsaved would be lost. It is kept otherwise, and the picker shows why:
+unsaved would be lost. Claude's session list is read afresh for each worktree, and
+after the stop the worktree is judged again under the per-repo creation lock: a
+session that committed or wrote a file as it stopped, or one that opened in another
+app meanwhile, keeps it. A commit that no merged PR or closed ticket covers makes the
+worktree open work again (kept, not flagged). It is kept otherwise, and the picker
+shows why:
 
 - 🔴 error: uncommitted changes (untracked files count; ignored ones such as
   `node_modules` do not), or commits that neither origin nor a merged PR holds. It
@@ -263,9 +273,26 @@ one repo run one at a time; each removal takes the same per-repo lock as creatio
 The last report is saved as `worktree-sweep.json` in the repo's Git directory: what
 was removed, what was kept with its status and reason, and any error. The picker reads
 it: a kept folder's resumable or view-only rows show 🔴 or ✅ while the folder still has
-the branch the sweep judged. `REMOTE_SESSIONS_GH` and `REMOTE_SESSIONS_CLAUDE` (or
+the branch the sweep judged. Only those rows change: a kept folder whose session is
+running in the background (🟢/🟡), whose only rows are history, or that has no
+conversation at all shows no 🔴 or ✅; its verdict is still in the report.
+`task_worktrees.sweep_report` names the file for both the sweep and the picker, so a
+repo whose `.git` is a file (a Git directory kept elsewhere) is read where it was
+written. `REMOTE_SESSIONS_GH` and `REMOTE_SESSIONS_CLAUDE` (or
 `--gh`, `--claude`) choose the executables; `CLAUDE_CONFIG_DIR` (or `--config`) the
 Claude configuration.
+
+Choices the ticket left open:
+
+- `--keep` (the hook passes the new worktree and the requesting session's folder)
+  keeps those worktrees out of the sweep entirely.
+- A merged PR counts only when its head holds the branch's current tip.
+- "Unpushed" means commits no remote-tracking branch and no merged PR head holds. A
+  branch cut from a local `dev` that is ahead of `origin/dev` stays 🔴 until `dev` is
+  pushed; this errs on the safe side.
+- On the closed-ticket path, work that was pushed but never merged is removed locally,
+  since origin holds it. A remote-branch cleanup on ticket close (the #33 Action)
+  deletes that copy too, so run it only for tickets whose work is merged or abandoned.
 
 ## Remote Control and continuity
 
@@ -358,8 +385,12 @@ sweep against real repos with a bare origin, a fake `gh` (`tests/fake_gh.py`, fo
 the fake-Claude pattern) and the fake Claude: merged, squash-merged and closed-ticket
 worktrees removed with their branches; uncommitted, unpushed and after-merge work,
 `prototype/*`, open work and sessions live in another app kept; background sessions
-stopped first; a `gh` failure removing nothing; the hook sweeping only its own repo
-without waiting for GitHub; and the picker's 🔴 and ✅ rows. `tests/test_agent_rules.py` checks that
+stopped first, and a worktree kept when its session commits or writes as it stops or
+when a session opens in another app mid-sweep; a missing ticket told by GitHub's
+answer, not gh's wording; a `gh` failure removing nothing; the hook sweeping only its
+own repo without waiting for GitHub, creating even when the sweep cannot load, and not
+sweeping when turned off; and the picker's 🔴 and ✅ rows, also for a repo whose Git
+directory lives elsewhere. The hook tests turn the sweep off. `tests/test_agent_rules.py` checks that
 every `oneezy-merge` copy in the repo is identical, that its land mode keeps
 `prototype/*` branches and deletes the rest, and that no `AGENTS.md` or `CLAUDE.md`
 overrides a skill's branch retention; it skips when the suite runs from a copy.
