@@ -22,6 +22,10 @@ A way of reaching a harness: terminal, desktop app, VS Code extension, phone app
 
 A machine or container where a harness is installed: this Windows PC, the Ubuntu WSL distro, a remote machine over SSH, a cloud sandbox. Skills are synced per harness per host.
 
+## Host app
+
+The program a session runs in on a **host**: a shell (PowerShell, cmd, bash), a terminal (Windows Terminal, tmux), an editor (VS Code) or an app (the desktop app, the Codex app). Said alone, host means the machine, never the host app. A session's host apps form a chain, each inside or launched by the next, such as PowerShell in Windows Terminal. A background session's host app is the Claude daemon.
+
 ## Picker
 
 The default user interface of a tool. One screen, sections of rows, the same key bindings in every tool: up/down move, space toggle, a all/none, enter act, x stop or remove, r refresh, q quit.

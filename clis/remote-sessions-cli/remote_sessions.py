@@ -13,6 +13,7 @@ import subprocess
 import sys
 import tempfile
 import time
+from typing import NamedTuple
 import unicodedata
 import uuid
 
@@ -222,57 +223,80 @@ def started_on(row, managed):
     return SURFACES.get(entrypoint, entrypoint) if entrypoint else 'Background' if managed else 'CLI'
 
 
-# Programs that host a Claude session, by image name: a shell runs it, an app holds the shell or runs it itself.
-HOSTS = {'pwsh.exe': ('PowerShell', 'shell'), 'powershell.exe': ('PowerShell', 'shell'), 'cmd.exe': ('cmd', 'shell'),
-         'code.exe': ('VS Code', 'app'), 'windowsterminal.exe': ('Windows Terminal', 'app'),
-         # Linux names, as /proc/<pid>/stat gives them.
-         'pwsh': ('PowerShell', 'shell'), 'bash': ('bash', 'shell'), 'zsh': ('zsh', 'shell'), 'fish': ('fish', 'shell'),
-         'sh': ('sh', 'shell'), 'dash': ('sh', 'shell'), 'code': ('VS Code', 'app'), 'tmux: server': ('tmux', 'app')}
+class HostApp(NamedTuple):
+    """A program a session runs in on this host: a shell that runs it, or an app (a terminal, an editor, a store app)
+    that holds the shell or runs the session itself."""
+    label: str
+    shell: bool = False
 
 
+def shell(label):
+    return HostApp(label, shell=True)
+
+
+# Host apps by image name.
+HOST_APPS = {'pwsh.exe': shell('PowerShell'), 'powershell.exe': shell('PowerShell'), 'cmd.exe': shell('cmd'),
+             'code.exe': HostApp('VS Code'), 'windowsterminal.exe': HostApp('Windows Terminal'),
+             # Linux names, as /proc/<pid>/stat gives them.
+             'pwsh': shell('PowerShell'), 'bash': shell('bash'), 'zsh': shell('zsh'), 'fish': shell('fish'),
+             'sh': shell('sh'), 'dash': shell('sh'), 'code': HostApp('VS Code'), 'tmux: server': HostApp('tmux')}
 # Store apps whose process names are not their own (the desktop app's is `claude.exe`, the Codex app's `ChatGPT.exe`),
 # known by the folder Windows installs their MSIX package in.
-PACKAGES = {r'\windowsapps\claude_': 'Desktop app', r'\windowsapps\openai.codex_': 'Codex app'}
-# A surface that already names the app hosting it.
-IMPLIED = {'VS Code ext': 'VS Code', 'Desktop': 'Desktop app'}
+PACKAGES = {r'\windowsapps\claude_': HostApp('Desktop app'), r'\windowsapps\openai.codex_': HostApp('Codex app')}
+# Surfaces, by entrypoint, whose Source label already names the host app they run in.
+IMPLIED = {'claude-vscode': HOST_APPS['code.exe'], 'claude-desktop': PACKAGES[r'\windowsapps\claude_']}
 
 
-def known_host(process):
-    """What a process is as a session host, as (label, shell or app), or None when it is no known host."""
+def known_host_app(process):
+    """The host app a process is, or None when it is none this tool knows."""
     path = str(process.get('path') or '').lower()
-    package = next((label for folder, label in PACKAGES.items() if folder in path), None)
-    return (package, 'app') if package else HOSTS.get(str(process.get('name') or '').lower())
+    return (next((app for folder, app in PACKAGES.items() if folder in path), None)
+            or HOST_APPS.get(str(process.get('name') or '').lower()))
 
 
-def host_chain(pid, processes):
-    """The known hosts above a session's process, nearest first, one entry per run of the same host. The walk ends
-    at a parent that is gone, or whose PID a process started later has reused."""
+def reused(parent, child):
+    """Whether a parent PID now belongs to a process other than the one that started the child: one started after
+    the child, or one whose start time this user cannot read while the child's is known. A session's host app runs as
+    its user, so this user can always read it."""
+    if child.get('started') is None:
+        return False
+    return parent.get('started') is None or parent['started'] > child['started']
+
+
+def host_app_chain(pid, processes):
+    """The host apps above a session's process, nearest first, one entry per run of the same app. The walk ends at a
+    parent that is gone or whose PID was reused."""
     chain, seen = [], {pid}
     process = processes.get(pid)
     while process:
         parent = processes.get(process.get('ppid'))
-        if not parent or parent['pid'] in seen or (parent.get('started') or 0) > (process.get('started') or float('inf')):
+        if not parent or parent['pid'] in seen or reused(parent, process):
             break
         seen.add(parent['pid'])
-        host = known_host(parent)
-        if host and (not chain or chain[-1] != host):
-            chain.append(host)
+        app = known_host_app(parent)
+        if app and (not chain or chain[-1] != app):
+            chain.append(app)
         process = parent
     return chain
 
 
-def host_of(pid, processes):
-    """A live session's host as (short label for Source, full chain for the detail pane), or (None, None) when unknown.
-    The short label is the nearest host; the chain names the shell, the app that holds it, and what launched that app."""
-    chain = host_chain(pid, processes)
+def host_app_of(pid, processes):
+    """A live session's host app as (the nearest, for Source; the whole chain, for the detail pane), or (None, None).
+    The chain reads outward: shells in the app that holds them, then each app that launched the one before,
+    such as 'PowerShell in cmd in Windows Terminal (launched from Codex app)'."""
+    chain = host_app_chain(pid, processes)
     if not chain:
         return None, None
-    shell = chain[0][0] if chain[0][1] == 'shell' else None
-    apps = [label for label, kind in chain if kind == 'app']
-    detail = ' in '.join(label for label in (shell, apps[0] if apps else None) if label)
-    if len(apps) > 1:
-        detail += f' (launched from {apps[1]})'
-    return chain[0][0], detail
+    # Each group is a run of shells and the app holding them; every group after the first launched the one before.
+    groups, group = [], []
+    for app in chain:
+        group.append(app.label)
+        if not app.shell:
+            groups.append(' in '.join(group))
+            group = []
+    groups += [' in '.join(group)] if group else []
+    launched = f" (launched from {', from '.join(groups[1:])})" if len(groups) > 1 else ''
+    return chain[0], groups[0] + launched
 
 
 def load_processes(file):
@@ -335,22 +359,25 @@ def windows_processes():
 def proc_processes(root='/proc'):
     """Every process by pid, read from /proc: name, parent and start time (clock ticks since boot) from each stat file."""
     processes = {}
-    for folder in os.scandir(root):
-        if not folder.name.isdigit():
-            continue
-        try:
-            with open(os.path.join(folder.path, 'stat'), encoding='utf-8', errors='replace') as stream:
-                stat = stream.read()
-        except OSError:
-            continue  # The process exited while the folder was listed.
-        # The name sits in parentheses and may itself hold spaces or parentheses; the fields after it do not.
-        name, fields = stat[stat.find('(') + 1:stat.rfind(')')], stat[stat.rfind(')') + 2:].split()
-        processes[int(folder.name)] = dict(pid=int(folder.name), ppid=int(fields[1]), name=name, path=None, started=int(fields[19]))
+    with os.scandir(root) as folders:
+        for folder in folders:
+            if not folder.name.isdigit():
+                continue
+            try:
+                with open(os.path.join(folder.path, 'stat'), encoding='utf-8', errors='replace') as stream:
+                    stat = stream.read()
+                # The name sits in parentheses and may itself hold spaces or parentheses; the fields after it do not.
+                name, fields = stat[stat.find('(') + 1:stat.rfind(')')], stat[stat.rfind(')') + 2:].split()
+                processes[int(folder.name)] = dict(pid=int(folder.name), ppid=int(fields[1]), name=name, path=None,
+                                                   started=int(fields[19]))
+            except (OSError, IndexError, ValueError):
+                continue  # The process exited while the folder was listed, or its stat file was cut short.
     return processes
 
 
 def process_snapshot():
-    """This host's processes by pid; empty where neither Windows nor /proc can list them."""
+    """This host's processes by pid, the machine's and not a host app's; empty where neither Windows nor /proc can
+    list them."""
     try:
         if os.name == 'nt':
             return windows_processes()
@@ -704,7 +731,7 @@ class Manager:
         return self.process(agent).get('bridgeSessionId')
 
     def processes(self):
-        """This host's processes by pid, or the snapshot planted with --processes."""
+        """This host's processes by pid (the machine the picker runs on), or the snapshot planted with --processes."""
         return load_processes(self.options.processes) if self.options.processes else process_snapshot()
 
     def status(self, saved, state, agents):
@@ -725,7 +752,7 @@ class Manager:
                                         Worktree=self.in_worktrees(folder, project)))
                 ids.add(a['sessionId'])
         result = []
-        # One process snapshot per inventory, taken only when a session lives in another app and so has a host to find.
+        # One process snapshot per inventory, taken only when a session lives in another app and so has a host app to find.
         processes = self.processes() if any(live_elsewhere(a) for a in agents) else {}
         for s in rows:
             id = s['SessionId']
@@ -735,21 +762,21 @@ class Manager:
             running = active(agent)
             entry = sessions.get(id, {})
             process = self.process(agent)
+            elsewhere = live_elsewhere(agent)
             # A background session runs under Claude's daemon, whatever terminal once started the daemon.
-            host, chain = (host_of(agent['pid'], processes) if live_elsewhere(agent) else
-                           (None, 'Claude daemon') if running else (None, None))
+            app, chain = (host_app_of(agent['pid'], processes) if elsewhere else
+                          (None, 'Claude daemon') if running else (None, None))
             source = surface_now(agent, process)
-            if host and IMPLIED.get(source) != host:
-                source += f' · {host}'
+            if app and IMPLIED.get(process.get('entrypoint')) != app:
+                source += f' · {app.label}'
             bridge = process.get('bridgeSessionId')
             task = entry.get('Task')
             title = (task if task not in (None, 'remote') else None) or (agent or {}).get('name') or s.get('Title') or task or Path(s.get('WorkingDirectory') or s['Project']).name
             origin = started_on(s, managed=id in sessions)
             status = status_of(s, agent, managed=id in sessions)
-            result.append(dict(s, Task=title, Stoppable=running and not live_elsewhere(agent), Running=running,
-                               ViewOnly=live_elsewhere(agent),
+            result.append(dict(s, Task=title, Stoppable=running and not elsewhere, Running=running, ViewOnly=elsewhere,
                                State=agent.get('state') if agent else s.get('UnavailableReason') or 'stopped',
-                               Status=status, Circle=CIRCLES[status], Origin=origin, Source=source or origin, Host=chain,
+                               Status=status, Circle=CIRCLES[status], Origin=origin, Source=source or origin, HostApp=chain,
                                Remote='📡' if bridge else '', PermissionMode=process.get('permissionMode') or s.get('PermissionMode'),
                                ClaudeVersion=process.get('version') or s.get('ClaudeVersion'),
                                RemoteRegistered=bool(bridge), RemoteSessionId=bridge,
@@ -969,7 +996,7 @@ def parser():
     p.add_argument('--include-project-sessions', '-IncludeProjectSessions', action='store_true',
                    help='Accepted for compatibility; repo-root sessions are always listed now.')
     p.add_argument('--desktop-sessions', '-DesktopSessions', help="The desktop app's session store folder (default: found per host).")
-    p.add_argument('--processes', '-Processes', help='Read the process snapshot from this JSON file instead of this host (for tests).')
+    p.add_argument('--processes', '-Processes', help="Read the process snapshot from this JSON file instead of this machine's (for tests).")
     p.add_argument('--config', '-ClaudeConfigDirectory', default=os.environ.get('CLAUDE_CONFIG_DIR', str(Path.home() / '.claude')))
     p.add_argument('--claude', '-ClaudeExecutable', default='claude.exe' if os.name == 'nt' else 'claude')
     p.add_argument('--launch-wait', '-LaunchWait', type=float, default=90, help='Seconds to wait for Claude to list a launched session.')
@@ -1076,18 +1103,23 @@ def age(row, now=None):
 COLUMNS = ('STATUS', 'REPO', 'TASK', 'SOURCE', 'BRANCH', 'LAST ACTIVE', 'REMOTE')
 
 
-# Source fits a surface and its host, such as 'RC server · PowerShell'.
-FIXED_WIDTHS = {'STATUS': 10, 'SOURCE': 22, 'LAST ACTIVE': 11, 'REMOTE': 6}
+FIXED_WIDTHS = {'STATUS': 10, 'SOURCE': 11, 'LAST ACTIVE': 11, 'REMOTE': 6}
+MIN_WIDTHS = {'TASK': 10, 'BRANCH': 8}
 ROW_PREFIX = 6  # The cursor and checkbox, '> [x] ', before the first column.
 
 
-def column_widths(columns):
-    """Cell widths of the table columns for a terminal this wide; Task and Branch share what is left."""
+def column_widths(columns, source=0):
+    """Cell widths of the table columns for a terminal this wide. Source widens toward its longest label (`source`
+    cells, a surface and its host app such as 'RC server · Windows Terminal'), taking at most half of what Task and
+    Branch have over their minimums; Task and Branch share what is left."""
     widths = dict(FIXED_WIDTHS, REPO=min(16, max(8, columns // 10)))
     # One cell stays free at the right edge, and one space separates each pair of columns.
     spare = columns - 1 - ROW_PREFIX - sum(widths.values()) - (len(COLUMNS) - 1)
-    task = max(10, spare * 3 // 5)
-    widths.update(TASK=task, BRANCH=max(8, spare - task))
+    wider = max(0, min(source - widths['SOURCE'], (spare - sum(MIN_WIDTHS.values())) // 2))
+    widths['SOURCE'] += wider
+    spare -= wider
+    task = max(MIN_WIDTHS['TASK'], spare * 3 // 5)
+    widths.update(TASK=task, BRANCH=max(MIN_WIDTHS['BRANCH'], spare - task))
     return tuple(widths[name] for name in COLUMNS)
 
 
@@ -1120,7 +1152,7 @@ def menu(manager):
         cursor = min(cursor, len(rows) - 1)
         terminal = shutil.get_terminal_size()
         height = max(3, terminal.lines - 16)
-        widths = column_widths(terminal.columns)
+        widths = column_widths(terminal.columns, max(cells(row.get('Source') or '') for row in rows))
         start = max(0, min(cursor - height // 2, len(rows) - height))
         print('\033[2J\033[H', end='')
         print(color(f'Claude sessions | {sys.platform} | {manager.root}', '96'))
@@ -1143,8 +1175,8 @@ def menu(manager):
             print(f"Session: {clean(row['SessionId'])} | permission {clean(row.get('PermissionMode') or '-')} | Claude {clean(row.get('ClaudeVersion') or '-')}")
             print(f"Started: {clean(row.get('Origin'))} | runs now: {clean(row.get('Source') if row.get('Running') else 'nothing')}"
                   + (' | live in another app; view-only' if row.get('ViewOnly') else ''))
-            if row.get('Host'):
-                print(f"Host:    {clean(row['Host'])}")
+            if row.get('HostApp'):
+                print(f"Host app: {clean(row['HostApp'])}")
         hidden = sum(not r.get('ReplacedBy') for r in all_rows) - len(visible_rows(all_rows, history))
         print(color(f'{hidden} more in history; H {"hides" if history else "shows"} it. 📡 registered for Remote Control; phone delivery unverified.', '90'))
         if message:
@@ -1215,7 +1247,7 @@ def main(argv=None):
     else:
         for row in rows:
             print(color(f"{clean(row.get('Project'))}  {clean(row.get('Task') or row.get('Title') or row.get('SessionId'))}", '96'))
-            for field in ('Status', 'Source', 'Host', 'State', 'Result', 'Connection', 'Branch', 'WorkingDirectory', 'RemoteUrl', 'Operation', 'Commands'):
+            for field in ('Status', 'Source', 'HostApp', 'State', 'Result', 'Connection', 'Branch', 'WorkingDirectory', 'RemoteUrl', 'Operation', 'Commands'):
                 if row.get(field) is not None:
                     print(f'  {field}: {clean(row[field])}')
 

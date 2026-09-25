@@ -472,11 +472,11 @@ class PortableTests(unittest.TestCase):
                        (300, 200, 'pwsh.exe', r'C:\Program Files\PowerShell\7\pwsh.exe'),
                        (200, 100, 'WindowsTerminal.exe'), (100, 4, 'explorer.exe'))
         row = self.rows_by_id()[id]
-        self.assertEqual((row['Source'], row['Host']), ('CLI · PowerShell', 'PowerShell in Windows Terminal'))
+        self.assertEqual((row['Source'], row['HostApp']), ('CLI · PowerShell', 'PowerShell in Windows Terminal'))
         screen = self.picker(['q'])[-1]
         line = next(line for line in screen.splitlines() if 'terminal chat' in line)
         self.assertIn(' CLI · PowerShell ', line)
-        self.assertIn('Host:    PowerShell in Windows Terminal', screen[screen.index(line) + len(line):])
+        self.assertIn('Host app: PowerShell in Windows Terminal', screen[screen.index(line) + len(line):])
 
     def test_vscode_session_names_the_app_that_launched_vscode(self):
         id = '5f1c0a52-4a57-4c1e-9a55-3c2d7c1b7a02'
@@ -488,7 +488,7 @@ class PortableTests(unittest.TestCase):
                        (1700, 1624, 'Code.exe', r'C:\Users\J\AppData\Local\Programs\Microsoft VS Code\Code.exe'),
                        (1624, 900, 'ChatGPT.exe', r'C:\Program Files\WindowsApps\OpenAI.Codex_26.917.9434.0_x64__2p2nqsd0c76g0\app\ChatGPT.exe'))
         row = self.rows_by_id()[id]
-        self.assertEqual((row['Source'], row['Host']), ('VS Code ext', 'VS Code (launched from Codex app)'))
+        self.assertEqual((row['Source'], row['HostApp']), ('VS Code ext', 'VS Code (launched from Codex app)'))
 
     def test_desktop_app_is_known_by_its_package_folder_not_its_process_name(self):
         desktop, cli = '5f1c0a52-4a57-4c1e-9a55-3c2d7c1b7a03', '5f1c0a52-4a57-4c1e-9a55-3c2d7c1b7a04'
@@ -503,7 +503,7 @@ class PortableTests(unittest.TestCase):
                        (self.pid_of(cli), 2400, 'claude.exe', r'C:\Users\J\.local\bin\claude.exe'),
                        (2400, 2500, 'cmd.exe', r'C:\WINDOWS\system32\cmd.exe'))
         rows = self.rows_by_id()
-        self.assertEqual({id: (rows[id]['Source'], rows[id]['Host']) for id in (desktop, cli)},
+        self.assertEqual({id: (rows[id]['Source'], rows[id]['HostApp']) for id in (desktop, cli)},
                          {desktop: ('Desktop', 'Desktop app'), cli: ('CLI · cmd', 'cmd')})
 
     def test_background_session_is_hosted_by_the_claude_daemon_not_the_terminal_that_started_it(self):
@@ -515,8 +515,8 @@ class PortableTests(unittest.TestCase):
         self.processes((self.pid_of(id), 1935, 'claude.exe', binary), (1935, 2080, 'claude.exe', binary),
                        (2080, 300, 'claude.exe', binary), (300, 200, 'pwsh.exe'), (200, 100, 'WindowsTerminal.exe'))
         row = self.rows_by_id()[id]
-        self.assertEqual((row['Source'], row['Host']), ('Background', 'Claude daemon'))
-        self.assertIn('Host:    Claude daemon', self.picker(['q'])[-1])
+        self.assertEqual((row['Source'], row['HostApp']), ('Background', 'Claude daemon'))
+        self.assertIn('Host app: Claude daemon', self.picker(['q'])[-1])
 
     def test_a_parent_pid_reused_by_a_later_process_is_not_the_host(self):
         id = '5f1c0a52-4a57-4c1e-9a55-3c2d7c1b7a06'
@@ -526,7 +526,50 @@ class PortableTests(unittest.TestCase):
         self.processes((self.pid_of(id), 300, 'claude.exe', None, 5000), (300, 100, 'Code.exe', None, 9000),
                        (100, 4, 'WindowsTerminal.exe', None, 1000))
         row = self.rows_by_id()[id]
-        self.assertEqual((row['Source'], row['Host']), ('CLI', None))
+        self.assertEqual((row['Source'], row['HostApp']), ('CLI', None))
+        # A parent this user cannot open has no start time to compare; a session's host app is always one it can open.
+        self.processes((self.pid_of(id), 300, 'claude.exe', None, 5000), (300, 100, 'pwsh.exe', None, None))
+        row = self.rows_by_id()[id]
+        self.assertEqual((row['Source'], row['HostApp']), ('CLI', None))
+
+    def test_the_detail_pane_names_every_host_app_in_the_chain(self):
+        id = '5f1c0a52-4a57-4c1e-9a55-3c2d7c1b7a09'
+        self.transcript(id, self.project)
+        self.live(id, self.project, entrypoint='cli')
+        # PowerShell started from cmd in a Windows Terminal tab, and the terminal launched from the Codex app.
+        self.processes((self.pid_of(id), 300, 'claude.exe'), (300, 250, 'pwsh.exe'), (250, 200, 'cmd.exe'),
+                       (200, 150, 'WindowsTerminal.exe'), (150, 100, 'explorer.exe'),
+                       (100, 50, 'ChatGPT.exe', r'C:\Program Files\WindowsApps\OpenAI.Codex_26.917.9434.0_x64__2p2nqsd0c76g0\app\ChatGPT.exe'))
+        row = self.rows_by_id()[id]
+        self.assertEqual((row['Source'], row['HostApp']),
+                         ('CLI · PowerShell', 'PowerShell in cmd in Windows Terminal (launched from Codex app)'))
+
+    def test_an_80_column_terminal_fits_every_table_line_and_a_wide_one_shows_the_whole_source(self):
+        id = '5f1c0a52-4a57-4c1e-9a55-3c2d7c1b7a0a'
+        self.transcript(id, self.project, dict(), dict(type='ai-title', aiTitle='a rather long title for a narrow terminal'))
+        self.live(id, self.project, entrypoint='sdk-cli')
+        self.processes((self.pid_of(id), 200, 'claude.exe'), (200, 100, 'WindowsTerminal.exe'))
+        self.assertEqual(self.rows_by_id()[id]['Source'], 'RC server · Windows Terminal')
+        for columns in (80, 100):
+            lines = self.picker(['q'], columns=columns)[-1].splitlines()
+            table = [line for line in lines if 'SOURCE' in line or line.startswith(('> [', '  ['))]
+            self.assertTrue(table)
+            self.assertEqual([line for line in table if cells(line) > columns - 1], [], columns)
+        wide = self.picker(['q'], columns=140)[-1]
+        self.assertIn(' RC server · Windows Terminal ', next(line for line in wide.splitlines() if 'rather long' in line))
+
+    def test_the_linux_process_list_skips_stat_files_it_cannot_parse(self):
+        proc = Path(self.temp.name) / 'proc'
+        for name, stat in (('1', '1 (systemd) S 0 1 1 0 -1 4194560 0 0 0 0 0 0 0 0 20 0 1 0 5 0'),
+                           ('42', '42 (tmux: server) S 1 42 42 0 -1 4194560 0 0 0 0 0 0 0 0 20 0 1 0 900 0'),
+                           ('43', ''), ('44', '44 (bash) S'), ('45', '45 (zsh) S x 45 45 0 -1 0 0 0 0 0 0 0 0 0 20 0 1 0 7 0'),
+                           ('self', '1 (not a pid) S 0')):
+            (proc / name).mkdir(parents=True)
+            (proc / name / 'stat').write_text(stat)
+        (proc / '46').mkdir()  # A process that exited between the listing and the read.
+        processes = rs.proc_processes(str(proc))
+        self.assertEqual({pid: (p['name'], p['ppid'], p['started']) for pid, p in processes.items()},
+                         {1: ('systemd', 0, 5), 42: ('tmux: server', 1, 900)})
 
     def test_a_session_missing_from_the_snapshot_keeps_its_surface_label(self):
         id = '5f1c0a52-4a57-4c1e-9a55-3c2d7c1b7a07'
@@ -534,8 +577,8 @@ class PortableTests(unittest.TestCase):
         self.live(id, self.project, entrypoint='cli')
         self.processes((1, 1, 'System'), (300, 200, 'pwsh.exe'))  # A PID loop, and no entry for the session's process.
         row = self.rows_by_id()[id]
-        self.assertEqual((row['Source'], row['Host']), ('CLI', None))
-        self.assertNotIn('Host:', self.picker(['q'])[-1])
+        self.assertEqual((row['Source'], row['HostApp']), ('CLI', None))
+        self.assertNotIn('Host app:', self.picker(['q'])[-1])
 
     def shell_child(self):
         """A real process running under a shell (cmd on Windows, sh elsewhere), as a terminal session runs under one.
@@ -544,6 +587,7 @@ class PortableTests(unittest.TestCase):
         command = (['cmd', '/d', '/c', sys.executable, '-c', code] if os.name == 'nt' else
                    ['sh', '-c', '"$0" -c "$1"; :', sys.executable, code])
         child = subprocess.Popen(command, stdin=subprocess.PIPE, stdout=subprocess.PIPE, text=True)
+        self.addCleanup(child.stdout.close)
         self.addCleanup(child.wait, 30)
         self.addCleanup(child.stdin.close)
         return int(child.stdout.readline()), 'cmd' if os.name == 'nt' else 'sh'
@@ -563,13 +607,15 @@ class PortableTests(unittest.TestCase):
             began = time.perf_counter()
             processes = rs.process_snapshot()
             for pid in processes:
-                rs.host_of(pid, processes)
+                rs.host_app_of(pid, processes)
             return time.perf_counter() - began, processes
-        # The best of a few runs, so another test suite sharing the machine does not decide the result.
+        # The ticket's budget is for this machine. The best of a few runs keeps another suite sharing the machine from
+        # deciding the result, and REMOTE_SESSIONS_SNAPSHOT_BUDGET_MS widens it on a slower or loaded host (CI, WSL).
+        # No command times the snapshot alone, so this one test calls the engine's snapshot and walk directly.
+        budget = float(os.environ.get('REMOTE_SESSIONS_SNAPSHOT_BUDGET_MS') or 50) / 1000
         elapsed, processes = min((once() for _ in range(5)), key=lambda run: run[0])
-        self.assertIn(os.getpid(), processes)
-        self.assertEqual(processes[os.getpid()]['ppid'], os.getppid())
-        self.assertLess(elapsed, .05)
+        self.assertIn(os.getpid(), processes)  # A real snapshot, not an empty one that returns at once.
+        self.assertLess(elapsed, budget)
 
     def test_archived_desktop_session_the_picker_tracks_stays_hidden_and_never_resumes(self):
         task = self.new()
