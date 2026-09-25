@@ -1,5 +1,6 @@
 """Run with python -m unittest discover -s tests -p test_portable.py -v."""
 import argparse
+from datetime import datetime, timezone
 import json
 import os
 from pathlib import Path
@@ -49,8 +50,17 @@ class PortableTests(unittest.TestCase):
         data.update(fields)
         self.native.write_text(json.dumps(data))
 
-    def new(self, name='fix-login'):
-        return self.run_manager('start', '--task', name, '--issue', '2')[0]
+    def new(self, name='fix-login', *extra):
+        return self.run_manager('start', '--task', name, '--issue', '2', *extra)[0]
+
+    def state_file(self):
+        return self.root / '.remote-sessions.json'
+
+    def reveal_slow_agents(self):
+        data = self.data()
+        for agent in data['Agents']:
+            agent.pop('HiddenPolls', None)
+        self.change(Mode='normal', Slow=False, Agents=data['Agents'])
 
     def test_readable_names_and_same_workspace_for_both_harnesses(self):
         first = self.run_manager('workspace', '--issue', '2', '--task', 'Fix login')[0]
@@ -95,27 +105,181 @@ class PortableTests(unittest.TestCase):
         self.assertEqual(len(rs.visible_rows(rows, True)), 2)
         self.assertFalse(rs.selectable(rows[0]))
 
-    def test_external_interactive_session_never_adopted(self):
+    def test_session_live_in_another_app_is_view_only(self):
         first = self.new()
         data = self.data()
         a = data['Agents'][0]
         a.update(kind='interactive', status='idle', startedAt='external')
         a.pop('id')
         self.change(Agents=data['Agents'])
-        self.assertFalse(self.run_manager('status')[0]['Managed'])
+        self.assertFalse(self.run_manager('status')[0]['Stoppable'])
         self.run_manager('start')
         self.assertEqual(self.data()['Starts'], 1)
-        with self.assertRaisesRegex(ValueError, 'another run'):
+        with self.assertRaisesRegex(ValueError, 'view-only'):
             self.run_manager('stop', '--session-id', first['SessionId'])
-
-    def test_stop_rejects_reused_native_identity(self):
-        self.new()
-        data = self.data()
-        data['Agents'][0]['startedAt'] = 'another-run'
-        self.change(Agents=data['Agents'])
-        with self.assertRaisesRegex(ValueError, 'another run'):
-            self.run_manager('stop')
+        self.assertEqual(self.run_manager('stop'), [])
         self.assertEqual(self.data()['Stops'], 0)
+
+    def test_background_session_started_elsewhere_is_stoppable(self):
+        self.change(Agents=[dict(id='outside1', sessionId='5f1c0a52-4a57-4c1e-9a55-3c2d7c1b9e01', kind='background',
+                                 state='idle', cwd=str(self.project), pid=4242, startedAt='elsewhere')])
+        self.assertEqual([r['SessionId'] for r in self.run_manager('stop')], ['5f1c0a52-4a57-4c1e-9a55-3c2d7c1b9e01'])
+        self.assertEqual(self.data()['Stops'], 1)
+
+    def test_session_recorded_as_pending_is_stoppable(self):
+        first = self.new()
+        state = rs.read_json(self.state_file())
+        state['Sessions'][first['SessionId']].update(Ownership='pending', StartedAt=None)
+        rs.write_json(self.state_file(), state)
+        result = self.run_manager('stop', '--session-id', first['SessionId'])[0]
+        self.assertIn('stopped', result['Result'])
+        self.assertEqual(self.data()['Stops'], 1)
+        self.assertEqual(self.data()['Agents'][0]['state'], 'stopped')
+
+    def test_resuming_a_stopped_session_continues_same_id_in_original_folder(self):
+        first = self.new()
+        self.run_manager('stop')
+        resumed = self.run_manager('resume', '--session-id', first['SessionId'])[0]
+        self.assertEqual(resumed['SessionId'], first['SessionId'])
+        self.assertEqual(self.data()['LastArguments'][:3], ['--bg', '--resume', first['SessionId']])
+        self.assertTrue(wt.same(self.data()['LastDirectory'], first['WorkingDirectory']))
+        self.assertEqual(len(wt.worktrees(self.project)), 2)
+
+    def test_slow_launch_is_not_an_error_and_ends_up_stoppable(self):
+        first = self.new()
+        self.run_manager('stop')
+        self.change(Mode='slow', SlowPolls=50)
+        resumed = self.run_manager('resume', '--session-id', first['SessionId'], '--launch-wait', '0')[0]
+        self.assertEqual(resumed['SessionId'], first['SessionId'])
+        self.assertIn('not listed yet', resumed['Result'])
+        self.reveal_slow_agents()
+        self.run_manager('stop', '--session-id', first['SessionId'])
+        self.assertEqual(self.data()['Stops'], 2)
+
+    def test_slow_new_task_launch_is_adopted_and_ends_up_stoppable(self):
+        # Claude prints no session ID and lists the session only after the wait has ended.
+        self.change(Mode='slow', SlowPolls=50, Quiet=True)
+        launched = self.new('fix-login', '--launch-wait', '0')
+        self.assertIn('not listed yet', launched['Result'])
+        self.reveal_slow_agents()
+        real = self.data()['Agents'][0]['sessionId']
+        rows = self.run_manager('status')
+        self.assertEqual([(r['SessionId'], r['Task'], r['Stoppable']) for r in rows], [(real, 'issue-2 fix-login', True)])
+        again = self.run_manager('start')[0]
+        self.assertEqual((again['SessionId'], again['Result']), (real, 'already running; not restarted'))
+        self.assertEqual(list(rs.read_json(self.state_file())['Sessions']), [real])
+        self.assertEqual(self.new()['SessionId'], real)
+        self.assertEqual(self.data()['Starts'], 1)
+        self.assertEqual([r['SessionId'] for r in self.run_manager('stop')], [real])
+        self.assertEqual(self.data()['Stops'], 1)
+
+    def test_slow_new_task_launch_reports_the_session_claude_printed(self):
+        self.change(Mode='slow', SlowPolls=50)
+        launched = self.new('fix-login', '--launch-wait', '0')
+        real = self.data()['Agents'][0]['sessionId']
+        self.assertEqual(launched['SessionId'], real)
+        self.assertEqual(list(rs.read_json(self.state_file())['Sessions']), [real])
+
+    def test_copied_launch_is_adopted_and_stoppable(self):
+        first = self.new()
+        self.run_manager('stop')
+        self.change(Mode='copy')
+        resumed = self.run_manager('resume', '--session-id', first['SessionId'])[0]
+        copy = next(a['sessionId'] for a in self.data()['Agents'] if a['state'] != 'stopped')
+        self.assertNotEqual(copy, first['SessionId'])
+        self.assertEqual(resumed['SessionId'], copy)
+        self.assertTrue(wt.same(resumed['WorkingDirectory'], first['WorkingDirectory']))
+        self.assertEqual([r['SessionId'] for r in self.run_manager('status') if r['Running']], [copy])
+        self.run_manager('stop', '--session-id', copy)
+        self.assertEqual(self.data()['Stops'], 2)
+
+    def test_slow_copied_resume_is_followed_and_stoppable_by_either_id(self):
+        first = self.new()
+        self.run_manager('stop')
+        # Claude names both the requested conversation and its copy, and lists the copy only after the wait.
+        self.change(Mode='copy', Slow=True, SlowPolls=50, EchoRequested=True)
+        resumed = self.run_manager('resume', '--session-id', first['SessionId'], '--launch-wait', '0')[0]
+        copy = next(a['sessionId'] for a in self.data()['Agents'] if a['sessionId'] != first['SessionId'])
+        self.assertEqual(resumed['SessionId'], copy)
+        self.reveal_slow_agents()
+        self.assertEqual([r['SessionId'] for r in self.run_manager('stop', '--session-id', first['SessionId'])], [copy])
+        self.assertEqual(self.data()['Stops'], 2)
+
+    def test_unrelated_id_in_launch_output_is_repaired_once_the_session_appears(self):
+        self.change(Mode='slow', SlowPolls=50, Quiet=True, Banner='Environment 5f1c0a52-4a57-4c1e-9a55-3c2d7c1b9e03 ready')
+        self.new('fix-login', '--launch-wait', '0')
+        self.reveal_slow_agents()
+        real = self.data()['Agents'][0]['sessionId']
+        self.assertEqual(self.run_manager('start')[0]['SessionId'], real)
+        self.assertEqual(list(rs.read_json(self.state_file())['Sessions']), [real])
+        self.assertEqual([r['SessionId'] for r in self.run_manager('stop')], [real])
+
+    def test_failed_new_task_launch_adopts_only_a_conversation_that_began_after_it(self):
+        self.change(Mode='launch-failure')
+        with self.assertRaises(RuntimeError):
+            self.new()
+        folder = next(t['Path'] for t in wt.worktrees(self.project) if not wt.same(t['Path'], self.project))
+        history = self.config / 'projects' / 'planted'
+        history.mkdir(parents=True)
+
+        def plant(id, timestamp):
+            (history / f'{id}.jsonl').write_text(json.dumps(dict(type='user', sessionId=id, cwd=folder, timestamp=timestamp)))
+            return next(r['Task'] for r in self.run_manager('status') if r['SessionId'] == id)
+
+        self.assertNotEqual(plant('5f1c0a52-4a57-4c1e-9a55-3c2d7c1b9e04', '2020-01-01T00:00:00Z'), 'issue-2 fix-login')
+        later = datetime.now(timezone.utc).isoformat()
+        self.assertEqual(plant('5f1c0a52-4a57-4c1e-9a55-3c2d7c1b9e05', later), 'issue-2 fix-login')
+
+    def test_stored_new_task_without_a_task_name_launches_in_its_own_folder(self):
+        folder = self.run_manager('workspace', '--task', 'legacy')[0]['WorkingDirectory']
+        id = '5f1c0a52-4a57-4c1e-9a55-3c2d7c1b9e06'
+        rs.write_json(self.state_file(), dict(Version=2, Sessions={id: dict(Project='brain', WorkingDirectory=folder, NewSession=True)}))
+        self.run_manager('start', '--session-id', id)
+        self.assertTrue(wt.same(self.data()['LastDirectory'], folder))
+        self.assertEqual(len(wt.worktrees(self.project)), 2)
+
+    def test_displayed_branch_follows_the_folders_checkout(self):
+        first = self.new()
+        self.run_manager('stop')
+        wt.git(first['WorkingDirectory'], 'switch', '-c', 'fix/2-renamed')
+        self.assertEqual(self.run_manager('status')[0]['Branch'], 'fix/2-renamed')
+        resumed = self.run_manager('resume', '--session-id', first['SessionId'])[0]
+        self.assertEqual(resumed['Branch'], 'fix/2-renamed')
+        again = self.run_manager('start', '--task', 'fix-login', '--issue', '2', '--branch', 'fix/2-renamed')[0]
+        self.assertEqual(again['SessionId'], first['SessionId'])
+        self.assertEqual(len(wt.worktrees(self.project)), 2)
+
+    def test_launch_claude_runs_in_another_folder_is_never_adopted(self):
+        self.change(Mode='wrong-directory')
+        launched = self.new('fix-login', '--launch-wait', '0')
+        elsewhere = self.data()['Agents'][0]['sessionId']
+        self.assertIn('not listed yet', launched['Result'])
+        self.assertNotEqual(launched['SessionId'], elsewhere)
+        self.assertNotIn(elsewhere, rs.read_json(self.state_file())['Sessions'])
+        self.assertFalse(any(r['Running'] for r in self.run_manager('status')))
+        self.assertEqual(self.run_manager('stop'), [])
+
+    def test_detached_folder_shows_no_stale_branch(self):
+        first = self.new()
+        self.run_manager('stop')
+        wt.git(first['WorkingDirectory'], 'checkout', '--detach')
+        self.assertIsNone(self.run_manager('status')[0]['Branch'])
+        self.run_manager('resume', '--session-id', first['SessionId'])
+        self.assertIsNone(rs.read_json(self.state_file())['Sessions'][first['SessionId']]['Branch'])
+
+    def test_second_load_reparses_no_unchanged_transcript(self):
+        first = self.new()
+        history = next((self.config / 'projects').glob(f"*/{first['SessionId']}.jsonl"))
+        with history.open('a') as file:
+            file.write('\n' + json.dumps(dict(type='ai-title', sessionId=first['SessionId'], aiTitle='Fix login')))
+        self.assertEqual(self.run_manager('sessions')[0]['Title'], 'Fix login')
+        # Same size and modification time: a re-parse would reveal the new title, the cache must not.
+        stat = history.stat()
+        history.write_text(history.read_text().replace('Fix login', 'Fix lagin'))
+        os.utime(history, ns=(stat.st_atime_ns, stat.st_mtime_ns))
+        self.assertEqual(self.run_manager('sessions')[0]['Title'], 'Fix login')
+        os.utime(history, ns=(stat.st_atime_ns, stat.st_mtime_ns + 1_000_000_000))
+        self.assertEqual(self.run_manager('sessions')[0]['Title'], 'Fix lagin')
 
     def test_bridge_registration_is_not_connection_claim(self):
         self.new()
@@ -130,13 +294,57 @@ class PortableTests(unittest.TestCase):
         file.write_text(json.dumps(dict(pid=a['pid'], sessionId='other', bridgeSessionId='session_wrong')))
         self.assertFalse(self.run_manager('status')[0]['RemoteRegistered'])
 
-    def test_deleted_worktree_restores_original_branch_and_uuid(self):
+    def test_session_whose_folder_was_deleted_is_hidden_and_never_recreated(self):
         first = self.new()
         self.run_manager('stop')
         wt.git(self.project, 'worktree', 'remove', first['WorkingDirectory'])
-        restored = self.run_manager('resume', '--session-id', first['SessionId'])[0]
-        self.assertEqual(restored['SessionId'], first['SessionId'])
-        self.assertEqual(restored['WorkingDirectory'], first['WorkingDirectory'])
+        trees = wt.worktrees(self.project)
+        self.assertNotIn(first['SessionId'], [r['SessionId'] for r in self.run_manager('status')])
+        self.assertNotIn(first['SessionId'], [r['SessionId'] for r in self.run_manager('sessions')])
+        with self.assertRaisesRegex(ValueError, 'folder'):
+            self.run_manager('resume', '--session-id', first['SessionId'])
+        with self.assertRaisesRegex(ValueError, 'no available task'):
+            self.run_manager('start')
+        with self.assertRaisesRegex(ValueError, 'folder'):
+            self.new()
+        self.assertFalse(Path(first['WorkingDirectory']).exists())
+        self.assertEqual(trees, wt.worktrees(self.project))
+        self.assertEqual(self.data()['Starts'], 1)
+
+    def test_running_session_stays_listed_when_its_transcript_is_missing(self):
+        first = self.new()
+        history = next((self.config / 'projects').glob(f"*/{first['SessionId']}.jsonl"))
+        history.rename(history.with_suffix('.parked'))
+        rows = self.run_manager('status')
+        self.assertEqual([(r['SessionId'], r['Running'], r['Stoppable']) for r in rows], [(first['SessionId'], True, True)])
+        again = self.run_manager('resume', '--session-id', first['SessionId'])[0]
+        self.assertEqual(again['Result'], 'already running; not restarted')
+        self.assertEqual(self.data()['Starts'], 1)
+
+    def test_new_task_folder_deleted_after_a_failed_launch_is_never_recreated(self):
+        self.change(Mode='launch-failure')
+        with self.assertRaises(RuntimeError):
+            self.new()
+        folder = next(t['Path'] for t in wt.worktrees(self.project) if not wt.same(t['Path'], self.project))
+        wt.git(self.project, 'worktree', 'remove', folder)
+        trees = wt.worktrees(self.project)
+        self.change(Mode='normal')
+        with self.assertRaisesRegex(ValueError, 'folder'):
+            self.new()
+        self.assertNotIn(folder, [r.get('WorkingDirectory') for r in self.run_manager('status')])
+        self.assertFalse(Path(folder).exists())
+        self.assertEqual(trees, wt.worktrees(self.project))
+        self.assertEqual(self.data()['Starts'], 1)
+
+    def test_stop_names_an_unknown_session_or_one_outside_the_selected_projects(self):
+        with self.assertRaisesRegex(ValueError, 'not found'):
+            self.run_manager('stop', '--session-id', '5f1c0a52-4a57-4c1e-9a55-3c2d7c1b9e01')
+        (self.root / 'other').mkdir()
+        self.change(Agents=[dict(id='outside1', sessionId='5f1c0a52-4a57-4c1e-9a55-3c2d7c1b9e02', kind='background',
+                                 state='idle', cwd=str(self.root / 'other'), pid=4242, startedAt='elsewhere')])
+        with self.assertRaisesRegex(ValueError, 'outside the selected projects'):
+            self.run_manager('stop', '--session-id', '5f1c0a52-4a57-4c1e-9a55-3c2d7c1b9e02')
+        self.assertEqual(self.data()['Stops'], 0)
 
     def test_failed_launch_retries_existing_named_worktree(self):
         self.change(Mode='launch-failure')
@@ -147,15 +355,17 @@ class PortableTests(unittest.TestCase):
         self.new()
         self.assertEqual(trees, wt.worktrees(self.project))
 
-    def test_launch_confirmation_failure_does_not_duplicate_or_adopt(self):
+    def test_launch_that_reports_failure_is_adopted_not_relaunched_and_stoppable(self):
         self.change(Mode='launch-exit-failure')
         with self.assertRaises(RuntimeError):
             self.new()
         self.change(Mode='normal')
-        self.new()
+        real = self.data()['Agents'][0]['sessionId']
+        self.assertEqual(self.new()['SessionId'], real)
         self.assertEqual(self.data()['Starts'], 1)
-        with self.assertRaisesRegex(ValueError, 'uncertain ownership'):
-            self.run_manager('stop')
+        self.assertEqual(list(rs.read_json(self.state_file())['Sessions']), [real])
+        self.run_manager('stop')
+        self.assertEqual(self.data()['Stops'], 1)
 
     def test_malformed_inventory_never_starts(self):
         self.change(Mode='malformed')
@@ -169,20 +379,6 @@ class PortableTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, 'incomplete agent record'):
                 self.new()
             self.assertFalse((self.root / '.remote-sessions.json').exists())
-
-    def test_missing_branch_creates_replacement_even_at_same_folder(self):
-        first = self.new()
-        self.run_manager('stop')
-        wt.git(self.project, 'worktree', 'remove', first['WorkingDirectory'])
-        state_file = self.root / '.remote-sessions.json'
-        state = rs.read_json(state_file)
-        state['Sessions'][first['SessionId']]['Branch'] = 'codex/no-longer-present'
-        rs.write_json(state_file, state)
-        replacement = self.run_manager('resume', '--session-id', first['SessionId'])[0]
-        self.assertNotEqual(first['SessionId'], replacement['SessionId'])
-        again = self.run_manager('resume', '--session-id', first['SessionId'])[0]
-        self.assertEqual(again['SessionId'], replacement['SessionId'])
-        self.assertEqual(self.data()['Starts'], 2)
 
     def test_nested_activity_and_saved_titles_do_not_break_continuity(self):
         first = self.new()
@@ -212,7 +408,7 @@ class PortableTests(unittest.TestCase):
         self.assertFalse((self.root / 'surprise').exists())
 
     def test_native_cli_process_entrypoint_and_legacy_aliases(self):
-        result = subprocess.run([sys.executable, str(ENGINE), 'start', '-Root', str(self.root), '-Only', 'brain', '-Task', 'fix login', '-ClaudeConfigDirectory', str(self.config), '-ClaudeExecutable', str(FAKE), '-Json'], capture_output=True, text=True)
+        result = subprocess.run([sys.executable, str(ENGINE), 'start', '-Root', str(self.root), '-Only', 'brain', '-Task', 'fix login', '-ClaudeConfigDirectory', str(self.config), '-ClaudeExecutable', str(FAKE), '-LaunchWait', '5', '-Json'], capture_output=True, text=True)
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(len(json.loads(result.stdout)), 1)
 
