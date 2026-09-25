@@ -66,6 +66,26 @@ The picker loads fast: each transcript's metadata and each desktop store file ar
 cached by path, modification time and size, so a refresh re-parses only files that
 changed.
 
+The open picker refreshes itself. About every 3 seconds it checks file times, never
+file contents: the modification times of the project root, the transcript folders and
+each project's `.claude/worktrees`, and the time and size of every file in Claude's
+per-pid `sessions` folder and in the desktop store. The check costs about 15 ms on a
+typical machine and never runs Claude or Git; it walks the desktop store as the full
+read does, so it grows with that store. Only when something changed does it read
+the full inventory again, so new sessions appear, removed worktrees disappear and
+statuses update without a keypress. With nothing changing, no `claude agents` call is
+made between checks. The full read runs off the key loop, so arrow keys and Space
+keep working while it loads. The cursor stays on the same session when rows move. If
+a live refresh fails for any reason, the picker keeps its rows and says so in red
+until a refresh succeeds. R reads the full inventory at once, or, if a read is already
+running, again as soon as it finishes. A branch switched inside an existing folder
+shows at the next full read, not on its own.
+
+Live status updates rest on one observation of real Claude (2.1.x): a live session
+rewrites its own `sessions/<pid>.json` when its status changes. A Claude version that
+changes a status only in `claude agents` leaves the circle stale until the next full
+read; press R.
+
 Task titles, folders, session IDs, and remote URLs are shown separately. Titles
 come from launcher task names, native agent names, or explicit saved Claude titles.
 Folder names remain a fallback for older conversations without a title. Existing
@@ -278,7 +298,14 @@ and the detail pane in captured picker output, UUID/options continuity, hidden
 deleted folders, slow and copied launches,
 the stop rule, branch-follows-folder, the transcript cache, duplicate prevention,
 read-only previews, worktree names, native path rules, cross-process locks,
-argument quoting, and A/Enter/N picker behavior. `tests/test_worktree_hook.py` feeds
+argument quoting, and A/Enter/N picker behavior. Live refresh is driven by scripted
+picker keys where time passes with no key: a session added or a worktree removed
+shows without a keypress, a status change updates its circle, no `claude agents`
+call is made while nothing changes, the cursor keeps its session, keys work while a
+slow refresh loads, a failed refresh (including an unexpected error such as a junk
+agent row) keeps the rows, and R pressed during a refresh reads again after it. The
+real key waits (console polling on Windows, `select` on POSIX) and the 3-second
+timing are not driven by the suite. `tests/test_worktree_hook.py` feeds
 the hook Claude's input JSON in a temporary repo with a `dev` branch, directly and
 through Git Bash and PowerShell, and checks names, the cut from local `dev` without
 a fetch, the printed path as UTF-8, reuse, refusals, the stderr note for a name

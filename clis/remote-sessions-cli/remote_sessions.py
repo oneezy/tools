@@ -12,6 +12,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 import unicodedata
 import uuid
@@ -327,6 +328,37 @@ class Manager:
         for key in DESKTOP.keys() - scanned:
             del DESKTOP[key]
         return found
+
+    def fingerprint(self):
+        """What the inventory reads, cheaply: the modification times of the project root, the transcript
+        folders and each project's task worktrees folder, and the times and sizes of every per-pid session file and
+        every file in the desktop store. Equal fingerprints mean nothing listed has changed.
+        Reads only folder and file times: no Claude, no Git, no transcript. The desktop store is walked as the
+        inventory walks it, so the check grows with the store.
+        Assumes real Claude rewrites a live session's `<config>/sessions/<pid>.json` when its status changes, as
+        seen on Claude 2.1.x. A status that changes only in `claude agents` shows at the next full read (R)."""
+        def stamp(path):
+            try:
+                return path.stat().st_mtime_ns
+            except OSError:
+                return None
+
+        def files(folder):
+            try:
+                with os.scandir(folder) as entries:
+                    return sorted((e.name, e.stat().st_mtime_ns, e.stat().st_size) for e in entries if e.is_file())
+            except OSError:
+                return None
+
+        transcripts = self.config / 'projects'
+        folders = [self.root, transcripts, *(p for p in transcripts.glob('*') if p.is_dir())]
+        try:
+            folders += [path / '.claude' / 'worktrees' for path in self.projects().values()]
+        except ValueError:
+            pass
+        stores = [Path(self.options.desktop_sessions)] if self.options.desktop_sessions else default_desktop_stores()
+        desktop = [(str(folder), files(folder)) for store in stores for folder in (store, *store.rglob('*')) if folder.is_dir()]
+        return [(str(folder), stamp(folder)) for folder in folders], files(self.config / 'sessions'), desktop
 
     def saved(self):
         catalog = {}
@@ -817,6 +849,8 @@ def parser():
     p.add_argument('--config', '-ClaudeConfigDirectory', default=os.environ.get('CLAUDE_CONFIG_DIR', str(Path.home() / '.claude')))
     p.add_argument('--claude', '-ClaudeExecutable', default='claude.exe' if os.name == 'nt' else 'claude')
     p.add_argument('--launch-wait', '-LaunchWait', type=float, default=90, help='Seconds to wait for Claude to list a launched session.')
+    # Seconds between the open picker's checks for changed sessions. Hidden: the spec fixes about 3 s; tests pass 0.
+    p.add_argument('--refresh-every', type=float, default=3, help=argparse.SUPPRESS)
     return p
 
 
@@ -829,9 +863,18 @@ def color(text, code):
     return f'\033[{code}m{text}\033[0m' if sys.stdout.isatty() and not os.environ.get('NO_COLOR') else text
 
 
-def keypress():
+def keypress(timeout=None):
+    """The next key, or None when `timeout` seconds pass without one (None waits for ever)."""
     if os.name == 'nt':
         import msvcrt
+        deadline = None if timeout is None else time.monotonic() + timeout
+        try:
+            while deadline is not None and not msvcrt.kbhit():
+                if time.monotonic() >= deadline:
+                    return None
+                time.sleep(.02)
+        except KeyboardInterrupt:
+            return '\x03'  # Between reads the console turns Ctrl+C into an interrupt; it is still the Ctrl+C key.
         key = msvcrt.getwch()
         if key in ('\x00', '\xe0'):
             return {'H': 'up', 'P': 'down'}.get(msvcrt.getwch(), '')
@@ -842,7 +885,10 @@ def keypress():
     fd = sys.stdin.fileno()
     previous = termios.tcgetattr(fd)
     try:
-        tty.setraw(fd)
+        # TCSANOW: a key typed between two waits stays queued instead of being flushed.
+        tty.setraw(fd, termios.TCSANOW)
+        if timeout is not None and not select.select([fd], [], [], timeout)[0]:
+            return None
         key = os.read(fd, 1).decode(errors='replace')
         if key == '\x1b' and select.select([fd], [], [], .1)[0]:
             suffix = os.read(fd, 2).decode(errors='replace')
@@ -943,15 +989,97 @@ def selectable(row):
     return bool(row.get('Available') or row.get('Running')) and not row.get('ViewOnly')
 
 
+def inventory(manager):
+    """Every row the picker lists: a full read of Claude, transcripts, the desktop store and state."""
+    state = manager.state()
+    return manager.status(manager.saved(), state, manager.agents())
+
+
+QUIT_KEYS = ('q', '\x1b', '\x03')
+ACTION_KEYS = ('\r', '\n', 'n', 'x')
+
+
+class Reload(threading.Thread):
+    """One inventory read off the key loop, so a refresh never holds up a keypress. start() runs it.
+    `rows` holds the result, or `error` whatever stopped it."""
+
+    def __init__(self, manager):
+        super().__init__(daemon=True)
+        self.manager, self.rows, self.error = manager, None, None
+
+    def run(self):
+        try:
+            self.rows = inventory(self.manager)
+        except Exception as error:  # Expected or not, a failure reaches the picker as a warning; the thread never dies silently.
+            self.error = error
+
+
+class LiveRefresh:
+    """The rows the open picker shows, kept current. Every `interval` seconds a check reads folder and file times
+    only; when they changed, a full inventory read runs off the key loop. `warning` says why rows may be stale."""
+
+    def __init__(self, manager, interval):
+        self.manager, self.interval = manager, max(0, interval)
+        self.rows, self.seen, self.check_at, self.loading, self.again, self.warning = [], None, 0, None, False, ''
+
+    def load(self):
+        """Read the full inventory now, on the key loop: when the picker opens and after an action."""
+        self.settle()
+        # Taken first, so a change made while the inventory loads is seen at the next check.
+        self.seen = self.manager.fingerprint()
+        self.rows, self.warning = inventory(self.manager), ''
+        self.check_at = time.monotonic() + self.interval
+
+    def reload(self, seen=None):
+        """Start a full read off the key loop. Asked for while one runs, another runs once it finishes."""
+        if self.loading:
+            self.again = True
+            return
+        self.seen, self.loading = seen or self.manager.fingerprint(), Reload(self.manager)
+        self.loading.start()
+
+    def settle(self):
+        """Wait out a read in flight and drop it: it must not outlive the picker or race an action."""
+        if self.loading:
+            self.loading.join()
+        self.loading, self.again = None, False
+
+    def key(self):
+        """The next keypress, or None when a read came back and the picker must redraw."""
+        while True:
+            if self.loading and not self.loading.is_alive():
+                done, self.loading = self.loading, None
+                if self.again:
+                    self.again = False
+                    self.reload()
+                if done.error:
+                    # The old rows stay, and the picker says why, until a read succeeds.
+                    error = done.error if isinstance(done.error, (OSError, ValueError, RuntimeError)) \
+                        else f'{type(done.error).__name__}: {done.error}'
+                    self.warning = f'Live refresh failed; rows may be out of date. {error}'
+                else:
+                    self.rows, self.warning = done.rows, ''
+                return None
+            key = keypress(.05 if self.loading else max(0, self.check_at - time.monotonic()))
+            if key is not None:
+                return key
+            if not self.loading and time.monotonic() >= self.check_at:
+                now = self.manager.fingerprint()
+                if now != self.seen:
+                    self.reload(now)
+                self.check_at = time.monotonic() + self.interval
+
+
 def menu(manager):
     if not sys.stdin.isatty():
         raise ValueError('The picker requires a terminal. Use status --json for scripts.')
-    cursor, checked, message, history, refresh = 0, set(), '', False, True
+    cursor, focus, checked, message, history, refresh = 0, None, set(), '', False, True
+    live = LiveRefresh(manager, manager.options.refresh_every)
     while True:
         if refresh:
-            state = manager.state()
-            all_rows = manager.status(manager.saved(), state, manager.agents())
+            live.load()
             refresh = False
+        all_rows = live.rows
         rows = visible_rows(all_rows, history)
         for project in manager.projects():
             if not any(r['Project'] == project for r in rows):
@@ -960,7 +1088,9 @@ def menu(manager):
         if not rows:
             print('No project folders found.')
             return
-        cursor = min(cursor, len(rows) - 1)
+        # The cursor follows its session when a refresh moves rows, and holds its place when the session is gone.
+        cursor = next((i for i, r in enumerate(rows) if r['SessionId'] == focus), min(cursor, len(rows) - 1))
+        focus = rows[cursor]['SessionId']
         terminal = shutil.get_terminal_size()
         height = max(3, terminal.lines - 16)
         widths = column_widths(terminal.columns)
@@ -990,18 +1120,23 @@ def menu(manager):
         print(color(f'{hidden} more in history; H {"hides" if history else "shows"} it. 📡 registered for Remote Control; phone delivery unverified.', '90'))
         if message:
             print(color(clean(message), '93'))
-        key = keypress()
-        if key in ('q', '\x1b', '\x03'):
+        if live.warning:
+            print(color(clean(live.warning), '91'))
+        key = live.key()
+        if key is None:
+            continue
+        if key in QUIT_KEYS + ACTION_KEYS:
+            live.settle()
+        if key in QUIT_KEYS:
             return
-        if key in ('up', 'k'):
-            cursor = (cursor - 1) % len(rows)
-        elif key in ('down', 'j'):
-            cursor = (cursor + 1) % len(rows)
+        if key in ('up', 'k', 'down', 'j'):
+            cursor = (cursor + (-1 if key in ('up', 'k') else 1)) % len(rows)
+            focus = rows[cursor]['SessionId']
         elif key == 'h':
             history = not history
             checked.clear()
         elif key == 'r':
-            refresh = True
+            live.reload()
         elif key == ' ':
             if row.get('ViewOnly'):
                 message = f"{row.get('Task')} is live in {row.get('Source')}; it is view-only here."
@@ -1012,7 +1147,7 @@ def menu(manager):
         elif key == 'a':
             available = {r['SessionId'] for r in rows if selectable(r) and not r.get('NewProject')}
             checked = set() if available <= checked else available
-        elif key in ('\r', '\n', 'n', 'x'):
+        elif key in ACTION_KEYS:
             targets = [row] if key == 'n' else [r for r in rows if r['SessionId'] in checked]
             messages = []
             for target in targets:
