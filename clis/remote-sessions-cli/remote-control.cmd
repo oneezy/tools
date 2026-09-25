@@ -1,4 +1,11 @@
 @echo off
-rem Double-click: one picker for every remote session on this PC. Claude Code servers per folder (worktree mode),
-rem other bridged Claude sessions, and the Codex machine-wide daemon. Arrows move, space checks, enter starts, x stops.
-pwsh -NoProfile -ExecutionPolicy Bypass -File "%~dp0remote-control.ps1"
+where py >nul 2>nul
+if errorlevel 1 goto python
+py -3 "%~dp0remote_sessions.py" %*
+goto done
+:python
+python "%~dp0remote_sessions.py" %*
+:done
+set "launcherExit=%errorlevel%"
+if "%~1"=="" if not "%launcherExit%"=="0" pause
+exit /b %launcherExit%
