@@ -49,8 +49,17 @@ class PortableTests(unittest.TestCase):
         data.update(fields)
         self.native.write_text(json.dumps(data))
 
-    def new(self, name='fix-login'):
-        return self.run_manager('start', '--task', name, '--issue', '2')[0]
+    def new(self, name='fix-login', *extra):
+        return self.run_manager('start', '--task', name, '--issue', '2', *extra)[0]
+
+    def state_file(self):
+        return self.root / '.remote-sessions.json'
+
+    def reveal_slow_agents(self):
+        data = self.data()
+        for agent in data['Agents']:
+            agent.pop('HiddenPolls', None)
+        self.change(Mode='normal', Agents=data['Agents'])
 
     def test_readable_names_and_same_workspace_for_both_harnesses(self):
         first = self.run_manager('workspace', '--issue', '2', '--task', 'Fix login')[0]
@@ -116,9 +125,6 @@ class PortableTests(unittest.TestCase):
         self.assertEqual([r['SessionId'] for r in self.run_manager('stop')], ['5f1c0a52-4a57-4c1e-9a55-3c2d7c1b9e01'])
         self.assertEqual(self.data()['Stops'], 1)
 
-    def state_file(self):
-        return self.root / '.remote-sessions.json'
-
     def test_session_recorded_as_pending_is_stoppable(self):
         first = self.new()
         state = rs.read_json(self.state_file())
@@ -145,12 +151,33 @@ class PortableTests(unittest.TestCase):
         resumed = self.run_manager('resume', '--session-id', first['SessionId'], '--launch-wait', '0')[0]
         self.assertEqual(resumed['SessionId'], first['SessionId'])
         self.assertIn('not listed yet', resumed['Result'])
-        data = self.data()
-        for agent in data['Agents']:
-            agent.pop('HiddenPolls', None)
-        self.change(Mode='normal', Agents=data['Agents'])
+        self.reveal_slow_agents()
         self.run_manager('stop', '--session-id', first['SessionId'])
         self.assertEqual(self.data()['Stops'], 2)
+
+    def test_slow_new_task_launch_is_adopted_and_ends_up_stoppable(self):
+        # Claude prints no session ID and lists the session only after the wait has ended.
+        self.change(Mode='slow', SlowPolls=50, Quiet=True)
+        launched = self.new('fix-login', '--launch-wait', '0')
+        self.assertIn('not listed yet', launched['Result'])
+        self.reveal_slow_agents()
+        real = self.data()['Agents'][0]['sessionId']
+        rows = self.run_manager('status')
+        self.assertEqual([(r['SessionId'], r['Task'], r['Stoppable']) for r in rows], [(real, 'issue-2 fix-login', True)])
+        again = self.run_manager('start')[0]
+        self.assertEqual((again['SessionId'], again['Result']), (real, 'already running; not restarted'))
+        self.assertEqual(list(rs.read_json(self.state_file())['Sessions']), [real])
+        self.assertEqual(self.new()['SessionId'], real)
+        self.assertEqual(self.data()['Starts'], 1)
+        self.assertEqual([r['SessionId'] for r in self.run_manager('stop')], [real])
+        self.assertEqual(self.data()['Stops'], 1)
+
+    def test_slow_new_task_launch_reports_the_session_claude_printed(self):
+        self.change(Mode='slow', SlowPolls=50)
+        launched = self.new('fix-login', '--launch-wait', '0')
+        real = self.data()['Agents'][0]['sessionId']
+        self.assertEqual(launched['SessionId'], real)
+        self.assertEqual(list(rs.read_json(self.state_file())['Sessions']), [real])
 
     def test_copied_launch_is_adopted_and_stoppable(self):
         first = self.new()
@@ -175,6 +202,24 @@ class PortableTests(unittest.TestCase):
         again = self.run_manager('start', '--task', 'fix-login', '--issue', '2', '--branch', 'fix/2-renamed')[0]
         self.assertEqual(again['SessionId'], first['SessionId'])
         self.assertEqual(len(wt.worktrees(self.project)), 2)
+
+    def test_launch_claude_runs_in_another_folder_is_never_adopted(self):
+        self.change(Mode='wrong-directory')
+        launched = self.new('fix-login', '--launch-wait', '0')
+        elsewhere = self.data()['Agents'][0]['sessionId']
+        self.assertIn('not listed yet', launched['Result'])
+        self.assertNotEqual(launched['SessionId'], elsewhere)
+        self.assertNotIn(elsewhere, rs.read_json(self.state_file())['Sessions'])
+        self.assertFalse(any(r['Running'] for r in self.run_manager('status')))
+        self.assertEqual(self.run_manager('stop'), [])
+
+    def test_detached_folder_shows_no_stale_branch(self):
+        first = self.new()
+        self.run_manager('stop')
+        wt.git(first['WorkingDirectory'], 'checkout', '--detach')
+        self.assertIsNone(self.run_manager('status')[0]['Branch'])
+        self.run_manager('resume', '--session-id', first['SessionId'])
+        self.assertIsNone(rs.read_json(self.state_file())['Sessions'][first['SessionId']]['Branch'])
 
     def test_second_load_reparses_no_unchanged_transcript(self):
         first = self.new()
@@ -226,6 +271,34 @@ class PortableTests(unittest.TestCase):
         history.rename(history.with_suffix('.parked'))
         rows = self.run_manager('status')
         self.assertEqual([(r['SessionId'], r['Running'], r['Stoppable']) for r in rows], [(first['SessionId'], True, True)])
+        again = self.run_manager('resume', '--session-id', first['SessionId'])[0]
+        self.assertEqual(again['Result'], 'already running; not restarted')
+        self.assertEqual(self.data()['Starts'], 1)
+
+    def test_new_task_folder_deleted_after_a_failed_launch_is_never_recreated(self):
+        self.change(Mode='launch-failure')
+        with self.assertRaises(RuntimeError):
+            self.new()
+        folder = next(t['Path'] for t in wt.worktrees(self.project) if not wt.same(t['Path'], self.project))
+        wt.git(self.project, 'worktree', 'remove', folder)
+        trees = wt.worktrees(self.project)
+        self.change(Mode='normal')
+        with self.assertRaisesRegex(ValueError, 'folder'):
+            self.new()
+        self.assertNotIn(folder, [r.get('WorkingDirectory') for r in self.run_manager('status')])
+        self.assertFalse(Path(folder).exists())
+        self.assertEqual(trees, wt.worktrees(self.project))
+        self.assertEqual(self.data()['Starts'], 1)
+
+    def test_stop_names_an_unknown_session_or_one_outside_the_selected_projects(self):
+        with self.assertRaisesRegex(ValueError, 'not found'):
+            self.run_manager('stop', '--session-id', '5f1c0a52-4a57-4c1e-9a55-3c2d7c1b9e01')
+        (self.root / 'other').mkdir()
+        self.change(Agents=[dict(id='outside1', sessionId='5f1c0a52-4a57-4c1e-9a55-3c2d7c1b9e02', kind='background',
+                                 state='idle', cwd=str(self.root / 'other'), pid=4242, startedAt='elsewhere')])
+        with self.assertRaisesRegex(ValueError, 'outside the selected projects'):
+            self.run_manager('stop', '--session-id', '5f1c0a52-4a57-4c1e-9a55-3c2d7c1b9e02')
+        self.assertEqual(self.data()['Stops'], 0)
 
     def test_failed_launch_retries_existing_named_worktree(self):
         self.change(Mode='launch-failure')
@@ -236,13 +309,15 @@ class PortableTests(unittest.TestCase):
         self.new()
         self.assertEqual(trees, wt.worktrees(self.project))
 
-    def test_launch_that_reports_failure_is_adopted_once_and_stoppable(self):
+    def test_launch_that_reports_failure_is_adopted_not_relaunched_and_stoppable(self):
         self.change(Mode='launch-exit-failure')
         with self.assertRaises(RuntimeError):
             self.new()
         self.change(Mode='normal')
-        self.new()
+        real = self.data()['Agents'][0]['sessionId']
+        self.assertEqual(self.new()['SessionId'], real)
         self.assertEqual(self.data()['Starts'], 1)
+        self.assertEqual(list(rs.read_json(self.state_file())['Sessions']), [real])
         self.run_manager('stop')
         self.assertEqual(self.data()['Stops'], 1)
 
@@ -287,7 +362,7 @@ class PortableTests(unittest.TestCase):
         self.assertFalse((self.root / 'surprise').exists())
 
     def test_native_cli_process_entrypoint_and_legacy_aliases(self):
-        result = subprocess.run([sys.executable, str(ENGINE), 'start', '-Root', str(self.root), '-Only', 'brain', '-Task', 'fix login', '-ClaudeConfigDirectory', str(self.config), '-ClaudeExecutable', str(FAKE), '-Json'], capture_output=True, text=True)
+        result = subprocess.run([sys.executable, str(ENGINE), 'start', '-Root', str(self.root), '-Only', 'brain', '-Task', 'fix login', '-ClaudeConfigDirectory', str(self.config), '-ClaudeExecutable', str(FAKE), '-LaunchWait', '5', '-Json'], capture_output=True, text=True)
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(len(json.loads(result.stdout)), 1)
 

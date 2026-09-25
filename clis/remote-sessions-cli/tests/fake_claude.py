@@ -51,7 +51,8 @@ elif args[0] == '--bg':
         sys.exit(9)
     if copied:
         print('Note: Started a copy with updated options.')
-    print(f'Resumed {id}')
+    if not data.get('Quiet'):
+        print(f'Resumed {id}')
 elif args[0] == 'stop':
     matches = [a for a in data['Agents'] if a.get('id') == args[1]]
     assert len(matches) == 1

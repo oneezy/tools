@@ -117,20 +117,28 @@ Handle any authentication or workspace trust prompt there. The launcher does not
 change credentials, workspace trust, or permission settings.
 
 A resume continues the same session ID in its original folder. After a launch the
-engine waits up to `--launch-wait` seconds (default 90) for `claude agents` to list
-the session. It adopts the requested ID, or the copy Claude reports (a UUID in its
-output, or the one new background session in that folder). A slow launch is not an
-error: the result says it is not listed yet, and it is stoppable once it appears.
+engine waits up to `--launch-wait` (`-LaunchWait`) seconds (default 90) for
+`claude agents` to list the session. It adopts the requested ID, or the copy Claude
+reports (a UUID in its output, or the one new background session in that folder).
+A slow launch is not an error: the result says it is not listed yet, and it is
+stoppable once it appears. If Claude printed one session ID it lists nowhere else,
+the state follows that ID at once. Otherwise the next `start` or `status` adopts the
+one untracked session found in the new task's folder, so a slow new task never
+leaves a phantom row behind. A printed ID Claude lists in another folder is never
+adopted.
 
 One stop rule, with no ownership check: every background session in a selected
 project can be stopped, whoever started it. A session live in another app (an
 interactive session in VS Code, the desktop app or a terminal) is view-only; the
 engine never stops it and never kills a saved PID. `stop --only brain` stops every
-background session in brain; `--session-id` stops just that one.
+background session in brain; `--session-id` stops just that one. A `--session-id`
+that runs outside the selected projects, or that the selected projects have never
+seen, is an error rather than "already stopped".
 
 A session follows its folder. The branch shown is whatever the folder has checked
-out now, and mutating commands update the saved state to match. A session whose
-folder is gone is hidden; the engine never recreates the folder, never makes a
+out now (none on a detached HEAD, never a stale saved branch), and mutating commands
+update the saved state to match. State records a new task only once its folder
+exists, so a recorded session whose folder is gone was deleted: it is hidden; the engine never recreates the folder, never makes a
 `recovered-<id>` worktree and never starts a replacement conversation. Closing the
 picker leaves sessions running. No worktree deletion, branch deletion, reset,
 stash, push, or transcript rewrite is implemented.
