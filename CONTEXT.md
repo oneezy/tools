@@ -40,7 +40,7 @@ Where a ticket sits on the board: **Todo**, **Next Up**, **In Progress**, **Revi
 
 ## Session status
 
-The colored circle a **picker** row shows for one Claude session: working, idle (waiting for Justin), stopped (resumable), live in another **surface**, new (a placeholder for a first task), history, error (needs a decision), merged. The picker's Status column means this, never a ticket's **Status**.
+The colored circle a **picker** row shows for one Claude session: working, idle (waiting for Justin), stopped (resumable), live in another **surface**, new (a placeholder for a first task), history, error (needs a decision), and merged (reserved for the cleanup sweep, which sets it; nothing does yet). The picker's Status column means this, never a ticket's **Status**.
 
 ## Needs changes
 

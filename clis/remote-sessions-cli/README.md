@@ -24,7 +24,8 @@ started it: task worktrees and the repo root alike. It joins four sources:
   running a live session (`entrypoint`) and its Remote Control registration
   (`bridgeSessionId`), plus its permission mode and Claude version when recorded
 - transcripts for history, title, the surface a session started on (its first
-  `entrypoint`, or `teleportedFrom` for a session teleported from the web), the
+  `entrypoint`, with `sessionKind: bg` on that record for a `--bg` launch, or
+  `teleportedFrom` for a session teleported from the web), the
   Claude version and the permission mode
 - the desktop app's session store (`claude-code-sessions` under the app's data
   folder; `--desktop-sessions` overrides it), which marks Desktop sessions and
@@ -47,7 +48,7 @@ Remote shows 📡 only when the live process has a Remote Control registration.
 Source is what runs a session now: CLI, Background (`--bg`, which records entrypoint
 `cli`), VS Code ext, Desktop, RC server (spawned by `claude remote-control`, entrypoint
 `sdk-cli`). A stopped session shows where it started instead, including Web for a
-teleported session.
+teleported session and Background for a `--bg` launch.
 The detail pane under the table shows the folder, remote URL, session ID,
 permission mode, Claude version, where the session started and what runs it now.
 Columns are measured in terminal cells, so emoji and wide titles keep them aligned

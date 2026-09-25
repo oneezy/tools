@@ -47,7 +47,9 @@ elif args[0] == '--bg':
     data['Agents'] = [a for a in data['Agents'] if a['sessionId'] != id] + [agent]
     history = config / 'projects' / 'test-history'
     history.mkdir(parents=True, exist_ok=True)
-    (history / f'{id}.jsonl').write_text(json.dumps(dict(type='user', sessionId=id, cwd=agent['cwd'], timestamp=datetime.now(timezone.utc).isoformat())))
+    (history / f'{id}.jsonl').write_text(json.dumps(dict(type='user', sessionId=id, cwd=agent['cwd'], timestamp=datetime.now(timezone.utc).isoformat(),
+                                                              # A --bg transcript records these, as Claude 2.1.282 does.
+                                                              entrypoint='cli', sessionKind='bg')))
     save()
     if data.get('Mode') == 'launch-exit-failure':
         sys.exit(9)

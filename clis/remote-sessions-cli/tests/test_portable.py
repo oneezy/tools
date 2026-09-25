@@ -21,7 +21,7 @@ FAKE = Path(__file__).with_name('fake_claude.py')
 
 
 # Cells each wide string takes in Windows Terminal, from what it draws: a joined emoji sequence is one glyph.
-WIDE = {'👨‍👩‍👧': 2, '👍🏽': 2, '漢': 2, '字': 2, '🚀': 2, '📡': 2,
+WIDE = {'👨‍👩‍👧': 2, '👍🏽': 2, '漢': 2, '字': 2, '🚀': 2, '📡': 2, '⚠️': 2, '❤️': 2,
         '🟢': 2, '🟡': 2, '🔵': 2, '🟣': 2, '⚪': 2, '⚫': 2, '🔴': 2, '✅': 2}
 
 
@@ -209,7 +209,7 @@ class PortableTests(unittest.TestCase):
     def test_picker_columns_stay_aligned_with_emoji(self):
         tree = Path(self.run_manager('workspace', '--task', 'aligned')[0]['WorkingDirectory'])
         working, stopped, vscode = (f'5f1c0a52-4a57-4c1e-9a55-3c2d7c1b9f{n:02d}' for n in range(1, 4))
-        self.transcript(working, tree, dict(), dict(type='ai-title', aiTitle='Wide 漢字 title 🚀 👨‍👩‍👧 👍🏽 end'))
+        self.transcript(working, tree, dict(), dict(type='ai-title', aiTitle='Wide ⚠️ 漢字 ❤️ title 🚀 👨‍👩‍👧 👍🏽 end'))
         self.live(working, tree, kind='background', state='working', bridge='session_aligned')
         self.transcript(stopped, self.project)
         self.live(vscode, self.project, entrypoint='claude-vscode')
@@ -433,6 +433,45 @@ class PortableTests(unittest.TestCase):
         self.live(id, self.project, kind='background', entrypoint='cli')
         resumed = self.rows_by_id()[id]
         self.assertEqual((resumed['Source'], resumed['Origin']), ('Background', 'Desktop'))
+
+    def test_stopped_session_says_where_it_started_even_when_launched_with_bg(self):
+        task = self.new()
+        self.run_manager('stop')
+        id = lambda n: f'5f1c0a52-4a57-4c1e-9a55-3c2d7c1b9b{n:02d}'
+        # Claude records entrypoint `cli` for a --bg launch too; its first record also says the session kind.
+        self.transcript(id(2), self.project, dict(entrypoint='cli', sessionKind='bg'), timestamp='2026-02-03T00:00:00Z')
+        self.transcript(id(3), self.project, dict(entrypoint='cli'), timestamp='2026-02-02T00:00:00Z')
+        # A remote-control session later resumed in the background still started as RC server.
+        self.transcript(id(4), self.project, dict(entrypoint='sdk-cli'), dict(type='user', entrypoint='cli', sessionKind='bg'),
+                        timestamp='2026-02-01T00:00:00Z')
+        rows = self.rows_by_id()
+        self.assertEqual({key: (rows[key]['Origin'], rows[key]['Source']) for key in (task['SessionId'], id(2), id(3), id(4))}, {
+            task['SessionId']: ('Background', 'Background'), id(2): ('Background', 'Background'),
+            id(3): ('CLI', 'CLI'), id(4): ('RC server', 'RC server')})
+        screen = self.picker(['q'])[-1]
+        self.assertIn('Started: Background', screen)
+
+    def test_archived_desktop_session_the_picker_tracks_stays_hidden_and_never_resumes(self):
+        task = self.new()
+        self.run_manager('stop')
+        self.desktop_session(task['SessionId'], task['WorkingDirectory'], archived=True)
+        self.assertNotIn(task['SessionId'], self.rows_by_id())
+        with self.assertRaisesRegex(ValueError, 'archived'):
+            self.run_manager('resume', '--session-id', task['SessionId'])
+        with self.assertRaisesRegex(ValueError, 'no available task'):
+            self.run_manager('start')
+        self.assertEqual(self.data()['Starts'], 1)
+
+    def test_every_status_row_carries_the_same_fields(self):
+        saved, bare = '5f1c0a52-4a57-4c1e-9a55-3c2d7c1b9b21', '5f1c0a52-4a57-4c1e-9a55-3c2d7c1b9b22'
+        tracked = self.new()
+        history = next((self.config / 'projects').glob(f"*/{tracked['SessionId']}.jsonl"))
+        history.rename(history.with_suffix('.parked'))  # Tracked by the picker, transcript not saved yet.
+        self.transcript(saved, self.project)
+        self.live(bare, self.project, kind='background', state='working')  # Live, transcript not saved yet.
+        rows = self.rows_by_id()
+        self.assertEqual({key: sorted(rows[key]) for key in (tracked['SessionId'], bare)},
+                         {key: sorted(rows[saved]) for key in (tracked['SessionId'], bare)})
 
     def test_each_state_maps_to_its_circle_and_remote_shows_only_a_registered_bridge(self):
         tree = Path(self.run_manager('workspace', '--task', 'circles')[0]['WorkingDirectory'])

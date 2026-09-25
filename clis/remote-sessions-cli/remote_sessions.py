@@ -119,7 +119,7 @@ def transcript_meta(file):
     if cached and cached[0] == stamp:
         return cached[1]
     folders, last, title, auto_title, conflict = [], None, None, None, False
-    entrypoint, teleported, version, permission = None, False, None, None
+    entrypoint, kind, teleported, version, permission = None, None, False, None, None
     updated = datetime.fromtimestamp(stat.st_mtime, timezone.utc).isoformat()
     # Stream metadata; never expose prompts or tool results as session labels.
     with file.open(encoding='utf-8-sig', errors='replace') as stream:
@@ -145,13 +145,15 @@ def transcript_meta(file):
                 auto_title = record['agentName']
             if record.get('type') == 'user' and record.get('timestamp'):
                 updated = record['timestamp']
-            # The first surface a session records is where it started; version and mode follow the latest record.
-            entrypoint = entrypoint or record.get('entrypoint')
+            # The first surface a session records is where it started, and that record says whether it was a
+            # --bg launch (whose entrypoint is `cli` too); version and mode follow the latest record.
+            if not entrypoint and record.get('entrypoint'):
+                entrypoint, kind = record['entrypoint'], record.get('sessionKind')
             teleported = teleported or bool(record.get('teleportedFrom'))
             version = record.get('version') or version
             permission = record.get('permissionMode') or permission
     meta = dict(Folders=folders, Last=last, Title=title or auto_title, Updated=updated, Conflict=conflict,
-                Entrypoint=entrypoint, Teleported=teleported, Version=version, PermissionMode=permission)
+                Entrypoint=entrypoint, Kind=kind, Teleported=teleported, Version=version, PermissionMode=permission)
     TRANSCRIPTS[key] = (stamp, meta)
     return meta
 
@@ -159,6 +161,11 @@ def transcript_meta(file):
 def active(agent):
     # A background agent that is `done` or `blocked` has finished its turn; its process stays up, waiting for a reply.
     return bool(agent and agent.get('pid') and state_of(agent) not in ('stopped', 'completed', 'failed', 'exited'))
+
+
+def live_elsewhere(agent):
+    """A session live in another app (a terminal, VS Code, the desktop app) is view-only: never resumed or stopped here."""
+    return active(agent) and agent['kind'] != 'background'
 
 
 def state_of(agent):
@@ -177,9 +184,9 @@ def surface_now(agent, process):
     if not active(agent):
         return None
     entrypoint = process.get('entrypoint')
-    if agent['kind'] == 'background':
-        return 'RC server' if entrypoint == 'sdk-cli' else 'Background'
-    return SURFACES.get(entrypoint, entrypoint or 'CLI')
+    if live_elsewhere(agent):
+        return SURFACES.get(entrypoint, entrypoint or 'CLI')
+    return 'RC server' if entrypoint == 'sdk-cli' else 'Background'
 
 
 def failed(agent):
@@ -192,7 +199,7 @@ def status_of(row, agent, managed):
     """The one status a row shows. Live in another app wins; errors and conflicting history need a decision;
     a stopped session is resumable only when it is the newest conversation in its folder or one the picker
     tracks; older conversations, and any that cannot resume, are history."""
-    if active(agent) and agent['kind'] != 'background':
+    if live_elsewhere(agent):
         return 'live'
     if failed(agent) or row.get('Conflict'):
         return 'error'
@@ -202,12 +209,15 @@ def status_of(row, agent, managed):
 
 
 def started_on(row, managed):
-    """Where a session started: Web when teleported, Desktop when the desktop app lists it, else the first surface
-    its transcript records. Without one, a session the picker tracks started in the background, any other on the CLI."""
+    """Where a session started: Web when teleported, Desktop when the desktop app lists it, Background when its first
+    surface record is a --bg launch, else that surface. Without one, a session the picker tracks started in the
+    background, any other on the CLI."""
     if row.get('Teleported'):
         return 'Web'
     if row.get('InDesktopApp'):
         return 'Desktop'
+    if row.get('StartKind') == 'bg':
+        return 'Background'
     entrypoint = row.get('StartEntrypoint')
     return SURFACES.get(entrypoint, entrypoint) if entrypoint else 'Background' if managed else 'CLI'
 
@@ -227,11 +237,11 @@ def desktop_entry(file):
         data = read_json(file, {})
     except ValueError:
         data = None  # Unparsable until it changes; not re-read on every refresh.
-    id = data.get('cliSessionId') if isinstance(data, dict) else None
+    session = data.get('cliSessionId') if isinstance(data, dict) else None
     entry = None
-    if isinstance(id, str) and UUID.fullmatch(id):
-        entry = id.lower(), dict(Archived=bool(data.get('isArchived') or data.get('archived')), Title=data.get('title'),
-                                 PermissionMode=data.get('permissionMode'))
+    if isinstance(session, str) and UUID.fullmatch(session):
+        entry = session.lower(), dict(Archived=bool(data.get('isArchived') or data.get('archived')), Title=data.get('title'),
+                                      PermissionMode=data.get('permissionMode'))
     DESKTOP[key] = (stamp, entry)
     return entry
 
@@ -249,12 +259,25 @@ def default_desktop_stores():
     return [app / 'claude-code-sessions' for app in apps]
 
 
+def session_row(id, project, folder, branch, **fields):
+    """One inventory row with every field a saved conversation has. The defaults describe a session whose transcript
+    Claude has not saved: no title, time or history, and nothing to resume from yet."""
+    row = dict(SessionId=id, Project=project, WorkingDirectory=folder, Branch=branch, Updated=None, Worktree=False,
+               Available=False, UnavailableReason='transcript missing', Conflict=False, Newest=False, NewSession=False,
+               Title=None, StartEntrypoint=None, StartKind=None, Teleported=False, InDesktopApp=False,
+               ClaudeVersion=None, PermissionMode=None)
+    row.update(fields)
+    return row
+
+
 class Manager:
     def __init__(self, options):
         self.options = options
         self.root = Path(options.root).expanduser().absolute()
         self.config = Path(options.config).expanduser().absolute()
         self.state_path = self.root / '.remote-sessions.json'
+        # Session IDs the desktop app has archived, as of the last saved() scan; never listed or resumed.
+        self.archived = set()
 
     def projects(self):
         projects = {p.name: p for p in sorted(self.root.iterdir()) if p.is_dir() and not p.name.startswith(('.', '_'))}
@@ -337,7 +360,7 @@ class Manager:
         projects = self.projects()
         desktop = self.desktop_store()
         # Transcripts repeat a few folders thousands of times; resolving each is slow on Windows.
-        roots, branches, scanned = {}, {}, set()
+        roots, branches, scanned, archived = {}, {}, set(), set()
         for file in (self.config / 'projects').glob('*/*.jsonl'):
             try:
                 if str(uuid.UUID(file.stem)) != file.stem.lower():
@@ -350,6 +373,8 @@ class Manager:
                 if candidate not in roots:
                     roots[candidate] = self.folder_root(candidate, projects)
             app = desktop.get(file.stem.lower(), {})
+            if app.get('Archived'):
+                archived.add(file.stem)
             # A session archived in the desktop app stays out of the picker, like a deleted one.
             if not meta['Last'] or app.get('Archived'):
                 continue
@@ -368,15 +393,17 @@ class Manager:
                           'history saved; worktree checkout missing' if is_tree and not (Path(cwd) / '.git').exists() else None)
                 if cwd not in branches:
                     branches[cwd] = checked_out_branch(cwd)
-                row = dict(SessionId=file.stem, Project=project, WorkingDirectory=cwd, Updated=updated, Branch=branches[cwd],
-                           Worktree=is_tree, Available=not reason, UnavailableReason=reason, Conflict=conflict, Title=title,
-                           StartEntrypoint=meta['Entrypoint'], Teleported=meta['Teleported'], InDesktopApp=bool(app),
-                           ClaudeVersion=meta['Version'], PermissionMode=meta['PermissionMode'] or app.get('PermissionMode'))
+                row = session_row(file.stem, project, cwd, branches[cwd], Updated=updated, Worktree=is_tree,
+                                  Available=not reason, UnavailableReason=reason, Conflict=conflict, Title=title,
+                                  StartEntrypoint=meta['Entrypoint'], StartKind=meta['Kind'], Teleported=meta['Teleported'],
+                                  InDesktopApp=bool(app), ClaudeVersion=meta['Version'],
+                                  PermissionMode=meta['PermissionMode'] or app.get('PermissionMode'))
                 if file.stem in catalog and not wt.same(catalog[file.stem]['WorkingDirectory'], cwd):
                     raise ValueError(f'Conflicting saved locations for session {file.stem}.')
                 catalog[file.stem] = row
         for key in TRANSCRIPTS.keys() - scanned:
             del TRANSCRIPTS[key]
+        self.archived = archived
         rows = sorted(catalog.values(), key=lambda s: s['Updated'], reverse=True)
         # The newest conversation in each folder is the one it resumes; older ones are history.
         seen = set()
@@ -388,15 +415,19 @@ class Manager:
 
     def managed(self, id, entry, saved):
         found = next((dict(s) for s in saved if s['SessionId'] == id), None)
-        # A session whose folder is gone is gone too. State records a task only once its folder exists.
-        if not found and not folder_exists(entry.get('WorkingDirectory')):
+        # A session whose folder is gone, or that the desktop app archived, is gone too.
+        # State records a task only once its folder exists.
+        if not found and (id in self.archived or not folder_exists(entry.get('WorkingDirectory'))):
             return None
-        row = found or dict(SessionId=id, Project=entry['Project'], WorkingDirectory=entry['WorkingDirectory'],
-                            Available=False, NewSession=entry.get('NewSession', False),
-                            Branch=checked_out_branch(entry['WorkingDirectory']),
-                            UnavailableReason='transcript missing')
+        folder, project = entry['WorkingDirectory'], entry['Project']
+        row = found or session_row(id, project, folder, checked_out_branch(folder), Worktree=self.in_worktrees(folder, project),
+                                   NewSession=entry.get('NewSession', False))
         row['Task'] = entry.get('Task')
         return row
+
+    def in_worktrees(self, folder, project):
+        """Whether a folder is one of the project's task worktrees, not the project root."""
+        return wt.inside(folder, self.root / project / '.claude' / 'worktrees')
 
     def follow_folders(self, state):
         """A session follows its folder: record the branch each folder has checked out now (none when detached)."""
@@ -465,7 +496,8 @@ class Manager:
                 raise ValueError('The saved session belongs to a different project.')
             row = self.managed(id, sessions[id], saved) if id in sessions else next((s for s in saved if s['SessionId'] == id), None)
             if not row:
-                raise ValueError(f'Saved session {id} was not found or its folder is gone. Nothing is recreated.')
+                raise ValueError(f'Saved session {id} was not found, was archived in the desktop app, or its folder is gone. '
+                                 'Nothing is recreated.')
             return [row]
         if o.action == 'resume':
             raise ValueError('Resume requires --session-id with the full saved conversation UUID.')
@@ -548,8 +580,8 @@ class Manager:
             folder = self.folder_root(a['cwd'], projects) if (active(a) or failed(a)) and a['sessionId'] not in ids else None
             project = folder and project_of(folder, projects)
             if project:
-                rows.append(dict(SessionId=a['sessionId'], Project=project, WorkingDirectory=folder,
-                                 Branch=checked_out_branch(folder), Available=False, UnavailableReason='transcript missing'))
+                rows.append(session_row(a['sessionId'], project, folder, checked_out_branch(folder),
+                                        Worktree=self.in_worktrees(folder, project)))
                 ids.add(a['sessionId'])
         result = []
         for s in rows:
@@ -565,8 +597,8 @@ class Manager:
             title = (task if task not in (None, 'remote') else None) or (agent or {}).get('name') or s.get('Title') or task or Path(s.get('WorkingDirectory') or s['Project']).name
             origin = started_on(s, managed=id in sessions)
             status = status_of(s, agent, managed=id in sessions)
-            result.append(dict(s, Task=title, Stoppable=running and agent['kind'] == 'background', Running=running,
-                               ViewOnly=running and agent['kind'] != 'background',
+            result.append(dict(s, Task=title, Stoppable=running and not live_elsewhere(agent), Running=running,
+                               ViewOnly=live_elsewhere(agent),
                                State=agent.get('state') if agent else s.get('UnavailableReason') or 'stopped',
                                Status=status, Circle=CIRCLES[status], Origin=origin, Source=surface_now(agent, process) or origin,
                                Remote='📡' if bridge else '', PermissionMode=process.get('permissionMode') or s.get('PermissionMode'),
@@ -604,7 +636,7 @@ class Manager:
             id = s['SessionId']
             workspace = launch.get('Workspace')
             if launch['Mode'] == 'running':
-                if launch['Agent']['kind'] != 'background' and self.options.session_id:
+                if live_elsewhere(launch['Agent']) and self.options.session_id:
                     # A session live in another app is view-only: resuming it would collide with that window.
                     raise ValueError(f"Session {id} is live in another app; it is view-only here." if launch['SessionId'] == id else
                                      f"Another app has session {launch['SessionId']} live in {launch['WorkingDirectory']}; it is view-only here.")
@@ -663,7 +695,7 @@ class Manager:
         else:
             chosen = [a for a in agents if active(a) and a['kind'] == 'background' and project_of(a['cwd'], projects)]
         for a in chosen:
-            if a['kind'] != 'background':
+            if live_elsewhere(a):
                 raise ValueError(f"Session {a['sessionId']} is live in another app; it is view-only here.")
         return chosen
 
@@ -833,7 +865,7 @@ def visible_rows(rows, history=False):
             return False
         if history or r.get('Running'):
             return True
-        return r.get('Status') != 'history' and bool(r.get('Available') or r.get('Status') in ('error', 'merged'))
+        return r.get('Status') != 'history' and bool(r.get('Available') or r.get('Status') == 'error')
     return sorted([r for r in rows if shown(r)], key=lambda r: (not r.get('Running', False), r['Project'], r.get('Task') or ''))
 
 
@@ -856,9 +888,14 @@ def glyphs(text):
         yield glyph
 
 
+EMOJI_STYLE = chr(0xfe0f)  # Asks for emoji presentation: Windows Terminal then draws a text symbol two cells wide.
+
+
 def glyph_cells(glyph):
     first = glyph[0]
-    return 0 if unicodedata.combining(first) or first in ZERO_WIDTH else 2 if unicodedata.east_asian_width(first) in 'WF' else 1
+    if unicodedata.combining(first) or first in ZERO_WIDTH:
+        return 0
+    return 2 if EMOJI_STYLE in glyph or unicodedata.east_asian_width(first) in 'WF' else 1
 
 
 def cells(text):
