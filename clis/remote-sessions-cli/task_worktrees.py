@@ -1,11 +1,11 @@
-"""Persistent, named Git worktrees shared by Claude and Codex. No cleanup operations."""
-from contextlib import contextmanager
+"""Persistent, named Git worktrees shared by Claude and Codex: their names, planning and creation. No cleanup operations."""
 import os
 import re
 import subprocess
-import time
 from pathlib import Path
 from typing import NamedTuple
+
+from locks import file_lock
 
 
 def key(path):
@@ -32,39 +32,6 @@ def git(directory, *args, check=True):
     return result
 
 
-@contextmanager
-def file_lock(path, timeout=30, busy='Another launcher action is still running.'):
-    """Cross-process exclusive lock on a file. The file stays in place so another process cannot lock a different inode."""
-    with open(path, 'a+b') as stream:
-        stream.seek(0, 2)
-        if not stream.tell():
-            stream.write(b'\0')
-            stream.flush()
-        deadline = time.monotonic() + timeout
-        while True:
-            try:
-                stream.seek(0)
-                if os.name == 'nt':
-                    import msvcrt
-                    msvcrt.locking(stream.fileno(), msvcrt.LK_NBLCK, 1)
-                else:
-                    import fcntl
-                    fcntl.flock(stream, fcntl.LOCK_EX | fcntl.LOCK_NB)
-                break
-            except OSError:
-                if time.monotonic() >= deadline:
-                    raise RuntimeError(busy)
-                time.sleep(.1)
-        try:
-            yield
-        finally:
-            stream.seek(0)
-            if os.name == 'nt':
-                msvcrt.locking(stream.fileno(), msvcrt.LK_UNLCK, 1)
-            else:
-                fcntl.flock(stream, fcntl.LOCK_UN)
-
-
 def slug(text):
     value = re.sub(r'[^a-z0-9]+', '-', text.lower()).strip('-')[:90].rstrip('-')
     if not value:
@@ -81,8 +48,14 @@ class TaskNames(NamedTuple):
     branch: str
 
 
+class ParsedTask(NamedTuple):
+    branch_type: str
+    number: int | None
+    description: str | None
+
+
 def parse_task(text):
-    """Split a name such as fix-31-picker-speed or fix/31-picker-speed into (branch type, issue, description),
+    """Split a name such as fix-31-picker-speed or fix/31-picker-speed into its branch type, issue and description,
     either of the last two possibly None. None when the name does not start with a known branch type."""
     try:
         text = slug(text)
@@ -91,7 +64,7 @@ def parse_task(text):
     match = re.fullmatch(rf"({'|'.join(BRANCH_TYPES)})(?:-(\d+)(?=-|$))?(?:-(.+))?", text)
     if not match or not (match.group(2) or match.group(3)):
         return None
-    return match.group(1), int(match.group(2)) if match.group(2) else None, match.group(3)
+    return ParsedTask(match.group(1), int(match.group(2)) if match.group(2) else None, match.group(3))
 
 
 def task_names(repo, branch_type, number=None, description=None):
@@ -103,21 +76,6 @@ def task_names(repo, branch_type, number=None, description=None):
         raise ValueError('Supply an issue number or a description for a new task.')
     # Keep the repository, branch type and ticket number at the beginning, even when truncating.
     return TaskNames(f'{slug(repo)}-{branch_type}-{suffix}'[:120].rstrip('-'), f'{branch_type}/{suffix}'[:120].rstrip('-'))
-
-
-def requested_names(repo, task=None, issue=None, pr=None, branch_type=None):
-    """Names for a task requested by --task/--issue/--pr/--type or picker N. The branch type comes from --type,
-    else from a task that starts with one (fix-login is a fix), else feature. A PR number takes the issue's place."""
-    number = issue or pr
-    parsed = parse_task(task) if task else None
-    if parsed and branch_type in (None, parsed[0]):
-        branch_type, task_number, description = parsed
-        if number and task_number:
-            description = '-'.join(str(p) for p in (task_number, description) if p)
-        number = number or task_number
-    else:
-        description = task
-    return task_names(repo, branch_type or 'feature', number, description)
 
 
 def default_branch(repo, folder):
@@ -159,6 +117,7 @@ def plan(project, name, branch=None, preferred=None):
     if branch and git(project, 'check-ref-format', '--branch', branch, check=False).returncode:
         raise ValueError(f'Invalid task branch: {branch}')
     requested = branch
+    request = dict(Name=name, Branch=requested, Preferred=str(preferred) if preferred else None)
     branch = branch or default_branch(project.name, name)
     registered = [t for t in trees if t['Branch'] == branch]
     usable = [t for t in registered if not t['Prunable'] and (Path(t['Path']) / '.git').exists()]
@@ -166,7 +125,7 @@ def plan(project, name, branch=None, preferred=None):
         if same(usable[0]['Path'], project):
             raise ValueError('Task branch is checked out in the main project folder. Switch that folder to dev first.')
         return dict(ProjectDirectory=str(project), WorkingDirectory=usable[0]['Path'], Branch=branch,
-                    Operation='reuse', Base=None)
+                    Operation='reuse', Base=None, Request=request)
     branch_exists = exists(project, f'refs/heads/{branch}')
     base_dir = project / '.claude' / 'worktrees'
     directory = base_dir / name
@@ -178,7 +137,7 @@ def plan(project, name, branch=None, preferred=None):
         if preferred and not Path(preferred).exists() and inside(preferred, base_dir):
             directory = Path(preferred)
         return dict(ProjectDirectory=str(project), WorkingDirectory=str(directory), Branch=branch,
-                    Operation='restore', Base=branch)
+                    Operation='restore', Base=branch, Request=request)
     if branch_exists:
         number = 2
         while exists(project, f'refs/heads/{branch}-{number}'):
@@ -186,7 +145,7 @@ def plan(project, name, branch=None, preferred=None):
         branch = f'{branch}-{number}'
     remote = requested and exists(project, f'refs/remotes/origin/{requested}') and not branch_exists
     return dict(ProjectDirectory=str(project), WorkingDirectory=str(directory), Branch=branch,
-                Operation='create', Base=f'origin/{requested}' if remote else dev_base(project), RequestedBranch=requested)
+                Operation='create', Base=f'origin/{requested}' if remote else dev_base(project), Request=request)
 
 
 def common_dir(directory):
@@ -201,40 +160,10 @@ def main_checkout(directory):
     return Path(git(directory, 'rev-parse', '--show-toplevel').stdout.strip())
 
 
-def next_new(project):
-    """Folder and branch for a worktree whose task is not known yet: <repo>-new-<n> on new/<n>,
-    with n one above the highest number any folder or branch in this repo uses."""
-    repo = slug(project.name)
-    folder = re.compile(rf'{re.escape(repo)}-new-(\d+)')
-    used = [int(m.group(1)) for p in (project / '.claude' / 'worktrees').glob(f'{repo}-new-*') if (m := folder.fullmatch(p.name))]
-    refs = git(project, 'for-each-ref', '--format=%(refname:short)', 'refs/heads/new/').stdout.split()
-    used += [int(r.removeprefix('new/')) for r in refs if re.fullmatch(r'new/\d+', r)]
-    n = max(used, default=0) + 1
-    return TaskNames(f'{repo}-new-{n}', f'new/{n}')
-
-
-def hook_worktree(cwd, name):
-    """What the WorktreeCreate hook does: create or reuse the worktree for a request, return its path.
-    Nothing is fetched; a new branch starts from local dev whatever base Claude proposed."""
-    project = main_checkout(cwd)
-    name = (name or '').strip()
-    current = checked_out_in(project)
-    if name in ('dev', 'main'):
-        if current == name:
-            return str(project)
-        raise ValueError(f"Sessions on {name} belong in the main checkout, and it has {current or 'no branch'} checked out.")
-    parsed = parse_task(name)
-    # Parallel subagents each run this hook: numbering, planning and creating happen under one per-repo lock,
-    # so two unnamed requests never pick the same new/<n>.
-    with file_lock(common_dir(project) / 'worktree-create.lock', 120, 'Another worktree is still being created in this repo.'):
-        names = task_names(project.name, *parsed) if parsed else next_new(project)
-        if current == names.branch:
-            return str(project)
-        workspace = plan(project, names.folder, names.branch)
-        if not parsed and workspace['Operation'] != 'create':
-            raise ValueError(f'{names.branch} is already in use; an unnamed worktree is never shared.')
-        create(workspace)
-    return str(Path(os.path.abspath(workspace['WorkingDirectory'])))
+def creation_lock(project):
+    """The per-repo lock every worktree creation takes: the WorktreeCreate hook, the picker and the CLI.
+    It lives in the repo's Git directory, so every checkout of the repo shares it."""
+    return file_lock(common_dir(project) / 'worktree-create.lock', 120, 'Another worktree is still being created in this repo.')
 
 
 def checked_out_in(directory):
@@ -250,17 +179,25 @@ def create(workspace):
     if workspace['Operation'] == 'restore':
         git(project, 'worktree', 'add', directory, branch)
         return
-    if workspace.get('RequestedBranch') == branch and exists(project, f'refs/remotes/origin/{branch}'):
+    if workspace['Request']['Branch'] == branch and exists(project, f'refs/remotes/origin/{branch}'):
         git(project, 'worktree', 'add', '-b', branch, directory, f'origin/{branch}')
         return
     git(project, 'worktree', 'add', '-b', branch, directory, dev_base(project))
 
 
 def create_after_fetch(workspace):
-    """The picker's creation: fetch origin and bring local dev up to date first, then create."""
-    if workspace['Operation'] == 'create':
-        refresh_dev(workspace['ProjectDirectory'])
-    create(workspace)
+    """The picker's and the CLI's creation, returning the workspace it made. Under the repo's creation lock it fetches
+    origin and brings local dev up to date, then plans again, so a worktree another process (the WorktreeCreate hook)
+    made for the branch since the first plan is reused instead of failing."""
+    if workspace['Operation'] == 'reuse':
+        return workspace
+    project, request = workspace['ProjectDirectory'], workspace['Request']
+    with creation_lock(project):
+        if workspace['Operation'] == 'create':
+            refresh_dev(project)
+        workspace = plan(project, request['Name'], request['Branch'], request['Preferred'])
+        create(workspace)
+    return workspace
 
 
 def refresh_dev(project):

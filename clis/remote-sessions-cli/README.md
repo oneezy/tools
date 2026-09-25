@@ -117,12 +117,15 @@ These produce folder `brain-fix-2-login` on branch `fix/2-login`, and
 folder `<repo>-<type>-<issue>-<desc>` on branch `<type>/<issue>-<desc>`; the issue
 or the description may be left out. The **branch type** (see `CONTEXT.md`; not a
 ticket's Type) is one of feature, fix, research, prototype, wayfinder, chore, docs.
-Without `--type`, a task that starts with a branch type supplies it
-(`--task fix-login` is a fix with description `login`); otherwise it is `feature`.
-`--type` alone is refused: give it `--task`, `--issue` or `--pr`. `--pr` takes the
-issue number's place. No `codex/` prefix is used. A task is identified by its branch,
-so `--type docs --issue 31 --task speed` never resumes the `fix/31-speed` task, and
-`--task fix-31-speed` resumes the task that `--type fix --issue 31 --task speed` made.
+Without `--type` the branch type is `feature`: `--task` is only a description and
+never supplies a type, so `--task fix-login` is `feature/fix-login`, as picker N with
+a blank type gives. `--type` alone is refused: give it `--task`, `--issue` or `--pr`.
+`--pr` takes the issue number's place. No `codex/` prefix is used. `--branch` keeps
+its own spelling; given alone it also names the folder, so `--branch codex/foo` is
+folder `brain-codex-foo`. A task is identified by its branch, the one it has or the
+one it asked for when a collision gave it a suffix. So `--type docs --issue 31 --task
+speed` never resumes the `fix/31-speed` task, and `--branch fix/31-speed` resumes the
+task that `--type fix --issue 31 --task speed` made.
 A numeric suffix is added only when a collision or stale registration requires it.
 Ticket titles are supplied with `--task`; the launcher does not guess titles or
 claim GitHub issues.
@@ -158,9 +161,11 @@ go to stderr, and any failure exits non-zero, which aborts the creation.
 - A name that starts with a branch type is a named task: `fix-31-picker-speed` (or
   `fix/31-picker-speed`) becomes folder `<repo>-fix-31-picker-speed` on branch
   `fix/31-picker-speed`, the same names the picker's N gives.
-- Any other name, such as Claude's generated `bold-oak-a3f2`, becomes
-  `<repo>-new-<n>` on branch `new/<n>`, n one above the highest number any
-  `<repo>-new-*` folder or `new/*` branch in that repo uses. Rename the branch to
+- Any other name, such as Claude's generated `bold-oak-a3f2` or a typed
+  `picker-speed`, becomes `<repo>-new-<n>` on branch `new/<n>`, n one above the
+  highest number any `<repo>-new-*` folder or `new/*` branch in that repo uses, and
+  the hook says so on stderr. The hook cannot tell a typed name from a generated one,
+  so start a typed name with its branch type to keep it. Rename the branch to
   `<type>/<issue>-<desc>` once the task is known; the folder keeps its name.
 - Nothing is fetched and the proposed base is ignored. New branches are cut from
   local `dev`; in a repo with no local `dev`, from `origin/dev`, else from HEAD. A
@@ -168,10 +173,13 @@ go to stderr, and any failure exits non-zero, which aborts the creation.
   be stale. The picker, by contrast, fetches and fast-forwards `dev` first.
 - Requests in one repo are serialised by a lock in its Git directory, so parallel
   subagents with `isolation: "worktree"` each get their own `new/<n>`. An unnamed
-  request never shares an existing worktree; it fails instead.
+  request never shares an existing worktree; it fails instead. The picker and the
+  CLI take the same lock and plan again under it, so when the hook made a worktree
+  for the same branch in the meantime, they reuse it.
 - One worktree per branch: a request for a branch that is already checked out
   prints that worktree's path, and a branch that exists but is not checked out gets
-  a worktree at its own commit. `dev` resolves to the main checkout; `main` is refused.
+  a worktree at its own commit. `dev` resolves to the main checkout when it has `dev`
+  checked out and is refused otherwise; `main` is always refused.
 - Folders go under the main checkout's `.claude/worktrees`, also when the request
   comes from inside a linked worktree. `.worktreeinclude` is not processed.
 
@@ -273,8 +281,9 @@ read-only previews, worktree names, native path rules, cross-process locks,
 argument quoting, and A/Enter/N picker behavior. `tests/test_worktree_hook.py` feeds
 the hook Claude's input JSON in a temporary repo with a `dev` branch, directly and
 through Git Bash and PowerShell, and checks names, the cut from local `dev` without
-a fetch, the printed path as UTF-8, reuse, and parallel requests. `tests/test-linux.sh` copies the
-source to a Linux temporary directory and runs the same suite with native Git.
+a fetch, the printed path as UTF-8, reuse, refusals, the stderr note for a name
+without a branch type, and parallel requests. `tests/test-linux.sh` copies the source
+to a Linux temporary directory and runs the same suite with native Git.
 The existing `test-native-lifecycle.ps1`, `test-task-worktrees.ps1`, and
 `test-remote-control.ps1` exercise the compatibility entry point on Windows.
 `test-picker.ps1` invokes the portable picker regression.

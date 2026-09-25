@@ -107,6 +107,21 @@ class WorktreeHookTests(unittest.TestCase):
         self.assertEqual(self.created('dev'), self.repo)
         self.assertEqual(self.worktree_count(), 1)
 
+    def test_main_is_refused_even_when_the_main_checkout_has_it(self):
+        git(self.repo, 'switch', '-c', 'main')
+        result = self.hook('main')
+        self.assertNotEqual(result.returncode, 0)
+        self.assertEqual(result.stdout.strip(), '')
+        self.assertIn('main', result.stderr)
+        self.assertEqual(self.worktree_count(), 1)
+
+    def test_a_name_without_a_branch_type_gets_new_n_and_the_hook_says_so(self):
+        result = self.hook('picker-speed')
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(Path(result.stdout.strip().splitlines()[-1]).name, 'brain-new-1')
+        self.assertIn("'picker-speed'", result.stderr)
+        self.assertIn('new/1', result.stderr)
+
     def test_existing_branch_that_is_not_checked_out_keeps_its_commits(self):
         git(self.repo, 'switch', '-c', 'fix/31-picker-speed')
         (self.repo / 'work.txt').write_text('work')

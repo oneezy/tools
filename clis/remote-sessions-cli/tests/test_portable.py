@@ -6,6 +6,7 @@ import io
 import json
 import os
 from pathlib import Path
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -673,7 +674,7 @@ class PortableTests(unittest.TestCase):
         name = "fix $(touch surprise); `echo nope` & quote's"
         first = self.run_manager('start', '--task', name)[0]
         self.assertIn(name, self.data()['LastArguments'][-1])
-        self.assertEqual(Path(first['WorkingDirectory']).name, 'brain-fix-touch-surprise-echo-nope-quote-s')
+        self.assertEqual(Path(first['WorkingDirectory']).name, 'brain-feature-fix-touch-surprise-echo-nope-quote-s')
         self.assertFalse((self.root / 'surprise').exists())
 
     def test_native_cli_process_entrypoint_and_legacy_aliases(self):
@@ -695,16 +696,22 @@ class PortableTests(unittest.TestCase):
         if os.name != 'nt':
             self.assertFalse(wt.same('/tmp/Brain', '/tmp/brain'))
 
-    def test_task_names_take_the_type_from_the_task_strip_path_traversal_and_never_use_codex(self):
-        def planned(*args):
-            workspace = self.run_manager('workspace', *args, '--plan')[0]
-            return Path(workspace['WorkingDirectory']).name, workspace['Branch']
-        self.assertEqual(planned('--issue', '2', '--task', '../../Fix login'), ('brain-fix-2-login', 'fix/2-login'))
-        self.assertEqual(planned('--task', 'fix-31-picker-speed'), ('brain-fix-31-picker-speed', 'fix/31-picker-speed'))
-        self.assertEqual(planned('--task', 'Readme refresh'), ('brain-feature-readme-refresh', 'feature/readme-refresh'))
-        self.assertEqual(planned('--type', 'docs', '--pr', '20'), ('brain-docs-20', 'docs/20'))
+    def planned(self, *args):
+        workspace = self.run_manager('workspace', *args, '--plan')[0]
+        return Path(workspace['WorkingDirectory']).name, workspace['Branch']
+
+    def test_task_names_use_the_given_branch_type_strip_path_traversal_and_never_use_codex(self):
+        self.assertEqual(self.planned('--issue', '2', '--task', '../../Fix login'), ('brain-feature-2-fix-login', 'feature/2-fix-login'))
+        self.assertEqual(self.planned('--type', 'fix', '--issue', '2', '--task', 'Login'), ('brain-fix-2-login', 'fix/2-login'))
+        # The task is a description; it never supplies a branch type.
+        self.assertEqual(self.planned('--task', 'fix-31-picker-speed'), ('brain-feature-fix-31-picker-speed', 'feature/fix-31-picker-speed'))
+        self.assertEqual(self.planned('--type', 'docs', '--pr', '20'), ('brain-docs-20', 'docs/20'))
         with self.assertRaises(ValueError):
-            planned('--task', '...')
+            self.planned('--task', '...')
+
+    def test_an_explicit_branch_alone_names_the_folder_after_itself(self):
+        self.assertEqual(self.planned('--branch', 'codex/foo'), ('brain-codex-foo', 'codex/foo'))
+        self.assertEqual(self.planned('--branch', 'fix/31-speed'), ('brain-fix-31-speed', 'fix/31-speed'))
 
     def press_n(self, *answers):
         """Picker N answered with branch type, issue number and description, then Q."""
@@ -721,6 +728,13 @@ class PortableTests(unittest.TestCase):
         self.assertTrue(wt.same(self.data()['LastDirectory'], folder))
         self.assertEqual(self.data()['Starts'], 1)
 
+    def test_picker_n_and_the_cli_give_the_same_names_for_the_same_answers(self):
+        self.press_n('', '', 'fix-31-picker-speed')
+        folder = self.project / '.claude' / 'worktrees' / 'brain-feature-fix-31-picker-speed'
+        self.assertEqual(wt.git(folder, 'branch', '--show-current').stdout.strip(), 'feature/fix-31-picker-speed')
+        again = self.run_manager('workspace', '--task', 'fix-31-picker-speed')[0]
+        self.assertEqual((again['Operation'], Path(again['WorkingDirectory'])), ('reuse', folder))
+
     def test_picker_n_with_a_blank_description_and_no_issue_cancels(self):
         self.press_n('', '', '')
         self.assertEqual(len(wt.worktrees(self.project)), 1)
@@ -733,9 +747,32 @@ class PortableTests(unittest.TestCase):
         self.assertEqual(Path(docs['WorkingDirectory']).name, 'brain-docs-31-speed')
         self.assertEqual(wt.git(docs['WorkingDirectory'], 'branch', '--show-current').stdout.strip(), 'docs/31-speed')
         # The same branch spelled another way is the same task.
-        again = self.run_manager('start', '--task', 'fix-31-speed')[0]
+        again = self.run_manager('start', '--branch', 'fix/31-speed')[0]
         self.assertEqual(again['SessionId'], fix['SessionId'])
         self.assertEqual(len(wt.worktrees(self.project)), 3)
+
+    def test_a_task_whose_branch_took_a_collision_suffix_is_found_by_the_branch_it_asked_for(self):
+        stale = self.project / '.claude' / 'worktrees' / 'stale'
+        wt.git(self.project, 'worktree', 'add', '-b', 'fix/31-speed', str(stale), 'dev')
+        shutil.rmtree(stale)  # The stale registration keeps fix/31-speed from being checked out again.
+        first = self.run_manager('start', '--type', 'fix', '--issue', '31', '--task', 'speed')[0]
+        self.assertEqual(first['Branch'], 'fix/31-speed-2')
+        again = self.run_manager('start', '--branch', 'fix/31-speed')[0]
+        self.assertEqual(again['SessionId'], first['SessionId'])
+        self.assertEqual(self.data()['Starts'], 1)
+
+    def test_a_worktree_made_for_the_branch_after_planning_is_reused_not_duplicated(self):
+        # Another process (the WorktreeCreate hook) wins the race between the picker's plan and its creation.
+        for action, number in (('workspace', 31), ('start', 32)):
+            with self.subTest(action=action):
+                rival = self.project / '.claude' / 'worktrees' / f'rival-{number}'
+                def rival_creates_it(project):
+                    wt.git(project, 'worktree', 'add', '-b', f'fix/{number}-speed', str(rival), 'dev')
+                with patch.object(wt, 'refresh_dev', side_effect=rival_creates_it):
+                    result = self.run_manager(action, '--type', 'fix', '--issue', str(number), '--task', 'speed')[0]
+                self.assertTrue(wt.same(result['WorkingDirectory'], rival))
+                self.assertFalse((self.project / '.claude' / 'worktrees' / f'brain-fix-{number}-speed').exists())
+        self.assertTrue(wt.same(self.data()['LastDirectory'], rival))
 
     def test_branch_type_alone_names_no_task(self):
         folder = self.run_manager('workspace', '--task', 'legacy')[0]['WorkingDirectory']

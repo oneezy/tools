@@ -16,6 +16,7 @@ import time
 import unicodedata
 import uuid
 
+from locks import file_lock
 import task_worktrees as wt
 
 
@@ -40,7 +41,8 @@ def write_json(path, data):
 
 
 def root_lock(root, timeout=30):
-    return wt.file_lock(root / '.remote-sessions.lock', timeout)
+    """The lock every state-changing launcher action takes on its projects root."""
+    return file_lock(root / '.remote-sessions.lock', timeout)
 
 
 UUID = re.compile(r'\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b', re.I)
@@ -449,16 +451,16 @@ class Manager:
                 raise ValueError('Use task/issue/PR/branch with start and exactly one --only project, without --session-id.')
             project = next(iter(projects))
             name = task_label(o) or o.branch
-            folder, branch = wt.requested_names(project, o.task or o.branch, o.issue, o.pr, o.type)
-            branch = o.branch or branch
-            # One task per branch, however it was spelled; a saved task label still finds tasks from before the scheme.
+            folder, branch = requested_names(project, o)
+            # One task per branch, however it was spelled: the branch it has, or the one it asked for when a collision
+            # gave it a suffix. A saved task label still finds tasks from before the scheme.
             matches = [(id, e) for id, e in sessions.items() if e['Project'] == project and not e.get('ReplacedBy')
-                       and (e.get('Branch') == branch or e.get('Task') == name)]
+                       and (branch in (e.get('Branch'), e.get('RequestedBranch')) or e.get('Task') == name)]
             if len(matches) > 1:
                 raise ValueError('More than one saved task matches; select its exact session ID.')
             if matches:
                 id, entry = matches[0]
-                if o.branch and entry.get('Branch') and entry['Branch'] != o.branch:
+                if o.branch and entry.get('Branch') and o.branch not in (entry['Branch'], entry.get('RequestedBranch')):
                     raise ValueError('Task already uses another branch; choose a different task name.')
                 row = self.managed(id, entry, saved)
                 if not row:
@@ -626,11 +628,15 @@ class Manager:
                 results.append(dict(Project=s['Project'], SessionId=launch['SessionId'], WorkingDirectory=launch['WorkingDirectory'], Result='already running; not restarted'))
                 continue
             if workspace:
-                wt.create_after_fetch(workspace)
+                workspace = wt.create_after_fetch(workspace)
+                launch['WorkingDirectory'] = workspace['WorkingDirectory']
             branch = workspace['Branch'] if workspace else checked_out_branch(launch['WorkingDirectory'])
+            asked = s.get('Branch') if workspace else sessions.get(id, {}).get('RequestedBranch')
             # Recorded only once the folder exists, so a recorded task whose folder is gone was deleted.
             sessions[id] = dict(Project=s['Project'], Task=s.get('Task'), Branch=branch, WorkingDirectory=launch['WorkingDirectory'],
                                 NewSession=launch['Mode'] == 'new', Updated=datetime.now(timezone.utc).isoformat())
+            if asked and asked != branch:
+                sessions[id]['RequestedBranch'] = asked
             write_json(self.state_path, state)
             output = self.claude(launch['Arguments'], launch['WorkingDirectory'])
             reported = {m.lower() for m in UUID.findall(output)}
@@ -709,10 +715,10 @@ class Manager:
                 if len(projects) != 1:
                     raise ValueError('Workspace requires exactly one --only project.')
                 project = next(iter(projects))
-                name, branch = wt.requested_names(project, o.task or o.branch, o.issue, o.pr, o.type)
-                workspace = wt.plan(projects[project], name, o.branch or branch)
+                name, branch = requested_names(project, o)
+                workspace = wt.plan(projects[project], name, branch)
                 if not o.plan:
-                    wt.create_after_fetch(workspace)
+                    workspace = wt.create_after_fetch(workspace)
                 workspace['Commands'] = dict(Claude=['claude', '--remote-control', name], Codex=['codex', '-C', workspace['WorkingDirectory']])
                 workspace['Title'] = name
                 return [workspace]
@@ -775,6 +781,16 @@ def launch_result(mode, listed, copied):
     return 'resumed as the copy Claude reported, in the same worktree' if copied else 'resumed original conversation and worktree'
 
 
+def requested_names(project, options):
+    """Folder and branch a start or workspace request names: branch type --type (else feature), then --issue or --pr,
+    then the --task description, which never supplies a branch type. An explicit --branch keeps its own spelling,
+    and given alone it names the folder too: --branch codex/foo is folder <repo>-codex-foo."""
+    if options.branch and not (options.task or options.issue or options.pr):
+        return wt.TaskNames(f'{wt.slug(project)}-{wt.slug(options.branch)}', options.branch)
+    names = wt.task_names(project, options.type or 'feature', options.issue or options.pr, options.task)
+    return names._replace(branch=options.branch or names.branch)
+
+
 def task_label(options):
     ticket = f'issue-{options.issue}' if options.issue else f'pr-{options.pr}' if options.pr else ''
     return ' '.join(str(v) for v in (options.type, ticket, options.task) if v) if ticket or options.task else ''
@@ -789,8 +805,7 @@ def parser():
     p.add_argument('--session-id', '-SessionId')
     p.add_argument('--task', '-Task')
     p.add_argument('--branch', '-Branch')
-    p.add_argument('--type', '-Type', choices=wt.BRANCH_TYPES,
-                   help='Branch type of a new task; default: the branch type the task name starts with, else feature.')
+    p.add_argument('--type', '-Type', choices=wt.BRANCH_TYPES, help='Branch type of a new task; default: feature.')
     ticket = p.add_mutually_exclusive_group()
     ticket.add_argument('--issue', '-Issue', type=int)
     ticket.add_argument('--pr', '-PR', type=int)
