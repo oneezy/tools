@@ -35,18 +35,19 @@ Table columns: `Status | Repo | Task | Source | Branch | Last active | Remote`.
 | Status | Meaning |
 |---|---|
 | 🟢 working | a background session is working |
-| 🟡 idle | a background session is waiting for you |
+| 🟡 idle | a background session is waiting for you (Claude's state `idle`, `blocked` or `done`) |
 | 🔵 stopped | resumable: the newest conversation in its folder, or a task the picker tracks |
 | 🟣 live | live in another app (VS Code, the desktop app, a terminal); view-only |
 | ⚪ new | a project with no session yet; N or Enter names a new task |
-| ⚫ history | an older conversation in the same folder, or one that cannot resume |
-| 🔴 error | a failed session, or history whose folder metadata conflicts |
-| ✅ merged | its work merged, awaiting folder removal (set by the cleanup sweep) |
+| ⚫ history | an older conversation in the same folder, or one that cannot resume, such as a worktree whose checkout is missing |
+| 🔴 error | a background session that failed or waits on a permission decision, or history whose folder metadata conflicts; shown without H |
+| ✅ merged | its work merged, awaiting folder removal (reserved for the cleanup sweep; nothing sets it yet) |
 
 Remote shows 📡 only when the live process has a Remote Control registration.
-Source is what runs a session now: CLI, Background (`--bg`), VS Code ext, Desktop,
-RC server (spawned by `claude remote-control`, entrypoint `sdk-cli`). A stopped
-session shows where it started instead, including Web for a teleported session.
+Source is what runs a session now: CLI, Background (`--bg`, which records entrypoint
+`cli`), VS Code ext, Desktop, RC server (spawned by `claude remote-control`, entrypoint
+`sdk-cli`). A stopped session shows where it started instead, including Web for a
+teleported session.
 The detail pane under the table shows the folder, remote URL, session ID,
 permission mode, Claude version, where the session started and what runs it now.
 Columns are measured in terminal cells, so emoji and wide titles keep them aligned
@@ -59,8 +60,9 @@ the picker. A row live in another app is view-only: it cannot be checked, resume
 stopped. A session whose folder was deleted, or that was archived in the desktop app,
 is not listed at all, and nothing recreates it.
 
-The picker loads fast: each transcript's metadata is cached by path, modification
-time and size, so a refresh re-parses only transcripts that changed.
+The picker loads fast: each transcript's metadata and each desktop store file are
+cached by path, modification time and size, so a refresh re-parses only files that
+changed.
 
 Task titles, folders, session IDs, and remote URLs are shown separately. Titles
 come from launcher task names, native agent names, or explicit saved Claude titles.

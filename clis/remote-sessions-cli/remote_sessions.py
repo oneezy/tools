@@ -157,15 +157,19 @@ def transcript_meta(file):
 
 
 def active(agent):
-    return bool(agent and agent.get('pid') and agent.get('state') not in
-                ('stopped', 'completed', 'failed', 'exited', 'done'))
+    # A background agent that is `done` or `blocked` has finished its turn; its process stays up, waiting for a reply.
+    return bool(agent and agent.get('pid') and state_of(agent) not in ('stopped', 'completed', 'failed', 'exited'))
+
+
+def state_of(agent):
+    return str((agent or {}).get('state') or '').lower()
 
 
 # Surface names Claude records as a process's or transcript's `entrypoint`.
 SURFACES = {'cli': 'CLI', 'claude-vscode': 'VS Code ext', 'claude-desktop': 'Desktop', 'sdk-cli': 'RC server'}
 CIRCLES = dict(working='🟢', idle='🟡', stopped='🔵', live='🟣', new='⚪', history='⚫', error='🔴', merged='✅')
 WORKING = ('working', 'busy', 'running')
-FAILED = ('error', 'failed', 'blocked')
+FAILED = ('error', 'failed')
 
 
 def surface_now(agent, process):
@@ -178,19 +182,58 @@ def surface_now(agent, process):
     return SURFACES.get(entrypoint, entrypoint or 'CLI')
 
 
+def failed(agent):
+    """A background session that failed or waits on a permission decision, whether or not its process is still up."""
+    state = state_of(agent)
+    return bool(agent and agent['kind'] == 'background' and (state in FAILED or 'permission' in state))
+
+
 def status_of(row, agent, managed):
-    """The one status a row shows. Live in another app wins; a stopped session is resumable only when it is
-    the newest conversation in its folder or one the picker tracks; older conversations are history."""
-    if active(agent):
-        if agent['kind'] != 'background':
-            return 'live'
-        state = str(agent.get('state') or '').lower()
-        return 'error' if state in FAILED or 'permission' in state else 'working' if state in WORKING else 'idle'
-    if row.get('Merged'):
-        return 'merged'
-    if row.get('UnavailableReason') and row['UnavailableReason'] != 'transcript missing':
+    """The one status a row shows. Live in another app wins; errors and conflicting history need a decision;
+    a stopped session is resumable only when it is the newest conversation in its folder or one the picker
+    tracks; older conversations, and any that cannot resume, are history."""
+    if active(agent) and agent['kind'] != 'background':
+        return 'live'
+    if failed(agent) or row.get('Conflict'):
         return 'error'
+    if active(agent):
+        return 'working' if state_of(agent) in WORKING else 'idle'
     return 'stopped' if row.get('Available') and (row.get('Newest') or managed) else 'history'
+
+
+def started_on(row, managed):
+    """Where a session started: Web when teleported, Desktop when the desktop app lists it, else the first surface
+    its transcript records. Without one, a session the picker tracks started in the background, any other on the CLI."""
+    if row.get('Teleported'):
+        return 'Web'
+    if row.get('InDesktopApp'):
+        return 'Desktop'
+    entrypoint = row.get('StartEntrypoint')
+    return SURFACES.get(entrypoint, entrypoint) if entrypoint else 'Background' if managed else 'CLI'
+
+
+# Desktop store entries by file path, kept while the file's modification time and size are unchanged.
+DESKTOP = {}
+
+
+def desktop_entry(file):
+    """One desktop store file as (session ID, entry), or None when it names no Claude session; re-read only on change."""
+    stat = file.stat()
+    key, stamp = str(file), (stat.st_mtime_ns, stat.st_size)
+    cached = DESKTOP.get(key)
+    if cached and cached[0] == stamp:
+        return cached[1]
+    try:
+        data = read_json(file, {})
+    except ValueError:
+        data = None  # Unparsable until it changes; not re-read on every refresh.
+    id = data.get('cliSessionId') if isinstance(data, dict) else None
+    entry = None
+    if isinstance(id, str) and UUID.fullmatch(id):
+        entry = id.lower(), dict(Archived=bool(data.get('isArchived') or data.get('archived')), Title=data.get('title'),
+                                 PermissionMode=data.get('permissionMode'))
+    DESKTOP[key] = (stamp, entry)
+    return entry
 
 
 def default_desktop_stores():
@@ -275,17 +318,18 @@ class Manager:
         """The desktop app's own session list by Claude session ID: archive flag, title and permission mode.
         Unreadable entries are skipped; the store is optional."""
         stores = [Path(self.options.desktop_sessions)] if self.options.desktop_sessions else default_desktop_stores()
-        found = {}
+        found, scanned = {}, set()
         for store in stores:
             for file in sorted(store.rglob('*.json')) if store.is_dir() else ():
+                scanned.add(str(file))
                 try:
-                    data = read_json(file, {})
+                    entry = desktop_entry(file)
                 except (OSError, ValueError):
                     continue
-                id = data.get('cliSessionId') if isinstance(data, dict) else None
-                if isinstance(id, str) and UUID.fullmatch(id):
-                    found[id.lower()] = dict(Archived=bool(data.get('isArchived') or data.get('archived')),
-                                             Title=data.get('title'), PermissionMode=data.get('permissionMode'))
+                if entry:
+                    found[entry[0]] = entry[1]
+        for key in DESKTOP.keys() - scanned:
+            del DESKTOP[key]
         return found
 
     def saved(self):
@@ -324,10 +368,9 @@ class Manager:
                           'history saved; worktree checkout missing' if is_tree and not (Path(cwd) / '.git').exists() else None)
                 if cwd not in branches:
                     branches[cwd] = checked_out_branch(cwd)
-                origin = ('Web' if meta['Teleported'] else 'Desktop' if app else
-                          SURFACES.get(meta['Entrypoint'], meta['Entrypoint']))
                 row = dict(SessionId=file.stem, Project=project, WorkingDirectory=cwd, Updated=updated, Branch=branches[cwd],
-                           Worktree=is_tree, Available=not reason, UnavailableReason=reason, Title=title, Origin=origin,
+                           Worktree=is_tree, Available=not reason, UnavailableReason=reason, Conflict=conflict, Title=title,
+                           StartEntrypoint=meta['Entrypoint'], Teleported=meta['Teleported'], InDesktopApp=bool(app),
                            ClaudeVersion=meta['Version'], PermissionMode=meta['PermissionMode'] or app.get('PermissionMode'))
                 if file.stem in catalog and not wt.same(catalog[file.stem]['WorkingDirectory'], cwd):
                     raise ValueError(f'Conflicting saved locations for session {file.stem}.')
@@ -338,7 +381,7 @@ class Manager:
         # The newest conversation in each folder is the one it resumes; older ones are history.
         seen = set()
         for row in rows:
-            folder = os.path.normcase(os.path.abspath(row['WorkingDirectory']))
+            folder = wt.key(row['WorkingDirectory'])
             row['Newest'] = folder not in seen
             seen.add(folder)
         return rows
@@ -436,7 +479,7 @@ class Manager:
             found = [s for s in saved if s['Project'] == project and s['Available']]
             seen = set()
             for s in found:
-                key = os.path.normcase(os.path.abspath(s['WorkingDirectory']))
+                key = wt.key(s['WorkingDirectory'])
                 if key not in seen:
                     selected.append(s)
                     seen.add(key)
@@ -482,7 +525,7 @@ class Manager:
             return {}
         try:
             data = read_json(self.config / 'sessions' / f"{agent['pid']}.json", {})
-        except ValueError:
+        except (OSError, ValueError):
             return {}
         if isinstance(data, dict) and data.get('pid') == agent['pid'] and data.get('sessionId') == agent['sessionId']:
             return data
@@ -500,9 +543,9 @@ class Manager:
         rows += [row for row in (self.managed(id, e, saved) for id, e in sessions.items()
                                  if id not in ids and e['Project'] in projects) if row]
         ids = {r['SessionId'] for r in rows}
-        # Every live session under a project folder is listed, even before Claude has saved its transcript.
+        # Every live or failed session under a project folder is listed, even before Claude has saved its transcript.
         for a in agents:
-            folder = self.folder_root(a['cwd'], projects) if active(a) and a['sessionId'] not in ids else None
+            folder = self.folder_root(a['cwd'], projects) if (active(a) or failed(a)) and a['sessionId'] not in ids else None
             project = folder and project_of(folder, projects)
             if project:
                 rows.append(dict(SessionId=a['sessionId'], Project=project, WorkingDirectory=folder,
@@ -511,17 +554,19 @@ class Manager:
         result = []
         for s in rows:
             id = s['SessionId']
-            agent = next((a for a in agents if a['sessionId'] == id and active(a)), None)
+            # The live record when there is one, else the last one Claude keeps, which may say how the session ended.
+            records = [a for a in agents if a['sessionId'] == id]
+            agent = next((a for a in records if active(a)), records[-1] if records else None)
+            running = active(agent)
             entry = sessions.get(id, {})
             process = self.process(agent)
             bridge = process.get('bridgeSessionId')
             task = entry.get('Task')
             title = (task if task not in (None, 'remote') else None) or (agent or {}).get('name') or s.get('Title') or task or Path(s.get('WorkingDirectory') or s['Project']).name
-            # Where it started; a session the picker launched in the background, else the plain CLI.
-            origin = s.get('Origin') or ('Background' if id in sessions else 'CLI')
+            origin = started_on(s, managed=id in sessions)
             status = status_of(s, agent, managed=id in sessions)
-            result.append(dict(s, Task=title, Stoppable=bool(agent and agent['kind'] == 'background'), Running=active(agent),
-                               ViewOnly=bool(agent and agent['kind'] != 'background'),
+            result.append(dict(s, Task=title, Stoppable=running and agent['kind'] == 'background', Running=running,
+                               ViewOnly=running and agent['kind'] != 'background',
                                State=agent.get('state') if agent else s.get('UnavailableReason') or 'stopped',
                                Status=status, Circle=CIRCLES[status], Origin=origin, Source=surface_now(agent, process) or origin,
                                Remote='📡' if bridge else '', PermissionMode=process.get('permissionMode') or s.get('PermissionMode'),
@@ -792,23 +837,43 @@ def visible_rows(rows, history=False):
     return sorted([r for r in rows if shown(r)], key=lambda r: (not r.get('Running', False), r['Project'], r.get('Task') or ''))
 
 
-ZERO_WIDTH = {chr(0x200d), chr(0xfe0e), chr(0xfe0f)}  # Joiner and variation selectors.
+JOINER = chr(0x200d)
+ZERO_WIDTH = {JOINER, chr(0xfe0e), chr(0xfe0f)}  # Joiner and variation selectors.
+
+
+def glyphs(text):
+    """Text split as a terminal draws it: combining marks, selectors and skin tones join the character before,
+    and a joiner joins the next, so a joined emoji sequence (a family, a toned hand) is one glyph."""
+    glyph = ''
+    for c in text:
+        if glyph and (unicodedata.combining(c) or c in ZERO_WIDTH or 0x1F3FB <= ord(c) <= 0x1F3FF or glyph.endswith(JOINER)):
+            glyph += c
+            continue
+        if glyph:
+            yield glyph
+        glyph = c
+    if glyph:
+        yield glyph
+
+
+def glyph_cells(glyph):
+    first = glyph[0]
+    return 0 if unicodedata.combining(first) or first in ZERO_WIDTH else 2 if unicodedata.east_asian_width(first) in 'WF' else 1
 
 
 def cells(text):
-    """Terminal cells a string takes: wide characters (emoji, CJK) take two, combining marks and selectors none."""
-    return sum(0 if unicodedata.combining(c) or c in ZERO_WIDTH else 2 if unicodedata.east_asian_width(c) in 'WF' else 1
-               for c in text)
+    """Terminal cells a string takes: wide glyphs (emoji, CJK) take two, combining marks and selectors none."""
+    return sum(glyph_cells(g) for g in glyphs(text))
 
 
 def fit(text, width):
     """Cut or pad text to exactly `width` terminal cells, so an emoji never shifts the columns after it."""
     kept, used = [], 0
-    for c in clean(text):
-        if used + cells(c) > width:
+    for glyph in glyphs(clean(text)):
+        if used + glyph_cells(glyph) > width:
             break
-        kept.append(c)
-        used += cells(c)
+        kept.append(glyph)
+        used += glyph_cells(glyph)
     return ''.join(kept) + ' ' * (width - used)
 
 
@@ -824,12 +889,18 @@ def age(row, now=None):
 COLUMNS = ('STATUS', 'REPO', 'TASK', 'SOURCE', 'BRANCH', 'LAST ACTIVE', 'REMOTE')
 
 
+FIXED_WIDTHS = {'STATUS': 10, 'SOURCE': 11, 'LAST ACTIVE': 11, 'REMOTE': 6}
+ROW_PREFIX = 6  # The cursor and checkbox, '> [x] ', before the first column.
+
+
 def column_widths(columns):
     """Cell widths of the table columns for a terminal this wide; Task and Branch share what is left."""
-    repo = min(16, max(8, columns // 10))
-    spare = columns - 1 - 6 - (10 + repo + 11 + 11 + 6) - len(COLUMNS) + 1
+    widths = dict(FIXED_WIDTHS, REPO=min(16, max(8, columns // 10)))
+    # One cell stays free at the right edge, and one space separates each pair of columns.
+    spare = columns - 1 - ROW_PREFIX - sum(widths.values()) - (len(COLUMNS) - 1)
     task = max(10, spare * 3 // 5)
-    return (10, repo, task, 11, max(8, spare - task), 11, 6)
+    widths.update(TASK=task, BRANCH=max(8, spare - task))
+    return tuple(widths[name] for name in COLUMNS)
 
 
 def table_line(values, widths):
@@ -866,7 +937,7 @@ def menu(manager):
         print('\033[2J\033[H', end='')
         print(color(f'Claude sessions | {sys.platform} | {manager.root}', '96'))
         print('Space select | A available | Enter resume | N new task | X stop | H history | R refresh | Q quit\n')
-        print(color('      ' + table_line(COLUMNS, widths), '96'))
+        print(color(' ' * ROW_PREFIX + table_line(COLUMNS, widths), '96'))
         print(color('─' * min(terminal.columns - 1, 160), '90'))
         for index in range(start, min(start + height, len(rows))):
             row = rows[index]

@@ -9,7 +9,6 @@ from pathlib import Path
 import subprocess
 import sys
 import tempfile
-import unicodedata
 import unittest
 from unittest.mock import patch
 
@@ -21,10 +20,16 @@ ENGINE = Path(rs.__file__)
 FAKE = Path(__file__).with_name('fake_claude.py')
 
 
+# Cells each wide string takes in Windows Terminal, from what it draws: a joined emoji sequence is one glyph.
+WIDE = {'👨‍👩‍👧': 2, '👍🏽': 2, '漢': 2, '字': 2, '🚀': 2, '📡': 2,
+        '🟢': 2, '🟡': 2, '🔵': 2, '🟣': 2, '⚪': 2, '⚫': 2, '🔴': 2, '✅': 2}
+
+
 def cells(text):
-    """Terminal cells a string takes in Windows Terminal: wide (emoji, CJK) characters take two."""
-    return sum(0 if unicodedata.combining(c) or c == '️' else 2 if unicodedata.east_asian_width(c) in 'WF' else 1
-               for c in text)
+    """Terminal cells a string takes, from the literal widths above; anything else takes one."""
+    for wide in sorted(WIDE, key=len, reverse=True):
+        text = text.replace(wide, '#' * WIDE[wide])
+    return len(text)
 
 
 class PortableTests(unittest.TestCase):
@@ -204,7 +209,7 @@ class PortableTests(unittest.TestCase):
     def test_picker_columns_stay_aligned_with_emoji(self):
         tree = Path(self.run_manager('workspace', '--task', 'aligned')[0]['WorkingDirectory'])
         working, stopped, vscode = (f'5f1c0a52-4a57-4c1e-9a55-3c2d7c1b9f{n:02d}' for n in range(1, 4))
-        self.transcript(working, tree, dict(), dict(type='ai-title', aiTitle='Wide 漢字 title 🚀'))
+        self.transcript(working, tree, dict(), dict(type='ai-title', aiTitle='Wide 漢字 title 🚀 👨‍👩‍👧 👍🏽 end'))
         self.live(working, tree, kind='background', state='working', bridge='session_aligned')
         self.transcript(stopped, self.project)
         self.live(vscode, self.project, entrypoint='claude-vscode')
@@ -401,16 +406,23 @@ class PortableTests(unittest.TestCase):
     def test_every_surface_gets_its_source_label(self):
         ids = {label: f'5f1c0a52-4a57-4c1e-9a55-3c2d7c1b9a{n:02d}' for n, label in enumerate(
             ['CLI', 'VS Code ext', 'Desktop', 'Background', 'RC server', 'Web'])}
-        for id in ids.values():
-            self.transcript(id, self.project)
+        for n, id in enumerate(ids.values()):
+            if id != ids['Web']:
+                self.transcript(id, self.project, dict(), dict(type='ai-title', aiTitle=f'chat-{n}'))
         self.live(ids['CLI'], self.project, entrypoint='cli')
         self.live(ids['VS Code ext'], self.project, entrypoint='claude-vscode')
         self.live(ids['Desktop'], self.project, entrypoint='claude-desktop')
         self.live(ids['Background'], self.project, kind='background', entrypoint='cli')
         self.live(ids['RC server'], self.project, entrypoint='sdk-cli')
-        self.transcript(ids['Web'], self.project, dict(teleportedFrom='https://claude.ai/code/session_web'))
+        # A background session launched with --bg records entrypoint `cli`, as Claude 2.1.282 does.
+        self.transcript(ids['Web'], self.project, dict(teleportedFrom='https://claude.ai/code/session_web'),
+                        dict(type='ai-title', aiTitle='chat-5'), timestamp='2026-03-01T00:00:00Z')
         rows = self.rows_by_id()
         self.assertEqual({label: rows[id]['Source'] for label, id in ids.items()}, {label: label for label in ids})
+        lines = self.picker(['q'])[-1].splitlines()
+        shown = {label: next(line for line in lines if f'chat-{n} ' in line) for n, label in enumerate(ids)}
+        for label, line in shown.items():
+            self.assertIn(f' {label} ', line[line.index('chat-'):])
 
     def test_source_shows_what_runs_a_session_now_and_origin_where_it_started(self):
         id = '5f1c0a52-4a57-4c1e-9a55-3c2d7c1b9b01'
@@ -437,6 +449,57 @@ class PortableTests(unittest.TestCase):
         rows = self.rows_by_id()
         self.assertEqual({n: (rows[id(n)]['Circle'], rows[id(n)]['Remote']) for n in range(1, 7)}, {
             1: ('🟢', '📡'), 2: ('🟡', ''), 3: ('🟣', '📡'), 4: ('🔵', ''), 5: ('⚫', ''), 6: ('🔴', '')})
+
+    def test_background_states_map_to_their_circles_even_once_the_process_ends(self):
+        id = lambda n: f'5f1c0a52-4a57-4c1e-9a55-3c2d7c1b8a{n:02d}'
+        self.transcript(id(1), self.project)
+        self.live(id(1), self.project, kind='background', state='failed')
+        self.live(id(2), self.project, kind='background', state='failed')  # Failed before Claude saved a transcript.
+        data = self.data()
+        data['Agents'][-1]['pid'] = None
+        self.change(Agents=data['Agents'])
+        self.live(id(3), self.project, kind='background', state='blocked', status='idle')  # Waiting on Justin's reply.
+        self.live(id(4), self.project, kind='background', state='done', status='idle')  # Finished its turn; process alive.
+        self.live(id(5), self.project, kind='background', state='error')
+        data = self.data()
+        for agent in data['Agents']:
+            agent['id'] = agent['sessionId'][-8:]  # Claude's short agent IDs are distinct.
+        self.change(Agents=data['Agents'])
+        rows = self.rows_by_id()
+        self.assertEqual({n: (rows[id(n)]['Circle'], rows[id(n)]['Stoppable']) for n in range(1, 6)}, {
+            1: ('🔴', False), 2: ('🔴', False), 3: ('🟡', True), 4: ('🟡', True), 5: ('🔴', True)})
+        self.assertEqual(sorted(r['SessionId'] for r in self.run_manager('stop')), [id(3), id(4), id(5)])
+
+    def test_worktree_whose_checkout_is_missing_is_history_not_an_error(self):
+        ghost = self.project / '.claude' / 'worktrees' / 'brain-ghost'
+        ghost.mkdir(parents=True)
+        id = '5f1c0a52-4a57-4c1e-9a55-3c2d7c1b8b01'
+        self.transcript(id, ghost)
+        row = self.rows_by_id()[id]
+        self.assertEqual((row['Circle'], row['Available']), ('⚫', False))
+
+    def test_unreadable_session_file_leaves_the_session_listed_without_registration(self):
+        id = '5f1c0a52-4a57-4c1e-9a55-3c2d7c1b8b02'
+        self.transcript(id, self.project)
+        self.live(id, self.project, kind='background', bridge='session_locked')
+        pid_file = self.config / 'sessions' / f"{self.data()['Agents'][0]['pid']}.json"
+        pid_file.unlink()
+        pid_file.mkdir()  # Opening it fails with an OSError, as a locked file does on Windows.
+        row = self.rows_by_id()[id]
+        self.assertEqual((row['Circle'], row['Remote'], row['Stoppable']), ('🟡', '', True))
+
+    def test_second_load_reparses_no_unchanged_desktop_store_file(self):
+        id = '5f1c0a52-4a57-4c1e-9a55-3c2d7c1b8b03'
+        self.transcript(id, self.project)
+        self.desktop_session(id, self.project, title='Desktop title')
+        self.assertEqual(self.rows_by_id()[id]['Title'], 'Desktop title')
+        entry = next(self.desktop.rglob(f'local_{id}.json'))
+        stat = entry.stat()
+        entry.write_text(entry.read_text().replace('Desktop title', 'Desktop tutle'))
+        os.utime(entry, ns=(stat.st_atime_ns, stat.st_mtime_ns))
+        self.assertEqual(self.rows_by_id()[id]['Title'], 'Desktop title')
+        os.utime(entry, ns=(stat.st_atime_ns, stat.st_mtime_ns + 1_000_000_000))
+        self.assertEqual(self.rows_by_id()[id]['Title'], 'Desktop tutle')
 
     def test_archived_desktop_sessions_are_not_listed(self):
         kept, archived = '5f1c0a52-4a57-4c1e-9a55-3c2d7c1b9d01', '5f1c0a52-4a57-4c1e-9a55-3c2d7c1b9d02'

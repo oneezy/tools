@@ -5,8 +5,13 @@ import subprocess
 from pathlib import Path
 
 
+def key(path):
+    """A path's identity for comparing and grouping folders: absolute, and case-folded where the OS ignores case."""
+    return os.path.normcase(os.path.abspath(path))
+
+
 def same(a, b):
-    return bool(a and b) and os.path.normcase(os.path.abspath(a)) == os.path.normcase(os.path.abspath(b))
+    return bool(a and b) and key(a) == key(b)
 
 
 def inside(path, parent):
