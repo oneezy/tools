@@ -1,12 +1,15 @@
 """Run with python -m unittest discover -s tests -p test_portable.py -v."""
 import argparse
+from contextlib import redirect_stdout
 from datetime import datetime, timezone
+import io
 import json
 import os
 from pathlib import Path
 import subprocess
 import sys
 import tempfile
+import unicodedata
 import unittest
 from unittest.mock import patch
 
@@ -16,6 +19,12 @@ import task_worktrees as wt
 
 ENGINE = Path(rs.__file__)
 FAKE = Path(__file__).with_name('fake_claude.py')
+
+
+def cells(text):
+    """Terminal cells a string takes in Windows Terminal: wide (emoji, CJK) characters take two."""
+    return sum(0 if unicodedata.combining(c) or c == '️' else 2 if unicodedata.east_asian_width(c) in 'WF' else 1
+               for c in text)
 
 
 class PortableTests(unittest.TestCase):
@@ -36,8 +45,60 @@ class PortableTests(unittest.TestCase):
         wt.git(self.project, 'add', '.')
         wt.git(self.project, 'commit', '-m', 'fixture')
 
-    def options(self, *args):
-        return rs.parser().parse_args([*args, '--root', str(self.root), '--config', str(self.config), '--claude', str(FAKE), '--only', 'brain'])
+    def options(self, *args, only=('brain',)):
+        return rs.parser().parse_args([*args, '--root', str(self.root), '--config', str(self.config), '--claude', str(FAKE),
+                                       '--desktop-sessions', str(self.desktop), *(['--only', *only] if only else [])])
+
+    @property
+    def desktop(self):
+        return Path(self.temp.name) / 'desktop-sessions'
+
+    def transcript(self, id, cwd, *records, timestamp='2026-01-01T00:00:00Z'):
+        """Plant a saved conversation, as Claude writes one under its config folder."""
+        history = self.config / 'projects' / 'planted'
+        history.mkdir(parents=True, exist_ok=True)
+        lines = [dict(type='user', sessionId=id, cwd=str(cwd), timestamp=timestamp, **records[0])] if records else [
+            dict(type='user', sessionId=id, cwd=str(cwd), timestamp=timestamp)]
+        lines += [dict(sessionId=id, **record) for record in records[1:]]
+        (history / f'{id}.jsonl').write_text('\n'.join(json.dumps(line) for line in lines))
+
+    def live(self, id, cwd, kind='interactive', entrypoint=None, bridge=None, **fields):
+        """A session Claude lists as live, with the per-pid session file its process writes."""
+        data = self.data()
+        pid = 7000 + len(data['Agents'])
+        agent = dict(sessionId=id, kind=kind, cwd=str(cwd), pid=pid, **fields)
+        if kind == 'background':
+            agent.setdefault('id', id[:8])
+            agent.setdefault('state', 'idle')
+        else:
+            agent.setdefault('status', 'idle')
+        data['Agents'].append(agent)
+        self.native.write_text(json.dumps(data))
+        folder = self.config / 'sessions'
+        folder.mkdir(exist_ok=True)
+        record = dict(pid=pid, sessionId=id, cwd=str(cwd))
+        if entrypoint:
+            record['entrypoint'] = entrypoint
+        if bridge:
+            record['bridgeSessionId'] = bridge
+        (folder / f'{pid}.json').write_text(json.dumps(record))
+
+    def desktop_session(self, id, cwd, archived=False, **fields):
+        """An entry in the desktop app's own session store."""
+        folder = self.desktop / 'account' / 'org'
+        folder.mkdir(parents=True, exist_ok=True)
+        (folder / f'local_{id}.json').write_text(json.dumps(dict(sessionId=f'local_{id}', cliSessionId=id, cwd=str(cwd), isArchived=archived, **fields)))
+
+    def rows_by_id(self):
+        return {r['SessionId']: r for r in self.run_manager('status')}
+
+    def picker(self, keys, columns=140, only=('brain',)):
+        """Drive the picker with scripted keypresses; return every screen it drew, as a terminal shows them."""
+        output = io.StringIO()
+        with patch.object(rs.sys.stdin, 'isatty', return_value=True), patch.object(rs, 'keypress', side_effect=keys), \
+                patch.dict(os.environ, COLUMNS=str(columns), LINES='40'), redirect_stdout(output):
+            rs.menu(rs.Manager(self.options('menu', only=only)))
+        return output.getvalue().split('\033[2J\033[H')[1:]
 
     def run_manager(self, *args):
         return rs.Manager(self.options(*args)).execute()
@@ -119,6 +180,62 @@ class PortableTests(unittest.TestCase):
             self.run_manager('stop', '--session-id', first['SessionId'])
         self.assertEqual(self.run_manager('stop'), [])
         self.assertEqual(self.data()['Stops'], 0)
+
+    def test_resume_is_refused_on_a_session_live_in_another_surface(self):
+        id = '5f1c0a52-4a57-4c1e-9a55-3c2d7c1b9e11'
+        self.transcript(id, self.project)
+        self.live(id, self.project, entrypoint='claude-vscode')
+        self.assertTrue(self.rows_by_id()[id]['ViewOnly'])
+        with self.assertRaisesRegex(ValueError, 'view-only'):
+            self.run_manager('resume', '--session-id', id)
+        with self.assertRaisesRegex(ValueError, 'view-only'):
+            self.run_manager('stop', '--session-id', id)
+        self.assertEqual((self.data()['Starts'], self.data()['Stops']), (0, 0))
+
+    def test_picker_refuses_to_check_a_row_live_in_another_surface(self):
+        id = '5f1c0a52-4a57-4c1e-9a55-3c2d7c1b9e12'
+        self.transcript(id, self.project)
+        self.live(id, self.project, entrypoint='claude-vscode')
+        screens = self.picker([' ', 'a', '\r', 'x', 'q'])
+        self.assertIn('view-only', screens[1])
+        self.assertFalse(any('[x]' in screen for screen in screens))
+        self.assertEqual((self.data()['Starts'], self.data()['Stops']), (0, 0))
+
+    def test_picker_columns_stay_aligned_with_emoji(self):
+        tree = Path(self.run_manager('workspace', '--task', 'aligned')[0]['WorkingDirectory'])
+        working, stopped, vscode = (f'5f1c0a52-4a57-4c1e-9a55-3c2d7c1b9f{n:02d}' for n in range(1, 4))
+        self.transcript(working, tree, dict(), dict(type='ai-title', aiTitle='Wide 漢字 title 🚀'))
+        self.live(working, tree, kind='background', state='working', bridge='session_aligned')
+        self.transcript(stopped, self.project)
+        self.live(vscode, self.project, entrypoint='claude-vscode')
+        (self.root / 'tools').mkdir()  # A project with no session yet shows its new-task placeholder.
+        lines = self.picker(['q'], only=())[-1].splitlines()
+        header = next(line for line in lines if 'SOURCE' in line)
+        self.assertEqual([h for h in ('STATUS', 'REPO', 'TASK', 'SOURCE', 'BRANCH', 'LAST ACTIVE', 'REMOTE') if h in header],
+                         ['STATUS', 'REPO', 'TASK', 'SOURCE', 'BRANCH', 'LAST ACTIVE', 'REMOTE'])
+        rows = {circle: next(line for line in lines if circle in line) for circle in ('🟢', '🟣', '🔵', '⚪')}
+        at = lambda line, text: cells(line[:line.index(text)])
+        for circle, source, branch in (('🟢', 'Background', 'codex/brain-aligned'), ('🟣', 'VS Code ext', 'dev'), ('🔵', 'CLI', 'dev')):
+            line = rows[circle]
+            self.assertEqual(at(line, circle), at(header, 'STATUS'), line)
+            self.assertEqual(at(line, source), at(header, 'SOURCE'), line)
+            self.assertEqual(at(line, ' ' + branch) + 1, at(header, 'BRANCH'), line)
+        self.assertEqual(at(rows['🟢'], '📡'), at(header, 'REMOTE'))
+        self.assertEqual(at(rows['⚪'], '⚪'), at(header, 'STATUS'))
+        self.assertEqual([line for line in lines if line.startswith(('> [', '  [')) and '📡' in line], [rows['🟢']])
+        self.assertTrue(all(cells(line) < 140 for line in lines))
+
+    def test_picker_detail_pane_shows_where_the_session_started_and_its_settings(self):
+        tree = Path(self.run_manager('workspace', '--task', 'details')[0]['WorkingDirectory'])
+        id = '5f1c0a52-4a57-4c1e-9a55-3c2d7c1b9f11'
+        self.transcript(id, tree, dict(entrypoint='claude-desktop', version='2.1.7', permissionMode='acceptEdits'))
+        self.live(id, tree, kind='background', state='idle', bridge='session_details')
+        screen = self.picker(['q'])[-1]
+        row = next(line for line in screen.splitlines() if '🟡' in line)
+        self.assertIn('Background', row)
+        detail = screen[screen.index(row) + len(row):]
+        for text in (str(tree), 'https://claude.ai/code/session_details', id, 'acceptEdits', '2.1.7', 'Started: Desktop'):
+            self.assertIn(text, detail)
 
     def test_background_session_started_elsewhere_is_stoppable(self):
         self.change(Agents=[dict(id='outside1', sessionId='5f1c0a52-4a57-4c1e-9a55-3c2d7c1b9e01', kind='background',
@@ -280,6 +397,55 @@ class PortableTests(unittest.TestCase):
         self.assertEqual(self.run_manager('sessions')[0]['Title'], 'Fix login')
         os.utime(history, ns=(stat.st_atime_ns, stat.st_mtime_ns + 1_000_000_000))
         self.assertEqual(self.run_manager('sessions')[0]['Title'], 'Fix lagin')
+
+    def test_every_surface_gets_its_source_label(self):
+        ids = {label: f'5f1c0a52-4a57-4c1e-9a55-3c2d7c1b9a{n:02d}' for n, label in enumerate(
+            ['CLI', 'VS Code ext', 'Desktop', 'Background', 'RC server', 'Web'])}
+        for id in ids.values():
+            self.transcript(id, self.project)
+        self.live(ids['CLI'], self.project, entrypoint='cli')
+        self.live(ids['VS Code ext'], self.project, entrypoint='claude-vscode')
+        self.live(ids['Desktop'], self.project, entrypoint='claude-desktop')
+        self.live(ids['Background'], self.project, kind='background', entrypoint='cli')
+        self.live(ids['RC server'], self.project, entrypoint='sdk-cli')
+        self.transcript(ids['Web'], self.project, dict(teleportedFrom='https://claude.ai/code/session_web'))
+        rows = self.rows_by_id()
+        self.assertEqual({label: rows[id]['Source'] for label, id in ids.items()}, {label: label for label in ids})
+
+    def test_source_shows_what_runs_a_session_now_and_origin_where_it_started(self):
+        id = '5f1c0a52-4a57-4c1e-9a55-3c2d7c1b9b01'
+        self.transcript(id, self.project, dict(entrypoint='claude-desktop'))
+        self.desktop_session(id, self.project)
+        stopped = self.rows_by_id()[id]
+        self.assertEqual((stopped['Source'], stopped['Origin']), ('Desktop', 'Desktop'))
+        self.live(id, self.project, kind='background', entrypoint='cli')
+        resumed = self.rows_by_id()[id]
+        self.assertEqual((resumed['Source'], resumed['Origin']), ('Background', 'Desktop'))
+
+    def test_each_state_maps_to_its_circle_and_remote_shows_only_a_registered_bridge(self):
+        tree = Path(self.run_manager('workspace', '--task', 'circles')[0]['WorkingDirectory'])
+        other = Path(self.run_manager('workspace', '--task', 'older')[0]['WorkingDirectory'])
+        clash = Path(self.run_manager('workspace', '--task', 'clash')[0]['WorkingDirectory'])
+        id = lambda n: f'5f1c0a52-4a57-4c1e-9a55-3c2d7c1b9c{n:02d}'
+        self.transcript(id(1), tree)
+        self.live(id(1), tree, kind='background', state='working', bridge='session_working')
+        self.live(id(2), self.project, kind='background', state='idle')
+        self.live(id(3), self.project, entrypoint='claude-vscode', status='busy', bridge='session_vscode')
+        self.transcript(id(4), other, timestamp='2026-02-01T00:00:00Z')
+        self.transcript(id(5), other, timestamp='2025-12-01T00:00:00Z')
+        self.transcript(id(6), clash, dict(), dict(type='assistant', cwd=str(tree)), dict(type='user', cwd=str(clash)))
+        rows = self.rows_by_id()
+        self.assertEqual({n: (rows[id(n)]['Circle'], rows[id(n)]['Remote']) for n in range(1, 7)}, {
+            1: ('🟢', '📡'), 2: ('🟡', ''), 3: ('🟣', '📡'), 4: ('🔵', ''), 5: ('⚫', ''), 6: ('🔴', '')})
+
+    def test_archived_desktop_sessions_are_not_listed(self):
+        kept, archived = '5f1c0a52-4a57-4c1e-9a55-3c2d7c1b9d01', '5f1c0a52-4a57-4c1e-9a55-3c2d7c1b9d02'
+        for id in (kept, archived):
+            self.transcript(id, self.project)
+        self.desktop_session(kept, self.project, title='Kept chat')
+        self.desktop_session(archived, self.project, archived=True)
+        self.assertEqual([(r['SessionId'], r['Task']) for r in self.run_manager('status')], [(kept, 'Kept chat')])
+        self.assertEqual([r['SessionId'] for r in self.run_manager('sessions')], [kept])
 
     def test_bridge_registration_is_not_connection_claim(self):
         self.new()

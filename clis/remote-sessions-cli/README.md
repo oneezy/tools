@@ -16,12 +16,48 @@ Override it with `--root` or `REMOTE_PROJECTS_ROOT`. Run each host against its o
 native checkout and Claude login. WSL uses Linux paths and Linux Claude; it does
 not manage the Windows Claude processes. Do not share one state file across hosts.
 
-The picker has aligned, colored columns and scrolls to fit the terminal. It shows
-available tasks first. H includes unavailable history; opening the picker starts
-nothing. Space selects, A selects available existing tasks, Enter resumes, N asks
-for a new task name, X stops background sessions, R refreshes, and Q closes the picker.
-A does not select unavailable history or unnamed new tasks. A session whose folder
-was deleted is not listed at all, and nothing recreates it.
+The picker lists every Claude session under each project folder, whichever surface
+started it: task worktrees and the repo root alike. It joins four sources:
+
+- `claude agents --json --all` for live state (`working`/`idle`/`busy`/`stopped`)
+- Claude's per-pid session files (`<config>/sessions/<pid>.json`) for the surface
+  running a live session (`entrypoint`) and its Remote Control registration
+  (`bridgeSessionId`), plus its permission mode and Claude version when recorded
+- transcripts for history, title, the surface a session started on (its first
+  `entrypoint`, or `teleportedFrom` for a session teleported from the web), the
+  Claude version and the permission mode
+- the desktop app's session store (`claude-code-sessions` under the app's data
+  folder; `--desktop-sessions` overrides it), which marks Desktop sessions and
+  supplies archived ones, which are hidden
+
+Table columns: `Status | Repo | Task | Source | Branch | Last active | Remote`.
+
+| Status | Meaning |
+|---|---|
+| 🟢 working | a background session is working |
+| 🟡 idle | a background session is waiting for you |
+| 🔵 stopped | resumable: the newest conversation in its folder, or a task the picker tracks |
+| 🟣 live | live in another app (VS Code, the desktop app, a terminal); view-only |
+| ⚪ new | a project with no session yet; N or Enter names a new task |
+| ⚫ history | an older conversation in the same folder, or one that cannot resume |
+| 🔴 error | a failed session, or history whose folder metadata conflicts |
+| ✅ merged | its work merged, awaiting folder removal (set by the cleanup sweep) |
+
+Remote shows 📡 only when the live process has a Remote Control registration.
+Source is what runs a session now: CLI, Background (`--bg`), VS Code ext, Desktop,
+RC server (spawned by `claude remote-control`, entrypoint `sdk-cli`). A stopped
+session shows where it started instead, including Web for a teleported session.
+The detail pane under the table shows the folder, remote URL, session ID,
+permission mode, Claude version, where the session started and what runs it now.
+Columns are measured in terminal cells, so emoji and wide titles keep them aligned
+in Windows Terminal.
+
+Opening the picker starts nothing. H shows history rows. Space checks a row, A
+checks every resumable or running row, Enter resumes the checked rows, N asks for a
+new task name, X stops the checked background sessions, R refreshes, and Q closes
+the picker. A row live in another app is view-only: it cannot be checked, resumed or
+stopped. A session whose folder was deleted, or that was archived in the desktop app,
+is not listed at all, and nothing recreates it.
 
 The picker loads fast: each transcript's metadata is cached by path, modification
 time and size, so a refresh re-parses only transcripts that changed.
@@ -48,7 +84,11 @@ python3 remote_sessions.py stop --only brain --session-id FULL-UUID --json
 commands require `--only`. Use `--only brain tools` or `--only brain,tools`. Legacy
 PowerShell spellings such as `-Only`, `-SessionId`, `-Task`, `-Plan`, and `-Json` are
 accepted. `--config` selects a Claude configuration directory. `--claude` selects
-its executable. `--include-project-sessions` also includes project-root history.
+its executable. `--desktop-sessions` selects the desktop app's session store. Repo-root
+sessions are always listed; `--include-project-sessions` is still accepted and does nothing.
+`status --json` rows carry `Status`, `Circle`, `Source`, `Origin`, `Remote`, `ViewOnly`,
+`PermissionMode` and `ClaudeVersion`. `resume --session-id` on a session live in another
+app is refused as view-only, like `stop`.
 
 `start` without a task name resumes managed tasks, or the newest available saved
 conversation per folder. Creating the first task now requires a descriptive name.
@@ -163,7 +203,10 @@ python3 -m unittest discover -s tests -p test_portable.py -v
 ```
 
 The portable suite uses a fake Claude executable and real disposable Git repos.
-It covers UUID/options continuity, hidden deleted folders, slow and copied launches,
+It covers the four-source inventory (Source labels per surface, status circles, the
+Remote column, archived desktop sessions), view-only rows, emoji column alignment
+and the detail pane in captured picker output, UUID/options continuity, hidden
+deleted folders, slow and copied launches,
 the stop rule, branch-follows-folder, the transcript cache, duplicate prevention,
 read-only previews, worktree names, native path rules, cross-process locks,
 argument quoting, and A/Enter picker behavior. `tests/test-linux.sh` copies the
