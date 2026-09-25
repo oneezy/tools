@@ -121,27 +121,36 @@ engine waits up to `--launch-wait` (`-LaunchWait`) seconds (default 90) for
 `claude agents` to list the session. It adopts the requested ID, or the copy Claude
 reports (a UUID in its output, or the one new background session in that folder).
 A slow launch is not an error: the result says it is not listed yet, and it is
-stoppable once it appears. If Claude printed one session ID it lists nowhere else,
-the state follows that ID at once. Otherwise the next `start` or `status` adopts the
-one untracked session found in the new task's folder, so a slow new task never
-leaves a phantom row behind. A printed ID Claude lists in another folder is never
-adopted.
+stoppable once it appears. If Claude printed one session ID, besides the requested
+one, that it lists nowhere yet, the state follows that ID at once but marks it
+unconfirmed. Until a launch is confirmed, the next `start` or `resume` settles it:
+it confirms the ID once Claude lists it, or else adopts the one untracked background
+session running in that folder, or failing that the one conversation saved there
+since the launch. An older conversation in the folder is never taken over. `status`
+shows the same adoption but does not save it. So a slow launch never leaves a
+phantom row behind. A printed ID that Claude lists in another folder is never adopted.
 
 One stop rule, with no ownership check: every background session in a selected
 project can be stopped, whoever started it. A session live in another app (an
 interactive session in VS Code, the desktop app or a terminal) is view-only; the
 engine never stops it and never kills a saved PID. `stop --only brain` stops every
-background session in brain; `--session-id` stops just that one. A `--session-id`
-that runs outside the selected projects, or that the selected projects have never
-seen, is an error rather than "already stopped".
+background session in brain; `--session-id` stops just that one, and a saved ID
+that continued as a copy stops the copy. A `--session-id` that runs outside the
+selected projects, or that the selected projects have never seen, is an error
+rather than "already stopped".
 
 A session follows its folder. The branch shown is whatever the folder has checked
 out now (none on a detached HEAD, never a stale saved branch), and mutating commands
 update the saved state to match. State records a new task only once its folder
-exists, so a recorded session whose folder is gone was deleted: it is hidden; the engine never recreates the folder, never makes a
-`recovered-<id>` worktree and never starts a replacement conversation. Closing the
-picker leaves sessions running. No worktree deletion, branch deletion, reset,
-stash, push, or transcript rewrite is implemented.
+exists, so a recorded session whose folder is gone was deleted. It is hidden, and
+the engine never recreates the folder, never makes a `recovered-<id>` worktree and
+never starts a replacement conversation. Closing the picker leaves sessions running.
+No worktree deletion, branch deletion, reset, stash, push, or transcript rewrite is
+implemented.
+
+Transcript metadata is cached per file (path, modification time and size) for the
+life of one process. An open picker's refresh re-parses only changed transcripts;
+each CLI call and each new picker starts with an empty cache.
 
 Mutations share an OS file lock and write state atomically. Both PowerShell entry
 points now delegate to Python, so there is one lock implementation. Do not run an

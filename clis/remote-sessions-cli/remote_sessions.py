@@ -92,6 +92,19 @@ def checked_out_branch(directory):
     return head.removeprefix('ref: refs/heads/') if head.startswith('ref: refs/heads/') else None
 
 
+def project_of(directory, projects):
+    return next((name for name, path in projects.items() if wt.inside(directory, path)), None)
+
+
+def moment(text):
+    """A saved timestamp as an aware datetime, or None when it cannot be read."""
+    try:
+        value = datetime.fromisoformat(str(text).replace('Z', '+00:00'))
+    except ValueError:
+        return None
+    return value if value.tzinfo else value.replace(tzinfo=timezone.utc)
+
+
 # Transcript metadata by file path, kept while the file's modification time and size are unchanged.
 # Each scan drops the entries of files it no longer sees, so the cache never outgrows the history.
 TRANSCRIPTS = {}
@@ -269,20 +282,29 @@ class Manager:
             write_json(self.state_path, state)
 
     def adopt(self, sessions, saved, agents):
-        """A new task whose launch was never confirmed belongs to the one untracked session in its folder:
-        the live background session there, else its saved history. Returns whether any entry moved."""
-        moved = False
+        """Settle launches that were never confirmed: a new task, or an ID taken only from Claude's output.
+        An entry whose own ID has appeared is confirmed. Otherwise it belongs to the one untracked session
+        in its folder: the live background session there, else a conversation saved there since the launch,
+        never an older one. Returns whether any entry changed."""
+        changed = False
         for id, entry in list(sessions.items()):
-            if not entry.get('NewSession') or not folder_exists(entry.get('WorkingDirectory')):
+            if not (entry.get('NewSession') or entry.get('Unconfirmed')) or not folder_exists(entry.get('WorkingDirectory')):
                 continue
             folder = entry['WorkingDirectory']
             live = {a['sessionId'] for a in agents if active(a) and a['kind'] == 'background' and wt.same(a['cwd'], folder)}
-            history = {r['SessionId'] for r in saved if wt.same(r['WorkingDirectory'], folder)}
-            candidates = (live - sessions.keys()) or (history - sessions.keys())
+            here = [r for r in saved if wt.same(r['WorkingDirectory'], folder)]
+            if id in live or any(r['SessionId'] == id for r in here):
+                entry['NewSession'] = False
+                entry.pop('Unconfirmed', None)
+                changed = True
+                continue
+            launched = moment(entry.get('Updated'))
+            since = {r['SessionId'] for r in here if launched and (moment(r['Updated']) or launched) > launched}
+            candidates = (live - sessions.keys()) or (since - sessions.keys())
             if len(candidates) == 1:
                 rekey(sessions, id, candidates.pop())
-                moved = True
-        return moved
+                changed = True
+        return changed
 
     def selection(self, saved, state):
         o = self.options
@@ -309,12 +331,7 @@ class Manager:
             return [dict(SessionId=str(uuid.uuid4()), Project=project, Task=name, Branch=o.branch,
                          Available=False, NewSession=True, Name=wt.task_name(project, o.task or o.branch, o.issue, o.pr))]
         if o.session_id:
-            id, visited = o.session_id, set()
-            while sessions.get(id, {}).get('ReplacedBy'):
-                if id in visited:
-                    raise ValueError('Saved replacement links contain a cycle.')
-                visited.add(id)
-                id = sessions[id]['ReplacedBy']
+            id = current(sessions, o.session_id)
             if id in sessions and sessions[id]['Project'] not in projects:
                 raise ValueError('The saved session belongs to a different project.')
             row = self.managed(id, sessions[id], saved) if id in sessions else next((s for s in saved if s['SessionId'] == id), None)
@@ -356,7 +373,8 @@ class Manager:
             if not any(a['sessionId'] == id and a['kind'] == 'background' for a in agents):
                 args += ['--remote-control', f"{project} {s.get('Task') or s.get('Title') or Path(directory).name}"]
             return dict(Session=s, Mode='resume', Arguments=args, WorkingDirectory=directory, SessionId=id, Project=project)
-        name = s.get('Name') or wt.task_name(project, s.get('Task'))
+        # A new request carries its Name; a stored task is named by its task, else by its folder.
+        name = s.get('Name') or (wt.task_name(project, s['Task']) if s.get('Task') else Path(directory).name)
         workspace = wt.plan(self.projects()[project], name, s.get('Branch'), directory)
         base = dict(Session=s, Mode='new', Arguments=['--bg', '--remote-control', f"{project} {s.get('Task') or name}"],
                     WorkingDirectory=workspace['WorkingDirectory'], SessionId=id, Project=project, Workspace=workspace)
@@ -405,29 +423,22 @@ class Manager:
                                AgentId=(agent or {}).get('id'), ReplacedBy=entry.get('ReplacedBy')))
         return result
 
-    def confirm(self, launch, output, before):
-        """Find the session a launch produced: the requested ID, or the copy Claude reports."""
+    def confirm(self, launch, reported, before):
+        """Find the session a launch produced: the requested ID, or the copy Claude reports.
+        Returns it (None when Claude has not listed it in time) and the last inventory read."""
         id, directory = launch['SessionId'], launch['WorkingDirectory']
-        reported = {m.lower() for m in UUID.findall(output)}
         earlier = {a['sessionId'] for a in before if active(a)}
         deadline = time.monotonic() + self.options.launch_wait
         while True:
-            in_folder = [a for a in self.agents() if active(a) and a['kind'] == 'background' and wt.same(a['cwd'], directory)]
+            inventory = self.agents()
+            in_folder = [a for a in inventory if active(a) and a['kind'] == 'background' and wt.same(a['cwd'], directory)]
             started = [a for a in in_folder if a['sessionId'] not in earlier]
             found = (next((a for a in in_folder if launch['Mode'] == 'resume' and a['sessionId'] == id), None)
                      or next((a for a in in_folder if a['sessionId'].lower() in reported), None)
                      or (started[0] if len(started) == 1 else None))
             if found or time.monotonic() >= deadline:
-                return found
+                return found, inventory
             time.sleep(.5)
-
-    def unlisted_report(self, output):
-        """The one session ID a launch printed that Claude lists nowhere yet: a slow start, not a session in another folder.
-        Without one, a later start adopts the session by its folder."""
-        reported = {m.lower() for m in UUID.findall(output)}
-        if len(reported) == 1 and not any(a['sessionId'].lower() in reported for a in self.agents()):
-            return reported.pop()
-        return None
 
     def start(self, selected, state):
         results = []
@@ -456,21 +467,22 @@ class Manager:
                                 NewSession=launch['Mode'] == 'new', Updated=datetime.now(timezone.utc).isoformat())
             write_json(self.state_path, state)
             output = self.claude(launch['Arguments'], launch['WorkingDirectory'])
-            agent = self.confirm(launch, output, before)
-            actual = agent['sessionId'] if agent else self.unlisted_report(output) or id
-            result = 'resumed original conversation and worktree' if launch['Mode'] == 'resume' else 'created task in a persistent worktree'
-            if not agent:
-                result = 'launched; not listed yet by claude agents, stoppable once it appears'
+            reported = {m.lower() for m in UUID.findall(output)}
+            agent, inventory = self.confirm(launch, reported, before)
+            printed = None if agent else printed_session(reported, id, inventory)
+            actual = agent['sessionId'] if agent else printed or id
+            result = launch_result(launch['Mode'], listed=bool(agent), copied=actual != id)
             if actual != id:
                 # Claude started a copy (or chose the ID of a new task). Follow it; the old ID stays history.
                 rekey(sessions, id, actual)
                 if launch['Mode'] == 'resume':
                     sessions[id] = dict(Project=s['Project'], WorkingDirectory=launch['WorkingDirectory'], ReplacedBy=actual)
-                    if agent:
-                        result = 'resumed as the copy Claude reported, in the same worktree'
                 id = actual
             if agent:
                 sessions[id]['NewSession'] = False
+            elif printed:
+                # Only Claude's output names it; a later start confirms it or moves to the session in the folder.
+                sessions[id]['Unconfirmed'] = True
             write_json(self.state_path, state)
             bridge = self.bridge(agent)
             results.append(dict(Project=s['Project'], SessionId=id, Task=s.get('Task'), Branch=branch,
@@ -479,36 +491,35 @@ class Manager:
                                 Connection='registration found; delivery unverified' if bridge else 'no bridge registration; attach and run /remote-control'))
         return results
 
-    @staticmethod
-    def project_of(directory, projects):
-        return next((name for name, path in projects.items() if wt.inside(directory, path)), None)
+    def target(self, state):
+        """The session --session-id names now: a saved ID that continued as a copy names the copy."""
+        return self.options.session_id and current(state['Sessions'], self.options.session_id)
 
-    def stoppable(self, agents, projects):
+    @staticmethod
+    def stoppable(agents, projects, id):
         # One rule: every background session can be stopped; a session live in another app is view-only.
-        id = self.options.session_id
         if id:
             chosen = [a for a in agents if active(a) and a['sessionId'] == id]
-            if any(not self.project_of(a['cwd'], projects) for a in chosen):
+            if any(not project_of(a['cwd'], projects) for a in chosen):
                 raise ValueError(f'Session {id} runs outside the selected projects; nothing was stopped.')
         else:
-            chosen = [a for a in agents if active(a) and a['kind'] == 'background' and self.project_of(a['cwd'], projects)]
+            chosen = [a for a in agents if active(a) and a['kind'] == 'background' and project_of(a['cwd'], projects)]
         for a in chosen:
             if a['kind'] != 'background':
                 raise ValueError(f"Session {a['sessionId']} is live in another app; it is view-only here.")
         return chosen
 
     def stop(self, state):
-        agents, projects = self.agents(), self.projects()
+        agents, projects, id = self.agents(), self.projects(), self.target(state)
         results = []
-        for a in self.stoppable(agents, projects):
+        for a in self.stoppable(agents, projects, id):
             if sum(item.get('id') == a['id'] for item in agents) != 1:
                 raise ValueError('Ambiguous native agent identifier; nothing was stopped.')
             self.claude(['stop', a['id']])
             if any(b['sessionId'] == a['sessionId'] and active(b) for b in self.agents()):
                 raise RuntimeError('Claude still reports the session active after stop.')
-            results.append(dict(SessionId=a['sessionId'], Project=self.project_of(a['cwd'], projects),
+            results.append(dict(SessionId=a['sessionId'], Project=project_of(a['cwd'], projects),
                                 Result='stopped; conversation and worktree retained'))
-        id = self.options.session_id
         if id and not results:
             entry = state['Sessions'].get(id)
             project = entry['Project'] if entry and entry.get('Project') in projects else next(
@@ -542,8 +553,8 @@ class Manager:
             if o.action == 'stop':
                 if o.plan:
                     projects = self.projects()
-                    return [dict(Project=self.project_of(a['cwd'], projects), SessionId=a['sessionId'], Result='stop background session; keep history')
-                            for a in self.stoppable(self.agents(), projects)]
+                    return [dict(Project=project_of(a['cwd'], projects), SessionId=a['sessionId'], Result='stop background session; keep history')
+                            for a in self.stoppable(self.agents(), projects, self.target(state))]
                 return self.stop(state)
             saved = self.saved()
             if o.action == 'sessions':
@@ -561,11 +572,41 @@ class Manager:
 
 
 def rekey(sessions, old, new):
-    """Move a state entry to the session ID Claude actually runs, and point replacement links at it."""
-    sessions[new] = dict(sessions.pop(old), NewSession=False)
+    """Move a state entry to the session ID Claude actually runs, now confirmed, and point replacement links at it."""
+    moved = dict(sessions.pop(old), NewSession=False)
+    moved.pop('Unconfirmed', None)
+    sessions[new] = moved
     for entry in sessions.values():
         if entry.get('ReplacedBy') == old:
             entry['ReplacedBy'] = new
+
+
+def current(sessions, id):
+    """Follow replacement links from a saved ID to the session it continues as."""
+    visited = set()
+    while sessions.get(id, {}).get('ReplacedBy'):
+        if id in visited:
+            raise ValueError('Saved replacement links contain a cycle.')
+        visited.add(id)
+        id = sessions[id]['ReplacedBy']
+    return id
+
+
+def printed_session(reported, requested, inventory):
+    """The one session ID a launch printed, besides the requested one, that Claude lists nowhere yet:
+    a slow start or copy. An ID Claude lists, in any folder, belongs to another session."""
+    others = reported - {requested.lower()}
+    if len(others) == 1 and not any(a['sessionId'].lower() in others for a in inventory):
+        return others.pop()
+    return None
+
+
+def launch_result(mode, listed, copied):
+    if not listed:
+        return 'launched; not listed yet by claude agents, stoppable once it appears'
+    if mode == 'new':
+        return 'created task in a persistent worktree'
+    return 'resumed as the copy Claude reported, in the same worktree' if copied else 'resumed original conversation and worktree'
 
 
 def task_label(options):

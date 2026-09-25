@@ -1,5 +1,6 @@
 """Run with python -m unittest discover -s tests -p test_portable.py -v."""
 import argparse
+from datetime import datetime, timezone
 import json
 import os
 from pathlib import Path
@@ -59,7 +60,7 @@ class PortableTests(unittest.TestCase):
         data = self.data()
         for agent in data['Agents']:
             agent.pop('HiddenPolls', None)
-        self.change(Mode='normal', Agents=data['Agents'])
+        self.change(Mode='normal', Slow=False, Agents=data['Agents'])
 
     def test_readable_names_and_same_workspace_for_both_harnesses(self):
         first = self.run_manager('workspace', '--issue', '2', '--task', 'Fix login')[0]
@@ -191,6 +192,51 @@ class PortableTests(unittest.TestCase):
         self.assertEqual([r['SessionId'] for r in self.run_manager('status') if r['Running']], [copy])
         self.run_manager('stop', '--session-id', copy)
         self.assertEqual(self.data()['Stops'], 2)
+
+    def test_slow_copied_resume_is_followed_and_stoppable_by_either_id(self):
+        first = self.new()
+        self.run_manager('stop')
+        # Claude names both the requested conversation and its copy, and lists the copy only after the wait.
+        self.change(Mode='copy', Slow=True, SlowPolls=50, EchoRequested=True)
+        resumed = self.run_manager('resume', '--session-id', first['SessionId'], '--launch-wait', '0')[0]
+        copy = next(a['sessionId'] for a in self.data()['Agents'] if a['sessionId'] != first['SessionId'])
+        self.assertEqual(resumed['SessionId'], copy)
+        self.reveal_slow_agents()
+        self.assertEqual([r['SessionId'] for r in self.run_manager('stop', '--session-id', first['SessionId'])], [copy])
+        self.assertEqual(self.data()['Stops'], 2)
+
+    def test_unrelated_id_in_launch_output_is_repaired_once_the_session_appears(self):
+        self.change(Mode='slow', SlowPolls=50, Quiet=True, Banner='Environment 5f1c0a52-4a57-4c1e-9a55-3c2d7c1b9e03 ready')
+        self.new('fix-login', '--launch-wait', '0')
+        self.reveal_slow_agents()
+        real = self.data()['Agents'][0]['sessionId']
+        self.assertEqual(self.run_manager('start')[0]['SessionId'], real)
+        self.assertEqual(list(rs.read_json(self.state_file())['Sessions']), [real])
+        self.assertEqual([r['SessionId'] for r in self.run_manager('stop')], [real])
+
+    def test_failed_new_task_launch_adopts_only_a_conversation_that_began_after_it(self):
+        self.change(Mode='launch-failure')
+        with self.assertRaises(RuntimeError):
+            self.new()
+        folder = next(t['Path'] for t in wt.worktrees(self.project) if not wt.same(t['Path'], self.project))
+        history = self.config / 'projects' / 'planted'
+        history.mkdir(parents=True)
+
+        def plant(id, timestamp):
+            (history / f'{id}.jsonl').write_text(json.dumps(dict(type='user', sessionId=id, cwd=folder, timestamp=timestamp)))
+            return next(r['Task'] for r in self.run_manager('status') if r['SessionId'] == id)
+
+        self.assertNotEqual(plant('5f1c0a52-4a57-4c1e-9a55-3c2d7c1b9e04', '2020-01-01T00:00:00Z'), 'issue-2 fix-login')
+        later = datetime.now(timezone.utc).isoformat()
+        self.assertEqual(plant('5f1c0a52-4a57-4c1e-9a55-3c2d7c1b9e05', later), 'issue-2 fix-login')
+
+    def test_stored_new_task_without_a_task_name_launches_in_its_own_folder(self):
+        folder = self.run_manager('workspace', '--task', 'legacy')[0]['WorkingDirectory']
+        id = '5f1c0a52-4a57-4c1e-9a55-3c2d7c1b9e06'
+        rs.write_json(self.state_file(), dict(Version=2, Sessions={id: dict(Project='brain', WorkingDirectory=folder, NewSession=True)}))
+        self.run_manager('start', '--session-id', id)
+        self.assertTrue(wt.same(self.data()['LastDirectory'], folder))
+        self.assertEqual(len(wt.worktrees(self.project)), 2)
 
     def test_displayed_branch_follows_the_folders_checkout(self):
         first = self.new()
