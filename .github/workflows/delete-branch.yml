@@ -1,0 +1,63 @@
+# delete-branch: deletes a ticket's remote branch once the ticket closes (oneezy/tools#33, spec #30).
+#
+# Reusable only. Every repo, oneezy/tools included, runs it from a thin caller on its own
+# `issues: closed` and `pull_request: closed` events; the caller is in clis/remote-sessions-cli/README.md.
+# When called, the `github` context and GITHUB_TOKEN are the caller's, so the branches deleted are
+# the caller's.
+#
+# The rules live in clis/remote-sessions-cli/delete_remote_branch.py:
+#   issue closed                     -> delete the branches named after it: <type>/<n>-<slug> or <n>-<slug>
+#   PR merged into integration-branch -> delete its head branch
+#   PR closed any other way          -> delete its head branch only when the branch's ticket is closed
+#   never deleted                    -> main, dev, integration-branch, release-branch, the default branch,
+#                                       prototype/* (per /prototype), protected branches and branches a
+#                                       ruleset forbids deleting, branches an open PR still uses, fork heads
+
+name: delete-branch
+
+on:
+  workflow_call:
+    inputs:
+      integration-branch:
+        description: A pull request merged into this branch deletes its head branch
+        type: string
+        default: dev
+      release-branch:
+        description: Never deleted
+        type: string
+        default: main
+
+permissions:
+  contents: write
+  issues: read
+  pull-requests: read
+
+jobs:
+  delete-branch:
+    if: >-
+      ${{ github.event.action == 'closed'
+          && (github.event_name == 'issues' || github.event_name == 'pull_request') }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out the script
+        uses: actions/checkout@v4
+        with:
+          repository: oneezy/tools
+          ref: ${{ github.repository == 'oneezy/tools' && github.sha || 'main' }}
+          sparse-checkout: clis/remote-sessions-cli/delete_remote_branch.py
+          sparse-checkout-cone-mode: false
+          persist-credentials: false
+      - name: Delete the branch
+        run: python3 clis/remote-sessions-cli/delete_remote_branch.py
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          EVENT: ${{ github.event_name }}
+          ACTION: ${{ github.event.action }}
+          ISSUE: ${{ github.event.issue.number }}
+          PR_HEAD: ${{ github.event.pull_request.head.ref }}
+          PR_HEAD_REPO: ${{ github.event.pull_request.head.repo.full_name }}
+          PR_BASE: ${{ github.event.pull_request.base.ref }}
+          PR_MERGED: ${{ github.event.pull_request.merged }}
+          INTEGRATION_BRANCH: ${{ inputs.integration-branch }}
+          RELEASE_BRANCH: ${{ inputs.release-branch }}

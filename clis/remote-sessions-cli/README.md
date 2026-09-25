@@ -140,3 +140,50 @@ The existing `test-native-lifecycle.ps1`, `test-task-worktrees.ps1`, and
 
 The legacy `task-worktrees.ps1` is retained as a reference during review and is not
 loaded by the launcher. The Python implementation is the active worktree engine.
+
+## Delete the remote branch when its ticket closes
+
+A reusable GitHub Actions workflow, [`.github/workflows/delete-branch.yml`](../../.github/workflows/delete-branch.yml),
+deletes a ticket's branch on GitHub as soon as the ticket closes, so remote branches
+do not pile up. Its rules live in `delete_remote_branch.py`:
+
+- **Issue closed:** every branch named after it, `<type>/<n>-<slug>` or `<n>-<slug>`, is deleted.
+- **Pull request merged into `dev`:** its head branch is deleted.
+- **Pull request closed any other way:** its head branch is deleted only when the ticket in
+  its name is already closed. A branch whose leading number is not an issue is left alone.
+- **Never deleted:** `main`, `dev`, the repo's default branch, `prototype/*` (per `/prototype`),
+  protected branches and branches a ruleset forbids deleting (such as tridentcubed's
+  `persist`), a branch an open pull request still uses as head or base, and a fork's head.
+
+Any repo turns it on with one caller file, `.github/workflows/delete-branch.yml`, on its
+default branch (issue events run from there). The one line that matters is `uses:`:
+
+```yaml
+name: delete-branch
+on:
+  issues:
+    types: [closed]
+  pull_request:
+    types: [closed]
+permissions:
+  contents: write
+  issues: read
+  pull-requests: read
+jobs:
+  delete-branch:
+    uses: oneezy/tools/.github/workflows/delete-branch.yml@main
+```
+
+It uses the caller's own `GITHUB_TOKEN`; no secret is needed. A repo whose integration
+branch is not `dev` adds `with: { integration-branch: <name> }`. The reusable workflow is
+read from `oneezy/tools` at `main`, so it works only once it is promoted there.
+
+The script reads its inputs from environment variables and runs by hand. `DRY_RUN=1`
+prints `would delete` lines and deletes nothing:
+
+```sh
+REPO=oneezy/tools EVENT=issues ACTION=closed ISSUE=33 DRY_RUN=1 python3 delete_remote_branch.py
+```
+
+Its tests (`tests/test_delete_remote_branch.py`) run it against `tests/fake_gh.py`, a
+fake `gh` that answers from a JSON fixture, following the fake-`claude` pattern.
