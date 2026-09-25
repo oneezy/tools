@@ -56,7 +56,8 @@ in Windows Terminal.
 
 Opening the picker starts nothing. H shows history rows. Space checks a row, A
 checks every resumable or running row, Enter resumes the checked rows, N asks for a
-new task name, X stops the checked background sessions, R refreshes, and Q closes
+new task's branch type, issue number and description (the same names the `WorktreeCreate`
+hook gives, below), X stops the checked background sessions, R refreshes, and Q closes
 the picker. A row live in another app is view-only: it cannot be checked, resumed or
 stopped. A session whose folder was deleted, or that was archived in the desktop app,
 is not listed at all, and nothing recreates it.
@@ -77,8 +78,8 @@ Use `python` on Windows and `python3` on Linux. These examples work from this fo
 ```sh
 python3 remote_sessions.py status --json
 python3 remote_sessions.py sessions --only brain --json
-python3 remote_sessions.py start --only brain --task fix-login --issue 2 --plan --json
-python3 remote_sessions.py start --only brain --task fix-login --issue 2 --json
+python3 remote_sessions.py start --only brain --type fix --issue 2 --task login --plan --json
+python3 remote_sessions.py start --only brain --type fix --issue 2 --task login --json
 python3 remote_sessions.py resume --only brain --session-id FULL-UUID --json
 python3 remote_sessions.py stop --only brain --session-id FULL-UUID --json
 ```
@@ -106,14 +107,25 @@ of transcript files is performed.
 The shared worktree command creates a folder without starting either agent:
 
 ```sh
-python3 remote_sessions.py workspace --only brain --issue 2 --task fix-login --plan --json
-python3 remote_sessions.py workspace --only brain --issue 2 --task fix-login --json
-python3 remote_sessions.py workspace --only tools --pr 20 --task session-continuity --json
+python3 remote_sessions.py workspace --only brain --type fix --issue 2 --task login --plan --json
+python3 remote_sessions.py workspace --only brain --type fix --issue 2 --task login --json
+python3 remote_sessions.py workspace --only tools --type chore --task session-continuity --json
 ```
 
-These produce `brain-issue-2-fix-login` and `tools-pr-20-session-continuity`. A PR or
-issue number alone is also accepted, for example `brain-pr-20`. New branch names
-start with `codex/`. The prefix is a branch convention, not ownership by Codex.
+These produce folder `brain-fix-2-login` on branch `fix/2-login`, and
+`tools-chore-session-continuity` on `chore/session-continuity`. The naming scheme is
+folder `<repo>-<type>-<issue>-<desc>` on branch `<type>/<issue>-<desc>`; the issue
+or the description may be left out. The **branch type** (see `CONTEXT.md`; not a
+ticket's Type) is one of feature, fix, research, prototype, wayfinder, chore, docs.
+Without `--type` the branch type is `feature`: `--task` is only a description and
+never supplies a type, so `--task fix-login` is `feature/fix-login`, as picker N with
+a blank type gives. `--type` alone is refused: give it `--task`, `--issue` or `--pr`.
+`--pr` takes the issue number's place. No `codex/` prefix is used. `--branch` keeps
+its own spelling; given alone it also names the folder, so `--branch codex/foo` is
+folder `brain-codex-foo`. A task is identified by its branch, the one it has or the
+one it asked for when a collision gave it a suffix. So `--type docs --issue 31 --task
+speed` never resumes the `fix/31-speed` task, and `--branch fix/31-speed` resumes the
+task that `--type fix --issue 31 --task speed` made.
 A numeric suffix is added only when a collision or stale registration requires it.
 Ticket titles are supplied with `--task`; the launcher does not guess titles or
 claim GitHub issues.
@@ -137,9 +149,63 @@ There is no common Claude/Codex setting that this tool can use to rename every
 app-created folder. Existing `bridge-cse_*` paths stay in place to preserve saved
 conversation locations. Renaming a chat changes its display title, not its folder.
 
+## WorktreeCreate hook
+
+`worktree_hook.py` is a Claude Code `WorktreeCreate` hook. Installed in user
+settings, it replaces Claude's own worktree creation for `claude --worktree`,
+subagents with `isolation: "worktree"`, and background sessions. Claude sends the
+hook JSON on stdin (`cwd` and the requested `name`); the hook creates or reuses the
+worktree and prints its absolute path as the last stdout line. Git output and errors
+go to stderr, and any failure exits non-zero, which aborts the creation.
+
+- A name that starts with a branch type is a named task: `fix-31-picker-speed` (or
+  `fix/31-picker-speed`) becomes folder `<repo>-fix-31-picker-speed` on branch
+  `fix/31-picker-speed`, the same names the picker's N gives.
+- Any other name, such as Claude's generated `bold-oak-a3f2` or a typed
+  `picker-speed`, becomes `<repo>-new-<n>` on branch `new/<n>`, n one above the
+  highest number any `<repo>-new-*` folder or `new/*` branch in that repo uses, and
+  the hook says so on stderr. The hook cannot tell a typed name from a generated one,
+  so start a typed name with its branch type to keep it. Rename the branch to
+  `<type>/<issue>-<desc>` once the task is known; the folder keeps its name.
+- Nothing is fetched and the proposed base is ignored. New branches are cut from
+  local `dev`; in a repo with no local `dev`, from `origin/dev`, else from HEAD. A
+  branch that only origin has starts at its last-fetched `origin/<branch>`, which may
+  be stale. The picker, by contrast, fetches and fast-forwards `dev` first.
+- Requests in one repo are serialised by a lock in its Git directory, so parallel
+  subagents with `isolation: "worktree"` each get their own `new/<n>`. An unnamed
+  request never shares an existing worktree; it fails instead. The picker and the
+  CLI take the same lock and plan again under it, so when the hook made a worktree
+  for the same branch in the meantime, they reuse it.
+- One worktree per branch: a request for a branch that is already checked out
+  prints that worktree's path, and a branch that exists but is not checked out gets
+  a worktree at its own commit. `dev` resolves to the main checkout when it has `dev`
+  checked out and is refused otherwise; `main` is always refused.
+- Folders go under the main checkout's `.claude/worktrees`, also when the request
+  comes from inside a linked worktree. `.worktreeinclude` is not processed.
+
+Install by adding it to `~/.claude/settings.json`. The single `command` string runs
+the same way under Git Bash (Claude's default hook shell on Windows) and PowerShell;
+forward slashes keep the path valid in both:
+
+```json
+{
+  "hooks": {
+    "WorktreeCreate": [
+      { "hooks": [ { "type": "command", "command": "py -3 \"V:/dev/tools/clis/remote-sessions-cli/worktree_hook.py\"" } ] }
+    ]
+  }
+}
+```
+
+On Linux use `"command": "python3 \"$HOME/dev/tools/clis/remote-sessions-cli/worktree_hook.py\""`.
+Check which surfaces honour it by hand: `claude --worktree`, a background session,
+`claude remote-control --spawn worktree`, and a desktop-app worktree. When a session
+on a reused worktree ends, Claude's own cleanup may offer to remove that worktree;
+keep it while another session still uses it.
+
 ## Remote Control and continuity
 
-In an already-open Claude conversation, `/remote-control brain-issue-2-fix-login`
+In an already-open Claude conversation, `/remote-control brain-fix-2-login`
 connects that conversation with a readable remote title. It carries its history.
 See [Remote Control from an existing session](https://code.claude.com/docs/en/remote-control#from-an-existing-session).
 The Desktop toggle does not combine all conversations into one remote session.
@@ -202,7 +268,7 @@ old copied PowerShell engine against the same root concurrently.
 ## Tests
 
 ```sh
-python3 -m unittest discover -s tests -p test_portable.py -v
+python3 -m unittest discover -s tests -v
 ```
 
 The portable suite uses a fake Claude executable and real disposable Git repos.
@@ -212,8 +278,12 @@ and the detail pane in captured picker output, UUID/options continuity, hidden
 deleted folders, slow and copied launches,
 the stop rule, branch-follows-folder, the transcript cache, duplicate prevention,
 read-only previews, worktree names, native path rules, cross-process locks,
-argument quoting, and A/Enter picker behavior. `tests/test-linux.sh` copies the
-source to a Linux temporary directory and runs the same suite with native Git.
+argument quoting, and A/Enter/N picker behavior. `tests/test_worktree_hook.py` feeds
+the hook Claude's input JSON in a temporary repo with a `dev` branch, directly and
+through Git Bash and PowerShell, and checks names, the cut from local `dev` without
+a fetch, the printed path as UTF-8, reuse, refusals, the stderr note for a name
+without a branch type, and parallel requests. `tests/test-linux.sh` copies the source
+to a Linux temporary directory and runs the same suite with native Git.
 The existing `test-native-lifecycle.ps1`, `test-task-worktrees.ps1`, and
 `test-remote-control.ps1` exercise the compatibility entry point on Windows.
 `test-picker.ps1` invokes the portable picker regression.
