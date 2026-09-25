@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Local Claude session manager. Python 3.10+, Git and Claude Code; no pip packages."""
 import argparse
-from contextlib import contextmanager, nullcontext
+from contextlib import nullcontext
 from copy import deepcopy
 from datetime import datetime, timezone
 import json
@@ -39,37 +39,8 @@ def write_json(path, data):
             os.unlink(temporary)
 
 
-@contextmanager
 def root_lock(root, timeout=30):
-    # The file stays in place so another process cannot lock a different inode.
-    with open(root / '.remote-sessions.lock', 'a+b') as stream:
-        stream.seek(0, 2)
-        if not stream.tell():
-            stream.write(b'\0')
-            stream.flush()
-        deadline = time.monotonic() + timeout
-        while True:
-            try:
-                stream.seek(0)
-                if os.name == 'nt':
-                    import msvcrt
-                    msvcrt.locking(stream.fileno(), msvcrt.LK_NBLCK, 1)
-                else:
-                    import fcntl
-                    fcntl.flock(stream, fcntl.LOCK_EX | fcntl.LOCK_NB)
-                break
-            except OSError:
-                if time.monotonic() >= deadline:
-                    raise RuntimeError('Another launcher action is still running.')
-                time.sleep(.1)
-        try:
-            yield
-        finally:
-            stream.seek(0)
-            if os.name == 'nt':
-                msvcrt.locking(stream.fileno(), msvcrt.LK_UNLCK, 1)
-            else:
-                fcntl.flock(stream, fcntl.LOCK_UN)
+    return wt.file_lock(root / '.remote-sessions.lock', timeout)
 
 
 UUID = re.compile(r'\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b', re.I)
@@ -470,14 +441,19 @@ class Manager:
         o = self.options
         projects = self.projects()
         sessions = state['Sessions']
-        named = o.task or o.branch or o.issue or o.pr or o.type
+        named = o.task or o.branch or o.issue or o.pr
+        if o.type and not named:
+            raise ValueError('--type needs a task: supply an issue number or a description for a new task.')
         if named:
             if len(projects) != 1 or o.session_id or o.action != 'start':
                 raise ValueError('Use task/issue/PR/branch with start and exactly one --only project, without --session-id.')
             project = next(iter(projects))
             name = task_label(o) or o.branch
+            folder, branch = wt.requested_names(project, o.task or o.branch, o.issue, o.pr, o.type)
+            branch = o.branch or branch
+            # One task per branch, however it was spelled; a saved task label still finds tasks from before the scheme.
             matches = [(id, e) for id, e in sessions.items() if e['Project'] == project and not e.get('ReplacedBy')
-                       and (e.get('Task') == name or (o.branch and e.get('Branch') == o.branch))]
+                       and (e.get('Branch') == branch or e.get('Task') == name)]
             if len(matches) > 1:
                 raise ValueError('More than one saved task matches; select its exact session ID.')
             if matches:
@@ -488,8 +464,7 @@ class Manager:
                 if not row:
                     raise ValueError(f"Task '{name}' had its folder deleted; its session stays gone. Choose a different task name.")
                 return [row]
-            folder, branch = wt.names(project, o.task or o.branch, o.issue, o.pr, o.type)
-            return [dict(SessionId=str(uuid.uuid4()), Project=project, Task=name, Branch=o.branch or branch,
+            return [dict(SessionId=str(uuid.uuid4()), Project=project, Task=name, Branch=branch,
                          Available=False, NewSession=True, Name=folder)]
         if o.session_id:
             id = current(sessions, o.session_id)
@@ -651,7 +626,7 @@ class Manager:
                 results.append(dict(Project=s['Project'], SessionId=launch['SessionId'], WorkingDirectory=launch['WorkingDirectory'], Result='already running; not restarted'))
                 continue
             if workspace:
-                wt.create(workspace)
+                wt.create_after_fetch(workspace)
             branch = workspace['Branch'] if workspace else checked_out_branch(launch['WorkingDirectory'])
             # Recorded only once the folder exists, so a recorded task whose folder is gone was deleted.
             sessions[id] = dict(Project=s['Project'], Task=s.get('Task'), Branch=branch, WorkingDirectory=launch['WorkingDirectory'],
@@ -734,10 +709,10 @@ class Manager:
                 if len(projects) != 1:
                     raise ValueError('Workspace requires exactly one --only project.')
                 project = next(iter(projects))
-                name, branch = wt.names(project, o.task or o.branch, o.issue, o.pr, o.type)
+                name, branch = wt.requested_names(project, o.task or o.branch, o.issue, o.pr, o.type)
                 workspace = wt.plan(projects[project], name, o.branch or branch)
                 if not o.plan:
-                    wt.create(workspace)
+                    wt.create_after_fetch(workspace)
                 workspace['Commands'] = dict(Claude=['claude', '--remote-control', name], Codex=['codex', '-C', workspace['WorkingDirectory']])
                 workspace['Title'] = name
                 return [workspace]
@@ -801,7 +776,8 @@ def launch_result(mode, listed, copied):
 
 
 def task_label(options):
-    return ' '.join(str(v) for v in (f'issue-{options.issue}' if options.issue else f'pr-{options.pr}' if options.pr else '', options.task) if v)
+    ticket = f'issue-{options.issue}' if options.issue else f'pr-{options.pr}' if options.pr else ''
+    return ' '.join(str(v) for v in (options.type, ticket, options.task) if v) if ticket or options.task else ''
 
 
 def parser():
@@ -813,7 +789,8 @@ def parser():
     p.add_argument('--session-id', '-SessionId')
     p.add_argument('--task', '-Task')
     p.add_argument('--branch', '-Branch')
-    p.add_argument('--type', '-Type', choices=wt.TYPES, help='Task type for a new task; default: the type the task name starts with, else feature.')
+    p.add_argument('--type', '-Type', choices=wt.BRANCH_TYPES,
+                   help='Branch type of a new task; default: the branch type the task name starts with, else feature.')
     ticket = p.add_mutually_exclusive_group()
     ticket.add_argument('--issue', '-Issue', type=int)
     ticket.add_argument('--pr', '-PR', type=int)
@@ -1032,7 +1009,7 @@ def menu(manager):
                 options.action = 'stop' if key == 'x' else 'resume'
                 if key == 'n' or (target.get('NewProject') and key != 'x'):
                     # The same names the WorktreeCreate hook gives: <repo>-<type>-<issue>-<desc> on <type>/<issue>-<desc>.
-                    kind = input(f"Type ({', '.join(wt.TYPES)}), blank for feature: ").strip().lower() or 'feature'
+                    branch_type = input(f"Branch type ({', '.join(wt.BRANCH_TYPES)}), blank for feature: ").strip().lower() or 'feature'
                     issue = input('Issue number, blank for none: ').strip().lstrip('#')
                     task = input('Description, blank cancels unless an issue is given: ').strip()
                     if not task and not issue:
@@ -1040,7 +1017,7 @@ def menu(manager):
                     if issue and not (issue.isdigit() and int(issue) > 0):
                         messages.append(f'Issue must be a number, not {issue!r}.')
                         continue
-                    options.action, options.type, options.task, options.issue = 'start', kind, task or None, int(issue) if issue else None
+                    options.action, options.type, options.task, options.issue = 'start', branch_type, task or None, int(issue) if issue else None
                 else:
                     options.session_id = target['SessionId']
                 try:

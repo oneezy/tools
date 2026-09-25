@@ -706,24 +706,44 @@ class PortableTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             planned('--task', '...')
 
-    def test_picker_n_prompts_for_type_issue_and_description_and_uses_the_hook_names(self):
+    def press_n(self, *answers):
+        """Picker N answered with branch type, issue number and description, then Q."""
         manager = rs.Manager(self.options('menu'))
-        answers = iter(['fix', '31', 'Picker speed'])
+        replies = iter(answers)
         with patch.object(rs.sys.stdin, 'isatty', return_value=True), patch.object(rs, 'keypress', side_effect=['n', 'q']), \
-                patch('builtins.input', side_effect=lambda prompt='': next(answers)), patch('builtins.print'):
+                patch('builtins.input', side_effect=lambda prompt='': next(replies)), patch('builtins.print'):
             rs.menu(manager)
+
+    def test_picker_n_prompts_for_type_issue_and_description_and_uses_the_hook_names(self):
+        self.press_n('fix', '31', 'Picker speed')
         folder = self.project / '.claude' / 'worktrees' / 'brain-fix-31-picker-speed'
         self.assertEqual(wt.git(folder, 'branch', '--show-current').stdout.strip(), 'fix/31-picker-speed')
         self.assertTrue(wt.same(self.data()['LastDirectory'], folder))
         self.assertEqual(self.data()['Starts'], 1)
 
     def test_picker_n_with_a_blank_description_and_no_issue_cancels(self):
-        manager = rs.Manager(self.options('menu'))
-        answers = iter(['', '', ''])
-        with patch.object(rs.sys.stdin, 'isatty', return_value=True), patch.object(rs, 'keypress', side_effect=['n', 'q']), \
-                patch('builtins.input', side_effect=lambda prompt='': next(answers)), patch('builtins.print'):
-            rs.menu(manager)
+        self.press_n('', '', '')
         self.assertEqual(len(wt.worktrees(self.project)), 1)
+        self.assertEqual(self.data()['Starts'], 0)
+
+    def test_same_issue_and_description_with_another_branch_type_is_another_task(self):
+        fix = self.run_manager('start', '--type', 'fix', '--issue', '31', '--task', 'speed')[0]
+        docs = self.run_manager('start', '--type', 'docs', '--issue', '31', '--task', 'speed')[0]
+        self.assertNotEqual(docs['SessionId'], fix['SessionId'])
+        self.assertEqual(Path(docs['WorkingDirectory']).name, 'brain-docs-31-speed')
+        self.assertEqual(wt.git(docs['WorkingDirectory'], 'branch', '--show-current').stdout.strip(), 'docs/31-speed')
+        # The same branch spelled another way is the same task.
+        again = self.run_manager('start', '--task', 'fix-31-speed')[0]
+        self.assertEqual(again['SessionId'], fix['SessionId'])
+        self.assertEqual(len(wt.worktrees(self.project)), 3)
+
+    def test_branch_type_alone_names_no_task(self):
+        folder = self.run_manager('workspace', '--task', 'legacy')[0]['WorkingDirectory']
+        id = '5f1c0a52-4a57-4c1e-9a55-3c2d7c1b9e06'
+        rs.write_json(self.state_file(), dict(Version=2, Sessions={id: dict(Project='brain', WorkingDirectory=folder, NewSession=True)}))
+        for action in ('start', 'workspace'):
+            with self.assertRaisesRegex(ValueError, 'issue number or a description'):
+                self.run_manager(action, '--type', 'fix')
         self.assertEqual(self.data()['Starts'], 0)
 
     def test_picker_a_enter_twice_preserves_sessions(self):

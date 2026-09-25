@@ -1,11 +1,17 @@
 # Worktree naming
 
 When preparing a new task worktree in Claude or Codex, name it after the work:
-`<repo>-issue-<number>-<short-description>`, `<repo>-pr-<number>-<short-description>`,
-or `<repo>-<short-description>` without a ticket. Examples: `brain-issue-2-fix-login`
-and `tools-pr-20-session-continuity`. Use lowercase hyphenated words, with the
-repository and ticket number first. Avoid opaque bridge IDs and random names when
-the creation API accepts a name. Add a numeric suffix only for a collision.
+folder `<repo>-<type>-<issue>-<desc>` on branch `<type>/<issue>-<desc>`, or
+`<repo>-<type>-<desc>` on `<type>/<desc>` without a ticket. The branch type is one
+of feature, fix, research, prototype, wayfinder, chore, docs. Example: folder
+`tools-fix-31-picker-speed` on `fix/31-picker-speed`. A worktree Claude makes before
+the task is known is `<repo>-new-<n>` on `new/<n>`; rename the branch to
+`<type>/<issue>-<desc>` once the task is known and leave the folder name alone. Use
+lowercase words separated by hyphens; no IDs or random words. Keep the repository,
+branch type and ticket number first; add a numeric suffix only for a collision.
+Avoid opaque bridge IDs and random names when the creation API accepts a name. The
+`WorktreeCreate` hook in `clis/remote-sessions-cli/worktree_hook.py` applies this
+scheme to every worktree Claude creates once it is installed.
 
 Prefer the shared `workspace` command in the tools repository's
 `clis/remote-sessions-cli/remote_sessions.py`; preview with `--plan --json`, then

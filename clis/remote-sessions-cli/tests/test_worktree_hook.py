@@ -44,12 +44,13 @@ class WorktreeHookTests(unittest.TestCase):
         git(self.repo, 'add', '.')
         git(self.repo, 'commit', '-m', 'fixture')
 
+    def payload(self, name, cwd=None):
+        return json.dumps(dict(session_id='abc123', transcript_path='/unused.jsonl', cwd=str(cwd or self.repo),
+                               hook_event_name='WorktreeCreate', name=name))
+
     def hook(self, name, cwd=None, command=None):
-        payload = dict(session_id='abc123', transcript_path='/unused.jsonl', cwd=str(cwd or self.repo),
-                       hook_event_name='WorktreeCreate', name=name)
-        result = subprocess.run(command or [sys.executable, str(HOOK)], input=json.dumps(payload), capture_output=True,
-                                text=True, cwd=str(cwd or self.repo))
-        return result
+        return subprocess.run(command or [sys.executable, str(HOOK)], input=self.payload(name, cwd), capture_output=True,
+                              text=True, encoding='utf-8', cwd=str(cwd or self.repo))
 
     def created(self, name, **options):
         result = self.hook(name, **options)
@@ -137,6 +138,67 @@ class WorktreeHookTests(unittest.TestCase):
         shell = shutil.which('pwsh') or shutil.which('powershell')
         command = f"& '{sys.executable}' '{HOOK}'"
         self.assertEqual(self.created('bold-oak-a3f2', command=[shell, '-NoProfile', '-Command', command]).name, 'brain-new-1')
+
+    def test_parallel_unnamed_requests_each_get_their_own_worktree(self):
+        # A workflow spawns isolated subagents at once; none may share or fail to get a worktree.
+        env = dict(os.environ, PYTHONIOENCODING='utf-8')
+        runs = [subprocess.Popen([sys.executable, str(HOOK)], stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+                                 stderr=subprocess.PIPE, text=True, encoding='utf-8', cwd=str(self.repo), env=env)
+                for _ in range(6)]
+        for run in runs:
+            run.stdin.write(self.payload('bold-oak-a3f2'))
+            run.stdin.close()
+        folders = []
+        for run in runs:
+            out, err = run.stdout.read(), run.stderr.read()
+            self.assertEqual(run.wait(), 0, err)
+            folders.append(Path(out.strip().splitlines()[-1]))
+        self.assertEqual(sorted(f.name for f in folders), [f'brain-new-{n}' for n in range(1, 7)])
+        self.assertEqual(sorted(self.branch(f) for f in folders), [f'new/{n}' for n in range(1, 7)])
+        self.assertEqual(self.worktree_count(), 7)
+
+    def test_path_with_non_ascii_characters_reaches_claude_as_utf8(self):
+        repo = self.repo.parent / 'café ✓' / 'brain'
+        repo.parent.mkdir()
+        shutil.move(str(self.repo), str(repo))
+        env = {k: v for k, v in os.environ.items() if k not in ('PYTHONIOENCODING', 'PYTHONUTF8')}
+        result = subprocess.run([sys.executable, str(HOOK)], input=self.payload('bold-oak-a3f2', repo).encode('utf-8'),
+                                capture_output=True, cwd=str(repo), env=env)
+        self.assertEqual(result.returncode, 0, result.stderr.decode('utf-8', 'replace'))
+        folder = Path(result.stdout.decode('utf-8').strip().splitlines()[-1])
+        self.assertEqual(folder, repo / '.claude' / 'worktrees' / 'brain-new-1')
+        self.assertTrue(folder.is_dir())
+
+    def clone_ahead_of_local_dev(self):
+        """An origin whose dev (and a pushed task branch) moved on after this repo last fetched."""
+        origin = self.repo.parent / 'origin.git'
+        git(self.repo.parent, 'clone', '--bare', '-q', str(self.repo), str(origin))
+        git(self.repo, 'remote', 'add', 'origin', str(origin))
+        git(self.repo, 'fetch', '-q', 'origin')
+        other = self.repo.parent / 'other'
+        git(self.repo.parent, 'clone', '-q', str(origin), str(other))
+        git(other, 'config', 'user.name', 'Fixture')
+        git(other, 'config', 'user.email', 'fixture@example.invalid')
+        git(other, 'commit', '-q', '--allow-empty', '-m', 'remote only')
+        git(other, 'push', '-q', 'origin', 'dev')
+        return other
+
+    def test_cuts_from_local_dev_without_fetching_a_newer_origin_dev(self):
+        self.clone_ahead_of_local_dev()
+        known = git(self.repo, 'rev-parse', 'origin/dev')
+        folder = self.created('fix-31-picker-speed')
+        self.assertEqual(git(folder, 'rev-parse', 'HEAD'), git(self.repo, 'rev-parse', 'dev'))
+        self.assertEqual(git(self.repo, 'rev-parse', 'origin/dev'), known)
+
+    def test_branch_known_only_on_origin_is_checked_out_at_its_remote_commit(self):
+        other = self.clone_ahead_of_local_dev()
+        git(other, 'switch', '-q', '-c', 'fix/31-picker-speed')
+        git(other, 'commit', '-q', '--allow-empty', '-m', 'task work')
+        git(other, 'push', '-q', 'origin', 'fix/31-picker-speed')
+        git(self.repo, 'fetch', '-q', 'origin')
+        folder = self.created('fix-31-picker-speed')
+        self.assertEqual(self.branch(folder), 'fix/31-picker-speed')
+        self.assertEqual(git(folder, 'rev-parse', 'HEAD'), git(other, 'rev-parse', 'HEAD'))
 
     def test_request_from_inside_a_worktree_lands_under_the_main_checkout(self):
         first = self.created('bold-oak-a3f2')

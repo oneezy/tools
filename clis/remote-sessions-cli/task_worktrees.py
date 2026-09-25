@@ -1,8 +1,11 @@
 """Persistent, named Git worktrees shared by Claude and Codex. No cleanup operations."""
+from contextlib import contextmanager
 import os
 import re
 import subprocess
+import time
 from pathlib import Path
+from typing import NamedTuple
 
 
 def key(path):
@@ -29,6 +32,39 @@ def git(directory, *args, check=True):
     return result
 
 
+@contextmanager
+def file_lock(path, timeout=30, busy='Another launcher action is still running.'):
+    """Cross-process exclusive lock on a file. The file stays in place so another process cannot lock a different inode."""
+    with open(path, 'a+b') as stream:
+        stream.seek(0, 2)
+        if not stream.tell():
+            stream.write(b'\0')
+            stream.flush()
+        deadline = time.monotonic() + timeout
+        while True:
+            try:
+                stream.seek(0)
+                if os.name == 'nt':
+                    import msvcrt
+                    msvcrt.locking(stream.fileno(), msvcrt.LK_NBLCK, 1)
+                else:
+                    import fcntl
+                    fcntl.flock(stream, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                break
+            except OSError:
+                if time.monotonic() >= deadline:
+                    raise RuntimeError(busy)
+                time.sleep(.1)
+        try:
+            yield
+        finally:
+            stream.seek(0)
+            if os.name == 'nt':
+                msvcrt.locking(stream.fileno(), msvcrt.LK_UNLCK, 1)
+            else:
+                fcntl.flock(stream, fcntl.LOCK_UN)
+
+
 def slug(text):
     value = re.sub(r'[^a-z0-9]+', '-', text.lower()).strip('-')[:90].rstrip('-')
     if not value:
@@ -36,53 +72,59 @@ def slug(text):
     return value
 
 
-TYPES = ('feature', 'fix', 'research', 'prototype', 'wayfinder', 'chore', 'docs')
+# Branch types (see CONTEXT.md): the first word of a task branch, not a ticket's Type.
+BRANCH_TYPES = ('feature', 'fix', 'research', 'prototype', 'wayfinder', 'chore', 'docs')
+
+
+class TaskNames(NamedTuple):
+    folder: str
+    branch: str
 
 
 def parse_task(text):
-    """Split a name such as fix-31-picker-speed or fix/31-picker-speed into (type, issue, description),
-    either of the last two possibly None. None when the name does not start with a known type."""
+    """Split a name such as fix-31-picker-speed or fix/31-picker-speed into (branch type, issue, description),
+    either of the last two possibly None. None when the name does not start with a known branch type."""
     try:
         text = slug(text)
     except ValueError:
         return None
-    match = re.fullmatch(rf"({'|'.join(TYPES)})(?:-(\d+)(?=-|$))?(?:-(.+))?", text)
+    match = re.fullmatch(rf"({'|'.join(BRANCH_TYPES)})(?:-(\d+)(?=-|$))?(?:-(.+))?", text)
     if not match or not (match.group(2) or match.group(3)):
         return None
     return match.group(1), int(match.group(2)) if match.group(2) else None, match.group(3)
 
 
-def task_names(repo, kind, number=None, description=None):
+def task_names(repo, branch_type, number=None, description=None):
     """Folder <repo>-<type>-<issue>-<desc> and branch <type>/<issue>-<desc>; the issue or the description may be absent."""
-    if kind not in TYPES:
-        raise ValueError(f"Unknown task type '{kind}'. Choose one of: {', '.join(TYPES)}.")
-    tail = '-'.join(str(p) for p in (number, slug(description) if description else None) if p)
-    if not tail:
+    if branch_type not in BRANCH_TYPES:
+        raise ValueError(f"Unknown branch type '{branch_type}'. Choose one of: {', '.join(BRANCH_TYPES)}.")
+    suffix = '-'.join(str(p) for p in (number, slug(description) if description else None) if p)
+    if not suffix:
         raise ValueError('Supply an issue number or a description for a new task.')
-    # Keep the repository, type and ticket number at the beginning, even when truncating.
-    return f'{slug(repo)}-{kind}-{tail}'[:120].rstrip('-'), f'{kind}/{tail}'[:120].rstrip('-')
+    # Keep the repository, branch type and ticket number at the beginning, even when truncating.
+    return TaskNames(f'{slug(repo)}-{branch_type}-{suffix}'[:120].rstrip('-'), f'{branch_type}/{suffix}'[:120].rstrip('-'))
 
 
-def names(repo, task=None, issue=None, pr=None, kind=None):
-    """Folder and branch for a named task. The type comes from --type, else from a task that starts with one
-    (fix-login is a fix), else feature. A PR number takes the issue's place."""
+def requested_names(repo, task=None, issue=None, pr=None, branch_type=None):
+    """Names for a task requested by --task/--issue/--pr/--type or picker N. The branch type comes from --type,
+    else from a task that starts with one (fix-login is a fix), else feature. A PR number takes the issue's place."""
     number = issue or pr
     parsed = parse_task(task) if task else None
-    if parsed and kind in (None, parsed[0]):
-        kind, found, description = parsed
-        if number and found:
-            description = '-'.join(str(p) for p in (found, description) if p)
-        number = number or found
+    if parsed and branch_type in (None, parsed[0]):
+        branch_type, task_number, description = parsed
+        if number and task_number:
+            description = '-'.join(str(p) for p in (task_number, description) if p)
+        number = number or task_number
     else:
         description = task
-    return task_names(repo, kind or 'feature', number, description)
+    return task_names(repo, branch_type or 'feature', number, description)
 
 
 def default_branch(repo, folder):
     """The branch a task folder's name implies: brain-fix-31-login implies fix/31-login."""
     rest = folder.removeprefix(f'{slug(repo)}-')
     parsed = parse_task(rest)
-    return task_names(repo, *parsed)[1] if parsed else f'feature/{slug(rest)}'
+    return task_names(repo, *parsed).branch if parsed else f'feature/{slug(rest)}'
 
 
 def worktrees(project):
@@ -97,6 +139,12 @@ def worktrees(project):
 
 def exists(project, ref):
     return git(project, 'show-ref', '--verify', '--quiet', ref, check=False).returncode == 0
+
+
+def dev_base(project):
+    """Where a new task branch starts: local dev, else origin/dev, else HEAD in a repo that has no dev at all."""
+    return next((b for b, ref in (('dev', 'refs/heads/dev'), ('origin/dev', 'refs/remotes/origin/dev'))
+                 if exists(project, ref)), 'HEAD')
 
 
 def plan(project, name, branch=None, preferred=None):
@@ -138,12 +186,16 @@ def plan(project, name, branch=None, preferred=None):
         branch = f'{branch}-{number}'
     remote = requested and exists(project, f'refs/remotes/origin/{requested}') and not branch_exists
     return dict(ProjectDirectory=str(project), WorkingDirectory=str(directory), Branch=branch,
-                Operation='create', Base=f'origin/{requested}' if remote else 'dev', RequestedBranch=requested)
+                Operation='create', Base=f'origin/{requested}' if remote else dev_base(project), RequestedBranch=requested)
+
+
+def common_dir(directory):
+    return Path(git(directory, 'rev-parse', '--path-format=absolute', '--git-common-dir').stdout.strip())
 
 
 def main_checkout(directory):
     """The main checkout of the repository that holds a folder, even when the folder is a linked worktree."""
-    common = Path(git(directory, 'rev-parse', '--path-format=absolute', '--git-common-dir').stdout.strip())
+    common = common_dir(directory)
     if common.name == '.git':
         return common.parent
     return Path(git(directory, 'rev-parse', '--show-toplevel').stdout.strip())
@@ -158,23 +210,30 @@ def next_new(project):
     refs = git(project, 'for-each-ref', '--format=%(refname:short)', 'refs/heads/new/').stdout.split()
     used += [int(r.removeprefix('new/')) for r in refs if re.fullmatch(r'new/\d+', r)]
     n = max(used, default=0) + 1
-    return f'{repo}-new-{n}', f'new/{n}'
+    return TaskNames(f'{repo}-new-{n}', f'new/{n}')
 
 
 def hook_worktree(cwd, name):
-    """What the WorktreeCreate hook does: create or reuse the worktree for a request, return its path."""
+    """What the WorktreeCreate hook does: create or reuse the worktree for a request, return its path.
+    Nothing is fetched; a new branch starts from local dev whatever base Claude proposed."""
     project = main_checkout(cwd)
     name = (name or '').strip()
+    current = checked_out_in(project)
     if name in ('dev', 'main'):
-        if checked_out_in(project) == name:
+        if current == name:
             return str(project)
-        raise ValueError(f'Sessions on {name} belong in the main checkout, and it has {checked_out_in(project) or "no branch"} checked out.')
+        raise ValueError(f"Sessions on {name} belong in the main checkout, and it has {current or 'no branch'} checked out.")
     parsed = parse_task(name)
-    folder, branch = task_names(project.name, *parsed) if parsed else next_new(project)
-    if checked_out_in(project) == branch:
-        return str(project)
-    workspace = plan(project, folder, branch)
-    create(workspace, fetch=False)
+    # Parallel subagents each run this hook: numbering, planning and creating happen under one per-repo lock,
+    # so two unnamed requests never pick the same new/<n>.
+    with file_lock(common_dir(project) / 'worktree-create.lock', 120, 'Another worktree is still being created in this repo.'):
+        names = task_names(project.name, *parsed) if parsed else next_new(project)
+        if current == names.branch:
+            return str(project)
+        workspace = plan(project, names.folder, names.branch)
+        if not parsed and workspace['Operation'] != 'create':
+            raise ValueError(f'{names.branch} is already in use; an unnamed worktree is never shared.')
+        create(workspace)
     return str(Path(os.path.abspath(workspace['WorkingDirectory'])))
 
 
@@ -182,24 +241,32 @@ def checked_out_in(directory):
     return git(directory, 'branch', '--show-current').stdout.strip() or None
 
 
-def create(workspace, fetch=True):
-    """Create a planned worktree. With fetch (the picker), origin is fetched and local dev fast-forwarded first;
-    without it (the hook), the worktree is cut from local dev as it is, or from HEAD in a repo with no dev."""
+def create(workspace):
+    """Create a planned worktree from what this repo already has; nothing is fetched. A new branch starts from
+    origin/<branch> when only origin has it, else from dev_base."""
     if workspace['Operation'] == 'reuse':
         return
     project, directory, branch = (workspace[k] for k in ('ProjectDirectory', 'WorkingDirectory', 'Branch'))
     if workspace['Operation'] == 'restore':
         git(project, 'worktree', 'add', directory, branch)
         return
-    if fetch and git(project, 'remote', 'get-url', 'origin', check=False).returncode == 0:
-        git(project, 'fetch', 'origin')
-    requested = workspace.get('RequestedBranch')
-    if requested == branch and exists(project, f'refs/remotes/origin/{branch}'):
+    if workspace.get('RequestedBranch') == branch and exists(project, f'refs/remotes/origin/{branch}'):
         git(project, 'worktree', 'add', '-b', branch, directory, f'origin/{branch}')
         return
-    if not fetch:
-        git(project, 'worktree', 'add', '-b', branch, directory, 'dev' if exists(project, 'refs/heads/dev') else 'HEAD')
-        return
+    git(project, 'worktree', 'add', '-b', branch, directory, dev_base(project))
+
+
+def create_after_fetch(workspace):
+    """The picker's creation: fetch origin and bring local dev up to date first, then create."""
+    if workspace['Operation'] == 'create':
+        refresh_dev(workspace['ProjectDirectory'])
+    create(workspace)
+
+
+def refresh_dev(project):
+    """Fetch origin, then create local dev when it is missing or fast-forward it to origin/dev."""
+    if git(project, 'remote', 'get-url', 'origin', check=False).returncode == 0:
+        git(project, 'fetch', 'origin')
     has_remote_dev = exists(project, 'refs/remotes/origin/dev')
     if not exists(project, 'refs/heads/dev'):
         git(project, 'branch', 'dev', 'origin/dev' if has_remote_dev else 'HEAD')
@@ -216,4 +283,3 @@ def create(workspace, fetch=True):
                 git(tree['Path'], 'merge', '--ff-only', 'origin/dev')
             else:
                 git(project, 'update-ref', 'refs/heads/dev', remote, local)
-    git(project, 'worktree', 'add', '-b', branch, directory, 'dev')

@@ -73,3 +73,7 @@ A ticket's size in Fibonacci points, 1 to 13. No weekly capacity: agents work in
 ## Type
 
 What kind of ticket: bug, feature, tech debt, question, learning, reference. A ticket with no type is a task. A map is the epic.
+
+## Branch type
+
+The first word of a task branch and worktree name: feature, fix, research, prototype, wayfinder, chore, docs. It says what the work on the branch is, as in `fix/31-picker-speed` in folder `tools-fix-31-picker-speed`. Not a ticket's **Type**: a bug ticket is usually worked on a `fix/` branch, but the two lists are separate. A worktree made before its task is known is `new/<n>` until the agent renames the branch.
