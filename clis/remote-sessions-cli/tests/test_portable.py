@@ -1,6 +1,6 @@
 """Run with python -m unittest discover -s tests -p test_portable.py -v."""
 import argparse
-from contextlib import redirect_stdout
+from contextlib import redirect_stderr, redirect_stdout
 from datetime import datetime, timezone
 import io
 import json
@@ -20,6 +20,7 @@ import task_worktrees as wt
 
 ENGINE = Path(rs.__file__)
 FAKE = Path(__file__).with_name('fake_claude.py')
+FAKE_WSL = Path(__file__).with_name('fake_wsl.py')
 CLEAR = '\033[2J\033[H'
 # A scripted picker item: press nothing until the picker redraws by itself.
 SETTLE = object()
@@ -53,6 +54,11 @@ class PortableTests(unittest.TestCase):
         self.config.mkdir()
         self.native = self.config / 'fake-native.json'
         self.native.write_text(json.dumps(dict(Agents=[], Starts=0, Stops=0, Mode='normal')))
+        # WSL as the fake reports it; with no state file, no distribution is installed.
+        self.wsl_state = Path(self.temp.name) / 'fake-wsl.json'
+        environment = patch.dict(os.environ, FAKE_WSL_STATE=str(self.wsl_state))
+        environment.start()
+        self.addCleanup(environment.stop)
         wt.git(self.project, 'init', '-b', 'dev')
         wt.git(self.project, 'config', 'user.name', 'Fixture')
         wt.git(self.project, 'config', 'user.email', 'fixture@example.invalid')
@@ -62,7 +68,7 @@ class PortableTests(unittest.TestCase):
 
     def options(self, *args, only=('brain',)):
         return rs.parser().parse_args([*args, '--root', str(self.root), '--config', str(self.config), '--claude', str(FAKE),
-                                       '--desktop-sessions', str(self.desktop), *(['--only', *only] if only else [])])
+                                       '--wsl', str(FAKE_WSL), '--desktop-sessions', str(self.desktop), *(['--only', *only] if only else [])])
 
     @property
     def desktop(self):
@@ -103,6 +109,23 @@ class PortableTests(unittest.TestCase):
         folder = self.desktop / 'account' / 'org'
         folder.mkdir(parents=True, exist_ok=True)
         (folder / f'local_{id}.json').write_text(json.dumps(dict(sessionId=f'local_{id}', cliSessionId=id, cwd=str(cwd), isArchived=archived, **fields)))
+
+    def distro(self, name, state, agents=None, files=(), shell=None, hang=None, noise=None):
+        """A WSL distribution as `wsl --list --verbose` reports it; agents and session files are what its Claude
+        reports once it runs. Without agents, Claude is not installed there. With `shell` (a Claude config folder and
+        a folder holding a `claude` command), the distro runs the engine's commands in a real POSIX shell instead."""
+        data = json.loads(self.wsl_state.read_text()) if self.wsl_state.exists() else dict(Distros=[], Homes={})
+        data['Distros'].append(dict(Name=name, State=state, Version=2))
+        if agents is not None:
+            data['Homes'][name] = dict(Agents=list(agents), Files=list(files), Noise=noise)
+        if shell:
+            data['Homes'][name] = dict(Shell=shell)
+        if hang:
+            data['Homes'][name] = dict(Hang=hang)
+        self.wsl_state.write_text(json.dumps(data))
+
+    def wsl(self):
+        return json.loads(self.wsl_state.read_text())
 
     def rows_by_id(self):
         return {r['SessionId']: r for r in self.run_manager('status')}
@@ -933,6 +956,170 @@ class PortableTests(unittest.TestCase):
         # One read for opening, one for the change, one more for the R pressed while that one loaded.
         self.picker([arrives_slowly, 'r', SETTLE, SETTLE, lambda: calls.append(self.data()['AgentsCalls']), 'q'])
         self.assertEqual(calls, [3])
+
+    def test_stopped_wsl_distro_shows_in_the_header_and_is_never_booted(self):
+        self.distro('Ubuntu-26.04', 'Stopped', agents=[dict(sessionId='5f1c0a52-4a57-4c1e-9a55-3c2d7c1b7a01', kind='interactive',
+                                                            cwd='/home/justin/dev/brain', pid=301, status='idle')])
+        self.distro('docker-desktop', 'Stopped')  # Docker's own distro hosts no Claude sessions.
+        screen = self.picker(['r', 'q'])[-1]
+        self.assertIn('WSL Ubuntu-26.04: stopped · W to scan', screen.splitlines()[0])
+        self.assertNotIn('docker-desktop', screen)
+        self.run_manager('status')
+        self.assertEqual(self.wsl()['Boots'], 0)
+        self.assertEqual({tuple(call[:2]) for call in self.wsl()['Calls']}, {('--list', '--verbose')})
+
+    def test_running_wsl_distro_contributes_view_only_rows_labelled_with_their_surface(self):
+        cli, other = '5f1c0a52-4a57-4c1e-9a55-3c2d7c1b7b01', '5f1c0a52-4a57-4c1e-9a55-3c2d7c1b7b02'
+        tree = '/home/justin/dev/brain/.claude/worktrees/brain-issue-9-linux-try'
+        self.distro('Ubuntu-26.04', 'Running', agents=[
+            dict(sessionId=cli, kind='interactive', cwd=tree + '/src', pid=301, status='busy', name='Linux try'),
+            dict(sessionId=other, kind='interactive', cwd='/home/justin/dev/tools', pid=302, status='idle')],
+            files=[dict(pid=301, sessionId=cli, cwd=tree, entrypoint='cli', bridgeSessionId='session_wsl')])
+        rows = self.rows_by_id()
+        self.assertNotIn(other, rows)  # Another repo than the selected one.
+        row = rows[cli]
+        self.assertEqual((row['Source'], row['Project'], row['Task'], row['WorkingDirectory'], row['Circle'], row['Remote']),
+                         ('WSL · CLI', 'brain', 'Linux try', tree, '🟣', '📡'))
+        self.assertEqual((row['ViewOnly'], row['Stoppable']), (True, False))
+        lines = self.picker(['q'])[-1].splitlines()
+        line = next(line for line in lines if 'Linux try' in line)
+        self.assertIn(' WSL · CLI ', line)
+        self.assertIn(f'Folder:  {tree} | host WSL Ubuntu-26.04', lines)  # The detail pane of the highlighted row.
+        # Brain on this host still has no session of its own, so it keeps its new-task placeholder.
+        self.assertTrue(any('⚪' in line and 'brain' in line for line in lines))
+        self.assertEqual(self.run_manager('stop'), [])
+        self.assertEqual(self.wsl()['Boots'], 0)
+
+    def test_w_boots_a_stopped_wsl_distro_and_lists_its_sessions(self):
+        id = '5f1c0a52-4a57-4c1e-9a55-3c2d7c1b7c01'
+        self.distro('Ubuntu-26.04', 'Stopped', agents=[dict(sessionId=id, kind='interactive', cwd='/home/justin/dev/brain',
+                                                            pid=301, status='idle', name='Linux chat')],
+                    files=[dict(pid=301, sessionId=id, cwd='/home/justin/dev/brain', entrypoint='cli')])
+        screens = self.picker(['w', SETTLE, 'q'])  # W reads off the key loop, like R.
+        first, woken = screens[0], screens[-1]
+        self.assertNotIn('Linux chat', first)
+        self.assertNotIn('stopped · W to scan', woken)
+        self.assertIn(' WSL · CLI ', next(line for line in woken.splitlines() if 'Linux chat' in line))
+        self.assertEqual(self.wsl()['Boots'], 1)
+
+    def test_picker_key_help_names_w(self):
+        keys = next(line for line in self.picker(['q'])[-1].splitlines() if 'Space select' in line)
+        self.assertIn('W scan WSL', keys)
+
+    def wsl_chat(self, id, name='Linux chat'):
+        return dict(sessionId=id, kind='interactive', cwd='/home/justin/dev/brain', pid=301, status='idle', name=name)
+
+    def test_wsl_row_detail_pane_says_another_host_not_another_app(self):
+        self.distro('Ubuntu-26.04', 'Running', agents=[self.wsl_chat('5f1c0a52-4a57-4c1e-9a55-3c2d7c1b7f01')])
+        screen = self.picker(['q'])[-1]
+        started = next(line for line in screen.splitlines() if line.startswith('Started:'))
+        self.assertIn('on another host; view-only', started)
+        self.assertNotIn('another app', started)
+
+    def test_picker_n_on_a_wsl_row_starts_nothing_on_windows(self):
+        self.distro('Ubuntu-26.04', 'Running', agents=[self.wsl_chat('5f1c0a52-4a57-4c1e-9a55-3c2d7c1b7f02')])
+        with patch('builtins.input', side_effect=AssertionError('N prompted for a WSL row')):
+            screens = self.picker(['n', 'q'])
+        self.assertIn('WSL Ubuntu-26.04', screens[-1].splitlines()[-1])
+        self.assertEqual(self.data()['Starts'], 0)
+        self.assertEqual(len(wt.worktrees(self.project)), 1)
+
+    def test_w_with_several_stopped_distros_boots_only_the_one_named(self):
+        self.distro('Ubuntu-26.04', 'Stopped', agents=[self.wsl_chat('5f1c0a52-4a57-4c1e-9a55-3c2d7c1b7f03', 'Ubuntu chat')])
+        self.distro('Debian', 'Stopped', agents=[self.wsl_chat('5f1c0a52-4a57-4c1e-9a55-3c2d7c1b7f04', 'Debian chat')])
+        prompts = []
+        with patch('builtins.input', side_effect=lambda prompt='': prompts.append(prompt) or 'Debian'):
+            woken = self.picker(['w', SETTLE, 'q'])[-1]
+        self.assertIn('Ubuntu-26.04', prompts[0])
+        self.assertIn('Debian chat', woken)
+        self.assertNotIn('Ubuntu chat', woken)
+        self.assertIn('WSL Ubuntu-26.04: stopped · W to scan', woken.splitlines()[0])
+        self.assertEqual({d['Name']: d['State'] for d in self.wsl()['Distros']}, {'Ubuntu-26.04': 'Stopped', 'Debian': 'Running'})
+
+    def test_w_with_one_stopped_distro_asks_nothing(self):
+        self.distro('Ubuntu-26.04', 'Stopped', agents=[self.wsl_chat('5f1c0a52-4a57-4c1e-9a55-3c2d7c1b7f05')])
+        with patch('builtins.input', side_effect=AssertionError('W prompted with one stopped distro')):
+            self.assertIn('Linux chat', self.picker(['w', SETTLE, 'q'])[-1])
+
+    def test_w_pressed_while_a_scan_runs_is_kept_for_the_next_scan(self):
+        # The picker reads off the key loop, so W can land while a live refresh is scanning; that scan must not drop it.
+        # Debian is listed first, so the scan has already passed it by the time W asks for it.
+        self.distro('Debian', 'Stopped', agents=[self.wsl_chat('5f1c0a52-4a57-4c1e-9a55-3c2d7c1b7f08', 'Debian chat')])
+        self.distro('Ubuntu-26.04', 'Running', agents=[self.wsl_chat('5f1c0a52-4a57-4c1e-9a55-3c2d7c1b7f07', 'Ubuntu chat')])
+        manager = rs.Manager(self.options('status'))
+        scan = rs.wsl_hosts.scan
+
+        def w_lands_mid_scan(*args, **kwargs):
+            manager.wake = {'Debian'}
+            return scan(*args, **kwargs)
+
+        with patch.object(rs.wsl_hosts, 'scan', side_effect=w_lands_mid_scan):
+            manager.wsl_rows()
+        self.assertEqual(manager.wake, {'Debian'})
+        self.assertIn('Debian chat', [r['Task'] for r in manager.wsl_rows()])
+        self.assertEqual(manager.wake, set())
+
+    def test_status_json_reports_wsl_notes_on_stderr(self):
+        self.distro('Ubuntu-26.04', 'Stopped')
+        out, err = io.StringIO(), io.StringIO()
+        with redirect_stdout(out), redirect_stderr(err):
+            rs.main(['status', '--json', '--root', str(self.root), '--config', str(self.config), '--claude', str(FAKE),
+                     '--wsl', str(FAKE_WSL), '--desktop-sessions', str(self.desktop), '--only', 'brain'])
+        self.assertIsInstance(json.loads(out.getvalue()), list)
+        self.assertIn('WSL Ubuntu-26.04: stopped · W to scan', err.getvalue())
+
+    def test_login_shell_noise_around_the_wsl_scan_is_ignored(self):
+        # A login profile may print a banner, and a logout script may clear the screen.
+        self.distro('Ubuntu-26.04', 'Running', agents=[self.wsl_chat('5f1c0a52-4a57-4c1e-9a55-3c2d7c1b7f06', 'Noisy chat')],
+                    noise='Welcome to Ubuntu {"motd": 1}\n\x1b[H\x1b[2J\x1b[3J')
+        screen = self.picker(['q'])[-1]
+        self.assertIn('Noisy chat', screen)
+        self.assertNotIn('unreadable', screen)
+
+    def test_a_wedged_wsl_distro_becomes_a_header_note_after_a_short_wait(self):
+        self.distro('Ubuntu-26.04', 'Running', hang=60)
+        with patch.object(rs.wsl_hosts, 'SCAN_TIMEOUT', 2):
+            began = time.monotonic()
+            screen = self.picker(['q'])[-1]
+        self.assertLess(time.monotonic() - began, 30)
+        self.assertIn('WSL Ubuntu-26.04: no answer in 2 s', screen.splitlines()[0])
+
+    def test_long_wsl_source_labels_are_shown_whole_and_keep_columns_aligned(self):
+        ids = ('5f1c0a52-4a57-4c1e-9a55-3c2d7c1b7d01', '5f1c0a52-4a57-4c1e-9a55-3c2d7c1b7d02')
+        self.transcript('5f1c0a52-4a57-4c1e-9a55-3c2d7c1b7d03', self.project)
+        self.distro('Ubuntu-26.04', 'Running', agents=[
+            dict(sessionId=ids[0], kind='background', id='bg000001', cwd='/home/justin/dev/brain', pid=301, state='working',
+                 name='Linux build'),
+            dict(sessionId=ids[1], kind='interactive', cwd='/home/justin/dev/brain', pid=302, status='idle', name='Linux editor')],
+            files=[dict(pid=301, sessionId=ids[0], entrypoint='cli'), dict(pid=302, sessionId=ids[1], entrypoint='claude-vscode')])
+        lines = self.picker(['q'])[-1].splitlines()
+        header = next(line for line in lines if 'SOURCE' in line)
+        at = lambda line, text: cells(line[:line.index(text)])
+        for task, source in (('Linux build', 'WSL · Background'), ('Linux editor', 'WSL · VS Code ext'), ('🔵', 'CLI')):
+            line = next(line for line in lines if task in line)
+            self.assertEqual(at(line, f' {source} ') + 1, at(header, 'SOURCE'), line)
+            self.assertLess(at(line, source) + len(source), at(header, 'BRANCH'), line)
+        self.assertEqual(at(next(line for line in lines if '🔵' in line), ' dev') + 1, at(header, 'BRANCH'))
+        self.assertTrue(all(cells(line) < 140 for line in lines))
+
+    @unittest.skipUnless(shutil.which('sh'), 'needs a POSIX shell')
+    def test_wsl_scan_reads_claude_and_its_session_files_in_a_real_shell(self):
+        id = '5f1c0a52-4a57-4c1e-9a55-3c2d7c1b7e01'
+        home = Path(self.temp.name) / 'ubuntu home'
+        config, commands = home / '.claude', home / 'bin'
+        (config / 'sessions').mkdir(parents=True)
+        commands.mkdir()
+        shim = commands / 'claude'
+        shim.write_text(f'#!/bin/sh\nexec "{Path(sys.executable).as_posix()}" "{FAKE.as_posix()}" "$@"\n', newline='\n')
+        shim.chmod(0o755)
+        (config / 'fake-native.json').write_text(json.dumps(dict(Starts=0, Stops=0, Mode='normal', Agents=[
+            dict(sessionId=id, kind='interactive', cwd='/home/justin/dev/brain', pid=301, status='busy', name='Shell chat')])))
+        (config / 'sessions' / '301.json').write_text(json.dumps(dict(pid=301, sessionId=id, cwd='/home/justin/dev/brain',
+                                                                      entrypoint='claude-vscode', bridgeSessionId='session_sh')))
+        (config / 'sessions' / '302.json').write_text(json.dumps(dict(pid=302, sessionId='5f1c0a52-4a57-4c1e-9a55-3c2d7c1b7e02')))
+        self.distro('Ubuntu-26.04', 'Running', shell=dict(Config=config.as_posix(), Path=str(commands)))
+        row = self.rows_by_id()[id]
+        self.assertEqual((row['Source'], row['Task'], row['Remote']), ('WSL · VS Code ext', 'Shell chat', '📡'))
 
     def test_picker_a_enter_twice_preserves_sessions(self):
         self.new('first')
