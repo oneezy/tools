@@ -28,6 +28,8 @@ if args[0] == 'agents':
         if a.get('HiddenPolls'):
             a['HiddenPolls'] -= 1
     save()
+    if data.get('Mode') == 'junk-agents':
+        listed = [1]  # A row that is not an agent record at all.
     print('{invalid' if data.get('Mode') == 'malformed' else json.dumps(listed))
 elif args[0] == '--bg':
     data['Starts'] += 1

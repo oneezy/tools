@@ -25,6 +25,11 @@ CLEAR = '\033[2J\033[H'
 SETTLE = object()
 
 
+def cursor_line(screen):
+    """The picker row the cursor is on."""
+    return next(line for line in screen.splitlines() if line.startswith('> ['))
+
+
 # Cells each wide string takes in Windows Terminal, from what it draws: a joined emoji sequence is one glyph.
 WIDE = {'👨‍👩‍👧': 2, '👍🏽': 2, '漢': 2, '字': 2, '🚀': 2, '📡': 2, '⚠️': 2, '❤️': 2,
         '🟢': 2, '🟡': 2, '🔵': 2, '🟣': 2, '⚪': 2, '⚫': 2, '🔴': 2, '✅': 2}
@@ -119,7 +124,7 @@ class PortableTests(unittest.TestCase):
                     self.assertLess(time.monotonic(), deadline[0], 'the picker never redrew by itself')
                     time.sleep(.02)
                     return None
-                deadline[0] = None
+                since[0], deadline[0] = drawn, None  # A SETTLE right after this one waits for a further redraw.
             item = next(script)
             if item is SETTLE:
                 since[0] = drawn if since[0] is None else since[0]
@@ -139,6 +144,12 @@ class PortableTests(unittest.TestCase):
 
     def run_manager(self, *args):
         return rs.Manager(self.options(*args)).execute()
+
+    def worktree_sessions(self, block, *titles):
+        """A task worktree per title, each with a saved session carrying that title."""
+        for n, title in enumerate(titles):
+            tree = self.run_manager('workspace', '--task', title)[0]['WorkingDirectory']
+            self.transcript(f'5f1c0a52-4a57-4c1e-9a55-3c2d7c1b7{block}{n:02d}', tree, dict(), dict(type='ai-title', aiTitle=title))
 
     def data(self):
         return json.loads(self.native.read_text())
@@ -859,18 +870,15 @@ class PortableTests(unittest.TestCase):
         self.assertIn('🟢 working', screens[-1])
 
     def test_keys_work_while_a_slow_refresh_loads(self):
-        for n, title in enumerate(('alpha', 'charlie')):
-            tree = self.run_manager('workspace', '--task', title)[0]['WorkingDirectory']
-            self.transcript(f'5f1c0a52-4a57-4c1e-9a55-3c2d7c1b7c{n:02d}', tree, dict(), dict(type='ai-title', aiTitle=title))
+        self.worktree_sessions('c', 'alpha', 'charlie')
 
         def arrives_slowly():
             self.change(AgentsDelay=2)
             self.transcript('5f1c0a52-4a57-4c1e-9a55-3c2d7c1b7c09', self.project, dict(), dict(type='ai-title', aiTitle='bravo'))
 
         screens = self.picker([arrives_slowly, 'down', SETTLE, 'q'])
-        cursor = lambda screen: next(line for line in screen.splitlines() if line.startswith('> ['))
         # The key moved the cursor at once, before the refresh it had to wait behind came back.
-        self.assertIn('charlie', cursor(screens[1]))
+        self.assertIn('charlie', cursor_line(screens[1]))
         self.assertNotIn('bravo', screens[1])
         self.assertIn('bravo', screens[-1])
 
@@ -891,9 +899,7 @@ class PortableTests(unittest.TestCase):
         self.assertNotIn('Claude exited 6', screens[-1])
 
     def test_cursor_stays_on_the_same_session_across_a_refresh(self):
-        for n, title in enumerate(('alpha', 'charlie')):
-            tree = self.run_manager('workspace', '--task', title)[0]['WorkingDirectory']
-            self.transcript(f'5f1c0a52-4a57-4c1e-9a55-3c2d7c1b7b{n:02d}', tree, dict(), dict(type='ai-title', aiTitle=title))
+        self.worktree_sessions('b', 'alpha', 'charlie')
         id = '5f1c0a52-4a57-4c1e-9a55-3c2d7c1b7b09'
 
         def arrives():  # A running session sorts above both.
@@ -901,10 +907,32 @@ class PortableTests(unittest.TestCase):
             self.live(id, self.project, kind='background', state='working')
 
         screens = self.picker(['down', arrives, SETTLE, 'q'])
-        cursor = lambda screen: next(line for line in screen.splitlines() if line.startswith('> ['))
-        self.assertIn('charlie', cursor(screens[1]))
+        self.assertIn('charlie', cursor_line(screens[1]))
         self.assertIn('bravo', screens[-1])
-        self.assertIn('charlie', cursor(screens[-1]))
+        self.assertIn('charlie', cursor_line(screens[-1]))
+
+    def test_live_refresh_broken_by_a_junk_agent_row_keeps_the_rows_and_says_why(self):
+        self.transcript('5f1c0a52-4a57-4c1e-9a55-3c2d7c1b7e01', self.project, dict(), dict(type='ai-title', aiTitle='kept'))
+
+        def claude_lists_junk():
+            self.change(Mode='junk-agents')
+            self.transcript('5f1c0a52-4a57-4c1e-9a55-3c2d7c1b7e02', self.project)
+
+        screens = self.picker([claude_lists_junk, SETTLE, 'q'])
+        self.assertIn('Live refresh failed', screens[-1])
+        self.assertIn('kept', screens[-1])
+
+    def test_r_during_a_live_refresh_reads_again_once_it_finishes(self):
+        self.transcript('5f1c0a52-4a57-4c1e-9a55-3c2d7c1b7f01', self.project)
+
+        def arrives_slowly():
+            self.change(AgentsDelay=1)
+            self.transcript('5f1c0a52-4a57-4c1e-9a55-3c2d7c1b7f02', self.project)
+
+        calls = []
+        # One read for opening, one for the change, one more for the R pressed while that one loaded.
+        self.picker([arrives_slowly, 'r', SETTLE, SETTLE, lambda: calls.append(self.data()['AgentsCalls']), 'q'])
+        self.assertEqual(calls, [3])
 
     def test_picker_a_enter_twice_preserves_sessions(self):
         self.new('first')

@@ -330,10 +330,13 @@ class Manager:
         return found
 
     def fingerprint(self):
-        """What the inventory reads, cheaply: the modification times of the project root, the per-pid session
-        files (a live session rewrites its own when its status changes), the transcript folders, each project's
-        task worktrees folder and the desktop store. Equal fingerprints mean nothing listed has changed.
-        Reads only folder and file times: no Claude, no Git, no transcript."""
+        """What the inventory reads, cheaply: the modification times of the project root, the transcript
+        folders and each project's task worktrees folder, and the times and sizes of every per-pid session file and
+        every file in the desktop store. Equal fingerprints mean nothing listed has changed.
+        Reads only folder and file times: no Claude, no Git, no transcript. The desktop store is walked as the
+        inventory walks it, so the check grows with the store.
+        Assumes real Claude rewrites a live session's `<config>/sessions/<pid>.json` when its status changes, as
+        seen on Claude 2.1.x. A status that changes only in `claude agents` shows at the next full read (R)."""
         def stamp(path):
             try:
                 return path.stat().st_mtime_ns
@@ -846,8 +849,8 @@ def parser():
     p.add_argument('--config', '-ClaudeConfigDirectory', default=os.environ.get('CLAUDE_CONFIG_DIR', str(Path.home() / '.claude')))
     p.add_argument('--claude', '-ClaudeExecutable', default='claude.exe' if os.name == 'nt' else 'claude')
     p.add_argument('--launch-wait', '-LaunchWait', type=float, default=90, help='Seconds to wait for Claude to list a launched session.')
-    p.add_argument('--refresh-every', '-RefreshEvery', type=float, default=3,
-                   help='Seconds between the open picker\'s checks for changed sessions.')
+    # Seconds between the open picker's checks for changed sessions. Hidden: the spec fixes about 3 s; tests pass 0.
+    p.add_argument('--refresh-every', type=float, default=3, help=argparse.SUPPRESS)
     return p
 
 
@@ -882,7 +885,8 @@ def keypress(timeout=None):
     fd = sys.stdin.fileno()
     previous = termios.tcgetattr(fd)
     try:
-        tty.setraw(fd)
+        # TCSANOW: a key typed between two waits stays queued instead of being flushed.
+        tty.setraw(fd, termios.TCSANOW)
         if timeout is not None and not select.select([fd], [], [], timeout)[0]:
             return None
         key = os.read(fd, 1).decode(errors='replace')
@@ -991,32 +995,91 @@ def inventory(manager):
     return manager.status(manager.saved(), state, manager.agents())
 
 
+QUIT_KEYS = ('q', '\x1b', '\x03')
+ACTION_KEYS = ('\r', '\n', 'n', 'x')
+
+
 class Reload(threading.Thread):
-    """One inventory read off the key loop, so a refresh never holds up a keypress.
-    `rows` holds the result, or `error` what stopped it."""
+    """One inventory read off the key loop, so a refresh never holds up a keypress. start() runs it.
+    `rows` holds the result, or `error` whatever stopped it."""
 
     def __init__(self, manager):
         super().__init__(daemon=True)
         self.manager, self.rows, self.error = manager, None, None
-        self.start()
 
     def run(self):
         try:
             self.rows = inventory(self.manager)
-        except (OSError, ValueError, RuntimeError) as error:
+        except Exception as error:  # Expected or not, a failure reaches the picker as a warning; the thread never dies silently.
             self.error = error
+
+
+class LiveRefresh:
+    """The rows the open picker shows, kept current. Every `interval` seconds a check reads folder and file times
+    only; when they changed, a full inventory read runs off the key loop. `warning` says why rows may be stale."""
+
+    def __init__(self, manager, interval):
+        self.manager, self.interval = manager, max(0, interval)
+        self.rows, self.seen, self.check_at, self.loading, self.again, self.warning = [], None, 0, None, False, ''
+
+    def load(self):
+        """Read the full inventory now, on the key loop: when the picker opens and after an action."""
+        self.settle()
+        # Taken first, so a change made while the inventory loads is seen at the next check.
+        self.seen = self.manager.fingerprint()
+        self.rows, self.warning = inventory(self.manager), ''
+        self.check_at = time.monotonic() + self.interval
+
+    def reload(self, seen=None):
+        """Start a full read off the key loop. Asked for while one runs, another runs once it finishes."""
+        if self.loading:
+            self.again = True
+            return
+        self.seen, self.loading = seen or self.manager.fingerprint(), Reload(self.manager)
+        self.loading.start()
+
+    def settle(self):
+        """Wait out a read in flight and drop it: it must not outlive the picker or race an action."""
+        if self.loading:
+            self.loading.join()
+        self.loading, self.again = None, False
+
+    def key(self):
+        """The next keypress, or None when a read came back and the picker must redraw."""
+        while True:
+            if self.loading and not self.loading.is_alive():
+                done, self.loading = self.loading, None
+                if self.again:
+                    self.again = False
+                    self.reload()
+                if done.error:
+                    # The old rows stay, and the picker says why, until a read succeeds.
+                    error = done.error if isinstance(done.error, (OSError, ValueError, RuntimeError)) \
+                        else f'{type(done.error).__name__}: {done.error}'
+                    self.warning = f'Live refresh failed; rows may be out of date. {error}'
+                else:
+                    self.rows, self.warning = done.rows, ''
+                return None
+            key = keypress(.05 if self.loading else max(0, self.check_at - time.monotonic()))
+            if key is not None:
+                return key
+            if not self.loading and time.monotonic() >= self.check_at:
+                now = self.manager.fingerprint()
+                if now != self.seen:
+                    self.reload(now)
+                self.check_at = time.monotonic() + self.interval
 
 
 def menu(manager):
     if not sys.stdin.isatty():
         raise ValueError('The picker requires a terminal. Use status --json for scripts.')
     cursor, focus, checked, message, history, refresh = 0, None, set(), '', False, True
-    every, loading, stale = max(0, manager.options.refresh_every), None, ''
+    live = LiveRefresh(manager, manager.options.refresh_every)
     while True:
         if refresh:
-            # Taken first, so a change made while the inventory loads is seen at the next check.
-            seen, all_rows = manager.fingerprint(), inventory(manager)
-            refresh, check_at, stale = False, time.monotonic() + every, ''
+            live.load()
+            refresh = False
+        all_rows = live.rows
         rows = visible_rows(all_rows, history)
         for project in manager.projects():
             if not any(r['Project'] == project for r in rows):
@@ -1057,30 +1120,14 @@ def menu(manager):
         print(color(f'{hidden} more in history; H {"hides" if history else "shows"} it. 📡 registered for Remote Control; phone delivery unverified.', '90'))
         if message:
             print(color(clean(message), '93'))
-        if stale:
-            print(color(clean(stale), '91'))
-        key = None
-        while key is None:
-            if loading and not loading.is_alive():
-                # A reload came back: show its rows, or keep the old ones and say why it failed until one succeeds.
-                all_rows, stale = (all_rows, f'Live refresh failed; rows may be out of date. {loading.error}') \
-                    if loading.error else (loading.rows, '')
-                loading = None
-                break
-            key = keypress(.05 if loading else max(0, check_at - time.monotonic()))
-            if key is None and not loading and time.monotonic() >= check_at:
-                # A check reads folder times only; the full inventory reloads, off the key loop, when one changed.
-                now = manager.fingerprint()
-                if now != seen:
-                    seen, loading = now, Reload(manager)
-                check_at = time.monotonic() + every
+        if live.warning:
+            print(color(clean(live.warning), '91'))
+        key = live.key()
         if key is None:
             continue
-        if loading and key in ('q', '\x1b', '\x03', '\r', '\n', 'n', 'x'):
-            # Quitting or acting waits for the reload in flight: it must not outlive the picker or race an action.
-            loading.join()
-            loading = None
-        if key in ('q', '\x1b', '\x03'):
+        if key in QUIT_KEYS + ACTION_KEYS:
+            live.settle()
+        if key in QUIT_KEYS:
             return
         if key in ('up', 'k', 'down', 'j'):
             cursor = (cursor + (-1 if key in ('up', 'k') else 1)) % len(rows)
@@ -1089,8 +1136,7 @@ def menu(manager):
             history = not history
             checked.clear()
         elif key == 'r':
-            if not loading:
-                seen, loading = manager.fingerprint(), Reload(manager)
+            live.reload()
         elif key == ' ':
             if row.get('ViewOnly'):
                 message = f"{row.get('Task')} is live in {row.get('Source')}; it is view-only here."
@@ -1101,7 +1147,7 @@ def menu(manager):
         elif key == 'a':
             available = {r['SessionId'] for r in rows if selectable(r) and not r.get('NewProject')}
             checked = set() if available <= checked else available
-        elif key in ('\r', '\n', 'n', 'x'):
+        elif key in ACTION_KEYS:
             targets = [row] if key == 'n' else [r for r in rows if r['SessionId'] in checked]
             messages = []
             for target in targets:
