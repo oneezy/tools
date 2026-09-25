@@ -282,8 +282,12 @@ argument quoting, and A/Enter/N picker behavior. `tests/test_worktree_hook.py` f
 the hook Claude's input JSON in a temporary repo with a `dev` branch, directly and
 through Git Bash and PowerShell, and checks names, the cut from local `dev` without
 a fetch, the printed path as UTF-8, reuse, refusals, the stderr note for a name
-without a branch type, and parallel requests. `tests/test-linux.sh` copies the source
-to a Linux temporary directory and runs the same suite with native Git.
+without a branch type, and parallel requests. `tests/test_agent_rules.py` checks that
+every `oneezy-merge` copy in the repo is identical, that its land mode keeps
+`prototype/*` branches and deletes the rest, and that no `AGENTS.md` or `CLAUDE.md`
+overrides a skill's branch retention; it skips when the suite runs from a copy.
+`tests/test-linux.sh` copies the source to a Linux temporary directory and runs the
+same suite with native Git.
 The existing `test-native-lifecycle.ps1`, `test-task-worktrees.ps1`, and
 `test-remote-control.ps1` exercise the compatibility entry point on Windows.
 `test-picker.ps1` invokes the portable picker regression.
