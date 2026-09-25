@@ -41,8 +41,8 @@ Table columns: `Status | Repo | Task | Source | Branch | Last active | Remote`.
 | 🟣 live | live in another app (VS Code, the desktop app, a terminal); view-only |
 | ⚪ new | a project with no session yet; N or Enter names a new task |
 | ⚫ history | an older conversation in the same folder, or one that cannot resume, such as a worktree whose checkout is missing |
-| 🔴 error | a background session that failed or waits on a permission decision, or history whose folder metadata conflicts; shown without H |
-| ✅ merged | its work merged, awaiting folder removal (reserved for the cleanup sweep; nothing sets it yet) |
+| 🔴 error | a background session that failed or waits on a permission decision, history whose folder metadata conflicts, or a finished worktree the cleanup sweep kept because of unsaved work; shown without H |
+| ✅ merged | its work merged or its ticket closed; the cleanup sweep removes the folder once the app that has it open closes |
 
 Remote shows 📡 only when the live process has a Remote Control registration.
 Source is what runs a session now: CLI, Background (`--bg`, which records entrypoint
@@ -202,6 +202,9 @@ go to stderr, and any failure exits non-zero, which aborts the creation.
   checked out and is refused otherwise; `main` is always refused.
 - Folders go under the main checkout's `.claude/worktrees`, also when the request
   comes from inside a linked worktree. `.worktreeinclude` is not processed.
+- After creating (not reusing) a worktree, it starts the cleanup sweep below for
+  that repo in the background and returns at once; the sweep never touches the new
+  worktree or the one the request came from.
 
 Install by adding it to `~/.claude/settings.json`. The single `command` string runs
 the same way under Git Bash (Claude's default hook shell on Windows) and PowerShell;
@@ -222,6 +225,47 @@ Check which surfaces honour it by hand: `claude --worktree`, a background sessio
 `claude remote-control --spawn worktree`, and a desktop-app worktree. When a session
 on a reused worktree ends, Claude's own cleanup may offer to remove that worktree;
 keep it while another session still uses it.
+
+## Cleanup sweep
+
+`worktree_sweep.py` removes one repo's finished worktrees. The `WorktreeCreate` hook
+starts it in the background after each creation, in that repo only; nothing polls.
+Run it by hand with `python3 worktree_sweep.py <repo folder> [--keep FOLDER] [--json]`.
+
+For each linked worktree under `.claude/worktrees` that is on a branch, it asks `gh`,
+run in the repo, whether the branch is finished:
+
+- a PR from the branch merged into `dev` whose head holds the branch as it is now
+  (`gh pr list --head <branch> --state merged`), so work committed after the merge
+  keeps the worktree; or
+- its ticket is closed (`gh issue view <n>`), the issue number read from the branch
+  name `<type>/<issue>-<desc>`. Branches without one (`new/<n>`, `codex/*`,
+  `worktree-bridge-cse_*`) go by their PRs only.
+
+A finished worktree is removed with `git worktree remove` (no `--force`) and its local
+branch deleted, after any background session there is stopped, only when nothing
+unsaved would be lost. It is kept otherwise, and the picker shows why:
+
+- 🔴 error: uncommitted changes (untracked files count; ignored ones such as
+  `node_modules` do not), or commits that neither origin nor a merged PR holds. It
+  first runs `git fetch --prune origin`, so a remote branch deleted since the last
+  fetch no longer counts; a squash-merged PR holds the commits its head had, whatever
+  base it merged into.
+- ✅ merged: nothing unsaved, but a session is live in another app (VS Code, the
+  desktop app, a terminal). That session is never stopped; the next sweep removes the
+  worktree once it has closed.
+
+`prototype/*` worktrees are always kept, per `/prototype`; `research/*` and every other
+type are removed like any other. A repo without an `origin` remote is skipped. If `gh`
+or the fetch fails, nothing more is removed and the report records the error. Sweeps in
+one repo run one at a time; each removal takes the same per-repo lock as creation.
+
+The last report is saved as `worktree-sweep.json` in the repo's Git directory: what
+was removed, what was kept with its status and reason, and any error. The picker reads
+it: a kept folder's resumable or view-only rows show 🔴 or ✅ while the folder still has
+the branch the sweep judged. `REMOTE_SESSIONS_GH` and `REMOTE_SESSIONS_CLAUDE` (or
+`--gh`, `--claude`) choose the executables; `CLAUDE_CONFIG_DIR` (or `--config`) the
+Claude configuration.
 
 ## Remote Control and continuity
 
@@ -274,8 +318,8 @@ update the saved state to match. State records a new task only once its folder
 exists, so a recorded session whose folder is gone was deleted. It is hidden, and
 the engine never recreates the folder, never makes a `recovered-<id>` worktree and
 never starts a replacement conversation. Closing the picker leaves sessions running.
-No worktree deletion, branch deletion, reset, stash, push, or transcript rewrite is
-implemented.
+The picker and the CLI delete no worktree or branch (the cleanup sweep does, above),
+and never reset, stash, push or rewrite a transcript.
 
 Transcript metadata is cached per file (path, modification time and size) for the
 life of one process. An open picker's refresh re-parses only changed transcripts;
@@ -309,7 +353,13 @@ timing are not driven by the suite. `tests/test_worktree_hook.py` feeds
 the hook Claude's input JSON in a temporary repo with a `dev` branch, directly and
 through Git Bash and PowerShell, and checks names, the cut from local `dev` without
 a fetch, the printed path as UTF-8, reuse, refusals, the stderr note for a name
-without a branch type, and parallel requests. `tests/test_agent_rules.py` checks that
+without a branch type, and parallel requests. `tests/test_worktree_sweep.py` runs the
+sweep against real repos with a bare origin, a fake `gh` (`tests/fake_gh.py`, following
+the fake-Claude pattern) and the fake Claude: merged, squash-merged and closed-ticket
+worktrees removed with their branches; uncommitted, unpushed and after-merge work,
+`prototype/*`, open work and sessions live in another app kept; background sessions
+stopped first; a `gh` failure removing nothing; the hook sweeping only its own repo
+without waiting for GitHub; and the picker's 🔴 and ✅ rows. `tests/test_agent_rules.py` checks that
 every `oneezy-merge` copy in the repo is identical, that its land mode keeps
 `prototype/*` branches and deletes the rest, and that no `AGENTS.md` or `CLAUDE.md`
 overrides a skill's branch retention; it skips when the suite runs from a copy.

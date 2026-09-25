@@ -182,6 +182,18 @@ def status_of(row, agent, managed):
     return 'stopped' if row.get('Available') and (row.get('Newest') or managed) else 'history'
 
 
+def sweep_flags(project):
+    """What the cleanup sweep last kept in a repo, by folder: the branch it judged and the status it gave, merged when only
+    an open app keeps the folder, error when unsaved work does. Empty when the repo has never been swept."""
+    try:
+        report = read_json(Path(project) / '.git' / wt.SWEEP_REPORT, {})
+    except (OSError, ValueError):
+        return {}
+    kept = report.get('Kept') if isinstance(report, dict) else None
+    return {wt.key(k['Path']): (k.get('Branch'), k['Status']) for k in kept or ()
+            if isinstance(k, dict) and k.get('Path') and k.get('Status') in ('merged', 'error')}
+
+
 def started_on(row, managed):
     """Where a session started: Web when teleported, Desktop when the desktop app lists it, Background when its first
     surface record is a --bg launch, else that surface. Without one, a session the picker tracks started in the
@@ -593,6 +605,7 @@ class Manager:
                 rows.append(session_row(a['sessionId'], project, folder, checked_out_branch(folder),
                                         Worktree=self.in_worktrees(folder, project)))
                 ids.add(a['sessionId'])
+        flags = {folder: flag for path in projects.values() for folder, flag in sweep_flags(path).items()}
         result = []
         for s in rows:
             id = s['SessionId']
@@ -607,6 +620,11 @@ class Manager:
             title = (task if task not in (None, 'remote') else None) or (agent or {}).get('name') or s.get('Title') or task or Path(s.get('WorkingDirectory') or s['Project']).name
             origin = started_on(s, managed=id in sessions)
             status = status_of(s, agent, managed=id in sessions)
+            # The sweep's verdict on the folder replaces a resumable or view-only row's status while the folder keeps the
+            # branch it judged; a running background session, an error and history keep theirs.
+            flag = flags.get(wt.key(s.get('WorkingDirectory') or ''))
+            if flag and flag[0] == s.get('Branch') and status in ('stopped', 'live'):
+                status = flag[1]
             result.append(dict(s, Task=title, Stoppable=running and not live_elsewhere(agent), Running=running,
                                ViewOnly=live_elsewhere(agent),
                                State=agent.get('state') if agent else s.get('UnavailableReason') or 'stopped',

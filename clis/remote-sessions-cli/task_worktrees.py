@@ -1,4 +1,4 @@
-"""Persistent, named Git worktrees shared by Claude and Codex: their names, planning and creation. No cleanup operations."""
+"""Persistent, named Git worktrees shared by Claude and Codex: their names, planning and creation. Cleanup lives in worktree_sweep.py."""
 import os
 import re
 import subprocess
@@ -38,6 +38,9 @@ def slug(text):
         raise ValueError('Supply a descriptive task name.')
     return value
 
+
+# The cleanup sweep's last report, in the repo's Git directory: which worktrees it removed and which it kept, and why.
+SWEEP_REPORT = 'worktree-sweep.json'
 
 # Branch types (see CONTEXT.md): the first word of a task branch, not a ticket's Type.
 BRANCH_TYPES = ('feature', 'fix', 'research', 'prototype', 'wayfinder', 'chore', 'docs')

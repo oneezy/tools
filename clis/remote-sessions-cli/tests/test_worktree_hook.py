@@ -33,7 +33,8 @@ def git(directory, *args):
 
 class WorktreeHookTests(unittest.TestCase):
     def setUp(self):
-        temp = tempfile.TemporaryDirectory(prefix="hook test's ")
+        # The hook starts a background sweep that may still be looking at the repo when a test ends.
+        temp = tempfile.TemporaryDirectory(prefix="hook test's ", ignore_cleanup_errors=True)
         self.addCleanup(temp.cleanup)
         self.repo = Path(temp.name) / 'brain'
         self.repo.mkdir()
