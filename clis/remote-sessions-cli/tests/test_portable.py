@@ -222,7 +222,7 @@ class PortableTests(unittest.TestCase):
                          ['STATUS', 'REPO', 'TASK', 'SOURCE', 'BRANCH', 'LAST ACTIVE', 'REMOTE'])
         rows = {circle: next(line for line in lines if circle in line) for circle in ('🟢', '🟣', '🔵', '⚪')}
         at = lambda line, text: cells(line[:line.index(text)])
-        for circle, source, branch in (('🟢', 'Background', 'codex/brain-aligned'), ('🟣', 'VS Code ext', 'dev'), ('🔵', 'CLI', 'dev')):
+        for circle, source, branch in (('🟢', 'Background', 'feature/aligned'), ('🟣', 'VS Code ext', 'dev'), ('🔵', 'CLI', 'dev')):
             line = rows[circle]
             self.assertEqual(at(line, circle), at(header, 'STATUS'), line)
             self.assertEqual(at(line, source), at(header, 'SOURCE'), line)
