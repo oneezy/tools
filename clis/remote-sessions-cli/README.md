@@ -145,7 +145,11 @@ loaded by the launcher. The Python implementation is the active worktree engine.
 
 A reusable GitHub Actions workflow, [`.github/workflows/delete-branch.yml`](../../.github/workflows/delete-branch.yml),
 deletes a ticket's branch on GitHub as soon as the ticket closes, so remote branches
-do not pile up. Its rules live in `delete_remote_branch.py`:
+do not pile up. Its rules live in `scripts/delete_remote_branch.py`. A branch belongs to a
+ticket by its name alone, `<type>/<n>-<slug>` or `<n>-<slug>`, the naming scheme of spec #30;
+a branch linked in GitHub's Development panel under another name, or a PR that says
+`Closes #n` from a branch without `n` in its name, is not found when the ticket closes
+(the PR's own merge into `dev` still deletes its head).
 
 - **Issue closed:** every branch named after it, `<type>/<n>-<slug>` or `<n>-<slug>`, is deleted.
 - **Pull request merged into `dev`:** its head branch is deleted.
@@ -154,6 +158,12 @@ do not pile up. Its rules live in `delete_remote_branch.py`:
 - **Never deleted:** `main`, `dev`, the repo's default branch, `prototype/*` (per `/prototype`),
   protected branches and branches a ruleset forbids deleting (such as tridentcubed's
   `persist`), a branch an open pull request still uses as head or base, and a fork's head.
+- **Races are not errors:** a PR merging into `dev` closes its ticket at the same moment, so
+  two runs (and GitHub's own "auto-delete head branches") can reach for one branch. A branch
+  already gone is reported as `already gone`. Any other failure on one branch is reported,
+  the remaining branches are still handled, and the run fails at the end.
+- **Private repos on a free plan** have no rulesets; the rules API answers 403 there, which
+  counts as no rules.
 
 Any repo turns it on with one caller file, `.github/workflows/delete-branch.yml`, on its
 default branch (issue events run from there). The one line that matters is `uses:`:
@@ -176,13 +186,15 @@ jobs:
 
 It uses the caller's own `GITHUB_TOKEN`; no secret is needed. A repo whose integration
 branch is not `dev` adds `with: { integration-branch: <name> }`. The reusable workflow is
-read from `oneezy/tools` at `main`, so it works only once it is promoted there.
+read from `oneezy/tools` at `main`, so it works only once it is promoted there. The
+reusable workflow has no triggers of its own, so `oneezy/tools` also needs this caller file
+before its own branches are deleted.
 
 The script reads its inputs from environment variables and runs by hand. `DRY_RUN=1`
 prints `would delete` lines and deletes nothing:
 
 ```sh
-REPO=oneezy/tools EVENT=issues ACTION=closed ISSUE=33 DRY_RUN=1 python3 delete_remote_branch.py
+REPO=oneezy/tools EVENT=issues ACTION=closed ISSUE=33 DRY_RUN=1 python3 scripts/delete_remote_branch.py
 ```
 
 Its tests (`tests/test_delete_remote_branch.py`) run it against `tests/fake_gh.py`, a

@@ -3,8 +3,9 @@
 
 Driven by .github/workflows/delete-branch.yml (hosted in oneezy/tools, called from any repo).
 Every input is an environment variable, so it runs by hand too:
-    REPO=oneezy/tools EVENT=issues ACTION=closed ISSUE=33 DRY_RUN=1 python3 delete_remote_branch.py
+    REPO=oneezy/tools EVENT=issues ACTION=closed ISSUE=33 DRY_RUN=1 python3 scripts/delete_remote_branch.py
 """
+from functools import cached_property
 import json
 import os
 import re
@@ -13,31 +14,51 @@ import sys
 from urllib.parse import quote
 
 
+class HttpError(RuntimeError):
+    def __init__(self, status, message):
+        super().__init__(message)
+        self.status = status
+
+
+class Gone(Exception):
+    """Another run deleted the branch after this one listed it: the closing PR and its ticket
+    fire at the same moment, and GitHub may auto-delete a merged head."""
+
+
 class GitHub:
     def __init__(self, repo, executable):
         self.repo = repo
         self.prefix = [sys.executable, executable] if executable.endswith('.py') else [executable]
 
-    def api(self, *args, missing=False):
-        """Run gh api; with missing=True a 404 answers None instead of failing."""
+    def api(self, *args, absent=()):
+        """Run gh api; an HTTP status listed in absent answers None instead of failing."""
         result = subprocess.run(self.prefix + ['api', *args], capture_output=True, text=True, encoding='utf-8', errors='replace')
         if result.returncode:
-            if missing and 'HTTP 404' in result.stderr:
+            status = re.search(r'HTTP (\d{3})', result.stderr)
+            status = status and int(status.group(1))
+            if status in absent:
                 return None
-            raise RuntimeError(result.stderr.strip() or f'gh api {" ".join(args)} failed')
+            raise HttpError(status, result.stderr.strip() or f'gh api {" ".join(args)} failed')
         return json.loads(result.stdout) if result.stdout.strip() else None
 
     def branches(self):
         return [r['ref'][len('refs/heads/'):] for r in self.api(f'repos/{self.repo}/git/matching-refs/heads/')]
 
+    @cached_property
     def default_branch(self):
+        """Looked up only when a branch is up for deletion."""
         return self.api(f'repos/{self.repo}')['default_branch']
 
     def protected(self, branch):
         name = quote(branch, safe='/')
-        if self.api(f'repos/{self.repo}/branches/{name}').get('protected'):
+        info = self.api(f'repos/{self.repo}/branches/{name}', absent=(404,))
+        if info is None:
+            raise Gone
+        if info.get('protected'):
             return True
-        return any(rule.get('type') == 'deletion' for rule in self.api(f'repos/{self.repo}/rules/branches/{name}'))
+        # A private repo on a free plan has no rulesets, and the rules API answers 403 there.
+        rules = self.api(f'repos/{self.repo}/rules/branches/{name}', absent=(403, 404)) or []
+        return any(rule.get('type') == 'deletion' for rule in rules)
 
     def open_pull_request(self, branch):
         owner = self.repo.split('/')[0]
@@ -49,11 +70,16 @@ class GitHub:
 
     def ticket_closed(self, number):
         """True only for a closed issue; a missing number or a pull request is no ticket."""
-        issue = self.api(f'repos/{self.repo}/issues/{number}', missing=True)
+        issue = self.api(f'repos/{self.repo}/issues/{number}', absent=(404,))
         return bool(issue) and 'pull_request' not in issue and issue['state'] == 'closed'
 
     def delete(self, branch):
-        self.api('-X', 'DELETE', f'repos/{self.repo}/git/refs/heads/{quote(branch, safe="/")}')
+        try:
+            self.api('-X', 'DELETE', f'repos/{self.repo}/git/refs/heads/{quote(branch, safe="/")}')
+        except HttpError as error:
+            if error.status == 422 and 'Reference does not exist' in str(error):
+                raise Gone from None
+            raise
 
 
 TICKET = re.compile(r'^(?:[^/]+/)?(\d+)-')
@@ -69,7 +95,7 @@ def ticket_branches(branches, number):
 
 
 def reason_to_keep(github, branch, permanent):
-    if branch in permanent:
+    if branch in permanent or branch == github.default_branch:
         return 'a permanent branch'
     if branch.startswith('prototype/'):
         return 'prototype branches are kept'
@@ -103,16 +129,25 @@ def main():
         sys.exit('delete_remote_branch.py: set REPO=owner/name')
     github = GitHub(env['REPO'], env.get('GH', 'gh'))
     integration = env.get('INTEGRATION_BRANCH') or 'dev'
-    permanent = {'main', 'dev', integration, env.get('RELEASE_BRANCH') or 'main', github.default_branch()}
+    permanent = {'main', 'dev', integration, env.get('RELEASE_BRANCH') or 'main'}
+    failed = []
     for branch in candidates(github, env, integration):
-        reason = reason_to_keep(github, branch, permanent)
-        if reason:
-            print(f'kept {branch}: {reason}')
-        elif env.get('DRY_RUN'):
-            print(f'would delete {branch}')
-        else:
-            github.delete(branch)
-            print(f'deleted {branch}')
+        try:
+            reason = reason_to_keep(github, branch, permanent)
+            if reason:
+                print(f'kept {branch}: {reason}')
+            elif env.get('DRY_RUN'):
+                print(f'would delete {branch}')
+            else:
+                github.delete(branch)
+                print(f'deleted {branch}')
+        except Gone:
+            print(f'{branch} is already gone')
+        except RuntimeError as error:  # one branch failing must not skip the rest
+            print(f'failed {branch}: {error}', file=sys.stderr)
+            failed.append(branch)
+    if failed:
+        sys.exit(f'delete_remote_branch.py: could not delete {", ".join(failed)}')
 
 
 if __name__ == '__main__':

@@ -11,8 +11,9 @@ import sys
 import tempfile
 import unittest
 
-SCRIPT = Path(__file__).resolve().parents[1] / 'delete_remote_branch.py'
-REPO_ROOT = SCRIPT.parents[2]
+TOOL = Path(__file__).resolve().parents[1]
+SCRIPT = TOOL / 'scripts' / 'delete_remote_branch.py'
+REPO_ROOT = TOOL.parents[1]
 FAKE_GH = Path(__file__).with_name('fake_gh.py')
 
 
@@ -23,21 +24,25 @@ class DeleteRemoteBranchTests(unittest.TestCase):
         self.state = Path(temp.name) / 'github.json'
         self.github(branches=['main', 'dev'])
 
-    def github(self, branches, issues=None, pulls=None, protected=(), deletion_rules=()):
+    def github(self, branches, issues=None, pulls=None, protected=(), deletion_rules=(), rules_forbidden=False,
+               vanishes=None, delete_fails=(), default_branch='main'):
+        vanishes = vanishes or {}
         self.state.write_text(json.dumps(dict(
-            Repo='oneezy/app', DefaultBranch='main',
-            Branches={b: dict(protected=b in protected, deletionRule=b in deletion_rules) for b in branches},
+            Repo='oneezy/app', DefaultBranch=default_branch, RulesForbidden=rules_forbidden,
+            Branches={b: dict(protected=b in protected, deletionRule=b in deletion_rules, vanishes=vanishes.get(b),
+                              deleteFails=b in delete_fails) for b in branches},
             Issues={str(k): v for k, v in (issues or {}).items()}, Pulls=pulls or [], Calls=[])))
 
     def remote_branches(self):
         return sorted(json.loads(self.state.read_text())['Branches'])
 
-    def event(self, **env):
-        base = {k: v for k, v in os.environ.items() if k not in ('ISSUE', 'PR_HEAD', 'PR_BASE', 'PR_MERGED', 'PR_HEAD_REPO', 'DRY_RUN')}
+    def event(self, succeeds=True, **env):
+        inputs = ('ISSUE', 'PR_HEAD', 'PR_BASE', 'PR_MERGED', 'PR_HEAD_REPO', 'DRY_RUN', 'INTEGRATION_BRANCH', 'RELEASE_BRANCH')
+        base = {k: v for k, v in os.environ.items() if k not in inputs}
         base.update(GH=str(FAKE_GH), FAKE_GH_STATE=str(self.state), REPO='oneezy/app', **env)
         result = subprocess.run([sys.executable, str(SCRIPT)], env=base, capture_output=True, text=True)
-        self.assertEqual(result.returncode, 0, result.stderr)
-        return result.stdout
+        self.assertEqual(result.returncode == 0, succeeds, result.stdout + result.stderr)
+        return result.stdout + result.stderr
 
     def close_issue(self, number, **env):
         return self.event(EVENT='issues', ACTION='closed', ISSUE=str(number), **env)
@@ -109,13 +114,47 @@ class DeleteRemoteBranchTests(unittest.TestCase):
         self.assertEqual(self.remote_branches(), ['chore/33-ruleset', 'dev', 'feature/33-persist', 'main', 'prototype/33-tray-icon'])
         self.assertIn('kept prototype/33-tray-icon', output)
 
+    def test_a_private_repo_without_rulesets_still_deletes_the_branch(self):
+        self.github(['main', 'dev', 'fix/33-slow-launch'], issues={33: 'closed'}, rules_forbidden=True)
+        self.close_issue(33)
+        self.assertEqual(self.remote_branches(), ['dev', 'main'])
+
+    def test_a_branch_another_run_deletes_first_is_not_an_error(self):
+        # A PR merging into dev closes its ticket at the same moment, so two runs race for one branch.
+        self.github(['main', 'dev', 'fix/33-slow-launch', 'research/33-notes', 'fix/33-rules'], issues={33: 'closed'},
+                    vanishes={'fix/33-slow-launch': 'before-delete', 'research/33-notes': 'after-listing'})
+        self.close_issue(33)
+        self.assertEqual(self.remote_branches(), ['dev', 'main'])
+
+    def test_one_branch_failing_to_delete_still_deletes_the_others_and_fails_the_run(self):
+        self.github(['main', 'dev', 'fix/33-a', 'fix/33-b', 'fix/33-c'], issues={33: 'closed'}, delete_fails=['fix/33-b'])
+        output = self.close_issue(33, succeeds=False)
+        self.assertEqual(self.remote_branches(), ['dev', 'fix/33-b', 'main'])
+        self.assertIn('fix/33-b', output)
+
+    def test_a_close_with_nothing_to_delete_only_lists_branches(self):
+        self.github(['main', 'dev', 'fix/34-other'], issues={33: 'closed'})
+        self.close_issue(33)
+        calls = json.loads(self.state.read_text())['Calls']
+        self.assertEqual(calls, [['api', 'repos/oneezy/app/git/matching-refs/heads/']])
+
+    def test_a_repo_whose_branches_are_not_main_and_dev(self):
+        self.github(['trunk', 'develop', 'dev', 'feature/12-login', 'feature/13-logout'], issues={12: 'open', 13: 'open'},
+                    default_branch='trunk')
+        self.close_pr('feature/12-login', base='develop', INTEGRATION_BRANCH='develop')
+        self.close_pr('feature/13-logout', base='dev', INTEGRATION_BRANCH='develop')
+        self.close_pr('trunk', base='develop', INTEGRATION_BRANCH='develop')
+        self.assertEqual(self.remote_branches(), ['dev', 'develop', 'feature/13-logout', 'trunk'])
+
     def test_readme_caller_uses_a_reusable_workflow_that_runs_this_script(self):
-        readme = SCRIPT.with_name('README.md').read_text(encoding='utf-8')
+        readme = (TOOL / 'README.md').read_text(encoding='utf-8')
         uses = re.search(r'uses: oneezy/tools/(\S+)@main', readme[readme.index('## Delete the remote branch'):])
         self.assertIsNotNone(uses, 'README documents no caller')
         workflow = (REPO_ROOT / uses.group(1)).read_text(encoding='utf-8')
         self.assertIn('workflow_call:', workflow)
-        self.assertIn('python3 clis/remote-sessions-cli/delete_remote_branch.py', workflow)
+        script = SCRIPT.relative_to(REPO_ROOT).as_posix()
+        self.assertIn(f'sparse-checkout: {script}', workflow)
+        self.assertIn(f'python3 {script}', workflow)
         self.assertIn('contents: write', readme)
 
 

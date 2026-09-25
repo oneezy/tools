@@ -1,7 +1,10 @@
 """Test-only gh substitute. Answers the GitHub REST calls the tools make from a JSON
 fixture named by FAKE_GH_STATE, and records every call. Touches no network.
 
-Fixture keys: Repo, DefaultBranch, Branches {name: {protected, deletionRule}},
+Fixture keys: Repo, DefaultBranch, RulesForbidden (the rules API answers 403, as it does on a
+free-plan private repo), Branches {name: {protected, deletionRule, vanishes, deleteFails}} where vanishes
+says when another run deletes it (after-listing: every call after the branch list misses it;
+before-delete: only the DELETE misses it) and deleteFails makes its DELETE answer 403,
 Issues {number: open|closed}, Pulls (share the issue numbers, as on GitHub) [{number, head, headRepo, base, state, merged}], Calls.
 """
 import json
@@ -48,11 +51,18 @@ branches = data['Branches']
 if path == base:
     reply(dict(full_name=repo, default_branch=data['DefaultBranch']))
 if path == f'{base}/git/matching-refs/heads/':
-    reply([dict(ref=f'refs/heads/{name}') for name in branches])
+    listed = [dict(ref=f'refs/heads/{name}') for name in branches]
+    for name in [n for n, b in branches.items() if b.get('vanishes') == 'after-listing']:
+        del branches[name]
+    reply(listed)
 if path.startswith(f'{base}/git/refs/heads/') and method == 'DELETE':
     name = path[len(f'{base}/git/refs/heads/'):]
+    if branches.get(name, {}).get('vanishes') == 'before-delete':
+        del branches[name]
     if name not in branches:
         fail(422, 'Reference does not exist')
+    if branches[name].get('deleteFails'):
+        fail(403, 'Resource not accessible by integration')
     del branches[name]
     save()
     sys.exit(0)
@@ -62,6 +72,8 @@ if path.startswith(f'{base}/branches/'):
         fail(404, 'Branch not found')
     reply(dict(name=name, protected=bool(branches[name].get('protected'))))
 if path.startswith(f'{base}/rules/branches/'):
+    if data.get('RulesForbidden'):
+        fail(403, 'Upgrade to GitHub Pro or make this repository public to enable this feature.')
     name = path[len(f'{base}/rules/branches/'):]
     reply([dict(type='deletion')] if branches.get(name, {}).get('deletionRule') else [])
 if path.startswith(f'{base}/issues/'):
