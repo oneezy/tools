@@ -66,6 +66,19 @@ The picker loads fast: each transcript's metadata and each desktop store file ar
 cached by path, modification time and size, so a refresh re-parses only files that
 changed.
 
+The open picker refreshes itself. About every 3 seconds (`--refresh-every`) it checks
+the modification times of a few folders: the project root, Claude's per-pid session
+files (a live session rewrites its own when its status changes), the transcript
+folders, each project's `.claude/worktrees` and the desktop store. The check costs
+about 15 ms and never runs Claude or Git. Only when something changed does it read
+the full inventory again, so new sessions appear, removed worktrees disappear and
+statuses update without a keypress. With nothing changing, no `claude agents` call is
+made between checks. The full read runs off the key loop, so arrow keys and Space
+keep working while it loads. The cursor stays on the same session when rows move. If
+a live refresh fails, the picker keeps its rows and says so in red until a refresh
+succeeds. R reads the full inventory at once. A branch switched inside an existing
+folder shows at the next full read, not on its own.
+
 Task titles, folders, session IDs, and remote URLs are shown separately. Titles
 come from launcher task names, native agent names, or explicit saved Claude titles.
 Folder names remain a fallback for older conversations without a title. Existing
@@ -88,7 +101,8 @@ python3 remote_sessions.py stop --only brain --session-id FULL-UUID --json
 commands require `--only`. Use `--only brain tools` or `--only brain,tools`. Legacy
 PowerShell spellings such as `-Only`, `-SessionId`, `-Task`, `-Plan`, and `-Json` are
 accepted. `--config` selects a Claude configuration directory. `--claude` selects
-its executable. `--desktop-sessions` selects the desktop app's session store. Repo-root
+its executable. `--desktop-sessions` selects the desktop app's session store.
+`--refresh-every` sets the open picker's seconds between checks (default 3). Repo-root
 sessions are always listed; `--include-project-sessions` is still accepted and does nothing.
 `status --json` rows carry `Status`, `Circle`, `Source`, `Origin`, `Remote`, `ViewOnly`,
 `PermissionMode` and `ClaudeVersion`. `resume --session-id` on a session live in another
@@ -278,7 +292,11 @@ and the detail pane in captured picker output, UUID/options continuity, hidden
 deleted folders, slow and copied launches,
 the stop rule, branch-follows-folder, the transcript cache, duplicate prevention,
 read-only previews, worktree names, native path rules, cross-process locks,
-argument quoting, and A/Enter/N picker behavior. `tests/test_worktree_hook.py` feeds
+argument quoting, and A/Enter/N picker behavior. Live refresh is driven by scripted
+picker keys where time passes with no key: a session added or a worktree removed
+shows without a keypress, a status change updates its circle, no `claude agents`
+call is made while nothing changes, the cursor keeps its session, keys work while a
+slow refresh loads, and a failed refresh keeps the rows. `tests/test_worktree_hook.py` feeds
 the hook Claude's input JSON in a temporary repo with a `dev` branch, directly and
 through Git Bash and PowerShell, and checks names, the cut from local `dev` without
 a fetch, the printed path as UTF-8, reuse, refusals, the stderr note for a name

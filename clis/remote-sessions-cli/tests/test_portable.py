@@ -10,6 +10,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import time
 import unittest
 from unittest.mock import patch
 
@@ -19,6 +20,9 @@ import task_worktrees as wt
 
 ENGINE = Path(rs.__file__)
 FAKE = Path(__file__).with_name('fake_claude.py')
+CLEAR = '\033[2J\033[H'
+# A scripted picker item: press nothing until the picker redraws by itself.
+SETTLE = object()
 
 
 # Cells each wide string takes in Windows Terminal, from what it draws: a joined emoji sequence is one glyph.
@@ -99,12 +103,39 @@ class PortableTests(unittest.TestCase):
         return {r['SessionId']: r for r in self.run_manager('status')}
 
     def picker(self, keys, columns=140, only=('brain',)):
-        """Drive the picker with scripted keypresses; return every screen it drew, as a terminal shows them."""
+        """Drive the picker with scripted keypresses; return every screen it drew, as a terminal shows them.
+        A key is a string. A callable is something that happens while no key is pressed: it runs, then the
+        picker's wait for a key times out. SETTLE presses nothing until the picker redraws by itself."""
         output = io.StringIO()
-        with patch.object(rs.sys.stdin, 'isatty', return_value=True), patch.object(rs, 'keypress', side_effect=keys), \
+        script = iter(keys)
+        # SETTLE waits for a screen beyond `since`: the screens drawn when the last change happened, or, after a
+        # key, the screens drawn once the picker had answered it. `deadline` is set while SETTLE waits.
+        since, deadline = [0], [None]
+
+        def press(timeout=None):
+            drawn = output.getvalue().count(CLEAR)
+            if deadline[0] is not None:
+                if drawn == since[0]:
+                    self.assertLess(time.monotonic(), deadline[0], 'the picker never redrew by itself')
+                    time.sleep(.02)
+                    return None
+                deadline[0] = None
+            item = next(script)
+            if item is SETTLE:
+                since[0] = drawn if since[0] is None else since[0]
+                deadline[0] = time.monotonic() + 20
+                return press(timeout)
+            if callable(item):
+                since[0] = drawn
+                item()
+                return None
+            since[0] = None
+            return item
+
+        with patch.object(rs.sys.stdin, 'isatty', return_value=True), patch.object(rs, 'keypress', side_effect=press), \
                 patch.dict(os.environ, COLUMNS=str(columns), LINES='40'), redirect_stdout(output):
-            rs.menu(rs.Manager(self.options('menu', only=only)))
-        return output.getvalue().split('\033[2J\033[H')[1:]
+            rs.menu(rs.Manager(self.options('menu', '--refresh-every', '0', only=only)))
+        return output.getvalue().split(CLEAR)[1:]
 
     def run_manager(self, *args):
         return rs.Manager(self.options(*args)).execute()
@@ -782,6 +813,98 @@ class PortableTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, 'issue number or a description'):
                 self.run_manager(action, '--type', 'fix')
         self.assertEqual(self.data()['Starts'], 0)
+
+    def test_picker_shows_a_new_session_without_a_keypress(self):
+        id = '5f1c0a52-4a57-4c1e-9a55-3c2d7c1b7a01'
+
+        def arrives():
+            self.transcript(id, self.project, dict(), dict(type='ai-title', aiTitle='arrived-later'))
+            self.live(id, self.project, kind='background', state='working')
+
+        screens = self.picker([arrives, SETTLE, 'q'])
+        self.assertNotIn('arrived-later', screens[0])
+        self.assertIn('arrived-later', screens[-1])
+
+    def test_picker_drops_a_removed_worktree_without_a_keypress(self):
+        tree = self.run_manager('workspace', '--task', 'short-lived')[0]['WorkingDirectory']
+        self.transcript('5f1c0a52-4a57-4c1e-9a55-3c2d7c1b7a02', tree, dict(), dict(type='ai-title', aiTitle='short-lived'))
+        screens = self.picker([lambda: wt.git(self.project, 'worktree', 'remove', tree), SETTLE, 'q'])
+        self.assertIn('short-lived', screens[0])
+        self.assertNotIn('short-lived', screens[-1])
+
+    def test_open_picker_asks_claude_nothing_while_nothing_changes(self):
+        tree = self.run_manager('workspace', '--task', 'steady')[0]['WorkingDirectory']
+        id = '5f1c0a52-4a57-4c1e-9a55-3c2d7c1b7a03'
+        self.transcript(id, tree)
+        self.live(id, tree, kind='background', state='idle')
+        calls = []
+        count = lambda: calls.append(self.data().get('AgentsCalls'))
+        self.picker([count, count, count, count, 'q'])
+        self.assertEqual(calls, [calls[0]] * 4)
+
+    def test_picker_shows_a_status_change_without_a_keypress(self):
+        id = '5f1c0a52-4a57-4c1e-9a55-3c2d7c1b7a04'
+        self.transcript(id, self.project)
+        self.live(id, self.project, kind='background', state='idle')
+
+        def starts_working():  # Claude rewrites the process's session file whenever its status changes.
+            data = self.data()
+            data['Agents'][0].update(state='working')
+            self.native.write_text(json.dumps(data))
+            file = self.config / 'sessions' / f"{data['Agents'][0]['pid']}.json"
+            file.write_text(json.dumps(dict(json.loads(file.read_text()), status='busy')))
+
+        screens = self.picker([starts_working, SETTLE, 'q'])
+        self.assertIn('🟡 idle', screens[0])
+        self.assertIn('🟢 working', screens[-1])
+
+    def test_keys_work_while_a_slow_refresh_loads(self):
+        for n, title in enumerate(('alpha', 'charlie')):
+            tree = self.run_manager('workspace', '--task', title)[0]['WorkingDirectory']
+            self.transcript(f'5f1c0a52-4a57-4c1e-9a55-3c2d7c1b7c{n:02d}', tree, dict(), dict(type='ai-title', aiTitle=title))
+
+        def arrives_slowly():
+            self.change(AgentsDelay=2)
+            self.transcript('5f1c0a52-4a57-4c1e-9a55-3c2d7c1b7c09', self.project, dict(), dict(type='ai-title', aiTitle='bravo'))
+
+        screens = self.picker([arrives_slowly, 'down', SETTLE, 'q'])
+        cursor = lambda screen: next(line for line in screen.splitlines() if line.startswith('> ['))
+        # The key moved the cursor at once, before the refresh it had to wait behind came back.
+        self.assertIn('charlie', cursor(screens[1]))
+        self.assertNotIn('bravo', screens[1])
+        self.assertIn('bravo', screens[-1])
+
+    def test_failed_live_refresh_keeps_the_rows_and_says_why(self):
+        self.transcript('5f1c0a52-4a57-4c1e-9a55-3c2d7c1b7d01', self.project, dict(), dict(type='ai-title', aiTitle='kept'))
+
+        def claude_breaks():
+            self.change(Mode='inventory-failure')
+            self.transcript('5f1c0a52-4a57-4c1e-9a55-3c2d7c1b7d02', self.project)
+
+        def claude_recovers():
+            self.change(Mode='normal')
+            self.transcript('5f1c0a52-4a57-4c1e-9a55-3c2d7c1b7d03', self.project)
+
+        screens = self.picker([claude_breaks, SETTLE, claude_recovers, SETTLE, 'q'])
+        failed = next(screen for screen in screens if 'Claude exited 6' in screen)
+        self.assertIn('kept', failed)
+        self.assertNotIn('Claude exited 6', screens[-1])
+
+    def test_cursor_stays_on_the_same_session_across_a_refresh(self):
+        for n, title in enumerate(('alpha', 'charlie')):
+            tree = self.run_manager('workspace', '--task', title)[0]['WorkingDirectory']
+            self.transcript(f'5f1c0a52-4a57-4c1e-9a55-3c2d7c1b7b{n:02d}', tree, dict(), dict(type='ai-title', aiTitle=title))
+        id = '5f1c0a52-4a57-4c1e-9a55-3c2d7c1b7b09'
+
+        def arrives():  # A running session sorts above both.
+            self.transcript(id, self.project, dict(), dict(type='ai-title', aiTitle='bravo'))
+            self.live(id, self.project, kind='background', state='working')
+
+        screens = self.picker(['down', arrives, SETTLE, 'q'])
+        cursor = lambda screen: next(line for line in screen.splitlines() if line.startswith('> ['))
+        self.assertIn('charlie', cursor(screens[1]))
+        self.assertIn('bravo', screens[-1])
+        self.assertIn('charlie', cursor(screens[-1]))
 
     def test_picker_a_enter_twice_preserves_sessions(self):
         self.new('first')

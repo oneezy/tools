@@ -4,6 +4,7 @@ import json
 import os
 from pathlib import Path
 import sys
+import time
 import uuid
 
 config = Path(os.environ['CLAUDE_CONFIG_DIR'])
@@ -17,6 +18,8 @@ def save():
 
 
 if args[0] == 'agents':
+    data['AgentsCalls'] = data.get('AgentsCalls', 0) + 1
+    time.sleep(data.get('AgentsDelay', 0))  # A slow inventory, as on a busy machine.
     if data.get('Mode') == 'inventory-failure':
         sys.exit(6)
     # A slow launch stays out of the inventory for a few polls, like a real cold start.
