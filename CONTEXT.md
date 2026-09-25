@@ -24,7 +24,7 @@ A machine or container where a harness is installed: this Windows PC, the Ubuntu
 
 ## Picker
 
-The default user interface of a tool. One screen, sections of rows, the same key bindings in every tool: up/down move, space toggle, a all/none, enter act, x stop or remove, r refresh, q quit.
+The default user interface of a tool. One screen, sections of rows, the same key bindings in every tool: up/down move, space toggle, a all/none, enter act, x stop or remove, r refresh, q quit. Enter acts on the checked rows; with nothing checked it acts on everything.
 
 ## Project
 

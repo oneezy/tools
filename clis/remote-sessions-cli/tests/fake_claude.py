@@ -69,8 +69,14 @@ elif args[0] == '--bg':
 elif args[0] == 'stop':
     matches = [a for a in data['Agents'] if a.get('id') == args[1]]
     assert len(matches) == 1
+    if data.get('KillCallerAtStop') == data['Stops'] + 1:
+        # The OS ends the caller mid-stop, as Windows ends a closing console's process: no cleanup runs.
+        import signal
+        os.kill(os.getppid(), signal.SIGTERM)
+        sys.exit(1)
     data['Stops'] += 1
-    if data.get('Mode') != 'stop-no-effect':
+    # A session marked Unstoppable, or every session in stop-no-effect mode, stays up after stop.
+    if data.get('Mode') != 'stop-no-effect' and not matches[0].get('Unstoppable'):
         matches[0].update(state='stopped', pid=None)
     save()
 else:

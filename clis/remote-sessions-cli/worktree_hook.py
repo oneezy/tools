@@ -5,22 +5,9 @@ Everything else goes to stderr. Python 3.10+ standard library and Git only."""
 import json
 import os
 from pathlib import Path
-import re
 import sys
 
 import task_worktrees as wt
-
-
-def next_new(project):
-    """Folder and branch for a worktree whose task is not known yet: <repo>-new-<n> on new/<n>,
-    with n one above the highest number any folder or branch in this repo uses."""
-    repo = wt.slug(project.name)
-    folder = re.compile(rf'{re.escape(repo)}-new-(\d+)')
-    used = [int(m.group(1)) for p in (project / '.claude' / 'worktrees').glob(f'{repo}-new-*') if (m := folder.fullmatch(p.name))]
-    refs = wt.git(project, 'for-each-ref', '--format=%(refname:short)', 'refs/heads/new/').stdout.split()
-    used += [int(r.removeprefix('new/')) for r in refs if re.fullmatch(r'new/\d+', r)]
-    n = max(used, default=0) + 1
-    return wt.TaskNames(f'{repo}-new-{n}', f'new/{n}')
 
 
 def worktree_for(cwd, name, note=lambda message: None):
@@ -39,7 +26,7 @@ def worktree_for(cwd, name, note=lambda message: None):
     # Parallel subagents each run this hook: numbering, planning and creating happen under one per-repo lock,
     # so two unnamed requests never pick the same new/<n>.
     with wt.creation_lock(project):
-        names = wt.task_names(project.name, *parsed) if parsed else next_new(project)
+        names = wt.task_names(project.name, *parsed) if parsed else wt.next_new(project)
         if current == names.branch:
             return str(project)
         workspace = wt.plan(project, names.folder, names.branch)

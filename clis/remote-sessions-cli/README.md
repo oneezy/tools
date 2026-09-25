@@ -89,14 +89,31 @@ permission mode, Claude version, where the session started and what runs it now.
 Columns are measured in terminal cells, so emoji and wide titles keep them aligned
 in Windows Terminal.
 
-Opening the picker starts nothing. H shows history rows. Space checks a row, A
-checks every resumable or running row, Enter resumes the checked rows, N asks for a
-new task's branch type, issue number and description (the same names the `WorktreeCreate`
-hook gives, below), X stops the checked background sessions, R refreshes, W boots and
-scans a stopped WSL distro, and Q closes
-the picker. A row live in another app is view-only: it cannot be checked, resumed or
-stopped. A session whose folder was deleted, or that was archived in the desktop app,
-is not listed at all, and nothing recreates it.
+H shows history rows. Space checks a row, A checks every resumable or running row,
+N asks for a new task's branch type, issue number and description (the same names
+the `WorktreeCreate` hook gives, below), R refreshes, and W boots and scans a stopped
+WSL distro. Enter acts on the checked
+rows only; with nothing checked it brings everything up: it resumes every 🔵 stopped
+row in the default view and creates one session in each repo that has none, in a new
+worktree `<repo>-new-<n>` on branch `new/<n>`, numbered as the hook numbers them and
+cut from local `dev`. X stops the checked background sessions, or the highlighted
+one when nothing is checked. A row live in another app is view-only: it cannot be
+checked, resumed or stopped. A session whose folder was deleted, or that was archived
+in the desktop app, is not listed at all, and nothing recreates it.
+
+Closing the picker ends remote work. Q, Esc, Ctrl+C (at any moment, including a
+prompt or a long Enter) and the window's close button stop every background session
+in the picker's projects, whoever started it; sessions live in another app (VS Code,
+the desktop app, a terminal) or in WSL keep running. The close button is best effort: Windows
+ends the process a few seconds after the close event (on Linux, a terminal hangup
+does the same), and if the picker is mid-action at that moment the close waits for
+that action's lock and may be cut off before it stops anything. If a stop fails, the
+picker stays open with the error, and Q tries again. Each session is recorded in the
+state file's `StoppedAtClose` as soon as it stops, so a close cut short still records
+exactly what it stopped; the next open resumes exactly that set and starts nothing
+new. D detaches instead: the picker exits, every session keeps running, and D itself
+records nothing, so after a clean detach the next open resumes nothing. Sessions a
+failed Q already stopped stay recorded, and the next open resumes them.
 
 The picker loads fast: each transcript's metadata and each desktop store file are
 cached by path, modification time and size, so a refresh re-parses only files that
@@ -302,14 +319,15 @@ engine never stops it and never kills a saved PID. `stop --only brain` stops eve
 background session in brain; `--session-id` stops just that one, and a saved ID
 that continued as a copy stops the copy. A `--session-id` that runs outside the
 selected projects, or that the selected projects have never seen, is an error
-rather than "already stopped".
+rather than "already stopped". A session that will not stop never keeps the others
+running: the rest are still stopped, and the error names the one that failed.
 
 A session follows its folder. The branch shown is whatever the folder has checked
 out now (none on a detached HEAD, never a stale saved branch), and mutating commands
 update the saved state to match. State records a new task only once its folder
 exists, so a recorded session whose folder is gone was deleted. It is hidden, and
 the engine never recreates the folder, never makes a `recovered-<id>` worktree and
-never starts a replacement conversation. Closing the picker leaves sessions running.
+never starts a replacement conversation.
 No worktree deletion, branch deletion, reset, stash, push, or transcript rewrite is
 implemented.
 
@@ -334,7 +352,11 @@ and the detail pane in captured picker output, UUID/options continuity, hidden
 deleted folders, slow and copied launches,
 the stop rule, branch-follows-folder, the transcript cache, duplicate prevention,
 read-only previews, worktree names, native path rules, cross-process locks,
-argument quoting, and A/Enter/N picker behavior. Live refresh is driven by scripted
+argument quoting, and picker keys: A/Enter/N, Enter with nothing checked, Space plus
+Enter, X, Q/Esc/Ctrl+C and the close event stopping background sessions, a failed
+stop, a close cut short, D detaching, and the next open resuming exactly the set the
+last close stopped. The close event itself is stood in for on Windows (only a real
+console window receives it); on Linux a real SIGHUP drives it. Live refresh is driven by scripted
 picker keys where time passes with no key: a session added or a worktree removed
 shows without a keypress, a status change updates its circle, no `claude agents`
 call is made while nothing changes, the cursor keeps its session, keys work while a

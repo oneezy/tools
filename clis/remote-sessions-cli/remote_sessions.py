@@ -271,7 +271,7 @@ def validated(agents):
     if not isinstance(agents, list):
         raise ValueError('Claude returned an unexpected agent inventory format.')
     for agent in agents:
-        if not agent.get('sessionId') or not agent.get('cwd'):
+        if not isinstance(agent, dict) or not agent.get('sessionId') or not agent.get('cwd'):
             raise ValueError('Claude returned an incomplete agent record.')
         if agent.get('kind') == 'interactive' and agent.get('pid'):
             agent['state'] = agent.get('status')
@@ -772,15 +772,28 @@ class Manager:
 
     def stop(self, state):
         agents, projects, id = self.agents(), self.projects(), self.target(state)
-        results = []
-        for a in self.stoppable(agents, projects, id):
-            if sum(item.get('id') == a['id'] for item in agents) != 1:
-                raise ValueError('Ambiguous native agent identifier; nothing was stopped.')
-            self.claude(['stop', a['id']])
-            if any(b['sessionId'] == a['sessionId'] and active(b) for b in self.agents()):
-                raise RuntimeError('Claude still reports the session active after stop.')
-            results.append(dict(SessionId=a['sessionId'], Project=project_of(a['cwd'], projects),
-                                Result='stopped; conversation and worktree retained'))
+        chosen = self.stoppable(agents, projects, id)
+        if any(sum(item.get('id') == a['id'] for item in agents) != 1 for a in chosen):
+            raise ValueError('Ambiguous native agent identifier; nothing was stopped.')
+        results, failures = [], []
+        # One session that will not stop never keeps the others running.
+        for a in chosen:
+            try:
+                self.claude(['stop', a['id']])
+                if any(b['sessionId'] == a['sessionId'] and active(b) for b in self.agents()):
+                    raise RuntimeError('Claude still reports the session active after stop.')
+            except (OSError, ValueError, RuntimeError) as error:
+                failures.append(f"{a['sessionId']}: {error}")
+                continue
+            project = project_of(a['cwd'], projects)
+            if getattr(self.options, 'record_close', False):
+                # A picker close records each session as it stops, so a close the OS cuts short still records what
+                # it stopped. Set only by the picker's close.
+                state.setdefault('StoppedAtClose', {})[a['sessionId']] = project
+                write_json(self.state_path, state)
+            results.append(dict(SessionId=a['sessionId'], Project=project, Result='stopped; conversation and worktree retained'))
+        if failures:
+            raise RuntimeError(f"Could not stop {'; '.join(failures)}")
         if id and not results:
             entry = state['Sessions'].get(id)
             project = entry['Project'] if entry and entry.get('Project') in projects else next(
@@ -789,6 +802,19 @@ class Manager:
                 raise ValueError(f'Session {id} was not found in the selected projects; nothing was stopped.')
             results.append(dict(SessionId=id, Project=project, Result='already stopped; history retained'))
         return results
+
+    def take_stopped(self):
+        """Take the selected projects' sessions the last picker close stopped out of the record, and return them."""
+        projects = self.projects()
+        if not any(p in projects for p in self.state().get('StoppedAtClose', {}).values()):
+            return {}  # Nothing recorded: opening the picker takes no lock.
+        with root_lock(self.root):
+            state = self.state()
+            record = state.get('StoppedAtClose', {})
+            taken = {id: p for id, p in record.items() if p in projects}
+            state['StoppedAtClose'] = {id: p for id, p in record.items() if id not in taken}
+            write_json(self.state_path, state)
+        return taken
 
     def execute(self):
         o = self.options
@@ -1131,10 +1157,156 @@ class LiveRefresh:
                 self.check_at = time.monotonic() + self.interval
 
 
+def picker_options(manager, projects, action, **fields):
+    """Options for one engine action the picker takes on the given projects."""
+    options = argparse.Namespace(**vars(manager.options))
+    options.task = options.branch = options.issue = options.pr = options.type = options.session_id = None
+    options.only, options.action = list(projects), action
+    for name, value in fields.items():
+        setattr(options, name, value)
+    return options
+
+
+def result_lines(results, project):
+    """One line per engine result, for the picker's message line."""
+    return [f"{r.get('Project') or project}: {r.get('Result', '')}. {r.get('Connection', '')}" for r in results]
+
+
+def placeholder(project):
+    """The new-task row a project with no session shows."""
+    return dict(Project=project, SessionId=f'new:{project}', Task='New named task', NewProject=True, Available=True, Status='new')
+
+
+def enter_everything_targets(rows, projects):
+    """What Enter with nothing checked acts on: every stopped row in the default view, and a new-task row for each
+    project with no session there on this host (a WSL session does not count)."""
+    shown = visible_rows(rows)
+    return [r for r in shown if r.get('Status') == 'stopped'] + [
+        placeholder(p) for p in projects if not any(r['Project'] == p and not r.get('Distro') for r in shown)]
+
+
+def act_on_row(manager, target, checked, action, **fields):
+    """Run one engine action on a picker row and return its message lines. A row the action succeeds on is unchecked."""
+    try:
+        results = Manager(picker_options(manager, [target['Project']], action, **fields)).execute()
+    except (OSError, ValueError, RuntimeError) as error:
+        return [str(error)]
+    checked.discard(target['SessionId'])
+    return result_lines(results, target['Project'])
+
+
+def press_enter(manager, rows, all_rows, checked):
+    """Enter: resume the checked rows, asking for the task of a checked new-task row. With nothing checked, bring
+    everything up: resume every stopped row in the default view and start one session in each repo that has none."""
+    everything = not checked
+    targets = enter_everything_targets(all_rows, manager.projects()) if everything else [
+        r for r in rows if r['SessionId'] in checked]
+    messages = []
+    for target in targets:
+        if not target.get('NewProject'):
+            messages += act_on_row(manager, target, checked, 'resume', session_id=target['SessionId'])
+        elif everything:
+            # A repo with no session gets one whose task is not known yet, named as the WorktreeCreate hook names it.
+            branch = wt.next_new(manager.projects()[target['Project']]).branch
+            messages += act_on_row(manager, target, checked, 'start', branch=branch)
+        else:
+            messages += new_task(manager, target, checked)
+    return messages
+
+
+def new_task(manager, target, checked):
+    """N, or Enter on a checked new-task row: ask for a task and start it in the row's repo."""
+    # The same names the WorktreeCreate hook gives: <repo>-<type>-<issue>-<desc> on <type>/<issue>-<desc>.
+    branch_type = input(f"Branch type ({', '.join(wt.BRANCH_TYPES)}), blank for feature: ").strip().lower() or 'feature'
+    issue = input('Issue number, blank for none: ').strip().lstrip('#')
+    task = input('Description, blank cancels unless an issue is given: ').strip()
+    if not task and not issue:
+        return []
+    if issue and not (issue.isdigit() and int(issue) > 0):
+        return [f'Issue must be a number, not {issue!r}.']
+    return act_on_row(manager, target, checked, 'start', type=branch_type, task=task or None, issue=int(issue) if issue else None)
+
+
+def stop_rows(manager, rows, row, checked):
+    """X: stop the checked background sessions, or the highlighted one when nothing is checked."""
+    targets = [r for r in rows if r['SessionId'] in checked] if checked else [row]
+    messages = []
+    for target in targets:
+        if target.get('Distro'):
+            messages.append(f"{target.get('Task')} is on WSL {target['Distro']}; view-only here.")
+        elif not target.get('NewProject'):  # A new-task placeholder has no session to stop.
+            messages += act_on_row(manager, target, checked, 'stop', session_id=target['SessionId'])
+    return messages
+
+
+def close_picker(manager):
+    """What closing the picker does: stop every background session in its projects, whoever started it, recording
+    each one as it stops so the next open resumes exactly them, even when the OS ends the picker partway. Sessions
+    live in another app keep running. A failed stop raises RuntimeError once the others have stopped."""
+    Manager(picker_options(manager, manager.projects(), 'stop', record_close=True)).execute()
+
+
+def resume_stopped(manager):
+    """What opening the picker does: resume exactly the sessions the last close stopped, and start nothing else.
+    Returns what happened; a session that cannot resume says why and is not tried again."""
+    messages = []
+    for id, project in manager.take_stopped().items():
+        try:
+            messages += result_lines(Manager(picker_options(manager, [project], 'resume', session_id=id)).execute(), project)
+        except (OSError, ValueError, RuntimeError) as error:
+            messages.append(str(error))
+    return messages
+
+
+def on_console_close(callback):
+    """Run `callback` when the terminal window closes: its close button, logoff or shutdown on Windows, a hangup on
+    Linux. Best effort: Windows ends the process a few seconds after the event. Returns a function that removes it."""
+    if os.name == 'nt':
+        import ctypes
+        from ctypes import wintypes
+        kernel32 = ctypes.WinDLL('kernel32')
+        closing_events = (2, 5, 6)  # CTRL_CLOSE_EVENT, CTRL_LOGOFF_EVENT, CTRL_SHUTDOWN_EVENT; Ctrl+C is a key here.
+
+        @ctypes.WINFUNCTYPE(wintypes.BOOL, wintypes.DWORD)
+        def handler(event):
+            if event not in closing_events:
+                return False
+            callback()
+            return True
+        kernel32.SetConsoleCtrlHandler(handler, True)
+        # The returned function keeps the handler referenced, so it is not collected while registered.
+        return lambda: kernel32.SetConsoleCtrlHandler(handler, False)
+    import signal
+
+    def hangup(signum, frame):
+        callback()
+        raise SystemExit(0)
+    previous = signal.signal(signal.SIGHUP, hangup)
+    return lambda: signal.signal(signal.SIGHUP, previous)
+
+
 def menu(manager):
+    """The Claude sessions picker, with the window's close event wired to a best-effort close."""
     if not sys.stdin.isatty():
         raise ValueError('The picker requires a terminal. Use status --json for scripts.')
-    cursor, focus, checked, message, history, refresh = 0, None, set(), '', False, True
+
+    def window_closed():
+        try:
+            close_picker(manager)
+        except (OSError, ValueError, RuntimeError):
+            pass  # Best effort: the window is going away and cannot show the error.
+    release = on_console_close(window_closed)
+    try:
+        picker(manager)
+    finally:
+        release()
+
+
+def picker(manager):
+    """The picker's screen and keys."""
+    cursor, focus, checked, history, refresh = 0, None, set(), False, True
+    # Opening resumes what the last close stopped, before the first read, so the rows show them running.
+    message = ' | '.join(resume_stopped(manager))
     live = LiveRefresh(manager, manager.options.refresh_every)
     while True:
         if refresh:
@@ -1144,8 +1316,7 @@ def menu(manager):
         rows = visible_rows(all_rows, history)
         for project in manager.projects():
             if not any(r['Project'] == project and not r.get('Distro') for r in rows):
-                rows.append(dict(Project=project, SessionId=f'new:{project}', Task='New named task', NewProject=True, Available=True,
-                                 Status='new'))
+                rows.append(placeholder(project))
         if not rows:
             print('No project folders found.')
             return
@@ -1160,7 +1331,7 @@ def menu(manager):
         print(color(f'Claude sessions | {sys.platform} | {manager.root}', '96')
               + (color(''.join(f' | {clean(note)}' for note in manager.wsl_notes), '90') if manager.wsl_notes else ''))
         print('Space select | A available | Enter resume | N new task | X stop | H history | R refresh'
-              + (' | W scan WSL' if manager.options.wsl else '') + ' | Q quit\n')
+              + (' | W scan WSL' if manager.options.wsl else '') + ' | D detach | Q stop & quit\n')
         print(color(' ' * ROW_PREFIX + table_line(COLUMNS, widths), '96'))
         print(color('─' * min(terminal.columns - 1, 160), '90'))
         for index in range(start, min(start + height, len(rows))):
@@ -1187,77 +1358,65 @@ def menu(manager):
             print(color(clean(message), '93'))
         if live.warning:
             print(color(clean(live.warning), '91'))
-        key = live.key()
-        if key is None:
-            continue
-        if key in QUIT_KEYS + ACTION_KEYS:
-            live.settle()
-        if key in QUIT_KEYS:
-            return
-        if key in ('up', 'k', 'down', 'j'):
-            cursor = (cursor + (-1 if key in ('up', 'k') else 1)) % len(rows)
-            focus = rows[cursor]['SessionId']
-        elif key == 'h':
-            history = not history
-            checked.clear()
-        elif key == 'r':
-            live.reload()
-        elif key == 'w':
-            # W boots the one stopped distro in the header, or asks which when there are several.
-            stopped = manager.wsl_stopped
-            answer = (stopped[0] if len(stopped) == 1
-                      else input(f"WSL distro to scan ({', '.join(stopped)}), blank for all: ").strip() if stopped else '')
-            if not stopped:
-                message = 'No stopped WSL distro to scan.'
-            elif answer and answer not in stopped:
-                message = f'No stopped WSL distro is named {answer}.'
-            else:
-                # Read off the key loop like R: a boot may take a minute, and keys keep working meanwhile.
-                manager.wake = {answer} if answer else set(stopped)
+        try:
+            key = live.key()
+            if key is None:
+                continue
+            if key in QUIT_KEYS + ACTION_KEYS + ('d',):
+                live.settle()  # A read in flight must not outlive the picker or race an action.
+            if key in ('up', 'k', 'down', 'j'):
+                cursor = (cursor + (-1 if key in ('up', 'k') else 1)) % len(rows)
+                focus = rows[cursor]['SessionId']
+            elif key == 'h':
+                history = not history
+                checked.clear()
+            elif key == 'r':
                 live.reload()
-        elif key == ' ':
-            if row.get('ViewOnly'):
-                message = f"{row.get('Task')} is live in {row.get('Source')}; it is view-only here."
-            elif row['SessionId'] in checked:
-                checked.remove(row['SessionId'])
-            else:
-                checked.add(row['SessionId'])
-        elif key == 'a':
-            available = {r['SessionId'] for r in rows if selectable(r) and not r.get('NewProject')}
-            checked = set() if available <= checked else available
-        elif key == 'n' and row.get('Distro'):
-            message = f"{row.get('Task')} is on WSL {row['Distro']}; start a task there with the picker inside that distro."
-        elif key in ACTION_KEYS:
-            targets = [row] if key == 'n' else [r for r in rows if r['SessionId'] in checked]
-            messages = []
-            for target in targets:
-                if key == 'x' and target.get('NewProject'):
-                    continue  # A new-task placeholder has no session to stop.
-                options = argparse.Namespace(**vars(manager.options))
-                options.only = [target['Project']]
-                options.task = options.branch = options.issue = options.pr = options.type = options.session_id = None
-                options.action = 'stop' if key == 'x' else 'resume'
-                if key == 'n' or (target.get('NewProject') and key != 'x'):
-                    # The same names the WorktreeCreate hook gives: <repo>-<type>-<issue>-<desc> on <type>/<issue>-<desc>.
-                    branch_type = input(f"Branch type ({', '.join(wt.BRANCH_TYPES)}), blank for feature: ").strip().lower() or 'feature'
-                    issue = input('Issue number, blank for none: ').strip().lstrip('#')
-                    task = input('Description, blank cancels unless an issue is given: ').strip()
-                    if not task and not issue:
-                        continue
-                    if issue and not (issue.isdigit() and int(issue) > 0):
-                        messages.append(f'Issue must be a number, not {issue!r}.')
-                        continue
-                    options.action, options.type, options.task, options.issue = 'start', branch_type, task or None, int(issue) if issue else None
+            elif key == 'w':
+                # W boots the one stopped distro in the header, or asks which when there are several.
+                stopped = manager.wsl_stopped
+                answer = (stopped[0] if len(stopped) == 1
+                          else input(f"WSL distro to scan ({', '.join(stopped)}), blank for all: ").strip() if stopped else '')
+                if not stopped:
+                    message = 'No stopped WSL distro to scan.'
+                elif answer and answer not in stopped:
+                    message = f'No stopped WSL distro is named {answer}.'
                 else:
-                    options.session_id = target['SessionId']
-                try:
-                    result = Manager(options).execute()
-                    messages.extend(f"{r.get('Project') or target['Project']}: {r.get('Result', '')}. {r.get('Connection', '')}" for r in result)
-                    checked.discard(target['SessionId'])
-                except (OSError, ValueError, RuntimeError) as error:
-                    messages.append(str(error))
-            message = ' | '.join(messages)
-            refresh = True
+                    # Read off the key loop like R: a boot may take a minute, and keys keep working meanwhile.
+                    manager.wake = {answer} if answer else set(stopped)
+                    live.reload()
+            elif key == ' ':
+                if row.get('ViewOnly'):
+                    message = f"{row.get('Task')} is live in {row.get('Source')}; it is view-only here."
+                elif row['SessionId'] in checked:
+                    checked.remove(row['SessionId'])
+                else:
+                    checked.add(row['SessionId'])
+            elif key == 'a':
+                available = {r['SessionId'] for r in rows if selectable(r) and not r.get('NewProject')}
+                checked = set() if available <= checked else available
+            elif key in ('\r', '\n'):
+                message, refresh = ' | '.join(press_enter(manager, rows, all_rows, checked)), True
+            elif key == 'n' and row.get('Distro'):
+                message = f"{row.get('Task')} is on WSL {row['Distro']}; start a task there with the picker inside that distro."
+            elif key == 'n':
+                message, refresh = ' | '.join(new_task(manager, row, checked)), True
+            elif key == 'x':
+                message, refresh = ' | '.join(stop_rows(manager, rows, row, checked)), True
+        except KeyboardInterrupt:
+            live.settle()
+            key = '\x03'  # Ctrl+C quits from anywhere: the key wait, a prompt, or a long Enter.
+        if key == 'd':
+            return  # Detach: every session keeps running, and D records nothing for the next open.
+        if key in QUIT_KEYS:
+            try:
+                close_picker(manager)
+                return
+            except (OSError, ValueError, RuntimeError) as error:
+                # A stop failed: the window stays open with the error, and the next Q tries again. The rows reload off
+                # the key loop, so a Claude that cannot list sessions shows as a warning instead of ending the picker.
+                message = str(error)
+                live.reload()
 
 
 def main(argv=None):

@@ -85,6 +85,19 @@ def default_branch(repo, folder):
     return task_names(repo, *parsed).branch if parsed else f'feature/{slug(rest)}'
 
 
+def next_new(project):
+    """Folder and branch for a worktree whose task is not known yet: <repo>-new-<n> on new/<n>, with n one above the
+    highest number any folder or branch in this repo uses. The WorktreeCreate hook and the picker both name them so."""
+    project = Path(project)
+    repo = slug(project.name)
+    folder = re.compile(rf'{re.escape(repo)}-new-(\d+)')
+    used = [int(m.group(1)) for p in (project / '.claude' / 'worktrees').glob(f'{repo}-new-*') if (m := folder.fullmatch(p.name))]
+    refs = git(project, 'for-each-ref', '--format=%(refname:short)', 'refs/heads/new/').stdout.split()
+    used += [int(r.removeprefix('new/')) for r in refs if re.fullmatch(r'new/\d+', r)]
+    n = max(used, default=0) + 1
+    return TaskNames(f'{repo}-new-{n}', f'new/{n}')
+
+
 def worktrees(project):
     trees = []
     for block in git(project, '-c', 'core.quotePath=false', 'worktree', 'list', '--porcelain').stdout.strip().split('\n\n'):

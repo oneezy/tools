@@ -133,7 +133,8 @@ class PortableTests(unittest.TestCase):
     def picker(self, keys, columns=140, only=('brain',)):
         """Drive the picker with scripted keypresses; return every screen it drew, as a terminal shows them.
         A key is a string. A callable is something that happens while no key is pressed: it runs, then the
-        picker's wait for a key times out. SETTLE presses nothing until the picker redraws by itself."""
+        picker's wait for a key times out. SETTLE presses nothing until the picker redraws by itself.
+        An exception is raised while the picker waits for a key, as Ctrl+C raises KeyboardInterrupt."""
         output = io.StringIO()
         script = iter(keys)
         # SETTLE waits for a screen beyond `since`: the screens drawn when the last change happened, or, after a
@@ -153,13 +154,15 @@ class PortableTests(unittest.TestCase):
                 since[0] = drawn if since[0] is None else since[0]
                 deadline[0] = time.monotonic() + 20
                 return press(timeout)
+            if isinstance(item, BaseException):
+                since[0] = None
+                raise item
             if callable(item):
                 since[0] = drawn
                 item()
                 return None
             since[0] = None
             return item
-
         with patch.object(rs.sys.stdin, 'isatty', return_value=True), patch.object(rs, 'keypress', side_effect=press), \
                 patch.dict(os.environ, COLUMNS=str(columns), LINES='40'), redirect_stdout(output):
             rs.menu(rs.Manager(self.options('menu', '--refresh-every', '0', only=only)))
@@ -941,7 +944,7 @@ class PortableTests(unittest.TestCase):
             self.change(Mode='junk-agents')
             self.transcript('5f1c0a52-4a57-4c1e-9a55-3c2d7c1b7e02', self.project)
 
-        screens = self.picker([claude_lists_junk, SETTLE, 'q'])
+        screens = self.picker([claude_lists_junk, SETTLE, 'd'])  # D leaves without a stop, which would need Claude.
         self.assertIn('Live refresh failed', screens[-1])
         self.assertIn('kept', screens[-1])
 
@@ -1015,6 +1018,12 @@ class PortableTests(unittest.TestCase):
         started = next(line for line in screen.splitlines() if line.startswith('Started:'))
         self.assertIn('on another host; view-only', started)
         self.assertNotIn('another app', started)
+
+    def test_x_on_a_wsl_row_says_it_is_view_only_and_stops_nothing(self):
+        self.distro('Ubuntu-26.04', 'Running', agents=[self.wsl_chat('5f1c0a52-4a57-4c1e-9a55-3c2d7c1b7f09')])
+        screens = self.picker(['x', 'd'])  # The live WSL row sorts first, under the cursor.
+        self.assertIn('WSL Ubuntu-26.04; view-only', screens[-1].splitlines()[-1])
+        self.assertEqual(self.data()['Stops'], 0)
 
     def test_picker_n_on_a_wsl_row_starts_nothing_on_windows(self):
         self.distro('Ubuntu-26.04', 'Running', agents=[self.wsl_chat('5f1c0a52-4a57-4c1e-9a55-3c2d7c1b7f02')])
@@ -1120,6 +1129,168 @@ class PortableTests(unittest.TestCase):
         self.distro('Ubuntu-26.04', 'Running', shell=dict(Config=config.as_posix(), Path=str(commands)))
         row = self.rows_by_id()[id]
         self.assertEqual((row['Source'], row['Task'], row['Remote']), ('WSL · VS Code ext', 'Shell chat', '📡'))
+
+    def running(self):
+        """Session IDs the fake Claude lists as running."""
+        return {a['sessionId'] for a in self.data()['Agents'] if a.get('pid') and a.get('state') != 'stopped'}
+
+    def test_quitting_stops_every_background_session_and_leaves_interactive_ones(self):
+        id = lambda n: f'5f1c0a52-4a57-4c1e-9a55-3c2d7c1b7a{n:02d}'
+        for quit in ('q', '\x1b', '\x03', KeyboardInterrupt()):
+            with self.subTest(quit=quit):
+                self.change(Agents=[])
+                task = self.new()  # Started by the picker's engine.
+                self.live(id(1), self.project, kind='background')  # Started elsewhere.
+                self.live(id(2), self.project, entrypoint='claude-vscode')  # Open in VS Code.
+                self.live(id(3), self.project, entrypoint='cli')  # Open in a terminal.
+                self.picker([quit])
+                self.assertEqual(self.running(), {id(2), id(3)})
+                self.assertNotIn(task['SessionId'], self.running())
+
+    def test_next_open_resumes_exactly_the_sessions_the_last_close_stopped(self):
+        first, second, stopped = self.new('first'), self.new('second'), self.new('third')
+        self.run_manager('stop', '--session-id', stopped['SessionId'])  # Stopped before the close: stays stopped.
+        self.picker(['q'])
+        self.assertEqual(self.running(), set())
+        starts = self.data()['Starts']
+        screen = self.picker(['d'])[-1]
+        self.assertEqual(self.running(), {first['SessionId'], second['SessionId']})
+        self.assertEqual(self.data()['Starts'], starts + 2)
+        self.assertIn('resumed original conversation', screen)
+        self.picker(['d'])  # The set was resumed once; this open starts nothing.
+        self.assertEqual(self.data()['Starts'], starts + 2)
+
+    def test_detaching_leaves_every_session_running_and_records_nothing(self):
+        task = self.new()
+        self.picker(['d'])
+        self.assertEqual((self.running(), self.data()['Stops']), ({task['SessionId']}, 0))
+        self.run_manager('stop')  # Stopped outside the picker after it detached.
+        self.picker(['d'])
+        self.assertEqual((self.running(), self.data()['Starts']), (set(), 1))
+
+    def unstoppable(self, id):
+        """Make one session stay up whenever Claude is asked to stop it."""
+        data = self.data()
+        next(a for a in data['Agents'] if a['sessionId'] == id)['Unstoppable'] = True
+        self.change(Agents=data['Agents'])
+
+    def test_one_session_that_will_not_stop_never_keeps_the_others_running(self):
+        stuck, other = self.new('first'), self.new('second')
+        self.unstoppable(stuck['SessionId'])
+        with self.assertRaisesRegex(RuntimeError, stuck['SessionId']):
+            self.run_manager('stop')
+        self.assertEqual(self.running(), {stuck['SessionId']})
+
+    def test_failed_stop_keeps_the_picker_open_with_the_error(self):
+        stuck, other = self.new('first'), self.new('second')
+        self.unstoppable(stuck['SessionId'])
+        screens = self.picker(['q', 'd'])
+        self.assertEqual(len(screens), 2)
+        self.assertIn('still reports the session active', screens[-1])
+        self.assertEqual(self.running(), {stuck['SessionId']})
+        self.picker(['d'])  # The close stopped the other session before the failure: the next open resumes it.
+        self.assertEqual(self.running(), {stuck['SessionId'], other['SessionId']})
+
+    def test_q_while_claude_cannot_list_sessions_keeps_the_picker_open_with_the_error(self):
+        self.new()
+        for mode, error in (('inventory-failure', 'Claude exited 6'), ('junk-agents', 'incomplete agent record')):
+            with self.subTest(mode=mode):
+                screens = self.picker([lambda: self.change(Mode=mode), 'q', lambda: self.change(Mode='normal'), 'q'])
+                self.assertTrue(any(error in screen for screen in screens), screens[-1])
+                self.assertEqual(self.running(), set())  # Once Claude answers again, Q stops and quits.
+
+    def repo(self, name):
+        """Another project: a Git repo on dev with one commit."""
+        repo = self.root / name
+        repo.mkdir()
+        wt.git(repo, 'init', '-b', 'dev')
+        wt.git(repo, '-c', 'user.name=Fixture', '-c', 'user.email=fixture@example.invalid', 'commit', '--allow-empty', '-m', 'fixture')
+        return repo
+
+    def test_enter_with_nothing_checked_resumes_every_stopped_row_and_starts_one_session_per_empty_repo(self):
+        first, second = self.new('first'), self.new('second')
+        self.run_manager('stop')
+        older = '5f1c0a52-4a57-4c1e-9a55-3c2d7c1b7b01'  # An older conversation in first's folder: history, not resumed.
+        self.transcript(older, first['WorkingDirectory'], timestamp='2020-01-01T00:00:00Z')
+        vscode = '5f1c0a52-4a57-4c1e-9a55-3c2d7c1b7b02'
+        self.live(vscode, self.project, entrypoint='claude-vscode')
+        tools = self.repo('tools')
+        self.picker(['\r', 'd'], only=())
+        created = [t for t in wt.worktrees(tools) if not wt.same(t['Path'], tools)]
+        self.assertEqual([(Path(t['Path']).name, t['Branch']) for t in created], [('tools-new-1', 'new/1')])
+        self.assertEqual(self.running() - {first['SessionId'], second['SessionId'], vscode},
+                         {a['sessionId'] for a in self.data()['Agents'] if wt.same(a['cwd'], created[0]['Path'])})
+        self.assertEqual(self.data()['Starts'], 5)
+        self.picker(['\r', 'd'], only=())  # Everything is up: Enter starts nothing more.
+        self.assertEqual(self.data()['Starts'], 5)
+
+    def test_space_and_enter_resume_only_the_checked_row(self):
+        first, second = self.new('first'), self.new('second')
+        self.run_manager('stop')
+        tools = self.repo('tools')
+        self.picker([' ', '\r', 'd'], only=())  # The cursor starts on the first row: issue-2 first.
+        self.assertEqual(self.running(), {first['SessionId']})
+        self.assertEqual(wt.worktrees(tools), [dict(Path=str(tools), Branch='dev', Prunable=False)])
+
+    def test_x_stops_the_highlighted_background_session_only(self):
+        first, second = self.new('first'), self.new('second')
+        self.picker(['down', 'x', 'd'])  # Rows: issue-2 first, issue-2 second.
+        self.assertEqual(self.running(), {first['SessionId']})
+        self.assertEqual(self.data()['Stops'], 1)
+
+    def test_closing_the_window_stops_background_sessions_and_the_next_open_resumes_them(self):
+        task = self.new()
+        vscode = '5f1c0a52-4a57-4c1e-9a55-3c2d7c1b7c01'
+        self.live(vscode, self.project, entrypoint='claude-vscode')
+        handlers = []
+
+        def close_window():
+            for handler in handlers:
+                handler()  # What the OS runs when the window's close button is pressed.
+            self.assertEqual(self.running(), {vscode})
+        with patch.object(rs, 'on_console_close', side_effect=lambda callback: handlers.append(callback) or (lambda: None)):
+            self.picker([close_window, 'd'])  # The OS then ends the picker; detaching here ends it without another stop.
+        self.assertEqual(len(handlers), 1)
+        self.picker(['d'])
+        self.assertEqual(self.running(), {task['SessionId'], vscode})
+
+    def test_a_close_the_os_cuts_short_still_resumes_what_it_stopped(self):
+        first, second = self.new('first'), self.new('second')
+        self.change(KillCallerAtStop=2)  # The OS ends the picker's process as the second stop begins.
+        argv = ['menu', '--root', str(self.root), '--config', str(self.config), '--claude', str(FAKE),
+                '--desktop-sessions', str(self.desktop), '--wsl', '', '--only', 'brain']
+        child = '; '.join([f'import sys, unittest.mock; sys.path.insert(0, {str(ENGINE.parent)!r}); import remote_sessions as rs',
+                           "unittest.mock.patch.object(rs.sys.stdin, 'isatty', return_value=True).start()",
+                           "unittest.mock.patch.object(rs, 'keypress', return_value='q').start()",
+                           f'rs.menu(rs.Manager(rs.parser().parse_args({argv!r})))'])
+        ended = subprocess.run([sys.executable, '-c', child], stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, timeout=120,
+                               env=dict(os.environ, PYTHONIOENCODING='utf-8'))
+        self.assertNotEqual(ended.returncode, 0, ended.stderr)  # It was ended, not closed normally.
+        self.assertEqual(self.running(), {second['SessionId']})
+        self.change(KillCallerAtStop=None)
+        self.picker(['d'])
+        self.assertEqual(self.running(), {first['SessionId'], second['SessionId']})
+
+    def test_ctrl_c_at_a_prompt_stops_background_sessions_and_quits(self):
+        task = self.new()
+        with patch('builtins.input', side_effect=KeyboardInterrupt):
+            self.picker(['n'])  # Ctrl+C while the picker asks for the new task's branch type.
+        self.assertEqual(self.running(), set())
+        self.picker(['d'])
+        self.assertEqual(self.running(), {task['SessionId']})
+
+    @unittest.skipIf(os.name == 'nt', 'Only a real console window receives the close event; the close-event test above stands in.')
+    def test_a_terminal_hangup_stops_background_sessions(self):
+        import signal
+        task = self.new()
+
+        def hang_up():
+            os.kill(os.getpid(), signal.SIGHUP)
+        with self.assertRaises(SystemExit):
+            self.picker([hang_up, 'd'])
+        self.assertEqual(self.running(), set())
+        self.picker(['d'])
+        self.assertEqual(self.running(), {task['SessionId']})
 
     def test_picker_a_enter_twice_preserves_sessions(self):
         self.new('first')
