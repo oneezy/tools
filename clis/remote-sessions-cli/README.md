@@ -49,8 +49,31 @@ Source is what runs a session now: CLI, Background (`--bg`, which records entryp
 `cli`), VS Code ext, Desktop, RC server (spawned by `claude remote-control`, entrypoint
 `sdk-cli`). A stopped session shows where it started instead, including Web for a
 teleported session and Background for a `--bg` launch.
+
+A session live in another app also shows its host: the program it runs in, found by
+walking its process's parents to the first known host. Source adds the nearest one,
+for example `CLI · PowerShell` or `RC server · cmd`; VS Code ext and Desktop already
+name theirs. The detail pane's `Host:` line gives the whole chain: the shell, the
+app holding it, and the app that launched that one, for example
+`PowerShell in Windows Terminal` or `VS Code (launched from Codex app)`. Known hosts:
+VS Code (`Code.exe`), Windows Terminal, PowerShell (`pwsh.exe`, `powershell.exe`),
+`cmd.exe`, the desktop app and the Codex app. The two store apps are known by their
+MSIX package folder (`WindowsApps\Claude_*`, `WindowsApps\OpenAI.Codex_*`), because
+their processes are named `claude.exe` and `ChatGPT.exe`. On Linux the shells
+(`bash`, `zsh`, `fish`, `sh`), `code` and tmux are known. A background session's host
+is the Claude daemon, whatever terminal once started the daemon. A parent whose PID
+was reused by a process started later is not a host, and a session whose process is
+not in the snapshot keeps its plain surface label.
+
+The process list is one snapshot per refresh, taken only when a session is live in
+another app, with the standard library alone: Toolhelp32 plus
+`QueryFullProcessImageNameW` and `GetProcessTimes` via ctypes on Windows, `/proc` on
+Linux. Snapshot and walk take about 15 ms here for some 280 processes; there is no
+PowerShell or CIM call, which would take 150-600 ms.
+
 The detail pane under the table shows the folder, remote URL, session ID,
-permission mode, Claude version, where the session started and what runs it now.
+permission mode, Claude version, where the session started, what runs it now and
+its host.
 Columns are measured in terminal cells, so emoji and wide titles keep them aligned
 in Windows Terminal.
 
@@ -89,8 +112,9 @@ PowerShell spellings such as `-Only`, `-SessionId`, `-Task`, `-Plan`, and `-Json
 accepted. `--config` selects a Claude configuration directory. `--claude` selects
 its executable. `--desktop-sessions` selects the desktop app's session store. Repo-root
 sessions are always listed; `--include-project-sessions` is still accepted and does nothing.
-`status --json` rows carry `Status`, `Circle`, `Source`, `Origin`, `Remote`, `ViewOnly`,
-`PermissionMode` and `ClaudeVersion`. `resume --session-id` on a session live in another
+`status --json` rows carry `Status`, `Circle`, `Source`, `Origin`, `Host`, `Remote`, `ViewOnly`,
+`PermissionMode` and `ClaudeVersion`. `--processes FILE` reads the process snapshot
+from a JSON list of `{pid, ppid, name, path, started}` instead of this host, for tests. `resume --session-id` on a session live in another
 app is refused as view-only, like `stop`.
 
 `start` without a task name resumes managed tasks, or the newest available saved
@@ -207,7 +231,10 @@ python3 -m unittest discover -s tests -p test_portable.py -v
 
 The portable suite uses a fake Claude executable and real disposable Git repos.
 It covers the four-source inventory (Source labels per surface, status circles, the
-Remote column, archived desktop sessions), view-only rows, emoji column alignment
+Remote column, archived desktop sessions), host labels from planted process lists
+(VS Code launched from the Codex app, Windows Terminal with PowerShell, the desktop
+app, the daemon, reused PIDs), a real shell-and-child chain read from this host's
+snapshot, the 50 ms snapshot budget, view-only rows, emoji column alignment
 and the detail pane in captured picker output, UUID/options continuity, hidden
 deleted folders, slow and copied launches,
 the stop rule, branch-follows-folder, the transcript cache, duplicate prevention,

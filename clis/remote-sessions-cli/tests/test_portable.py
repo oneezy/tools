@@ -9,6 +9,7 @@ from pathlib import Path
 import subprocess
 import sys
 import tempfile
+import time
 import unittest
 from unittest.mock import patch
 
@@ -43,6 +44,9 @@ class PortableTests(unittest.TestCase):
         self.config.mkdir()
         self.native = self.config / 'fake-native.json'
         self.native.write_text(json.dumps(dict(Agents=[], Starts=0, Stops=0, Mode='normal')))
+        # The process snapshot the engine reads instead of this machine's; empty unless a test plants a chain.
+        self.snapshot = Path(self.temp.name) / 'processes.json'
+        self.snapshot.write_text('[]')
         wt.git(self.project, 'init', '-b', 'dev')
         wt.git(self.project, 'config', 'user.name', 'Fixture')
         wt.git(self.project, 'config', 'user.email', 'fixture@example.invalid')
@@ -50,9 +54,10 @@ class PortableTests(unittest.TestCase):
         wt.git(self.project, 'add', '.')
         wt.git(self.project, 'commit', '-m', 'fixture')
 
-    def options(self, *args, only=('brain',)):
+    def options(self, *args, only=('brain',), real_processes=False):
         return rs.parser().parse_args([*args, '--root', str(self.root), '--config', str(self.config), '--claude', str(FAKE),
-                                       '--desktop-sessions', str(self.desktop), *(['--only', *only] if only else [])])
+                                       '--desktop-sessions', str(self.desktop), *(['--only', *only] if only else []),
+                                       *([] if real_processes else ['--processes', str(self.snapshot)])])
 
     @property
     def desktop(self):
@@ -67,10 +72,10 @@ class PortableTests(unittest.TestCase):
         lines += [dict(sessionId=id, **record) for record in records[1:]]
         (history / f'{id}.jsonl').write_text('\n'.join(json.dumps(line) for line in lines))
 
-    def live(self, id, cwd, kind='interactive', entrypoint=None, bridge=None, **fields):
+    def live(self, id, cwd, kind='interactive', entrypoint=None, bridge=None, pid=None, **fields):
         """A session Claude lists as live, with the per-pid session file its process writes."""
         data = self.data()
-        pid = 7000 + len(data['Agents'])
+        pid = pid or 7000 + len(data['Agents'])
         agent = dict(sessionId=id, kind=kind, cwd=str(cwd), pid=pid, **fields)
         if kind == 'background':
             agent.setdefault('id', id[:8])
@@ -87,6 +92,14 @@ class PortableTests(unittest.TestCase):
         if bridge:
             record['bridgeSessionId'] = bridge
         (folder / f'{pid}.json').write_text(json.dumps(record))
+
+    def processes(self, *chain):
+        """Plant a process snapshot: each entry is (pid, parent pid, image name[, full image path[, start time]])."""
+        rows = [dict(zip(('pid', 'ppid', 'name', 'path', 'started'), entry)) for entry in chain]
+        self.snapshot.write_text(json.dumps(rows))
+
+    def pid_of(self, id):
+        return next(a['pid'] for a in self.data()['Agents'] if a['sessionId'] == id)
 
     def desktop_session(self, id, cwd, archived=False, **fields):
         """An entry in the desktop app's own session store."""
@@ -450,6 +463,113 @@ class PortableTests(unittest.TestCase):
             id(3): ('CLI', 'CLI'), id(4): ('RC server', 'RC server')})
         screen = self.picker(['q'])[-1]
         self.assertIn('Started: Background', screen)
+
+    def test_cli_session_in_windows_terminal_shows_its_shell_in_source_and_the_chain_in_the_detail_pane(self):
+        id = '5f1c0a52-4a57-4c1e-9a55-3c2d7c1b7a01'
+        self.transcript(id, self.project, dict(), dict(type='ai-title', aiTitle='terminal chat'))
+        self.live(id, self.project, entrypoint='cli')
+        self.processes((self.pid_of(id), 300, 'claude.exe', r'C:\Users\J\.local\bin\claude.exe'),
+                       (300, 200, 'pwsh.exe', r'C:\Program Files\PowerShell\7\pwsh.exe'),
+                       (200, 100, 'WindowsTerminal.exe'), (100, 4, 'explorer.exe'))
+        row = self.rows_by_id()[id]
+        self.assertEqual((row['Source'], row['Host']), ('CLI · PowerShell', 'PowerShell in Windows Terminal'))
+        screen = self.picker(['q'])[-1]
+        line = next(line for line in screen.splitlines() if 'terminal chat' in line)
+        self.assertIn(' CLI · PowerShell ', line)
+        self.assertIn('Host:    PowerShell in Windows Terminal', screen[screen.index(line) + len(line):])
+
+    def test_vscode_session_names_the_app_that_launched_vscode(self):
+        id = '5f1c0a52-4a57-4c1e-9a55-3c2d7c1b7a02'
+        self.transcript(id, self.project)
+        self.live(id, self.project, entrypoint='claude-vscode')
+        # The extension host and the main window are both Code.exe; the Codex app is ChatGPT.exe in its MSIX package.
+        self.processes((self.pid_of(id), 1424, 'claude.exe', r'c:\Users\J\.vscode\extensions\anthropic.claude-code\claude.exe'),
+                       (1424, 1700, 'Code.exe', r'C:\Users\J\AppData\Local\Programs\Microsoft VS Code\Code.exe'),
+                       (1700, 1624, 'Code.exe', r'C:\Users\J\AppData\Local\Programs\Microsoft VS Code\Code.exe'),
+                       (1624, 900, 'ChatGPT.exe', r'C:\Program Files\WindowsApps\OpenAI.Codex_26.917.9434.0_x64__2p2nqsd0c76g0\app\ChatGPT.exe'))
+        row = self.rows_by_id()[id]
+        self.assertEqual((row['Source'], row['Host']), ('VS Code ext', 'VS Code (launched from Codex app)'))
+
+    def test_desktop_app_is_known_by_its_package_folder_not_its_process_name(self):
+        desktop, cli = '5f1c0a52-4a57-4c1e-9a55-3c2d7c1b7a03', '5f1c0a52-4a57-4c1e-9a55-3c2d7c1b7a04'
+        for id in (desktop, cli):
+            self.transcript(id, self.project)
+        self.live(desktop, self.project, entrypoint='claude-desktop')
+        self.live(cli, self.project, entrypoint='cli')
+        app = r'C:\Program Files\WindowsApps\Claude_2.9939.2.0_x64__pzs8sxrjxfjjc\app\claude.exe'
+        # Both sessions have a parent named claude.exe; only the one in the desktop app's package is the desktop app.
+        self.processes((self.pid_of(desktop), 2300, 'claude.exe', r'C:\Users\J\AppData\Roaming\Claude\claude-code\claude.exe'),
+                       (2300, 650, 'claude.exe', app), (650, 600, 'sihost.exe'),
+                       (self.pid_of(cli), 2400, 'claude.exe', r'C:\Users\J\.local\bin\claude.exe'),
+                       (2400, 2500, 'cmd.exe', r'C:\WINDOWS\system32\cmd.exe'))
+        rows = self.rows_by_id()
+        self.assertEqual({id: (rows[id]['Source'], rows[id]['Host']) for id in (desktop, cli)},
+                         {desktop: ('Desktop', 'Desktop app'), cli: ('CLI · cmd', 'cmd')})
+
+    def test_background_session_is_hosted_by_the_claude_daemon_not_the_terminal_that_started_it(self):
+        id = '5f1c0a52-4a57-4c1e-9a55-3c2d7c1b7a05'
+        self.transcript(id, self.project, dict(), dict(type='ai-title', aiTitle='daemon chat'))
+        self.live(id, self.project, kind='background', entrypoint='cli')
+        binary = r'C:\Users\J\.local\bin\claude.exe'
+        # The daemon was started from a PowerShell tab, which does not host the session.
+        self.processes((self.pid_of(id), 1935, 'claude.exe', binary), (1935, 2080, 'claude.exe', binary),
+                       (2080, 300, 'claude.exe', binary), (300, 200, 'pwsh.exe'), (200, 100, 'WindowsTerminal.exe'))
+        row = self.rows_by_id()[id]
+        self.assertEqual((row['Source'], row['Host']), ('Background', 'Claude daemon'))
+        self.assertIn('Host:    Claude daemon', self.picker(['q'])[-1])
+
+    def test_a_parent_pid_reused_by_a_later_process_is_not_the_host(self):
+        id = '5f1c0a52-4a57-4c1e-9a55-3c2d7c1b7a06'
+        self.transcript(id, self.project)
+        self.live(id, self.project, entrypoint='cli')
+        # The shell that started the session exited; Windows gave its PID to a VS Code window opened afterwards.
+        self.processes((self.pid_of(id), 300, 'claude.exe', None, 5000), (300, 100, 'Code.exe', None, 9000),
+                       (100, 4, 'WindowsTerminal.exe', None, 1000))
+        row = self.rows_by_id()[id]
+        self.assertEqual((row['Source'], row['Host']), ('CLI', None))
+
+    def test_a_session_missing_from_the_snapshot_keeps_its_surface_label(self):
+        id = '5f1c0a52-4a57-4c1e-9a55-3c2d7c1b7a07'
+        self.transcript(id, self.project)
+        self.live(id, self.project, entrypoint='cli')
+        self.processes((1, 1, 'System'), (300, 200, 'pwsh.exe'))  # A PID loop, and no entry for the session's process.
+        row = self.rows_by_id()[id]
+        self.assertEqual((row['Source'], row['Host']), ('CLI', None))
+        self.assertNotIn('Host:', self.picker(['q'])[-1])
+
+    def shell_child(self):
+        """A real process running under a shell (cmd on Windows, sh elsewhere), as a terminal session runs under one.
+        Returns the child's PID and the shell's host label; the child exits once the test ends."""
+        code = "print(__import__('os').getpid(),flush=True);__import__('sys').stdin.read()"
+        command = (['cmd', '/d', '/c', sys.executable, '-c', code] if os.name == 'nt' else
+                   ['sh', '-c', '"$0" -c "$1"; :', sys.executable, code])
+        child = subprocess.Popen(command, stdin=subprocess.PIPE, stdout=subprocess.PIPE, text=True)
+        self.addCleanup(child.wait, 30)
+        self.addCleanup(child.stdin.close)
+        return int(child.stdout.readline()), 'cmd' if os.name == 'nt' else 'sh'
+
+    @unittest.skipUnless(os.name == 'nt' or Path('/proc/self/stat').exists(), 'process snapshot reads Windows or /proc')
+    def test_real_process_snapshot_finds_the_shell_a_session_runs_under(self):
+        id = '5f1c0a52-4a57-4c1e-9a55-3c2d7c1b7a08'
+        self.transcript(id, self.project)
+        pid, shell = self.shell_child()
+        self.live(id, self.project, entrypoint='cli', pid=pid)
+        rows = {r['SessionId']: r for r in rs.Manager(self.options('status', real_processes=True)).execute()}
+        self.assertEqual(rows[id]['Source'], f'CLI · {shell}')
+
+    @unittest.skipUnless(os.name == 'nt' or Path('/proc/self/stat').exists(), 'process snapshot reads Windows or /proc')
+    def test_snapshot_and_walk_of_every_process_stay_under_50_ms(self):
+        def once():
+            began = time.perf_counter()
+            processes = rs.process_snapshot()
+            for pid in processes:
+                rs.host_of(pid, processes)
+            return time.perf_counter() - began, processes
+        # The best of a few runs, so another test suite sharing the machine does not decide the result.
+        elapsed, processes = min((once() for _ in range(5)), key=lambda run: run[0])
+        self.assertIn(os.getpid(), processes)
+        self.assertEqual(processes[os.getpid()]['ppid'], os.getppid())
+        self.assertLess(elapsed, .05)
 
     def test_archived_desktop_session_the_picker_tracks_stays_hidden_and_never_resumes(self):
         task = self.new()
