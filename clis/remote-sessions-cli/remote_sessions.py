@@ -17,6 +17,7 @@ import time
 import unicodedata
 import uuid
 
+import commands
 from locks import file_lock
 import task_worktrees as wt
 import wsl_hosts
@@ -306,10 +307,11 @@ class Manager:
         self.state_path = self.root / '.remote-sessions.json'
         # Session IDs the desktop app has archived, as of the last saved() scan; never listed or resumed.
         self.archived = set()
-        # Header notes on WSL distros from the last status() scan, such as a stopped distro left unscanned.
-        self.wsl_notes = []
-        # Set by W: the next scan boots stopped WSL distros too.
-        self.wake = False
+        # Header notes on WSL distros from the last status() scan, such as a stopped distro left unscanned, and the
+        # stopped distros that scan left alone.
+        self.wsl_notes, self.wsl_stopped = [], []
+        # Set by W: the stopped WSL distros the next scan boots too.
+        self.wake = set()
 
     def projects(self):
         projects = {p.name: p for p in sorted(self.root.iterdir()) if p.is_dir() and not p.name.startswith(('.', '_'))}
@@ -326,12 +328,7 @@ class Manager:
         return state
 
     def claude(self, args, directory=None):
-        executable = self.options.claude
-        prefix = [executable]
-        if executable.endswith('.py'):
-            prefix = [sys.executable, executable]
-        elif executable.endswith('.ps1'):
-            prefix = ['pwsh', '-NoProfile', '-File', executable]
+        prefix = commands.prefix(self.options.claude)
         env = os.environ.copy()
         if 'CLAUDE_CONFIG_DIR' in env or not wt.same(self.config, Path.home() / '.claude'):
             env['CLAUDE_CONFIG_DIR'] = str(self.config)
@@ -648,15 +645,19 @@ class Manager:
     def wsl_rows(self):
         """Rows for the live sessions in running WSL distros, labelled `WSL · <surface>` and view-only here.
         A stopped distro is never booted; it becomes a header note, as does a distro that cannot be scanned."""
-        rows, notes, names = [], [], only_names(self.options)
+        rows, notes, stopped, names = [], [], [], only_names(self.options)
+        # The boots asked for when this scan starts; a W pressed while it runs (off the picker's key loop) waits for the next.
+        wake = set(self.wake)
         for distro in wsl_hosts.distros(self.options.wsl) if self.options.wsl else ():
             name = distro['Name']
-            if distro['State'] != 'Running' and not (self.wake and distro['State'] == 'Stopped'):
+            boot = distro['State'] == 'Stopped' and name in wake
+            if distro['State'] != 'Running' and not boot:
                 if distro['State'] == 'Stopped':
                     notes.append(f'WSL {name}: stopped · W to scan')
+                    stopped.append(name)
                 continue
             try:
-                agents, files = wsl_hosts.scan(self.options.wsl, name)
+                agents, files = wsl_hosts.scan(self.options.wsl, name, boot=boot)
                 agents = validated(agents)
             except (wsl_hosts.WslError, ValueError) as error:
                 notes.append(f'WSL {name}: {error}')
@@ -672,7 +673,7 @@ class Manager:
                                  agent, process, {}, managed=False)
                 row.update(Source=f"WSL · {row['Source']}", Origin=f"WSL · {row['Origin']}", ViewOnly=True, Stoppable=False)
                 rows.append(row)
-        self.wsl_notes, self.wake = notes, False
+        self.wsl_notes, self.wsl_stopped, self.wake = notes, stopped, self.wake - wake
         return rows
 
     def confirm(self, launch, reported, before):
@@ -1158,7 +1159,8 @@ def menu(manager):
         print('\033[2J\033[H', end='')
         print(color(f'Claude sessions | {sys.platform} | {manager.root}', '96')
               + (color(''.join(f' | {clean(note)}' for note in manager.wsl_notes), '90') if manager.wsl_notes else ''))
-        print('Space select | A available | Enter resume | N new task | X stop | H history | R refresh | Q quit\n')
+        print('Space select | A available | Enter resume | N new task | X stop | H history | R refresh'
+              + (' | W scan WSL' if manager.options.wsl else '') + ' | Q quit\n')
         print(color(' ' * ROW_PREFIX + table_line(COLUMNS, widths), '96'))
         print(color('─' * min(terminal.columns - 1, 160), '90'))
         for index in range(start, min(start + height, len(rows))):
@@ -1177,7 +1179,8 @@ def menu(manager):
         if not row.get('NewProject'):
             print(f"Session: {clean(row['SessionId'])} | permission {clean(row.get('PermissionMode') or '-')} | Claude {clean(row.get('ClaudeVersion') or '-')}")
             print(f"Started: {clean(row.get('Origin'))} | runs now: {clean(row.get('Source') if row.get('Running') else 'nothing')}"
-                  + (' | live in another app; view-only' if row.get('ViewOnly') else ''))
+                  + (' | on another host; view-only' if row.get('Distro')
+                     else ' | live in another app; view-only' if row.get('ViewOnly') else ''))
         hidden = sum(not r.get('ReplacedBy') for r in all_rows) - len(visible_rows(all_rows, history))
         print(color(f'{hidden} more in history; H {"hides" if history else "shows"} it. 📡 registered for Remote Control; phone delivery unverified.', '90'))
         if message:
@@ -1200,8 +1203,18 @@ def menu(manager):
         elif key == 'r':
             live.reload()
         elif key == 'w':
-            manager.wake = True
-            live.reload()
+            # W boots the one stopped distro in the header, or asks which when there are several.
+            stopped = manager.wsl_stopped
+            answer = (stopped[0] if len(stopped) == 1
+                      else input(f"WSL distro to scan ({', '.join(stopped)}), blank for all: ").strip() if stopped else '')
+            if not stopped:
+                message = 'No stopped WSL distro to scan.'
+            elif answer and answer not in stopped:
+                message = f'No stopped WSL distro is named {answer}.'
+            else:
+                # Read off the key loop like R: a boot may take a minute, and keys keep working meanwhile.
+                manager.wake = {answer} if answer else set(stopped)
+                live.reload()
         elif key == ' ':
             if row.get('ViewOnly'):
                 message = f"{row.get('Task')} is live in {row.get('Source')}; it is view-only here."
@@ -1212,6 +1225,8 @@ def menu(manager):
         elif key == 'a':
             available = {r['SessionId'] for r in rows if selectable(r) and not r.get('NewProject')}
             checked = set() if available <= checked else available
+        elif key == 'n' and row.get('Distro'):
+            message = f"{row.get('Task')} is on WSL {row['Distro']}; start a task there with the picker inside that distro."
         elif key in ACTION_KEYS:
             targets = [row] if key == 'n' else [r for r in rows if r['SessionId'] in checked]
             messages = []
@@ -1257,6 +1272,9 @@ def main(argv=None):
         menu(manager)
         return
     rows = manager.execute()
+    # A script reading status gets the same WSL notes the picker header shows, without changing the JSON shape.
+    for note in manager.wsl_notes:
+        print(note, file=sys.stderr)
     if options.json:
         print(json.dumps(rows, indent=2))
     else:

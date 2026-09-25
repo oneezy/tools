@@ -2,8 +2,10 @@
 
 State lives in the JSON file named by FAKE_WSL_STATE:
   Distros: [{Name, State, Version}]    what `wsl --list --verbose` reports
-  Homes:   {distro: {Agents, Files}}   what Claude in a distro reports: `claude agents --json --all` and its per-pid
-                                       session files; a distro without an entry has no Claude installed
+  Homes:   {distro: {Agents, Files, Noise}}  what Claude in a distro reports: `claude agents --json --all` and its
+                                       per-pid session files, with the Noise text a login shell prints before and
+                                       after them; a distro without an entry has no Claude installed
+           {distro: {Hang: seconds}}       a wedged distro: the command sleeps that long before printing anything
            {distro: {Shell: {Config, Path}}}  run the command in a real local `sh` instead, with that Claude config
                                        folder and that folder of commands first on PATH
   Boots:   count of stopped distros a command started, as `wsl -d <stopped distro>` does
@@ -15,6 +17,7 @@ import os
 from pathlib import Path
 import subprocess
 import sys
+import time
 
 args = sys.argv[1:]
 path = Path(os.environ.get('FAKE_WSL_STATE', '')) if os.environ.get('FAKE_WSL_STATE') else None
@@ -54,6 +57,8 @@ elif args[:1] in (['-d'], ['--distribution']) and args[2:4] in (['--exec', 'sh']
         data['Boots'] += 1
     save()
     script, home = args[5], data.get('Homes', {}).get(args[1])
+    if home and home.get('Hang'):
+        time.sleep(home['Hang'])
     if home and home.get('Shell'):
         shell = home['Shell']
         env = dict(os.environ, CLAUDE_CONFIG_DIR=shell['Config'], PATH=shell['Path'] + os.pathsep + os.environ['PATH'])
@@ -64,8 +69,12 @@ elif args[:1] in (['-d'], ['--distribution']) and args[2:4] in (['--exec', 'sh']
     # Emulates the distro running the engine's script: nothing without Claude; else Claude's agent list, then the
     # contents of each session file.
     assert 'claude agents --json --all' in script and 'sessions/*.json' in script, script
+    begin, end = 'echo @@claude-scan@@', 'echo @@claude-scan-end@@'
+    assert begin in script and end in script, script
     if home:
-        out(json.dumps(home.get('Agents', [])) + '\n' + ''.join(json.dumps(f) + '\n' for f in home.get('Files', [])))
+        noise = home.get('Noise') or ''
+        out(noise + begin[5:] + '\n' + json.dumps(home.get('Agents', [])) + '\n'
+            + ''.join(json.dumps(f) + '\n' for f in home.get('Files', [])) + end[5:] + '\n' + noise)
 else:
     save()
     raise ValueError(args)

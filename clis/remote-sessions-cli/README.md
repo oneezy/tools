@@ -21,17 +21,31 @@ On Windows the picker also lists the live Claude sessions of every running WSL
 distro. It runs `wsl --list --verbose` (about 50 ms), which never starts a distro.
 For each running distro it runs one login-shell command inside it (`wsl -d <distro>
 --exec sh -lc ...`) that prints `claude agents --json --all` and the distro's per-pid
-session files (`${CLAUDE_CONFIG_DIR:-~/.claude}/sessions/*.json`). A distro without
-Claude on its login `PATH` contributes nothing.
+session files (`${CLAUDE_CONFIG_DIR:-~/.claude}/sessions/*.json`) between two marker
+lines, so whatever the login profile or logout script prints is ignored. A distro
+without Claude on its login `PATH` contributes nothing.
 
 - Rows read `WSL · <surface>` in Source (`WSL · CLI`, `WSL · Background`,
   `WSL · VS Code ext`, ...). Repo is the folder above `.claude/worktrees`, or the
   session folder's own name; `--only` filters them by that name. The detail pane
-  shows `host WSL <distro>`.
-- WSL rows are view-only: the Windows picker never resumes or stops them.
+  shows `host WSL <distro>` and `on another host; view-only`.
+- WSL rows are view-only: the Windows picker never resumes or stops them, and N on
+  one starts nothing (start a task with the picker inside that distro).
 - A stopped distro is never booted. The header shows `WSL <distro>: stopped · W to
-  scan`, and W boots and scans it. A distro that cannot be scanned shows its error in
-  the header instead.
+  scan`, and W boots and scans it. With several stopped distros, W asks which one
+  (blank boots them all). A distro that cannot be scanned shows its error in the
+  header instead.
+- `status` prints the same notes on stderr, one per line, so `status --json` keeps its
+  shape and a script can still tell a stopped or failed distro from an empty one.
+- Cost: every refresh and every `status` runs `wsl --list --verbose` and one in-distro
+  command per running distro, about a second each. A running distro that does not
+  answer in 10 s becomes a `no answer in 10 s` header note; a boot by W may take 60 s.
+  Nothing is cached yet. The open picker's 3-second check never looks inside a
+  distro, so a WSL change shows on R, on W, or when a Windows change starts a full
+  read; that read, like W's boot, runs off the key loop.
+- Distro states are read as the English words `Running` and `Stopped` that
+  `wsl --list --verbose` prints. On a Windows display language that translates them,
+  no distro is scanned and none shows a header note.
 - Docker Desktop's own `docker-desktop*` distros are ignored.
 - `--wsl` (`-WslExecutable`) selects the `wsl` executable; `--wsl ''` turns WSL
   scanning off. On Linux there is nothing to scan. Run the engine inside the distro
@@ -79,7 +93,7 @@ Opening the picker starts nothing. H shows history rows. Space checks a row, A
 checks every resumable or running row, Enter resumes the checked rows, N asks for a
 new task's branch type, issue number and description (the same names the `WorktreeCreate`
 hook gives, below), X stops the checked background sessions, R refreshes, W boots and
-scans stopped WSL distros, and Q closes
+scans a stopped WSL distro, and Q closes
 the picker. A row live in another app is view-only: it cannot be checked, resumed or
 stopped. A session whose folder was deleted, or that was archived in the desktop app,
 is not listed at all, and nothing recreates it.
@@ -335,10 +349,10 @@ without a branch type, and parallel requests. `tests/test_agent_rules.py` checks
 every `oneezy-merge` copy in the repo is identical, that its land mode keeps
 `prototype/*` branches and deletes the rest, and that no `AGENTS.md` or `CLAUDE.md`
 overrides a skill's branch retention; it skips when the suite runs from a copy.
-A fake `wsl` (`tests/fake_wsl.py`) covers WSL rows, the stopped-distro header, W, and,
-where a POSIX `sh` is on `PATH`, the in-distro scan command run in a real shell.
-`tests/test-linux.sh` copies the source to a Linux temporary directory and runs the
-same suite with native Git.
+A fake `wsl` (`tests/fake_wsl.py`) covers WSL rows, the stopped-distro header, W,
+login-shell noise, a wedged distro, and, where a POSIX `sh` is on `PATH`, the
+in-distro scan command run in a real shell. `tests/test-linux.sh` copies the source
+to a Linux temporary directory and runs the same suite with native Git.
 The existing `test-native-lifecycle.ps1`, `test-task-worktrees.ps1`, and
 `test-remote-control.ps1` exercise the compatibility entry point on Windows.
 `test-picker.ps1` invokes the portable picker regression.

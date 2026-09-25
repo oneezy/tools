@@ -1,6 +1,6 @@
 """Run with python -m unittest discover -s tests -p test_portable.py -v."""
 import argparse
-from contextlib import redirect_stdout
+from contextlib import redirect_stderr, redirect_stdout
 from datetime import datetime, timezone
 import io
 import json
@@ -110,16 +110,18 @@ class PortableTests(unittest.TestCase):
         folder.mkdir(parents=True, exist_ok=True)
         (folder / f'local_{id}.json').write_text(json.dumps(dict(sessionId=f'local_{id}', cliSessionId=id, cwd=str(cwd), isArchived=archived, **fields)))
 
-    def distro(self, name, state, agents=None, files=(), shell=None):
+    def distro(self, name, state, agents=None, files=(), shell=None, hang=None, noise=None):
         """A WSL distribution as `wsl --list --verbose` reports it; agents and session files are what its Claude
         reports once it runs. Without agents, Claude is not installed there. With `shell` (a Claude config folder and
         a folder holding a `claude` command), the distro runs the engine's commands in a real POSIX shell instead."""
         data = json.loads(self.wsl_state.read_text()) if self.wsl_state.exists() else dict(Distros=[], Homes={})
         data['Distros'].append(dict(Name=name, State=state, Version=2))
         if agents is not None:
-            data['Homes'][name] = dict(Agents=list(agents), Files=list(files))
+            data['Homes'][name] = dict(Agents=list(agents), Files=list(files), Noise=noise)
         if shell:
             data['Homes'][name] = dict(Shell=shell)
+        if hang:
+            data['Homes'][name] = dict(Hang=hang)
         self.wsl_state.write_text(json.dumps(data))
 
     def wsl(self):
@@ -999,6 +1001,88 @@ class PortableTests(unittest.TestCase):
         self.assertNotIn('stopped · W to scan', woken)
         self.assertIn(' WSL · CLI ', next(line for line in woken.splitlines() if 'Linux chat' in line))
         self.assertEqual(self.wsl()['Boots'], 1)
+
+    def test_picker_key_help_names_w(self):
+        keys = next(line for line in self.picker(['q'])[-1].splitlines() if 'Space select' in line)
+        self.assertIn('W scan WSL', keys)
+
+    def wsl_chat(self, id, name='Linux chat'):
+        return dict(sessionId=id, kind='interactive', cwd='/home/justin/dev/brain', pid=301, status='idle', name=name)
+
+    def test_wsl_row_detail_pane_says_another_host_not_another_app(self):
+        self.distro('Ubuntu-26.04', 'Running', agents=[self.wsl_chat('5f1c0a52-4a57-4c1e-9a55-3c2d7c1b7f01')])
+        screen = self.picker(['q'])[-1]
+        started = next(line for line in screen.splitlines() if line.startswith('Started:'))
+        self.assertIn('on another host; view-only', started)
+        self.assertNotIn('another app', started)
+
+    def test_picker_n_on_a_wsl_row_starts_nothing_on_windows(self):
+        self.distro('Ubuntu-26.04', 'Running', agents=[self.wsl_chat('5f1c0a52-4a57-4c1e-9a55-3c2d7c1b7f02')])
+        with patch('builtins.input', side_effect=AssertionError('N prompted for a WSL row')):
+            screens = self.picker(['n', 'q'])
+        self.assertIn('WSL Ubuntu-26.04', screens[-1].splitlines()[-1])
+        self.assertEqual(self.data()['Starts'], 0)
+        self.assertEqual(len(wt.worktrees(self.project)), 1)
+
+    def test_w_with_several_stopped_distros_boots_only_the_one_named(self):
+        self.distro('Ubuntu-26.04', 'Stopped', agents=[self.wsl_chat('5f1c0a52-4a57-4c1e-9a55-3c2d7c1b7f03', 'Ubuntu chat')])
+        self.distro('Debian', 'Stopped', agents=[self.wsl_chat('5f1c0a52-4a57-4c1e-9a55-3c2d7c1b7f04', 'Debian chat')])
+        prompts = []
+        with patch('builtins.input', side_effect=lambda prompt='': prompts.append(prompt) or 'Debian'):
+            woken = self.picker(['w', SETTLE, 'q'])[-1]
+        self.assertIn('Ubuntu-26.04', prompts[0])
+        self.assertIn('Debian chat', woken)
+        self.assertNotIn('Ubuntu chat', woken)
+        self.assertIn('WSL Ubuntu-26.04: stopped · W to scan', woken.splitlines()[0])
+        self.assertEqual({d['Name']: d['State'] for d in self.wsl()['Distros']}, {'Ubuntu-26.04': 'Stopped', 'Debian': 'Running'})
+
+    def test_w_with_one_stopped_distro_asks_nothing(self):
+        self.distro('Ubuntu-26.04', 'Stopped', agents=[self.wsl_chat('5f1c0a52-4a57-4c1e-9a55-3c2d7c1b7f05')])
+        with patch('builtins.input', side_effect=AssertionError('W prompted with one stopped distro')):
+            self.assertIn('Linux chat', self.picker(['w', SETTLE, 'q'])[-1])
+
+    def test_w_pressed_while_a_scan_runs_is_kept_for_the_next_scan(self):
+        # The picker reads off the key loop, so W can land while a live refresh is scanning; that scan must not drop it.
+        # Debian is listed first, so the scan has already passed it by the time W asks for it.
+        self.distro('Debian', 'Stopped', agents=[self.wsl_chat('5f1c0a52-4a57-4c1e-9a55-3c2d7c1b7f08', 'Debian chat')])
+        self.distro('Ubuntu-26.04', 'Running', agents=[self.wsl_chat('5f1c0a52-4a57-4c1e-9a55-3c2d7c1b7f07', 'Ubuntu chat')])
+        manager = rs.Manager(self.options('status'))
+        scan = rs.wsl_hosts.scan
+
+        def w_lands_mid_scan(*args, **kwargs):
+            manager.wake = {'Debian'}
+            return scan(*args, **kwargs)
+
+        with patch.object(rs.wsl_hosts, 'scan', side_effect=w_lands_mid_scan):
+            manager.wsl_rows()
+        self.assertEqual(manager.wake, {'Debian'})
+        self.assertIn('Debian chat', [r['Task'] for r in manager.wsl_rows()])
+        self.assertEqual(manager.wake, set())
+
+    def test_status_json_reports_wsl_notes_on_stderr(self):
+        self.distro('Ubuntu-26.04', 'Stopped')
+        out, err = io.StringIO(), io.StringIO()
+        with redirect_stdout(out), redirect_stderr(err):
+            rs.main(['status', '--json', '--root', str(self.root), '--config', str(self.config), '--claude', str(FAKE),
+                     '--wsl', str(FAKE_WSL), '--desktop-sessions', str(self.desktop), '--only', 'brain'])
+        self.assertIsInstance(json.loads(out.getvalue()), list)
+        self.assertIn('WSL Ubuntu-26.04: stopped · W to scan', err.getvalue())
+
+    def test_login_shell_noise_around_the_wsl_scan_is_ignored(self):
+        # A login profile may print a banner, and a logout script may clear the screen.
+        self.distro('Ubuntu-26.04', 'Running', agents=[self.wsl_chat('5f1c0a52-4a57-4c1e-9a55-3c2d7c1b7f06', 'Noisy chat')],
+                    noise='Welcome to Ubuntu {"motd": 1}\n\x1b[H\x1b[2J\x1b[3J')
+        screen = self.picker(['q'])[-1]
+        self.assertIn('Noisy chat', screen)
+        self.assertNotIn('unreadable', screen)
+
+    def test_a_wedged_wsl_distro_becomes_a_header_note_after_a_short_wait(self):
+        self.distro('Ubuntu-26.04', 'Running', hang=60)
+        with patch.object(rs.wsl_hosts, 'SCAN_TIMEOUT', 2):
+            began = time.monotonic()
+            screen = self.picker(['q'])[-1]
+        self.assertLess(time.monotonic() - began, 30)
+        self.assertIn('WSL Ubuntu-26.04: no answer in 2 s', screen.splitlines()[0])
 
     def test_long_wsl_source_labels_are_shown_whole_and_keep_columns_aligned(self):
         ids = ('5f1c0a52-4a57-4c1e-9a55-3c2d7c1b7d01', '5f1c0a52-4a57-4c1e-9a55-3c2d7c1b7d02')
