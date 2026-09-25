@@ -66,7 +66,7 @@ The one message `/oneezy-status` produces. One template; each slot names its sou
 | labels | tickets the PR closes | tickets the PR will close | same | tickets named in commit subjects |
 | Quick Links | PR, Task Board, Dev Branch, Vercel, Apps with branch and dev | PR, Task Board, Branch, Vercel, Apps with branch only | same as open | Task Board, Branch when pushed, Vercel |
 | Overview items | ✅ struck tickets, else the PR snapshot | tickets without ✅, else the snapshot | same as open | commits ahead as `<sha> <subject>`, then `<n> files uncommitted: <top three paths>` |
-| Git line | `` `<branch>` → `<base>`, squash <sha>, branch deleted `` (or the refusal) | `` `<branch>` → PR #<n> open, <n> ahead of `<base>` `` | `` `<branch>`, PR open, branch kept `` | `` `<branch>` off `<base>`, <n> ahead, <n> files uncommitted `` |
+| Git line | `` `<branch>` → `<base>`, squash <sha>, branch deleted `` (`` branch kept `` for `prototype/*`, or the refusal) | `` `<branch>` → PR #<n> open, <n> ahead of `<base>` `` | `` `<branch>`, PR open, branch kept `` | `` `<branch>` off `<base>`, <n> ahead, <n> files uncommitted `` |
 | Builds | ✅ per project | ✅ or ⏳ per project | ❌ on the failed one | `- none yet` |
 
 ## Rules
