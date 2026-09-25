@@ -286,8 +286,8 @@ without a branch type, and parallel requests. `tests/test_agent_rules.py` checks
 every `oneezy-merge` copy in the repo is identical, that its land mode keeps
 `prototype/*` branches and deletes the rest, and that no `AGENTS.md` or `CLAUDE.md`
 overrides a skill's branch retention; it skips when the suite runs from a copy.
-`tests/test-linux.sh` copies the source
-to a Linux temporary directory and runs the same suite with native Git.
+`tests/test-linux.sh` copies the source to a Linux temporary directory and runs the
+same suite with native Git.
 The existing `test-native-lifecycle.ps1`, `test-task-worktrees.ps1`, and
 `test-remote-control.ps1` exercise the compatibility entry point on Windows.
 `test-picker.ps1` invokes the portable picker regression.

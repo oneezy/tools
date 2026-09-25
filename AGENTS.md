@@ -25,9 +25,10 @@ the task is known is `<repo>-new-<n>` on `new/<n>`; rename the branch to
 `<type>/<issue>-<desc>` once the task is known and leave the folder name alone. Use
 lowercase words separated by hyphens; no IDs or random words. Keep the repository,
 branch type and ticket number first; add a numeric suffix only for a collision.
-New branches are cut from local `dev`. Once landed, a branch is deleted unless it is
-`prototype/*`, which `/prototype` keeps as a primary source. `/oneezy-merge` land
-mode applies this rule.
+New branches are cut from local `dev`, except an autopilot run's ticket branches,
+which are cut from its autopilot branch. Once landed, a branch is deleted unless
+it is `prototype/*`, which `/prototype` keeps as a primary source. `/oneezy-merge`
+land mode applies this rule.
 
 Use the shared `workspace` command in `clis/remote-sessions-cli/remote_sessions.py`
 to prepare a named persistent worktree, then start either harness in its returned

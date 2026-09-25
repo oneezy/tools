@@ -10,7 +10,7 @@ Invoking this skill is Justin's word to commit and push the current branch. It d
 ## Mode, from the arguments
 
 - **open**: no argument, or words that name no branch (`this pr`, `pr`, `branch`). Commit, push, open the PR, wait for the builds, report. Nothing is merged or deleted: Justin checks the branch.
-- **land**: the argument names a branch (`into dev`, `to dev`, `dev`). Everything in open, then squash-merge on green builds, fast-forward, delete the landed branch. Land mode is Justin's OK to delete the landed branch, unless it is `prototype/*`: `/prototype` keeps that branch as a primary source, so it stays. The target is the named branch and only that branch; `main` is a target only when the argument says `main`.
+- **land**: the argument names a branch (`into dev`, `to dev`, `dev`). Everything in open, then squash-merge on green builds, fast-forward, delete the landed branch (Justin's OK; a `prototype/*` branch stays, since `/prototype` keeps it as a primary source). The target is the named branch and only that branch; `main` is a target only when the argument says `main`.
 
 PR base: the named branch in land mode. In open mode, `dev` when origin has it, else origin's default branch.
 

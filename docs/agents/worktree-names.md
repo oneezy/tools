@@ -18,8 +18,9 @@ Prefer the shared `workspace` command in the tools repository's
 create after the normal Git proposal. Start Claude or Codex inside the returned
 `WorkingDirectory` without requesting another worktree. If the helper is not
 available on this host, use the same naming convention with the native creation
-API or Git, cutting new branches from local `dev`. The `WorktreeCreate` hook cuts
-from local `dev` whatever base Claude proposes, so no per-repo base setting is needed.
+API or Git, cutting new branches from local `dev`. Once installed, the
+`WorktreeCreate` hook cuts from local `dev` whatever base Claude proposes, so no
+per-repo base setting is needed.
 
 Keep the session display title descriptive too. A title and a folder are separate.
 Do not rename or move an existing worktree or rewrite saved session paths merely
