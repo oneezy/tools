@@ -13,8 +13,29 @@ Linux: `sh remote-control.sh`, or `python3 remote_sessions.py`.
 
 Default project root: `V:\dev` on Windows when it exists, otherwise `~/dev`.
 Override it with `--root` or `REMOTE_PROJECTS_ROOT`. Run each host against its own
-native checkout and Claude login. WSL uses Linux paths and Linux Claude; it does
-not manage the Windows Claude processes. Do not share one state file across hosts.
+native checkout and Claude login. Do not share one state file across hosts.
+
+### WSL distros
+
+On Windows the picker also lists the live Claude sessions of every running WSL
+distro. It runs `wsl --list --verbose` (about 50 ms), which never starts a distro.
+For each running distro it runs one login-shell command inside it (`wsl -d <distro>
+--exec sh -lc ...`) that prints `claude agents --json --all` and the distro's per-pid
+session files (`${CLAUDE_CONFIG_DIR:-~/.claude}/sessions/*.json`). A distro without
+Claude on its login `PATH` contributes nothing.
+
+- Rows read `WSL · <surface>` in Source (`WSL · CLI`, `WSL · Background`,
+  `WSL · VS Code ext`, ...). Repo is the folder above `.claude/worktrees`, or the
+  session folder's own name; `--only` filters them by that name. The detail pane
+  shows `host WSL <distro>`.
+- WSL rows are view-only: the Windows picker never resumes or stops them.
+- A stopped distro is never booted. The header shows `WSL <distro>: stopped · W to
+  scan`, and W boots and scans it. A distro that cannot be scanned shows its error in
+  the header instead.
+- Docker Desktop's own `docker-desktop*` distros are ignored.
+- `--wsl` (`-WslExecutable`) selects the `wsl` executable; `--wsl ''` turns WSL
+  scanning off. On Linux there is nothing to scan. Run the engine inside the distro
+  itself to manage its sessions there.
 
 The picker lists every Claude session under each project folder, whichever surface
 started it: task worktrees and the repo root alike. It joins four sources:
@@ -57,7 +78,8 @@ in Windows Terminal.
 Opening the picker starts nothing. H shows history rows. Space checks a row, A
 checks every resumable or running row, Enter resumes the checked rows, N asks for a
 new task's branch type, issue number and description (the same names the `WorktreeCreate`
-hook gives, below), X stops the checked background sessions, R refreshes, and Q closes
+hook gives, below), X stops the checked background sessions, R refreshes, W boots and
+scans stopped WSL distros, and Q closes
 the picker. A row live in another app is view-only: it cannot be checked, resumed or
 stopped. A session whose folder was deleted, or that was archived in the desktop app,
 is not listed at all, and nothing recreates it.
@@ -313,6 +335,8 @@ without a branch type, and parallel requests. `tests/test_agent_rules.py` checks
 every `oneezy-merge` copy in the repo is identical, that its land mode keeps
 `prototype/*` branches and deletes the rest, and that no `AGENTS.md` or `CLAUDE.md`
 overrides a skill's branch retention; it skips when the suite runs from a copy.
+A fake `wsl` (`tests/fake_wsl.py`) covers WSL rows, the stopped-distro header, W, and,
+where a POSIX `sh` is on `PATH`, the in-distro scan command run in a real shell.
 `tests/test-linux.sh` copies the source to a Linux temporary directory and runs the
 same suite with native Git.
 The existing `test-native-lifecycle.ps1`, `test-task-worktrees.ps1`, and

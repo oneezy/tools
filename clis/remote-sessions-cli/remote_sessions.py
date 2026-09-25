@@ -6,7 +6,7 @@ from copy import deepcopy
 from datetime import datetime, timezone
 import json
 import os
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 import re
 import shutil
 import subprocess
@@ -19,6 +19,7 @@ import uuid
 
 from locks import file_lock
 import task_worktrees as wt
+import wsl_hosts
 
 
 def read_json(path, default=None):
@@ -239,9 +240,62 @@ def session_row(id, project, folder, branch, **fields):
     row = dict(SessionId=id, Project=project, WorkingDirectory=folder, Branch=branch, Updated=None, Worktree=False,
                Available=False, UnavailableReason='transcript missing', Conflict=False, Newest=False, NewSession=False,
                Title=None, StartEntrypoint=None, StartKind=None, Teleported=False, InDesktopApp=False,
-               ClaudeVersion=None, PermissionMode=None)
+               ClaudeVersion=None, PermissionMode=None, Distro=None)
     row.update(fields)
     return row
+
+
+def status_row(s, agent, process, entry, managed):
+    """One status row: an inventory row with its latest agent record, that process's session file and its state entry."""
+    running = active(agent)
+    bridge = process.get('bridgeSessionId')
+    task = entry.get('Task')
+    title = (task if task not in (None, 'remote') else None) or (agent or {}).get('name') or s.get('Title') or task or Path(s.get('WorkingDirectory') or s['Project']).name
+    origin = started_on(s, managed)
+    status = status_of(s, agent, managed)
+    return dict(s, Task=title, Stoppable=running and not live_elsewhere(agent), Running=running,
+                ViewOnly=live_elsewhere(agent),
+                State=agent.get('state') if agent else s.get('UnavailableReason') or 'stopped',
+                Status=status, Circle=CIRCLES[status], Origin=origin, Source=surface_now(agent, process) or origin,
+                Remote='📡' if bridge else '', PermissionMode=process.get('permissionMode') or s.get('PermissionMode'),
+                ClaudeVersion=process.get('version') or s.get('ClaudeVersion'),
+                RemoteRegistered=bool(bridge), RemoteSessionId=bridge,
+                RemoteUrl=f'https://claude.ai/code/{bridge}' if bridge else None,
+                Connection='registration found; delivery unverified' if bridge else 'no bridge registration',
+                AgentId=(agent or {}).get('id'), ReplacedBy=entry.get('ReplacedBy'))
+
+
+def validated(agents):
+    """Claude's agent inventory with every record checked; a live interactive record's status is its state."""
+    if not isinstance(agents, list):
+        raise ValueError('Claude returned an unexpected agent inventory format.')
+    for agent in agents:
+        if not agent.get('sessionId') or not agent.get('cwd'):
+            raise ValueError('Claude returned an incomplete agent record.')
+        if agent.get('kind') == 'interactive' and agent.get('pid'):
+            agent['state'] = agent.get('status')
+        elif agent.get('kind') == 'background':
+            if not agent.get('id'):
+                raise ValueError('Claude returned an incomplete agent record.')
+        elif agent.get('kind') == 'interactive':
+            raise ValueError('Claude returned an incomplete agent record.')
+        else:
+            raise ValueError('Claude returned an unexpected agent kind.')
+    return agents
+
+
+def only_names(options):
+    """The project names --only selects; none means every project."""
+    return [n.strip() for item in options.only for n in item.split(',') if n.strip()]
+
+
+def linux_folder(cwd):
+    """A WSL session's folder and repo: its task worktree under <repo>/.claude/worktrees, else its own folder."""
+    parts = PurePosixPath(cwd).parts
+    for at in range(1, len(parts) - 2):
+        if parts[at:at + 2] == ('.claude', 'worktrees'):
+            return str(PurePosixPath(*parts[:at + 3])), parts[at - 1]
+    return cwd, PurePosixPath(cwd).name
 
 
 class Manager:
@@ -252,10 +306,14 @@ class Manager:
         self.state_path = self.root / '.remote-sessions.json'
         # Session IDs the desktop app has archived, as of the last saved() scan; never listed or resumed.
         self.archived = set()
+        # Header notes on WSL distros from the last status() scan, such as a stopped distro left unscanned.
+        self.wsl_notes = []
+        # Set by W: the next scan boots stopped WSL distros too.
+        self.wake = False
 
     def projects(self):
         projects = {p.name: p for p in sorted(self.root.iterdir()) if p.is_dir() and not p.name.startswith(('.', '_'))}
-        names = [n.strip() for item in self.options.only for n in item.split(',') if n.strip()]
+        names = only_names(self.options)
         for name in names:
             if name not in projects:
                 raise ValueError(f"Unknown project '{name}' in {self.root}.")
@@ -284,22 +342,7 @@ class Manager:
         return result.stdout
 
     def agents(self):
-        agents = json.loads(self.claude(['agents', '--json', '--all']))
-        if not isinstance(agents, list):
-            raise ValueError('Claude returned an unexpected agent inventory format.')
-        for agent in agents:
-            if not agent.get('sessionId') or not agent.get('cwd'):
-                raise ValueError('Claude returned an incomplete agent record.')
-            if agent.get('kind') == 'interactive' and agent.get('pid'):
-                agent['state'] = agent.get('status')
-            elif agent.get('kind') == 'background':
-                if not agent.get('id'):
-                    raise ValueError('Claude returned an incomplete agent record.')
-            elif agent.get('kind') == 'interactive':
-                raise ValueError('Claude returned an incomplete agent record.')
-            else:
-                raise ValueError('Claude returned an unexpected agent kind.')
-        return agents
+        return validated(json.loads(self.claude(['agents', '--json', '--all'])))
 
     @staticmethod
     def folder_root(candidate, projects):
@@ -599,25 +642,38 @@ class Manager:
             # The live record when there is one, else the last one Claude keeps, which may say how the session ended.
             records = [a for a in agents if a['sessionId'] == id]
             agent = next((a for a in records if active(a)), records[-1] if records else None)
-            running = active(agent)
-            entry = sessions.get(id, {})
-            process = self.process(agent)
-            bridge = process.get('bridgeSessionId')
-            task = entry.get('Task')
-            title = (task if task not in (None, 'remote') else None) or (agent or {}).get('name') or s.get('Title') or task or Path(s.get('WorkingDirectory') or s['Project']).name
-            origin = started_on(s, managed=id in sessions)
-            status = status_of(s, agent, managed=id in sessions)
-            result.append(dict(s, Task=title, Stoppable=running and not live_elsewhere(agent), Running=running,
-                               ViewOnly=live_elsewhere(agent),
-                               State=agent.get('state') if agent else s.get('UnavailableReason') or 'stopped',
-                               Status=status, Circle=CIRCLES[status], Origin=origin, Source=surface_now(agent, process) or origin,
-                               Remote='📡' if bridge else '', PermissionMode=process.get('permissionMode') or s.get('PermissionMode'),
-                               ClaudeVersion=process.get('version') or s.get('ClaudeVersion'),
-                               RemoteRegistered=bool(bridge), RemoteSessionId=bridge,
-                               RemoteUrl=f'https://claude.ai/code/{bridge}' if bridge else None,
-                               Connection='registration found; delivery unverified' if bridge else 'no bridge registration',
-                               AgentId=(agent or {}).get('id'), ReplacedBy=entry.get('ReplacedBy')))
-        return result
+            result.append(status_row(s, agent, self.process(agent), sessions.get(id, {}), managed=id in sessions))
+        return result + self.wsl_rows()
+
+    def wsl_rows(self):
+        """Rows for the live sessions in running WSL distros, labelled `WSL · <surface>` and view-only here.
+        A stopped distro is never booted; it becomes a header note, as does a distro that cannot be scanned."""
+        rows, notes, names = [], [], only_names(self.options)
+        for distro in wsl_hosts.distros(self.options.wsl) if self.options.wsl else ():
+            name = distro['Name']
+            if distro['State'] != 'Running' and not (self.wake and distro['State'] == 'Stopped'):
+                if distro['State'] == 'Stopped':
+                    notes.append(f'WSL {name}: stopped · W to scan')
+                continue
+            try:
+                agents, files = wsl_hosts.scan(self.options.wsl, name)
+                agents = validated(agents)
+            except (wsl_hosts.WslError, ValueError) as error:
+                notes.append(f'WSL {name}: {error}')
+                continue
+            for agent in agents:
+                folder, project = linux_folder(agent['cwd'])
+                if not (active(agent) or failed(agent)) or (names and project not in names):
+                    continue
+                process = next((f for f in files if active(agent) and f.get('pid') == agent['pid']
+                                and f.get('sessionId') == agent['sessionId']), {})
+                row = status_row(session_row(agent['sessionId'], project, folder, None, Distro=name,
+                                             Worktree='/.claude/worktrees/' in folder),
+                                 agent, process, {}, managed=False)
+                row.update(Source=f"WSL · {row['Source']}", Origin=f"WSL · {row['Origin']}", ViewOnly=True, Stoppable=False)
+                rows.append(row)
+        self.wsl_notes, self.wake = notes, False
+        return rows
 
     def confirm(self, launch, reported, before):
         """Find the session a launch produced: the requested ID, or the copy Claude reports.
@@ -848,6 +904,8 @@ def parser():
     p.add_argument('--desktop-sessions', '-DesktopSessions', help="The desktop app's session store folder (default: found per host).")
     p.add_argument('--config', '-ClaudeConfigDirectory', default=os.environ.get('CLAUDE_CONFIG_DIR', str(Path.home() / '.claude')))
     p.add_argument('--claude', '-ClaudeExecutable', default='claude.exe' if os.name == 'nt' else 'claude')
+    p.add_argument('--wsl', '-WslExecutable', default=wsl_hosts.default_executable(),
+                   help="wsl.exe, to list sessions in running WSL distros (default: found on Windows; '' turns it off).")
     p.add_argument('--launch-wait', '-LaunchWait', type=float, default=90, help='Seconds to wait for Claude to list a launched session.')
     # Seconds between the open picker's checks for changed sessions. Hidden: the spec fixes about 3 s; tests pass 0.
     p.add_argument('--refresh-every', type=float, default=3, help=argparse.SUPPRESS)
@@ -970,9 +1028,11 @@ FIXED_WIDTHS = {'STATUS': 10, 'SOURCE': 11, 'LAST ACTIVE': 11, 'REMOTE': 6}
 ROW_PREFIX = 6  # The cursor and checkbox, '> [x] ', before the first column.
 
 
-def column_widths(columns):
-    """Cell widths of the table columns for a terminal this wide; Task and Branch share what is left."""
+def column_widths(columns, source=0):
+    """Cell widths of the table columns for a terminal this wide; Source widens to fit a label up to `source` cells
+    (a WSL label such as `WSL · VS Code ext`), and Task and Branch share what is left."""
     widths = dict(FIXED_WIDTHS, REPO=min(16, max(8, columns // 10)))
+    widths['SOURCE'] = max(widths['SOURCE'], min(source, 17))
     # One cell stays free at the right edge, and one space separates each pair of columns.
     spare = columns - 1 - ROW_PREFIX - sum(widths.values()) - (len(COLUMNS) - 1)
     task = max(10, spare * 3 // 5)
@@ -1082,7 +1142,7 @@ def menu(manager):
         all_rows = live.rows
         rows = visible_rows(all_rows, history)
         for project in manager.projects():
-            if not any(r['Project'] == project for r in rows):
+            if not any(r['Project'] == project and not r.get('Distro') for r in rows):
                 rows.append(dict(Project=project, SessionId=f'new:{project}', Task='New named task', NewProject=True, Available=True,
                                  Status='new'))
         if not rows:
@@ -1093,10 +1153,11 @@ def menu(manager):
         focus = rows[cursor]['SessionId']
         terminal = shutil.get_terminal_size()
         height = max(3, terminal.lines - 16)
-        widths = column_widths(terminal.columns)
+        widths = column_widths(terminal.columns, max(cells(clean(r.get('Source'))) for r in rows))
         start = max(0, min(cursor - height // 2, len(rows) - height))
         print('\033[2J\033[H', end='')
-        print(color(f'Claude sessions | {sys.platform} | {manager.root}', '96'))
+        print(color(f'Claude sessions | {sys.platform} | {manager.root}', '96')
+              + (color(''.join(f' | {clean(note)}' for note in manager.wsl_notes), '90') if manager.wsl_notes else ''))
         print('Space select | A available | Enter resume | N new task | X stop | H history | R refresh | Q quit\n')
         print(color(' ' * ROW_PREFIX + table_line(COLUMNS, widths), '96'))
         print(color('─' * min(terminal.columns - 1, 160), '90'))
@@ -1110,7 +1171,8 @@ def menu(manager):
                         else '90' if not selectable(row) else '0'))
         row = rows[cursor]
         print('\n' + clean(row.get('Task')))
-        print(f"Folder:  {clean(row.get('WorkingDirectory') or manager.projects()[row['Project']])}")
+        print(f"Folder:  {clean(row.get('WorkingDirectory') or manager.projects()[row['Project']])}"
+              + (f" | host WSL {clean(row['Distro'])}" if row.get('Distro') else ''))
         print(f"Remote:  {clean(row.get('RemoteUrl') or 'not registered')}")
         if not row.get('NewProject'):
             print(f"Session: {clean(row['SessionId'])} | permission {clean(row.get('PermissionMode') or '-')} | Claude {clean(row.get('ClaudeVersion') or '-')}")
@@ -1136,6 +1198,9 @@ def menu(manager):
             history = not history
             checked.clear()
         elif key == 'r':
+            live.reload()
+        elif key == 'w':
+            manager.wake = True
             live.reload()
         elif key == ' ':
             if row.get('ViewOnly'):
