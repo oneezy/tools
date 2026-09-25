@@ -470,7 +470,7 @@ class Manager:
         o = self.options
         projects = self.projects()
         sessions = state['Sessions']
-        named = o.task or o.branch or o.issue or o.pr
+        named = o.task or o.branch or o.issue or o.pr or o.type
         if named:
             if len(projects) != 1 or o.session_id or o.action != 'start':
                 raise ValueError('Use task/issue/PR/branch with start and exactly one --only project, without --session-id.')
@@ -488,8 +488,9 @@ class Manager:
                 if not row:
                     raise ValueError(f"Task '{name}' had its folder deleted; its session stays gone. Choose a different task name.")
                 return [row]
-            return [dict(SessionId=str(uuid.uuid4()), Project=project, Task=name, Branch=o.branch,
-                         Available=False, NewSession=True, Name=wt.task_name(project, o.task or o.branch, o.issue, o.pr))]
+            folder, branch = wt.names(project, o.task or o.branch, o.issue, o.pr, o.type)
+            return [dict(SessionId=str(uuid.uuid4()), Project=project, Task=name, Branch=o.branch or branch,
+                         Available=False, NewSession=True, Name=folder)]
         if o.session_id:
             id = current(sessions, o.session_id)
             if id in sessions and sessions[id]['Project'] not in projects:
@@ -534,8 +535,8 @@ class Manager:
             if not any(a['sessionId'] == id and a['kind'] == 'background' for a in agents):
                 args += ['--remote-control', f"{project} {s.get('Task') or s.get('Title') or Path(directory).name}"]
             return dict(Session=s, Mode='resume', Arguments=args, WorkingDirectory=directory, SessionId=id, Project=project)
-        # A new request carries its Name; a stored task is named by its task, else by its folder.
-        name = s.get('Name') or (wt.task_name(project, s['Task']) if s.get('Task') else Path(directory).name)
+        # A new request carries its Name; a stored task is named by its folder.
+        name = s.get('Name') or Path(directory).name
         workspace = wt.plan(self.projects()[project], name, s.get('Branch'), directory)
         base = dict(Session=s, Mode='new', Arguments=['--bg', '--remote-control', f"{project} {s.get('Task') or name}"],
                     WorkingDirectory=workspace['WorkingDirectory'], SessionId=id, Project=project, Workspace=workspace)
@@ -733,8 +734,8 @@ class Manager:
                 if len(projects) != 1:
                     raise ValueError('Workspace requires exactly one --only project.')
                 project = next(iter(projects))
-                name = wt.task_name(project, o.task or o.branch, o.issue, o.pr)
-                workspace = wt.plan(projects[project], name, o.branch)
+                name, branch = wt.names(project, o.task or o.branch, o.issue, o.pr, o.type)
+                workspace = wt.plan(projects[project], name, o.branch or branch)
                 if not o.plan:
                     wt.create(workspace)
                 workspace['Commands'] = dict(Claude=['claude', '--remote-control', name], Codex=['codex', '-C', workspace['WorkingDirectory']])
@@ -812,6 +813,7 @@ def parser():
     p.add_argument('--session-id', '-SessionId')
     p.add_argument('--task', '-Task')
     p.add_argument('--branch', '-Branch')
+    p.add_argument('--type', '-Type', choices=wt.TYPES, help='Task type for a new task; default: the type the task name starts with, else feature.')
     ticket = p.add_mutually_exclusive_group()
     ticket.add_argument('--issue', '-Issue', type=int)
     ticket.add_argument('--pr', '-PR', type=int)
@@ -1026,13 +1028,19 @@ def menu(manager):
                     continue  # A new-task placeholder has no session to stop.
                 options = argparse.Namespace(**vars(manager.options))
                 options.only = [target['Project']]
-                options.task = options.branch = options.issue = options.pr = options.session_id = None
+                options.task = options.branch = options.issue = options.pr = options.type = options.session_id = None
                 options.action = 'stop' if key == 'x' else 'resume'
                 if key == 'n' or (target.get('NewProject') and key != 'x'):
-                    name = input('Task name, e.g. issue-2-fix-login. Blank cancels: ').strip()
-                    if not name:
+                    # The same names the WorktreeCreate hook gives: <repo>-<type>-<issue>-<desc> on <type>/<issue>-<desc>.
+                    kind = input(f"Type ({', '.join(wt.TYPES)}), blank for feature: ").strip().lower() or 'feature'
+                    issue = input('Issue number, blank for none: ').strip().lstrip('#')
+                    task = input('Description, blank cancels unless an issue is given: ').strip()
+                    if not task and not issue:
                         continue
-                    options.action, options.task = 'start', name
+                    if issue and not (issue.isdigit() and int(issue) > 0):
+                        messages.append(f'Issue must be a number, not {issue!r}.')
+                        continue
+                    options.action, options.type, options.task, options.issue = 'start', kind, task or None, int(issue) if issue else None
                 else:
                     options.session_id = target['SessionId']
                 try:

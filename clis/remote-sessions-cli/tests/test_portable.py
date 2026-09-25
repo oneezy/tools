@@ -129,10 +129,11 @@ class PortableTests(unittest.TestCase):
         self.change(Mode='normal', Slow=False, Agents=data['Agents'])
 
     def test_readable_names_and_same_workspace_for_both_harnesses(self):
-        first = self.run_manager('workspace', '--issue', '2', '--task', 'Fix login')[0]
-        self.assertEqual(Path(first['WorkingDirectory']).name, 'brain-issue-2-fix-login')
-        self.assertEqual(first['Branch'], 'codex/brain-issue-2-fix-login')
-        again = self.run_manager('workspace', '--issue', '2', '--task', 'Fix login')[0]
+        first = self.run_manager('workspace', '--type', 'fix', '--issue', '31', '--task', 'Picker speed')[0]
+        self.assertEqual(Path(first['WorkingDirectory']).name, 'brain-fix-31-picker-speed')
+        self.assertEqual(first['Branch'], 'fix/31-picker-speed')
+        self.assertEqual(wt.git(first['WorkingDirectory'], 'branch', '--show-current').stdout.strip(), 'fix/31-picker-speed')
+        again = self.run_manager('workspace', '--type', 'fix', '--issue', '31', '--task', 'Picker speed')[0]
         self.assertEqual(first['WorkingDirectory'], again['WorkingDirectory'])
         self.assertEqual(again['Operation'], 'reuse')
         self.assertEqual(first['Commands']['Codex'][2], first['WorkingDirectory'])
@@ -694,11 +695,36 @@ class PortableTests(unittest.TestCase):
         if os.name != 'nt':
             self.assertFalse(wt.same('/tmp/Brain', '/tmp/brain'))
 
-    def test_task_names_retain_repo_ticket_and_strip_path_traversal(self):
-        self.assertEqual(wt.task_name('Brain', '../../Fix login', issue=2), 'brain-issue-2-fix-login')
-        self.assertEqual(wt.task_name('Brain', None, pr=20), 'brain-pr-20')
+    def test_task_names_take_the_type_from_the_task_strip_path_traversal_and_never_use_codex(self):
+        def planned(*args):
+            workspace = self.run_manager('workspace', *args, '--plan')[0]
+            return Path(workspace['WorkingDirectory']).name, workspace['Branch']
+        self.assertEqual(planned('--issue', '2', '--task', '../../Fix login'), ('brain-fix-2-login', 'fix/2-login'))
+        self.assertEqual(planned('--task', 'fix-31-picker-speed'), ('brain-fix-31-picker-speed', 'fix/31-picker-speed'))
+        self.assertEqual(planned('--task', 'Readme refresh'), ('brain-feature-readme-refresh', 'feature/readme-refresh'))
+        self.assertEqual(planned('--type', 'docs', '--pr', '20'), ('brain-docs-20', 'docs/20'))
         with self.assertRaises(ValueError):
-            wt.task_name('Brain', '...')
+            planned('--task', '...')
+
+    def test_picker_n_prompts_for_type_issue_and_description_and_uses_the_hook_names(self):
+        manager = rs.Manager(self.options('menu'))
+        answers = iter(['fix', '31', 'Picker speed'])
+        with patch.object(rs.sys.stdin, 'isatty', return_value=True), patch.object(rs, 'keypress', side_effect=['n', 'q']), \
+                patch('builtins.input', side_effect=lambda prompt='': next(answers)), patch('builtins.print'):
+            rs.menu(manager)
+        folder = self.project / '.claude' / 'worktrees' / 'brain-fix-31-picker-speed'
+        self.assertEqual(wt.git(folder, 'branch', '--show-current').stdout.strip(), 'fix/31-picker-speed')
+        self.assertTrue(wt.same(self.data()['LastDirectory'], folder))
+        self.assertEqual(self.data()['Starts'], 1)
+
+    def test_picker_n_with_a_blank_description_and_no_issue_cancels(self):
+        manager = rs.Manager(self.options('menu'))
+        answers = iter(['', '', ''])
+        with patch.object(rs.sys.stdin, 'isatty', return_value=True), patch.object(rs, 'keypress', side_effect=['n', 'q']), \
+                patch('builtins.input', side_effect=lambda prompt='': next(answers)), patch('builtins.print'):
+            rs.menu(manager)
+        self.assertEqual(len(wt.worktrees(self.project)), 1)
+        self.assertEqual(self.data()['Starts'], 0)
 
     def test_picker_a_enter_twice_preserves_sessions(self):
         self.new('first')
