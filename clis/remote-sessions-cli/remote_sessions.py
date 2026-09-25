@@ -70,6 +70,68 @@ def root_lock(root, timeout=30):
                 fcntl.flock(stream, fcntl.LOCK_UN)
 
 
+UUID = re.compile(r'\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b', re.I)
+
+
+def folder_exists(directory):
+    return bool(directory) and Path(directory).is_dir()
+
+
+def checkout(directory):
+    """The branch a folder has checked out now, read from Git's HEAD file without spawning Git."""
+    git = Path(directory) / '.git'
+    try:
+        if git.is_file():
+            pointer = git.read_text(encoding='utf-8').strip().removeprefix('gitdir:').strip()
+            git = (Path(directory) / pointer).resolve()
+        head = (git / 'HEAD').read_text(encoding='utf-8').strip()
+    except OSError:
+        return None
+    return head.removeprefix('ref: refs/heads/') if head.startswith('ref: refs/heads/') else None
+
+
+# Transcript metadata by file path, kept while the file's modification time and size are unchanged.
+TRANSCRIPTS = {}
+
+
+def transcript(file):
+    """Folders, title and last activity of one transcript, re-parsed only when the file changes."""
+    stat = file.stat()
+    key, stamp = str(file), (stat.st_mtime_ns, stat.st_size)
+    cached = TRANSCRIPTS.get(key)
+    if cached and cached[0] == stamp:
+        return cached[1]
+    folders, last, title, auto_title, conflict = [], None, None, None, False
+    updated = datetime.fromtimestamp(stat.st_mtime, timezone.utc).isoformat()
+    # Stream metadata; never expose prompts or tool results as session labels.
+    with file.open(encoding='utf-8-sig', errors='replace') as stream:
+        for line in stream:
+            try:
+                record = json.loads(line)
+            except ValueError:
+                continue
+            if record.get('isSidechain'):
+                continue
+            if record.get('sessionId') and record['sessionId'] != file.stem:
+                conflict = True
+            # Another OS's transcripts are not local runnable tasks.
+            if record.get('cwd') and os.path.isabs(record['cwd']):
+                last = record['cwd']
+                if last not in folders:
+                    folders.append(last)
+            if record.get('type') == 'custom-title' and record.get('customTitle'):
+                title = record['customTitle']
+            if record.get('type') == 'ai-title' and record.get('aiTitle'):
+                auto_title = record['aiTitle']
+            if record.get('type') == 'agent-name' and record.get('agentName'):
+                auto_title = record['agentName']
+            if record.get('type') == 'user' and record.get('timestamp'):
+                updated = record['timestamp']
+    meta = dict(Folders=folders, Last=last, Title=title or auto_title, Updated=updated, Conflict=conflict)
+    TRANSCRIPTS[key] = (stamp, meta)
+    return meta
+
+
 def active(agent):
     return bool(agent and agent.get('pid') and agent.get('state') not in
                 ('stopped', 'completed', 'failed', 'exited', 'done'))
@@ -134,64 +196,43 @@ class Manager:
         catalog = {}
         projects = self.projects()
         # Transcripts repeat a few folders thousands of times; resolving each is slow on Windows.
-        roots = {}
+        roots, branches = {}, {}
         for file in (self.config / 'projects').glob('*/*.jsonl'):
             try:
                 if str(uuid.UUID(file.stem)) != file.stem.lower():
                     continue
             except ValueError:
                 continue
-            cwd, title, auto_title, conflict = None, None, None, False
-            updated = datetime.fromtimestamp(file.stat().st_mtime, timezone.utc).isoformat()
-            # Stream metadata; never expose prompts or tool results as session labels.
-            with file.open(encoding='utf-8-sig', errors='replace') as stream:
-                for line in stream:
-                    try:
-                        record = json.loads(line)
-                    except ValueError:
-                        continue
-                    if record.get('isSidechain'):
-                        continue
-                    if record.get('sessionId') and record['sessionId'] != file.stem:
-                        conflict = True
-                    if record.get('cwd'):
-                        candidate = record['cwd']
-                        # Another OS's transcripts are not local runnable tasks.
-                        if not os.path.isabs(candidate):
-                            continue
-                        if candidate not in roots:
-                            roots[candidate] = candidate
-                            # Tool activity may temporarily cd below the task root. Those
-                            # records still belong to the same persistent worktree.
-                            for path in projects.values():
-                                parent = path / '.claude' / 'worktrees'
-                                if wt.inside(candidate, parent):
-                                    relative = os.path.relpath(candidate, parent)
-                                    roots[candidate] = str(parent / Path(relative).parts[0])
-                                    break
-                        candidate = roots[candidate]
-                        if cwd and not wt.same(cwd, candidate):
-                            conflict = True
-                        cwd = candidate
-                    if record.get('type') == 'custom-title' and record.get('customTitle'):
-                        title = record['customTitle']
-                    if record.get('type') == 'ai-title' and record.get('aiTitle'):
-                        auto_title = record['aiTitle']
-                    if record.get('type') == 'agent-name' and record.get('agentName'):
-                        auto_title = record['agentName']
-                    if record.get('type') == 'user' and record.get('timestamp'):
-                        updated = record['timestamp']
-            if not cwd:
+            meta = transcript(file)
+            for candidate in meta['Folders']:
+                if candidate not in roots:
+                    roots[candidate] = candidate
+                    # Tool activity may temporarily cd below the task root. Those
+                    # records still belong to the same persistent worktree.
+                    for path in projects.values():
+                        parent = path / '.claude' / 'worktrees'
+                        if wt.inside(candidate, parent):
+                            relative = os.path.relpath(candidate, parent)
+                            roots[candidate] = str(parent / Path(relative).parts[0])
+                            break
+            if not meta['Last']:
                 continue
+            cwd, title = roots[meta['Last']], meta['Title']
+            updated = meta['Updated']
+            conflict = meta['Conflict'] or len({os.path.normcase(os.path.abspath(roots[f])) for f in meta['Folders']}) > 1
             for project, path in projects.items():
                 is_tree = wt.inside(cwd, path / '.claude' / 'worktrees')
                 if not is_tree and not (self.options.include_project_sessions and wt.same(cwd, path)):
                     continue
+                # A session follows its folder: once the folder is gone, the session is gone too.
+                if not Path(cwd).is_dir():
+                    continue
                 reason = ('history has conflicting session or folder metadata' if conflict else
-                          'history saved; working folder missing' if not Path(cwd).is_dir() else
                           'history saved; worktree checkout missing' if is_tree and not (Path(cwd) / '.git').exists() else None)
-                row = dict(SessionId=file.stem, Project=project, WorkingDirectory=cwd, Updated=updated,
-                           Worktree=is_tree, Available=not reason, UnavailableReason=reason, Title=title or auto_title)
+                if cwd not in branches:
+                    branches[cwd] = checkout(cwd)
+                row = dict(SessionId=file.stem, Project=project, WorkingDirectory=cwd, Updated=updated, Branch=branches[cwd],
+                           Worktree=is_tree, Available=not reason, UnavailableReason=reason, Title=title)
                 if file.stem in catalog and not wt.same(catalog[file.stem]['WorkingDirectory'], cwd):
                     raise ValueError(f'Conflicting saved locations for session {file.stem}.')
                 catalog[file.stem] = row
@@ -199,11 +240,25 @@ class Manager:
 
     def managed(self, id, entry, saved):
         found = next((dict(s) for s in saved if s['SessionId'] == id), None)
+        # A session whose folder is gone is gone too. A new task not yet launched has no folder yet.
+        if not found and not entry.get('NewSession') and not folder_exists(entry.get('WorkingDirectory')):
+            return None
         row = found or dict(SessionId=id, Project=entry['Project'], WorkingDirectory=entry.get('WorkingDirectory'),
                             Available=False, NewSession=entry.get('NewSession', False),
-                            UnavailableReason='saved worktree or transcript missing')
-        row.update(Task=entry.get('Task'), Branch=entry.get('Branch'))
+                            Branch=entry.get('WorkingDirectory') and checkout(entry['WorkingDirectory']),
+                            UnavailableReason='transcript missing')
+        row.update(Task=entry.get('Task'), Branch=row.get('Branch') or entry.get('Branch'))
         return row
+
+    def follow_folders(self, state):
+        """A session follows its folder: record the branch each folder has checked out now."""
+        changed = False
+        for entry in state['Sessions'].values():
+            branch = entry.get('WorkingDirectory') and checkout(entry['WorkingDirectory'])
+            if branch and branch != entry.get('Branch'):
+                entry['Branch'], changed = branch, True
+        if changed:
+            write_json(self.state_path, state)
 
     def selection(self, saved, state):
         o = self.options
@@ -223,7 +278,10 @@ class Manager:
                 id, entry = matches[0]
                 if o.branch and entry.get('Branch') and entry['Branch'] != o.branch:
                     raise ValueError('Task already uses another branch; choose a different task name.')
-                return [self.managed(id, entry, saved)]
+                row = self.managed(id, entry, saved)
+                if not row:
+                    raise ValueError(f"Task '{name}' had its folder deleted; its session stays gone. Choose a different task name.")
+                return [row]
             return [dict(SessionId=str(uuid.uuid4()), Project=project, Task=name, Branch=o.branch,
                          Available=False, NewSession=True, Name=wt.task_name(project, o.task or o.branch, o.issue, o.pr))]
         if o.session_id:
@@ -233,21 +291,20 @@ class Manager:
                     raise ValueError('Saved replacement links contain a cycle.')
                 visited.add(id)
                 id = sessions[id]['ReplacedBy']
-            if id in sessions:
-                if sessions[id]['Project'] not in projects:
-                    raise ValueError('The saved session belongs to a different project.')
-                return [self.managed(id, sessions[id], saved)]
-            found = [s for s in saved if s['SessionId'] == id]
-            if len(found) != 1:
-                raise ValueError(f'Saved session {id} was not found. No replacement will be created.')
-            return found
+            if id in sessions and sessions[id]['Project'] not in projects:
+                raise ValueError('The saved session belongs to a different project.')
+            row = self.managed(id, sessions[id], saved) if id in sessions else next((s for s in saved if s['SessionId'] == id), None)
+            if not row:
+                raise ValueError(f'Saved session {id} was not found or its folder is gone. Nothing is recreated.')
+            return [row]
         if o.action == 'resume':
             raise ValueError('Resume requires --session-id with the full saved conversation UUID.')
         selected = []
         for project in projects:
-            managed = [(id, e) for id, e in sessions.items() if e['Project'] == project and not e.get('ReplacedBy')]
+            managed = [self.managed(id, e, saved) for id, e in sessions.items() if e['Project'] == project and not e.get('ReplacedBy')]
+            managed = [row for row in managed if row and row.get('Available')]
             if managed:
-                selected.extend(self.managed(id, e, saved) for id, e in managed)
+                selected.extend(managed)
                 continue
             found = [s for s in saved if s['Project'] == project and s['Available']]
             seen = set()
@@ -263,25 +320,22 @@ class Manager:
     def launch_plan(self, s, agents):
         id, project = s['SessionId'], s['Project']
         directory = s.get('WorkingDirectory')
-        running = [a for a in agents if active(a) and (a['sessionId'] == id or wt.same(a['cwd'], directory))]
-        if running:
-            return dict(Session=s, Mode='running', Arguments=[], WorkingDirectory=running[0]['cwd'],
-                        SessionId=running[0]['sessionId'], Project=project)
-        background = any(a['sessionId'] == id and a['kind'] == 'background' for a in agents)
-        args = ['--bg', '--resume', id]
-        if not background:
-            args += ['--remote-control', f"{project} {s.get('Task') or s.get('Title') or Path(directory or project).name}"]
-        base = dict(Session=s, Mode='resume', Arguments=args, WorkingDirectory=directory, SessionId=id, Project=project)
-        if s.get('Available'):
-            return base
-        if 'conflicting' in (s.get('UnavailableReason') or ''):
-            raise ValueError('Conflicting session metadata needs inspection before recovery.')
-        name = s.get('Name') or wt.task_name(project, s.get('Task') or f'recovered-{id[:8]}')
+        if not s.get('NewSession'):
+            # A resume continues the same conversation in its original folder, or nothing happens.
+            if not s.get('Available'):
+                raise ValueError(f"Session {id} cannot resume: {s.get('UnavailableReason') or 'folder missing'}. Nothing is recreated.")
+            running = [a for a in agents if active(a) and (a['sessionId'] == id or wt.same(a['cwd'], directory))]
+            if running:
+                return dict(Session=s, Mode='running', Arguments=[], WorkingDirectory=running[0]['cwd'],
+                            SessionId=running[0]['sessionId'], Project=project)
+            args = ['--bg', '--resume', id]
+            if not any(a['sessionId'] == id and a['kind'] == 'background' for a in agents):
+                args += ['--remote-control', f"{project} {s.get('Task') or s.get('Title') or Path(directory).name}"]
+            return dict(Session=s, Mode='resume', Arguments=args, WorkingDirectory=directory, SessionId=id, Project=project)
+        name = s.get('Name') or wt.task_name(project, s.get('Task'))
         workspace = wt.plan(self.projects()[project], name, s.get('Branch'), directory)
-        base['Workspace'] = workspace
-        base['WorkingDirectory'] = workspace['WorkingDirectory']
-        if not s.get('NewSession') and wt.same(directory, workspace['WorkingDirectory']) and (workspace['Operation'] == 'restore' or (workspace['Operation'] == 'reuse' and background)):
-            return base
+        base = dict(Session=s, Mode='new', Arguments=['--bg', '--remote-control', f"{project} {s.get('Task') or name}"],
+                    WorkingDirectory=workspace['WorkingDirectory'], SessionId=id, Project=project, Workspace=workspace)
         if workspace['Operation'] == 'reuse':
             other = next((a for a in agents if active(a) and wt.same(a['cwd'], workspace['WorkingDirectory'])), None)
             if other:
@@ -291,7 +345,6 @@ class Manager:
             if old:
                 old.update(Task=s.get('Task'), Branch=workspace['Branch'])
                 return self.launch_plan(old, agents)
-        base.update(Mode='new', Arguments=['--bg', '--remote-control', f"{project} {s.get('Task') or name}"])
         return base
 
     def bridge(self, agent):
@@ -309,26 +362,39 @@ class Manager:
         sessions = state['Sessions']
         rows = list(saved)
         ids = {r['SessionId'] for r in rows}
-        rows += [self.managed(id, e, saved) for id, e in sessions.items()
-                 if id not in ids and e['Project'] in self.projects()]
+        rows += [row for row in (self.managed(id, e, saved) for id, e in sessions.items()
+                                 if id not in ids and e['Project'] in self.projects()) if row]
         result = []
         for s in rows:
             id = s['SessionId']
             agent = next((a for a in agents if a['sessionId'] == id and active(a)), None)
             entry = sessions.get(id, {})
-            owned = entry.get('Ownership') == 'confirmed'
-            if agent:
-                owned = owned and agent['kind'] == 'background' and wt.same(agent['cwd'], entry.get('WorkingDirectory')) and agent.get('startedAt') == entry.get('StartedAt')
             bridge = self.bridge(agent)
             task = entry.get('Task')
             title = (task if task not in (None, 'remote') else None) or (agent or {}).get('name') or s.get('Title') or task or Path(s.get('WorkingDirectory') or s['Project']).name
-            result.append(dict(s, Task=title, Branch=entry.get('Branch'), Managed=bool(owned), Running=active(agent),
+            result.append(dict(s, Task=title, Branch=s.get('Branch') or entry.get('Branch'), Stoppable=bool(agent and agent['kind'] == 'background'), Running=active(agent),
                                State=agent.get('state') if agent else s.get('UnavailableReason') or 'stopped',
                                RemoteRegistered=bool(bridge), RemoteSessionId=bridge,
                                RemoteUrl=f'https://claude.ai/code/{bridge}' if bridge else None,
                                Connection='registration found; delivery unverified' if bridge else 'no bridge registration',
                                AgentId=(agent or {}).get('id'), ReplacedBy=entry.get('ReplacedBy')))
         return result
+
+    def confirm(self, launch, output, before):
+        """Find the session a launch produced: the requested ID, or the copy Claude reports."""
+        id, directory = launch['SessionId'], launch['WorkingDirectory']
+        reported = {m.lower() for m in UUID.findall(output)}
+        earlier = {a['sessionId'] for a in before if active(a)}
+        deadline = time.monotonic() + self.options.launch_wait
+        while True:
+            here = [a for a in self.agents() if active(a) and a['kind'] == 'background' and wt.same(a['cwd'], directory)]
+            fresh = [a for a in here if a['sessionId'] not in earlier]
+            found = (next((a for a in here if launch['Mode'] == 'resume' and a['sessionId'] == id), None)
+                     or next((a for a in here if a['sessionId'].lower() in reported), None)
+                     or (fresh[0] if len(fresh) == 1 else None))
+            if found or time.monotonic() >= deadline:
+                return found
+            time.sleep(.5)
 
     def start(self, selected, state):
         results = []
@@ -342,78 +408,70 @@ class Manager:
             if launch['Mode'] == 'running':
                 pending = s.get('NewSession') and id in sessions
                 if self.options.task or self.options.branch or self.options.issue or self.options.pr or pending:
-                    entry = sessions.setdefault(launch['SessionId'], dict(Project=s['Project'], WorkingDirectory=launch['WorkingDirectory'], Ownership='unmanaged'))
+                    entry = sessions.setdefault(launch['SessionId'], dict(Project=s['Project'], WorkingDirectory=launch['WorkingDirectory']))
                     entry.update(Task=s.get('Task'), Branch=workspace['Branch'] if workspace else s.get('Branch'))
                     if pending and id != launch['SessionId']:
                         sessions[id]['ReplacedBy'] = launch['SessionId']
                     write_json(self.state_path, state)
-                results.append(dict(Project=s['Project'], SessionId=launch['SessionId'], WorkingDirectory=launch['WorkingDirectory'], Result='already running; not restarted or adopted'))
+                results.append(dict(Project=s['Project'], SessionId=launch['SessionId'], WorkingDirectory=launch['WorkingDirectory'], Result='already running; not restarted'))
                 continue
-            replaces = id if launch['Mode'] == 'new' and not s.get('NewSession') else None
-            if replaces:
-                id = str(uuid.uuid4())
-            branch = workspace['Branch'] if workspace else s.get('Branch') or wt.git(launch['WorkingDirectory'], 'symbolic-ref', '--quiet', '--short', 'HEAD', check=False).stdout.strip()
+            branch = workspace['Branch'] if workspace else checkout(launch['WorkingDirectory'])
             sessions[id] = dict(Project=s['Project'], Task=s.get('Task'), Branch=branch, WorkingDirectory=launch['WorkingDirectory'],
-                                Ownership='pending', NewSession=launch['Mode'] == 'new', Replaces=replaces,
-                                Updated=datetime.now(timezone.utc).isoformat())
-            if replaces:
-                sessions.setdefault(replaces, dict(Project=s['Project'], WorkingDirectory=s.get('WorkingDirectory'), Ownership='unmanaged'))['ReplacedBy'] = id
+                                NewSession=launch['Mode'] == 'new', Updated=datetime.now(timezone.utc).isoformat())
             write_json(self.state_path, state)
             if workspace:
                 wt.create(workspace)
             output = self.claude(launch['Arguments'], launch['WorkingDirectory'])
-            agent = None
-            prior_ids = {a['sessionId'] for a in before}
-            for attempt in range(10):
-                inventory = self.agents()
-                matches = [a for a in inventory if active(a) and
-                           ((a['kind'] == 'background' and a['sessionId'] not in prior_ids and wt.same(a['cwd'], launch['WorkingDirectory']))
-                            if launch['Mode'] == 'new' else a['sessionId'] == id)]
-                if len(matches) > 1:
-                    raise ValueError('More than one native session matches the launch; ownership remains pending.')
-                if matches:
-                    agent = matches[0]
-                    break
-                time.sleep(.5)
-            if not agent or not agent.get('startedAt') or agent['kind'] != 'background' or not wt.same(agent['cwd'], launch['WorkingDirectory']) or re.search(r'^\s*note:.*(copy|copied)', output, re.I | re.M):
-                raise RuntimeError('Claude did not confirm the requested session and folder. Ownership remains pending; inspect claude agents.')
-            if launch['Mode'] == 'new' and agent['sessionId'] != id:
+            agent = self.confirm(launch, output, before)
+            result = 'resumed original conversation and worktree' if launch['Mode'] == 'resume' else 'created task in a persistent worktree'
+            if not agent:
+                result = 'launched; not listed yet by claude agents, stoppable once it appears'
+            elif agent['sessionId'] != id:
+                # Claude started a copy (or chose the ID of a new task). Follow it; the old ID stays history.
                 sessions[agent['sessionId']] = sessions.pop(id)
                 for entry in sessions.values():
                     if entry.get('ReplacedBy') == id:
                         entry['ReplacedBy'] = agent['sessionId']
+                if launch['Mode'] == 'resume':
+                    sessions[id] = dict(Project=s['Project'], WorkingDirectory=launch['WorkingDirectory'], ReplacedBy=agent['sessionId'])
+                    result = 'resumed as the copy Claude reported, in the same worktree'
                 id = agent['sessionId']
-            sessions[id].update(Ownership='confirmed', NewSession=False, StartedAt=agent.get('startedAt'))
-            write_json(self.state_path, state)
+            if agent:
+                sessions[id]['NewSession'] = False
+                write_json(self.state_path, state)
             bridge = self.bridge(agent)
-            result = 'resumed original conversation and worktree' if launch['Mode'] == 'resume' else 'created replacement task; previous branch and history retained' if replaces else 'created task in a persistent worktree'
             results.append(dict(Project=s['Project'], SessionId=id, Task=s.get('Task'), Branch=branch,
-                                WorkingDirectory=launch['WorkingDirectory'], Replaces=replaces, Result=result,
+                                WorkingDirectory=launch['WorkingDirectory'], Result=result,
                                 RemoteRegistered=bool(bridge), RemoteUrl=f'https://claude.ai/code/{bridge}' if bridge else None,
                                 Connection='registration found; delivery unverified' if bridge else 'no bridge registration; attach and run /remote-control'))
         return results
 
-    def stop(self, state):
-        selected = [(id, e) for id, e in state['Sessions'].items() if e['Project'] in self.projects()
-                    and not e.get('ReplacedBy') and (not self.options.session_id or self.options.session_id == id)]
-        if not selected:
-            raise ValueError('No matching managed sessions. Nothing was stopped.')
+    def project_of(self, directory):
+        return next((name for name, path in self.projects().items() if wt.inside(directory, path)), None)
+
+    def stoppable(self, agents):
+        # One rule: every background session can be stopped; a session live in another app is view-only.
+        id = self.options.session_id
+        chosen = [a for a in agents if active(a) and (a['sessionId'] == id if id else a['kind'] == 'background')
+                  and self.project_of(a['cwd'])]
+        for a in chosen:
+            if a['kind'] != 'background':
+                raise ValueError(f"Session {a['sessionId']} is live in another app; it is view-only here.")
+        return chosen
+
+    def stop(self):
+        agents = self.agents()
         results = []
-        for id, entry in selected:
-            if entry.get('Ownership') != 'confirmed':
-                raise ValueError(f'Session {id} has uncertain ownership; inspect it before stopping.')
-            agents = self.agents()
-            matches = [a for a in agents if a['sessionId'] == id and active(a)]
-            if matches:
-                a = matches[0]
-                if len(matches) != 1 or a['kind'] != 'background' or not wt.same(a['cwd'], entry['WorkingDirectory']) or not a.get('startedAt') or a['startedAt'] != entry.get('StartedAt'):
-                    raise ValueError(f'Session {id} is now owned by another run; nothing was stopped.')
-                if sum(item.get('id') == a['id'] for item in agents) != 1:
-                    raise ValueError('Ambiguous native agent identifier; nothing was stopped.')
-                self.claude(['stop', a['id']])
-                if any(a['sessionId'] == id and active(a) for a in self.agents()):
-                    raise RuntimeError('Claude still reports the session active after stop.')
-            results.append(dict(SessionId=id, Project=entry['Project'], Result='stopped; conversation and worktree retained' if matches else 'already stopped; history retained'))
+        for a in self.stoppable(agents):
+            if sum(item.get('id') == a['id'] for item in agents) != 1:
+                raise ValueError('Ambiguous native agent identifier; nothing was stopped.')
+            self.claude(['stop', a['id']])
+            if any(b['sessionId'] == a['sessionId'] and active(b) for b in self.agents()):
+                raise RuntimeError('Claude still reports the session active after stop.')
+            results.append(dict(SessionId=a['sessionId'], Project=self.project_of(a['cwd']),
+                                Result='stopped; conversation and worktree retained'))
+        if self.options.session_id and not results:
+            results.append(dict(SessionId=self.options.session_id, Project=None, Result='already stopped; history retained'))
         return results
 
     def execute(self):
@@ -423,6 +481,8 @@ class Manager:
         mutation = o.action in ('start', 'resume', 'stop', 'workspace') and not o.plan
         with root_lock(self.root) if mutation else nullcontext():
             state = self.state()
+            if mutation:
+                self.follow_folders(state)
             if o.action == 'workspace':
                 projects = self.projects()
                 if len(projects) != 1:
@@ -437,9 +497,9 @@ class Manager:
                 return [workspace]
             if o.action == 'stop':
                 if o.plan:
-                    return [dict(Project=e['Project'], SessionId=id, Result='stop managed session; keep history') for id, e in state['Sessions'].items()
-                            if e['Project'] in self.projects() and (not o.session_id or id == o.session_id)]
-                return self.stop(state)
+                    return [dict(Project=self.project_of(a['cwd']), SessionId=a['sessionId'], Result='stop background session; keep history')
+                            for a in self.stoppable(self.agents())]
+                return self.stop()
             saved = self.saved()
             if o.action == 'sessions':
                 return saved
@@ -473,6 +533,7 @@ def parser():
     p.add_argument('--include-project-sessions', '-IncludeProjectSessions', action='store_true')
     p.add_argument('--config', '-ClaudeConfigDirectory', default=os.environ.get('CLAUDE_CONFIG_DIR', str(Path.home() / '.claude')))
     p.add_argument('--claude', '-ClaudeExecutable', default='claude.exe' if os.name == 'nt' else 'claude')
+    p.add_argument('--launch-wait', type=float, default=90, help='Seconds to wait for Claude to list a launched session.')
     return p
 
 
@@ -593,13 +654,9 @@ def menu(manager):
                     options.action, options.task = 'start', name
                 else:
                     options.session_id = target['SessionId']
-                if options.action == 'resume' and not selectable(target):
-                    answer = input('Recovery may create a replacement conversation. Type recover to proceed: ')
-                    if answer != 'recover':
-                        continue
                 try:
                     result = Manager(options).execute()
-                    messages.extend(f"{r['Project']}: {r.get('Result', '')}. {r.get('Connection', '')}" for r in result)
+                    messages.extend(f"{r.get('Project') or target['Project']}: {r.get('Result', '')}. {r.get('Connection', '')}" for r in result)
                     checked.discard(target['SessionId'])
                 except (OSError, ValueError, RuntimeError) as error:
                     messages.append(str(error))

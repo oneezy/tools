@@ -58,27 +58,27 @@ try {
         $again=@(Run $f @('start','-Task','ticket-41'))[0]
         Assert ($again.SessionId -eq $a.SessionId -and (Native $f).Starts -eq 2) 'Named task was duplicated.'
     }
-    Case 'deleted worktree restores its retained branch and original conversation' {
+    Case 'deleted worktree is never recreated and its conversation is never replaced' {
         $f=Fixture restore; $first=@(Run $f @('start','-Task','ticket-43'))[0]
         $null=Run $f @('stop')
         $null=Git $f.Project @('worktree','remove',$first.WorkingDirectory)
-        $again=@(Run $f @('start','-Task','ticket-43'))[0]
-        Assert ($again.SessionId -eq $first.SessionId -and $again.Branch -eq $first.Branch -and $again.WorkingDirectory -eq $first.WorkingDirectory) 'Recovery failed to restore the original task in place.'
-        Assert (Test-Path -LiteralPath (Join-Path $again.WorkingDirectory '.git')) 'Recovery did not recreate the checkout.'
+        $refused=$false; try{$null=Run $f @('start','-Task','ticket-43')}catch{$refused=$_.Exception.Message -match 'folder deleted'}
+        Assert $refused 'A named start recreated a deleted task.'
+        $refused=$false; try{$null=Run $f @('resume','-SessionId',$first.SessionId)}catch{$refused=$_.Exception.Message -match 'folder is gone'}
+        Assert $refused 'Resume recreated a deleted task.'
+        Assert (!(Test-Path -LiteralPath $first.WorkingDirectory) -and (Native $f).Starts -eq 1) 'A deleted folder was recreated or relaunched.'
     }
-    Case 'stale registered worktree gets one replacement while old files, branch, and history remain' {
+    Case 'moved-away worktree keeps its files, branch, and history and gets no replacement' {
         $f=Fixture stale; $first=@(Run $f @('start','-Task','ticket-44'))[0]; $null=Run $f @('stop')
         $parked=$first.WorkingDirectory+'-parked'
         Assert ([IO.Path]::GetFullPath($parked).StartsWith($suite+[IO.Path]::DirectorySeparatorChar)) 'Move escaped fixture.'
         Move-Item -LiteralPath $first.WorkingDirectory -Destination $parked
-        $replacement=@(Run $f @('start','-Task','ticket-44'))[0]
-        Assert ($replacement.SessionId -ne $first.SessionId -and $replacement.Branch -ne $first.Branch) 'Missing registered worktree did not get a fresh task.'
-        Assert ((State $f).Sessions[$first.SessionId].ReplacedBy -eq $replacement.SessionId) 'Replacement link was not saved.'
-        Assert (Test-Path -LiteralPath $parked) 'Recovery deleted old files.'
+        $refused=$false; try{$null=Run $f @('start','-Task','ticket-44')}catch{$refused=$true}
+        Assert $refused 'A missing worktree got a replacement task.'
+        Assert (Test-Path -LiteralPath $parked) 'Old files were deleted.'
         $null=Git $f.Project @('show-ref','--verify',"refs/heads/$($first.Branch)")
-        Assert (Test-Path -LiteralPath (Join-Path $f.Config "projects/new-task/$($first.SessionId).jsonl")) 'Recovery removed conversation history.'
-        $again=@(Run $f @('resume','-SessionId',$first.SessionId))[0]
-        Assert ($again.SessionId -eq $replacement.SessionId -and (Native $f).Starts -eq 2) 'Old identity created another replacement.'
+        Assert (Test-Path -LiteralPath (Join-Path $f.Config "projects/new-task/$($first.SessionId).jsonl")) 'Conversation history was removed.'
+        Assert ((Native $f).Starts -eq 1) 'A replacement conversation was started.'
     }
     Case 'existing feature branch is checked out without changing its commits' {
         $f=Fixture branch; $null=Git $f.Project @('branch','feature/existing')
@@ -101,7 +101,7 @@ try {
         $retry=@(Run $f @('start','-Task','ticket-46'))[0]
         Assert ($retry.WorkingDirectory -eq $folder) 'Retry created another worktree.'
     }
-    Case 'uncertain launch is rediscovered without duplicate sessions or stop ownership' {
+    Case 'uncertain launch is rediscovered without duplicate sessions and stays stoppable' {
         $f=Fixture uncertain; $native=Native $f; $native.Mode='launch-exit-failure'
         $native | ConvertTo-Json -Depth 10 | Set-Content -LiteralPath $f.Native
         $failed=$false; try{$null=Run $f @('start','-Task','ticket-uncertain')}catch{$failed=$true}
@@ -109,7 +109,8 @@ try {
         $found=@(Run $f @('start','-Task','ticket-uncertain'))[0]
         $again=@(Run $f @('start','-Task','ticket-uncertain'))[0]
         Assert ($found.SessionId -eq $again.SessionId -and (Native $f).Starts -eq 1) 'Uncertain launch was duplicated.'
-        Assert ((State $f).Sessions[$found.SessionId].Ownership -eq 'unmanaged') 'Uncertain launch acquired stop ownership.'
+        $null=Run $f @('stop')
+        Assert ((Native $f).Stops -eq 1) 'Uncertain launch could not be stopped.'
     }
     Case 'origin is fetched, dev fast-forwards, and existing remote feature branches retain their commits' {
         $origin=Fixture upstream; $f=Fixture clone $origin.Project
@@ -135,16 +136,6 @@ try {
         Assert ((Git $f.Project @('branch','--show-current')) -eq 'main' -and (Git $f.Project @('rev-parse','main')) -eq $main) 'Bootstrap changed main.'
         Assert ((Git $f.Project @('rev-parse','dev')) -eq $main -and (Git $row.WorkingDirectory @('rev-parse','HEAD')) -eq $main) 'Bootstrap failed to cut the task from dev.'
     }
-    Case 'a missing task branch gets a remembered replacement rather than blocking' {
-        $f=Fixture gone; $first=@(Run $f @('start','-Task','ticket-gone'))[0]; $null=Run $f @('stop')
-        $null=Git $f.Project @('worktree','remove',$first.WorkingDirectory)
-        $state=State $f; $state.Sessions[$first.SessionId].Branch='codex/branch-no-longer-present'
-        $state | ConvertTo-Json -Depth 10 | Set-Content -LiteralPath $f.State
-        $replacement=@(Run $f @('start','-Task','ticket-gone'))[0]
-        Assert ($replacement.SessionId -ne $first.SessionId -and (Test-Path $replacement.WorkingDirectory)) 'Missing branch prevented replacement.'
-        $again=@(Run $f @('start','-Task','ticket-gone'))[0]
-        Assert ($again.SessionId -eq $replacement.SessionId -and (Native $f).Starts -eq 2) 'Replacement was not remembered.'
-    }
     Case 'existing branch worktree and conversation can be found again after launcher state is lost' {
         $f=Fixture rediscover; $first=@(Run $f @('start','-Task','ticket-found'))[0]
         Rename-Item -LiteralPath $f.State -NewName 'prior-state.json'
@@ -152,7 +143,6 @@ try {
         Assert ($found.SessionId -eq $first.SessionId -and (Native $f).Starts -eq 1) 'Lost state caused a duplicate session.'
         $again=@(Run $f @('start','-Task','ticket-found'))[0]
         Assert ($again.SessionId -eq $first.SessionId -and (Native $f).Starts -eq 1) 'Rediscovered task was not remembered.'
-        Assert ((State $f).Sessions[$first.SessionId].Ownership -eq 'unmanaged') 'Rediscovery adopted ownership of an external session.'
     }
     if($failures.Count){throw "$($failures.Count) failed, $passed passed.`n$($failures -join "`n")"}
     Write-Host "All $passed worktree tests passed. No real Claude session was started."

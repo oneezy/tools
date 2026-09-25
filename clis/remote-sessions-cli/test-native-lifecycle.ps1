@@ -73,11 +73,12 @@ try {
         Require-Success $result
         $rows=@($result.Text | ConvertFrom-Json)
         Assert-True ($rows.Count -eq 1 -and $rows[0].Running -and $rows[0].State -eq 'idle') 'Interactive session status was not preserved.'
-        Assert-True (!$rows[0].Managed -and !$rows[0].AgentId) 'Interactive session received background ownership or an invented stop identifier.'
+        Assert-True (!$rows[0].Stoppable -and !$rows[0].AgentId) 'Interactive session was offered as stoppable or received an invented stop identifier.'
         Require-Success (Invoke-Launcher $f @('resume','-Only','example','-SessionId',$testId))
         Assert-True (!(Test-Path -LiteralPath $f.State)) 'Interactive session was adopted into managed state.'
-        $result=Invoke-Launcher $f @('stop','-Only','example')
-        Assert-True ($result.Code -ne 0) 'Stopping an unmanaged session should fail explicitly.'
+        $result=Invoke-Launcher $f @('stop','-Only','example','-SessionId',$testId)
+        Assert-True ($result.Code -ne 0 -and $result.Text -match 'view-only') 'Stopping a session live in another app should fail explicitly.'
+        Require-Success (Invoke-Launcher $f @('stop','-Only','example'))
         Assert-True ((Read-Native $f).Starts -eq 0 -and (Read-Native $f).Stops -eq 0) 'Interactive session was launched or stopped.'
     }
     Test-Case 'another conversation already running in the worktree prevents a duplicate launch' {
@@ -137,27 +138,27 @@ try {
         Require-Success $result
         $rows=@($result.Text | ConvertFrom-Json)
         Assert-True ($rows.Count -eq 1 -and $rows[0].SessionId -eq $testId) 'Missing history concealed the saved managed identity.'
-        Assert-True ($rows[0].Running -and $rows[0].Managed) 'Status falsely reported the native session stopped or unowned after history disappeared.'
+        Assert-True ($rows[0].Running -and $rows[0].Stoppable) 'Status falsely reported the native session stopped or unstoppable after history disappeared.'
         Assert-True (!$rows[0].Available) 'Status advertised an unavailable transcript as resumable.'
         Assert-True ((Read-Native $f).Stops -eq 0) 'Status stopped the still-running session.'
     }
-    Test-Case 'failed or mismatched launches retain pending ownership and cannot be stopped' {
-        foreach($mode in @('launch-failure','wrong-directory')) {
-            $f=New-Fixture $mode; $native=Read-Native $f; $native.Mode=$mode; Save-Native $f $native
-            $result=Invoke-Launcher $f @('start','-Only','example')
-            Assert-True ($result.Code -ne 0) "$mode launch was reported successful."
-            $state=Get-Content -LiteralPath $f.State -Raw | ConvertFrom-Json -AsHashtable
-            Assert-True ($state.Sessions[$testId].Ownership -eq 'pending') "$mode launch claimed confirmed ownership."
-            $result=Invoke-Launcher $f @('stop','-Only','example')
-            Assert-True ($result.Code -ne 0 -and (Read-Native $f).Stops -eq 0) "$mode launch allowed stop without confirmed ownership."
-        }
+    Test-Case 'a failed launch is reported; a launch Claude runs elsewhere is never adopted or stopped' {
+        $f=New-Fixture launch-failure; $native=Read-Native $f; $native.Mode='launch-failure'; Save-Native $f $native
+        $result=Invoke-Launcher $f @('start','-Only','example')
+        Assert-True ($result.Code -ne 0) 'Failed launch was reported successful.'
+        $f=New-Fixture wrong-directory; $native=Read-Native $f; $native.Mode='wrong-directory'; Save-Native $f $native
+        $result=Invoke-Launcher $f @('start','-Only','example','--launch-wait','1')
+        Require-Success $result
+        Assert-True ($result.Text -match 'not listed yet') 'A launch in another folder was adopted.'
+        Require-Success (Invoke-Launcher $f @('stop','-Only','example'))
+        Assert-True ((Read-Native $f).Stops -eq 0) 'Stop reached a session outside the project.'
     }
-    Test-Case 'replaced native run and ineffective native stop are reported safely' {
+    Test-Case 'any background run is stoppable; an ineffective native stop is reported' {
         $f=New-Fixture replaced
         Require-Success (Invoke-Launcher $f @('start','-Only','example'))
         $native=Read-Native $f; $native.Agents[0].startedAt='someone-elses-run'; Save-Native $f $native
-        $result=Invoke-Launcher $f @('stop','-Only','example')
-        Assert-True ($result.Code -ne 0 -and (Read-Native $f).Stops -eq 0) 'Stop terminated a replacement run.'
+        Require-Success (Invoke-Launcher $f @('stop','-Only','example'))
+        Assert-True ((Read-Native $f).Stops -eq 1) 'A background run started elsewhere was not stopped.'
         $f=New-Fixture stopfailure
         Require-Success (Invoke-Launcher $f @('start','-Only','example'))
         $native=Read-Native $f; $native.Mode='stop-no-effect'; Save-Native $f $native

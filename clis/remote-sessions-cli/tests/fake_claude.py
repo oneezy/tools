@@ -18,7 +18,13 @@ def save():
 if args[0] == 'agents':
     if data.get('Mode') == 'inventory-failure':
         sys.exit(6)
-    print('{invalid' if data.get('Mode') == 'malformed' else json.dumps(data['Agents']))
+    # A slow launch stays out of the inventory for a few polls, like a real cold start.
+    listed = [a for a in data['Agents'] if not a.get('HiddenPolls')]
+    for a in data['Agents']:
+        if a.get('HiddenPolls'):
+            a['HiddenPolls'] -= 1
+    save()
+    print('{invalid' if data.get('Mode') == 'malformed' else json.dumps(listed))
 elif args[0] == '--bg':
     data['Starts'] += 1
     data['LastArguments'], data['LastDirectory'] = args, os.getcwd()
@@ -27,12 +33,15 @@ elif args[0] == '--bg':
         sys.exit(9)
     new = '--resume' not in args
     id = str(uuid.uuid4()) if new else args[args.index('--resume') + 1]
-    copied = any(a['sessionId'] == id and a['kind'] == 'background' for a in data['Agents']) and '--remote-control' in args
+    copied = (any(a['sessionId'] == id and a['kind'] == 'background' for a in data['Agents']) and '--remote-control' in args) or (
+        not new and data.get('Mode') == 'copy')
     if copied:
         id = str(uuid.uuid4())
     agent = dict(id=id[:8], sessionId=id, kind='background', state='idle', cwd=os.getcwd(), pid=9000 + data['Starts'], startedAt=f"run-{data['Starts']}")
     if data.get('Mode') == 'wrong-directory':
         agent['cwd'] = str(config)
+    if data.get('Mode') == 'slow':
+        agent['HiddenPolls'] = data.get('SlowPolls', 4)
     data['Agents'] = [a for a in data['Agents'] if a['sessionId'] != id] + [agent]
     history = config / 'projects' / 'test-history'
     history.mkdir(parents=True, exist_ok=True)
