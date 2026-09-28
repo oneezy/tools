@@ -1,0 +1,230 @@
+{
+  "ask-matt->code-review": [
+    "/code-review"
+  ],
+  "ask-matt->codebase-design": [
+    "/codebase-design"
+  ],
+  "ask-matt->diagnosing-bugs": [
+    "/diagnosing-bugs"
+  ],
+  "ask-matt->domain-modeling": [
+    "/domain-modeling"
+  ],
+  "ask-matt->grill-me": [
+    "/grill-me"
+  ],
+  "ask-matt->grill-with-docs": [
+    "/grill-with-docs",
+    "`grill-with-docs`"
+  ],
+  "ask-matt->grilling": [
+    "/grilling"
+  ],
+  "ask-matt->handoff": [
+    "/handoff"
+  ],
+  "ask-matt->implement": [
+    "/implement"
+  ],
+  "ask-matt->improve-codebase-architecture": [
+    "/improve-codebase-architecture"
+  ],
+  "ask-matt->prototype": [
+    "/prototype"
+  ],
+  "ask-matt->research": [
+    "/research"
+  ],
+  "ask-matt->resolving-merge-conflicts": [
+    "/resolving-merge-conflicts"
+  ],
+  "ask-matt->setup-matt-pocock-skills": [
+    "/setup-matt-pocock-skills"
+  ],
+  "ask-matt->tdd": [
+    "/tdd"
+  ],
+  "ask-matt->teach": [
+    "/teach"
+  ],
+  "ask-matt->to-questionnaire": [
+    "/to-questionnaire"
+  ],
+  "ask-matt->to-spec": [
+    "/to-spec"
+  ],
+  "ask-matt->to-tickets": [
+    "/to-tickets"
+  ],
+  "ask-matt->triage": [
+    "/triage"
+  ],
+  "ask-matt->wait-what": [
+    "/wait-what"
+  ],
+  "ask-matt->wayfinder": [
+    "/wayfinder"
+  ],
+  "ask-matt->wizard": [
+    "/wizard"
+  ],
+  "ask-matt->writing-for-agents": [
+    "/writing-for-agents"
+  ],
+  "claude-handoff->handoff": [
+    "bare \"handoff\""
+  ],
+  "code-review->implement": [
+    "bare \"implement\""
+  ],
+  "code-review->setup-matt-pocock-skills": [
+    "/setup-matt-pocock-skills"
+  ],
+  "codebase-design->implement": [
+    "bare \"implement\""
+  ],
+  "grill-me->grilling": [
+    "Skill tool with \"grilling\""
+  ],
+  "grill-with-docs->domain-modeling": [
+    "bare \"domain-modeling\""
+  ],
+  "grill-with-docs->grilling": [
+    "bare \"grilling\""
+  ],
+  "implement->code-review": [
+    "/code-review"
+  ],
+  "implement->tdd": [
+    "/tdd"
+  ],
+  "implement-spec->code-review": [
+    "/code-review"
+  ],
+  "implement-spec->implement": [
+    "bare \"implement\""
+  ],
+  "implement-spec->research": [
+    "bare \"research\""
+  ],
+  "improve-codebase-architecture->codebase-design": [
+    "/codebase-design",
+    "Skill tool with \"codebase-design\""
+  ],
+  "improve-codebase-architecture->domain-modeling": [
+    "Skill tool with \"domain-modeling\""
+  ],
+  "improve-codebase-architecture->grilling": [
+    "Skill tool with \"grilling\""
+  ],
+  "loop-me->grilling": [
+    "/grilling"
+  ],
+  "retro->writing-for-agents": [
+    "\"the writing-for-agents skill\"",
+    "Skill tool with \"writing-for-agents\"",
+    "`writing-for-agents`"
+  ],
+  "setup-matt-pocock-skills->domain-modeling": [
+    "/domain-modeling"
+  ],
+  "setup-matt-pocock-skills->grill-with-docs": [
+    "/grill-with-docs"
+  ],
+  "setup-matt-pocock-skills->grilling": [
+    "`grilling`"
+  ],
+  "setup-matt-pocock-skills->improve-codebase-architecture": [
+    "/improve-codebase-architecture"
+  ],
+  "setup-matt-pocock-skills->pr": [
+    "`pr`"
+  ],
+  "setup-matt-pocock-skills->prototype": [
+    "`prototype`"
+  ],
+  "setup-matt-pocock-skills->research": [
+    "`research`"
+  ],
+  "setup-matt-pocock-skills->to-spec": [
+    "`to-spec`"
+  ],
+  "setup-matt-pocock-skills->to-tickets": [
+    "`to-tickets`"
+  ],
+  "setup-matt-pocock-skills->triage": [
+    "/triage",
+    "\"the triage skill\"",
+    "`triage`"
+  ],
+  "setup-matt-pocock-skills->wayfinder": [
+    "/wayfinder"
+  ],
+  "setup-ts-deep-modules->codebase-design": [
+    "Skill tool with \"codebase-design\""
+  ],
+  "tdd->code-review": [
+    "\"the code-review skill\"",
+    "`code-review`"
+  ],
+  "tdd->codebase-design": [
+    "Skill tool with \"codebase-design\""
+  ],
+  "to-spec->prototype": [
+    "bare \"prototype\""
+  ],
+  "to-spec->setup-matt-pocock-skills": [
+    "/setup-matt-pocock-skills"
+  ],
+  "to-spec->triage": [
+    "bare \"triage\""
+  ],
+  "to-tickets->prototype": [
+    "bare \"prototype\""
+  ],
+  "to-tickets->setup-matt-pocock-skills": [
+    "/setup-matt-pocock-skills"
+  ],
+  "to-tickets->triage": [
+    "bare \"triage\""
+  ],
+  "triage->domain-modeling": [
+    "bare \"domain-modeling\""
+  ],
+  "triage->grilling": [
+    "bare \"grilling\""
+  ],
+  "triage->implement": [
+    "bare \"implement\""
+  ],
+  "triage->setup-matt-pocock-skills": [
+    "/setup-matt-pocock-skills"
+  ],
+  "wayfinder->domain-modeling": [
+    "bare \"domain-modeling\""
+  ],
+  "wayfinder->grilling": [
+    "`grilling`"
+  ],
+  "wayfinder->pr": [
+    "Skill tool with \"pr\""
+  ],
+  "wayfinder->prototype": [
+    "Skill tool with \"prototype\"",
+    "`prototype`"
+  ],
+  "wayfinder->research": [
+    "Skill tool with \"research\"",
+    "`research`"
+  ],
+  "wayfinder->setup-matt-pocock-skills": [
+    "/setup-matt-pocock-skills"
+  ],
+  "writing-fragments->grilling": [
+    "bare \"grilling\""
+  ],
+  "writing-shape->grilling": [
+    "bare \"grilling\""
+  ]
+}

@@ -1,0 +1,107 @@
+graph TD
+    subgraph Commands
+    end
+    subgraph Skills
+        skill_ask_matt["ask-matt"]
+        skill_claude_handoff["claude-handoff"]
+        skill_code_review["code-review"]
+        skill_codebase_design["codebase-design"]
+        skill_diagnosing_bugs["diagnosing-bugs"]
+        skill_domain_modeling["domain-modeling"]
+        skill_git_guardrails_claude_code["git-guardrails-claude-code"]
+        skill_grill_me["grill-me"]
+        skill_grill_with_docs["grill-with-docs"]
+        skill_grilling["grilling"]
+        skill_handoff["handoff"]
+        skill_implement["implement"]
+        skill_implement_spec["implement-spec"]
+        skill_improve_codebase_architecture["improve-codebase-architecture"]
+        skill_loop_me["loop-me"]
+        skill_migrate_to_shoehorn["migrate-to-shoehorn"]
+        skill_pr["pr"]
+        skill_prototype["prototype"]
+        skill_research["research"]
+        skill_resolving_merge_conflicts["resolving-merge-conflicts"]
+        skill_retro["retro"]
+        skill_scaffold_exercises["scaffold-exercises"]
+        skill_setup_matt_pocock_skills["setup-matt-pocock-skills"]
+        skill_setup_pre_commit["setup-pre-commit"]
+        skill_setup_ts_deep_modules["setup-ts-deep-modules"]
+        skill_tdd["tdd"]
+        skill_teach["teach"]
+        skill_to_questionnaire["to-questionnaire"]
+        skill_to_spec["to-spec"]
+        skill_to_tickets["to-tickets"]
+        skill_triage["triage"]
+        skill_wait_what["wait-what"]
+        skill_wayfinder["wayfinder"]
+        skill_wizard["wizard"]
+        skill_writing_beats["writing-beats"]
+        skill_writing_for_agents["writing-for-agents"]
+        skill_writing_fragments["writing-fragments"]
+        skill_writing_shape["writing-shape"]
+    end
+    subgraph Hooks
+    end
+    subgraph Events
+    end
+    skill_ask_matt --> skill_code_review
+    skill_ask_matt --> skill_codebase_design
+    skill_ask_matt --> skill_diagnosing_bugs
+    skill_ask_matt --> skill_domain_modeling
+    skill_ask_matt --> skill_grill_me
+    skill_ask_matt --> skill_grill_with_docs
+    skill_ask_matt --> skill_grilling
+    skill_ask_matt --> skill_handoff
+    skill_ask_matt --> skill_implement
+    skill_ask_matt --> skill_improve_codebase_architecture
+    skill_ask_matt --> skill_prototype
+    skill_ask_matt --> skill_research
+    skill_ask_matt --> skill_resolving_merge_conflicts
+    skill_ask_matt --> skill_setup_matt_pocock_skills
+    skill_ask_matt --> skill_tdd
+    skill_ask_matt --> skill_teach
+    skill_ask_matt --> skill_to_questionnaire
+    skill_ask_matt --> skill_to_spec
+    skill_ask_matt --> skill_to_tickets
+    skill_ask_matt --> skill_triage
+    skill_ask_matt --> skill_wait_what
+    skill_ask_matt --> skill_wayfinder
+    skill_ask_matt --> skill_wizard
+    skill_ask_matt --> skill_writing_for_agents
+    skill_code_review --> skill_setup_matt_pocock_skills
+    skill_grill_me --> skill_grilling
+    skill_grill_with_docs --> skill_domain_modeling
+    skill_grill_with_docs --> skill_grilling
+    skill_implement --> skill_code_review
+    skill_implement --> skill_tdd
+    skill_implement_spec --> skill_code_review
+    skill_improve_codebase_architecture --> skill_codebase_design
+    skill_improve_codebase_architecture --> skill_domain_modeling
+    skill_improve_codebase_architecture --> skill_grilling
+    skill_loop_me --> skill_grilling
+    skill_retro --> skill_writing_for_agents
+    skill_setup_matt_pocock_skills --> skill_domain_modeling
+    skill_setup_matt_pocock_skills --> skill_grill_with_docs
+    skill_setup_matt_pocock_skills --> skill_grilling
+    skill_setup_matt_pocock_skills --> skill_improve_codebase_architecture
+    skill_setup_matt_pocock_skills --> skill_pr
+    skill_setup_matt_pocock_skills --> skill_prototype
+    skill_setup_matt_pocock_skills --> skill_research
+    skill_setup_matt_pocock_skills --> skill_to_spec
+    skill_setup_matt_pocock_skills --> skill_to_tickets
+    skill_setup_matt_pocock_skills --> skill_triage
+    skill_setup_matt_pocock_skills --> skill_wayfinder
+    skill_setup_ts_deep_modules --> skill_codebase_design
+    skill_tdd --> skill_code_review
+    skill_tdd --> skill_codebase_design
+    skill_to_spec --> skill_setup_matt_pocock_skills
+    skill_to_tickets --> skill_setup_matt_pocock_skills
+    skill_triage --> skill_domain_modeling
+    skill_triage --> skill_grilling
+    skill_triage --> skill_setup_matt_pocock_skills
+    skill_wayfinder --> skill_domain_modeling
+    skill_wayfinder --> skill_grilling
+    skill_wayfinder --> skill_prototype
+    skill_wayfinder --> skill_research
+    skill_wayfinder --> skill_setup_matt_pocock_skills

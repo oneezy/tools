@@ -1,0 +1,108 @@
+{
+ "ask-matt": [
+  "code-review",
+  "codebase-design",
+  "diagnosing-bugs",
+  "domain-modeling",
+  "grill-me",
+  "grill-with-docs",
+  "grilling",
+  "handoff",
+  "implement",
+  "improve-codebase-architecture",
+  "prototype",
+  "research",
+  "resolving-merge-conflicts",
+  "setup-matt-pocock-skills",
+  "tdd",
+  "teach",
+  "to-questionnaire",
+  "to-spec",
+  "to-tickets",
+  "triage",
+  "wait-what",
+  "wayfinder",
+  "wizard",
+  "writing-for-agents"
+ ],
+ "code-review": [
+  "setup-matt-pocock-skills"
+ ],
+ "grill-me": [
+  "grilling"
+ ],
+ "grill-with-docs": [
+  "domain-modeling",
+  "grilling"
+ ],
+ "implement": [
+  "code-review",
+  "tdd"
+ ],
+ "implement-spec": [
+  "code-review"
+ ],
+ "improve-codebase-architecture": [
+  "codebase-design",
+  "domain-modeling",
+  "grilling"
+ ],
+ "loop-me": [
+  "grilling"
+ ],
+ "retro": [
+  "writing-for-agents"
+ ],
+ "setup-matt-pocock-skills": [
+  "to-spec",
+  "to-tickets",
+  "triage"
+ ],
+ "setup-ts-deep-modules": [
+  "codebase-design"
+ ],
+ "tdd": [
+  "code-review",
+  "codebase-design"
+ ],
+ "to-spec": [
+  "setup-matt-pocock-skills"
+ ],
+ "to-tickets": [
+  "setup-matt-pocock-skills"
+ ],
+ "triage": [
+  "domain-modeling",
+  "grilling",
+  "setup-matt-pocock-skills"
+ ],
+ "wayfinder": [
+  "domain-modeling",
+  "grilling",
+  "prototype",
+  "research",
+  "setup-matt-pocock-skills"
+ ],
+ "claude-handoff": [],
+ "codebase-design": [],
+ "diagnosing-bugs": [],
+ "domain-modeling": [],
+ "git-guardrails-claude-code": [],
+ "grilling": [],
+ "handoff": [],
+ "migrate-to-shoehorn": [],
+ "pr": [],
+ "prototype": [],
+ "research": [],
+ "resolving-merge-conflicts": [],
+ "scaffold-exercises": [],
+ "setup-pre-commit": [],
+ "teach": [],
+ "to-questionnaire": [],
+ "wait-what": [],
+ "wizard": [],
+ "writing-beats": [],
+ "writing-for-agents": [],
+ "writing-fragments": [],
+ "writing-shape": []
+}

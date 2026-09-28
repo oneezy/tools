@@ -1,0 +1,157 @@
+# skill-graph-builder log
+Generated: 2026-09-27T19:15:03
+
+
+## Skill provenance (deduped physical copies)
+- ask-matt
+    src: user:claude-.claude :: C:\Users\Justin\.claude\jobs\9f3eb07d\tmp\agent-skill-graph-trial\home\.claude\skills\ask-matt\SKILL.md
+    src: user:codex :: C:\Users\Justin\.claude\jobs\9f3eb07d\tmp\agent-skill-graph-trial\home\.agents\skills\ask-matt\SKILL.md
+    agents: claude-.claude, codex-.codex
+- claude-handoff
+    src: user:claude-.claude :: C:\Users\Justin\.claude\jobs\9f3eb07d\tmp\agent-skill-graph-trial\home\.claude\skills\claude-handoff\SKILL.md
+    src: user:codex :: C:\Users\Justin\.claude\jobs\9f3eb07d\tmp\agent-skill-graph-trial\home\.agents\skills\claude-handoff\SKILL.md
+    agents: claude-.claude, codex-.codex
+- code-review
+    src: user:claude-.claude :: C:\Users\Justin\.claude\jobs\9f3eb07d\tmp\agent-skill-graph-trial\home\.claude\skills\code-review\SKILL.md
+    src: user:codex :: C:\Users\Justin\.claude\jobs\9f3eb07d\tmp\agent-skill-graph-trial\home\.agents\skills\code-review\SKILL.md
+    agents: claude-.claude, codex-.codex
+- codebase-design
+    src: user:claude-.claude :: C:\Users\Justin\.claude\jobs\9f3eb07d\tmp\agent-skill-graph-trial\home\.claude\skills\codebase-design\SKILL.md
+    src: user:codex :: C:\Users\Justin\.claude\jobs\9f3eb07d\tmp\agent-skill-graph-trial\home\.agents\skills\codebase-design\SKILL.md
+    agents: claude-.claude, codex-.codex
+- diagnosing-bugs
+    src: user:claude-.claude :: C:\Users\Justin\.claude\jobs\9f3eb07d\tmp\agent-skill-graph-trial\home\.claude\skills\diagnosing-bugs\SKILL.md
+    src: user:codex :: C:\Users\Justin\.claude\jobs\9f3eb07d\tmp\agent-skill-graph-trial\home\.agents\skills\diagnosing-bugs\SKILL.md
+    agents: claude-.claude, codex-.codex
+- domain-modeling
+    src: user:claude-.claude :: C:\Users\Justin\.claude\jobs\9f3eb07d\tmp\agent-skill-graph-trial\home\.claude\skills\domain-modeling\SKILL.md
+    src: user:codex :: C:\Users\Justin\.claude\jobs\9f3eb07d\tmp\agent-skill-graph-trial\home\.agents\skills\domain-modeling\SKILL.md
+    agents: claude-.claude, codex-.codex
+- git-guardrails-claude-code
+    src: user:claude-.claude :: C:\Users\Justin\.claude\jobs\9f3eb07d\tmp\agent-skill-graph-trial\home\.claude\skills\git-guardrails-claude-code\SKILL.md
+    src: user:codex :: C:\Users\Justin\.claude\jobs\9f3eb07d\tmp\agent-skill-graph-trial\home\.agents\skills\git-guardrails-claude-code\SKILL.md
+    agents: claude-.claude, codex-.codex
+- grill-me
+    src: user:claude-.claude :: C:\Users\Justin\.claude\jobs\9f3eb07d\tmp\agent-skill-graph-trial\home\.claude\skills\grill-me\SKILL.md
+    src: user:codex :: C:\Users\Justin\.claude\jobs\9f3eb07d\tmp\agent-skill-graph-trial\home\.agents\skills\grill-me\SKILL.md
+    agents: claude-.claude, codex-.codex
+- grill-with-docs
+    src: user:claude-.claude :: C:\Users\Justin\.claude\jobs\9f3eb07d\tmp\agent-skill-graph-trial\home\.claude\skills\grill-with-docs\SKILL.md
+    src: user:codex :: C:\Users\Justin\.claude\jobs\9f3eb07d\tmp\agent-skill-graph-trial\home\.agents\skills\grill-with-docs\SKILL.md
+    agents: claude-.claude, codex-.codex
+- grilling
+    src: user:claude-.claude :: C:\Users\Justin\.claude\jobs\9f3eb07d\tmp\agent-skill-graph-trial\home\.claude\skills\grilling\SKILL.md
+    src: user:codex :: C:\Users\Justin\.claude\jobs\9f3eb07d\tmp\agent-skill-graph-trial\home\.agents\skills\grilling\SKILL.md
+    agents: claude-.claude, codex-.codex
+- handoff
+    src: user:claude-.claude :: C:\Users\Justin\.claude\jobs\9f3eb07d\tmp\agent-skill-graph-trial\home\.claude\skills\handoff\SKILL.md
+    src: user:codex :: C:\Users\Justin\.claude\jobs\9f3eb07d\tmp\agent-skill-graph-trial\home\.agents\skills\handoff\SKILL.md
+    agents: claude-.claude, codex-.codex
+- implement
+    src: user:claude-.claude :: C:\Users\Justin\.claude\jobs\9f3eb07d\tmp\agent-skill-graph-trial\home\.claude\skills\implement\SKILL.md
+    src: user:codex :: C:\Users\Justin\.claude\jobs\9f3eb07d\tmp\agent-skill-graph-trial\home\.agents\skills\implement\SKILL.md
+    agents: claude-.claude, codex-.codex
+- implement-spec
+    src: user:claude-.claude :: C:\Users\Justin\.claude\jobs\9f3eb07d\tmp\agent-skill-graph-trial\home\.claude\skills\implement-spec\SKILL.md
+    src: user:codex :: C:\Users\Justin\.claude\jobs\9f3eb07d\tmp\agent-skill-graph-trial\home\.agents\skills\implement-spec\SKILL.md
+    agents: claude-.claude, codex-.codex
+- improve-codebase-architecture
+    src: user:claude-.claude :: C:\Users\Justin\.claude\jobs\9f3eb07d\tmp\agent-skill-graph-trial\home\.claude\skills\improve-codebase-architecture\SKILL.md
+    src: user:codex :: C:\Users\Justin\.claude\jobs\9f3eb07d\tmp\agent-skill-graph-trial\home\.agents\skills\improve-codebase-architecture\SKILL.md
+    agents: claude-.claude, codex-.codex
+- loop-me
+    src: user:claude-.claude :: C:\Users\Justin\.claude\jobs\9f3eb07d\tmp\agent-skill-graph-trial\home\.claude\skills\loop-me\SKILL.md
+    src: user:codex :: C:\Users\Justin\.claude\jobs\9f3eb07d\tmp\agent-skill-graph-trial\home\.agents\skills\loop-me\SKILL.md
+    agents: claude-.claude, codex-.codex
+- migrate-to-shoehorn
+    src: user:claude-.claude :: C:\Users\Justin\.claude\jobs\9f3eb07d\tmp\agent-skill-graph-trial\home\.claude\skills\migrate-to-shoehorn\SKILL.md
+    src: user:codex :: C:\Users\Justin\.claude\jobs\9f3eb07d\tmp\agent-skill-graph-trial\home\.agents\skills\migrate-to-shoehorn\SKILL.md
+    agents: claude-.claude, codex-.codex
+- pr
+    src: user:claude-.claude :: C:\Users\Justin\.claude\jobs\9f3eb07d\tmp\agent-skill-graph-trial\home\.claude\skills\pr\SKILL.md
+    src: user:codex :: C:\Users\Justin\.claude\jobs\9f3eb07d\tmp\agent-skill-graph-trial\home\.agents\skills\pr\SKILL.md
+    agents: claude-.claude, codex-.codex
+- prototype
+    src: user:claude-.claude :: C:\Users\Justin\.claude\jobs\9f3eb07d\tmp\agent-skill-graph-trial\home\.claude\skills\prototype\SKILL.md
+    src: user:codex :: C:\Users\Justin\.claude\jobs\9f3eb07d\tmp\agent-skill-graph-trial\home\.agents\skills\prototype\SKILL.md
+    agents: claude-.claude, codex-.codex
+- research
+    src: user:claude-.claude :: C:\Users\Justin\.claude\jobs\9f3eb07d\tmp\agent-skill-graph-trial\home\.claude\skills\research\SKILL.md
+    src: user:codex :: C:\Users\Justin\.claude\jobs\9f3eb07d\tmp\agent-skill-graph-trial\home\.agents\skills\research\SKILL.md
+    agents: claude-.claude, codex-.codex
+- resolving-merge-conflicts
+    src: user:claude-.claude :: C:\Users\Justin\.claude\jobs\9f3eb07d\tmp\agent-skill-graph-trial\home\.claude\skills\resolving-merge-conflicts\SKILL.md
+    src: user:codex :: C:\Users\Justin\.claude\jobs\9f3eb07d\tmp\agent-skill-graph-trial\home\.agents\skills\resolving-merge-conflicts\SKILL.md
+    agents: claude-.claude, codex-.codex
+- retro
+    src: user:claude-.claude :: C:\Users\Justin\.claude\jobs\9f3eb07d\tmp\agent-skill-graph-trial\home\.claude\skills\retro\SKILL.md
+    src: user:codex :: C:\Users\Justin\.claude\jobs\9f3eb07d\tmp\agent-skill-graph-trial\home\.agents\skills\retro\SKILL.md
+    agents: claude-.claude, codex-.codex
+- scaffold-exercises
+    src: user:claude-.claude :: C:\Users\Justin\.claude\jobs\9f3eb07d\tmp\agent-skill-graph-trial\home\.claude\skills\scaffold-exercises\SKILL.md
+    src: user:codex :: C:\Users\Justin\.claude\jobs\9f3eb07d\tmp\agent-skill-graph-trial\home\.agents\skills\scaffold-exercises\SKILL.md
+    agents: claude-.claude, codex-.codex
+- setup-matt-pocock-skills
+    src: user:claude-.claude :: C:\Users\Justin\.claude\jobs\9f3eb07d\tmp\agent-skill-graph-trial\home\.claude\skills\setup-matt-pocock-skills\SKILL.md
+    src: user:codex :: C:\Users\Justin\.claude\jobs\9f3eb07d\tmp\agent-skill-graph-trial\home\.agents\skills\setup-matt-pocock-skills\SKILL.md
+    agents: claude-.claude, codex-.codex
+- setup-pre-commit
+    src: user:claude-.claude :: C:\Users\Justin\.claude\jobs\9f3eb07d\tmp\agent-skill-graph-trial\home\.claude\skills\setup-pre-commit\SKILL.md
+    src: user:codex :: C:\Users\Justin\.claude\jobs\9f3eb07d\tmp\agent-skill-graph-trial\home\.agents\skills\setup-pre-commit\SKILL.md
+    agents: claude-.claude, codex-.codex
+- setup-ts-deep-modules
+    src: user:claude-.claude :: C:\Users\Justin\.claude\jobs\9f3eb07d\tmp\agent-skill-graph-trial\home\.claude\skills\setup-ts-deep-modules\SKILL.md
+    src: user:codex :: C:\Users\Justin\.claude\jobs\9f3eb07d\tmp\agent-skill-graph-trial\home\.agents\skills\setup-ts-deep-modules\SKILL.md
+    agents: claude-.claude, codex-.codex
+- tdd
+    src: user:claude-.claude :: C:\Users\Justin\.claude\jobs\9f3eb07d\tmp\agent-skill-graph-trial\home\.claude\skills\tdd\SKILL.md
+    src: user:codex :: C:\Users\Justin\.claude\jobs\9f3eb07d\tmp\agent-skill-graph-trial\home\.agents\skills\tdd\SKILL.md
+    agents: claude-.claude, codex-.codex
+- teach
+    src: user:claude-.claude :: C:\Users\Justin\.claude\jobs\9f3eb07d\tmp\agent-skill-graph-trial\home\.claude\skills\teach\SKILL.md
+    src: user:codex :: C:\Users\Justin\.claude\jobs\9f3eb07d\tmp\agent-skill-graph-trial\home\.agents\skills\teach\SKILL.md
+    agents: claude-.claude, codex-.codex
+- to-questionnaire
+    src: user:claude-.claude :: C:\Users\Justin\.claude\jobs\9f3eb07d\tmp\agent-skill-graph-trial\home\.claude\skills\to-questionnaire\SKILL.md
+    src: user:codex :: C:\Users\Justin\.claude\jobs\9f3eb07d\tmp\agent-skill-graph-trial\home\.agents\skills\to-questionnaire\SKILL.md
+    agents: claude-.claude, codex-.codex
+- to-spec
+    src: user:claude-.claude :: C:\Users\Justin\.claude\jobs\9f3eb07d\tmp\agent-skill-graph-trial\home\.claude\skills\to-spec\SKILL.md
+    src: user:codex :: C:\Users\Justin\.claude\jobs\9f3eb07d\tmp\agent-skill-graph-trial\home\.agents\skills\to-spec\SKILL.md
+    agents: claude-.claude, codex-.codex
+- to-tickets
+    src: user:claude-.claude :: C:\Users\Justin\.claude\jobs\9f3eb07d\tmp\agent-skill-graph-trial\home\.claude\skills\to-tickets\SKILL.md
+    src: user:codex :: C:\Users\Justin\.claude\jobs\9f3eb07d\tmp\agent-skill-graph-trial\home\.agents\skills\to-tickets\SKILL.md
+    agents: claude-.claude, codex-.codex
+- triage
+    src: user:claude-.claude :: C:\Users\Justin\.claude\jobs\9f3eb07d\tmp\agent-skill-graph-trial\home\.claude\skills\triage\SKILL.md
+    src: user:codex :: C:\Users\Justin\.claude\jobs\9f3eb07d\tmp\agent-skill-graph-trial\home\.agents\skills\triage\SKILL.md
+    agents: claude-.claude, codex-.codex
+- wait-what
+    src: user:claude-.claude :: C:\Users\Justin\.claude\jobs\9f3eb07d\tmp\agent-skill-graph-trial\home\.claude\skills\wait-what\SKILL.md
+    src: user:codex :: C:\Users\Justin\.claude\jobs\9f3eb07d\tmp\agent-skill-graph-trial\home\.agents\skills\wait-what\SKILL.md
+    agents: claude-.claude, codex-.codex
+- wayfinder
+    src: user:claude-.claude :: C:\Users\Justin\.claude\jobs\9f3eb07d\tmp\agent-skill-graph-trial\home\.claude\skills\wayfinder\SKILL.md
+    src: user:codex :: C:\Users\Justin\.claude\jobs\9f3eb07d\tmp\agent-skill-graph-trial\home\.agents\skills\wayfinder\SKILL.md
+    agents: claude-.claude, codex-.codex
+- wizard
+    src: user:claude-.claude :: C:\Users\Justin\.claude\jobs\9f3eb07d\tmp\agent-skill-graph-trial\home\.claude\skills\wizard\SKILL.md
+    src: user:codex :: C:\Users\Justin\.claude\jobs\9f3eb07d\tmp\agent-skill-graph-trial\home\.agents\skills\wizard\SKILL.md
+    agents: claude-.claude, codex-.codex
+- writing-beats
+    src: user:claude-.claude :: C:\Users\Justin\.claude\jobs\9f3eb07d\tmp\agent-skill-graph-trial\home\.claude\skills\writing-beats\SKILL.md
+    src: user:codex :: C:\Users\Justin\.claude\jobs\9f3eb07d\tmp\agent-skill-graph-trial\home\.agents\skills\writing-beats\SKILL.md
+    agents: claude-.claude, codex-.codex
+- writing-for-agents
+    src: user:claude-.claude :: C:\Users\Justin\.claude\jobs\9f3eb07d\tmp\agent-skill-graph-trial\home\.claude\skills\writing-for-agents\SKILL.md
+    src: user:codex :: C:\Users\Justin\.claude\jobs\9f3eb07d\tmp\agent-skill-graph-trial\home\.agents\skills\writing-for-agents\SKILL.md
+    agents: claude-.claude, codex-.codex
+- writing-fragments
+    src: user:claude-.claude :: C:\Users\Justin\.claude\jobs\9f3eb07d\tmp\agent-skill-graph-trial\home\.claude\skills\writing-fragments\SKILL.md
+    src: user:codex :: C:\Users\Justin\.claude\jobs\9f3eb07d\tmp\agent-skill-graph-trial\home\.agents\skills\writing-fragments\SKILL.md
+    agents: claude-.claude, codex-.codex
+- writing-shape
+    src: user:claude-.claude :: C:\Users\Justin\.claude\jobs\9f3eb07d\tmp\agent-skill-graph-trial\home\.claude\skills\writing-shape\SKILL.md
+    src: user:codex :: C:\Users\Justin\.claude\jobs\9f3eb07d\tmp\agent-skill-graph-trial\home\.agents\skills\writing-shape\SKILL.md
+    agents: claude-.claude, codex-.codex

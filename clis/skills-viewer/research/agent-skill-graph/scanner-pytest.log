@@ -1,0 +1,3482 @@
+.................FF..........F..FF.....F....F.....FFFFFF.FFFFF.......... [ 30%]
+................................................FFFFFFFFFFFF..FFFFFFF... [ 60%]
+.......FFFFF....FFFFFFFF...............................F................ [ 90%]
+..F.FF................                                                   [100%]
+================================== FAILURES ===================================
+_______________ test_blacklist_excluded_skill_not_in_accessible _______________
+
+tmp_path = WindowsPath('C:/Users/Justin/AppData/Local/Temp/pytest-of-Justin/pytest-3/test_blacklist_excluded_skill_0')
+
+    def test_blacklist_excluded_skill_not_in_accessible(tmp_path):
+        """A [[skills.config]] entry with enabled=false must exclude that path
+        from the agent's accessible skills end-to-end via parse_codex."""
+        # Set up a Codex config dir
+        cfg_dir = tmp_path / "builder"
+        (cfg_dir / "skills" / ".system").mkdir(parents=True)
+        (cfg_dir / "AGENTS.md").write_text("# a")
+    
+        # Create a real skill under the system bundle
+        sys_skill = cfg_dir / "skills" / ".system" / "banned-skill" / "SKILL.md"
+        sys_skill.parent.mkdir(parents=True)
+        sys_skill.write_text("# Banned")
+    
+        # Create another skill that is NOT blacklisted
+        ok_skill = cfg_dir / "skills" / ".system" / "ok-skill" / "SKILL.md"
+        ok_skill.parent.mkdir(parents=True)
+        ok_skill.write_text("# OK")
+    
+        # Write a config.toml that blacklists sys_skill's parent dir
+        banned_path = sys_skill.parent.resolve()
+        config_toml = cfg_dir / "config.toml"
+        config_toml.write_text(
+            f'[[skills.config]]\npath = "{banned_path}"\nenabled = false\n'
+        )
+    
+        agents = parse_codex(tmp_path, user_scope_path=None)
+        assert len(agents) == 1
+        agent = agents[0]
+        skill_names = {s.name for s in agent.accessible_skills}
+        assert "ok-skill" in skill_names
+>       assert "banned-skill" not in skill_names
+E       AssertionError: assert 'banned-skill' not in {'banned-skill', 'ok-skill'}
+
+tests\test_codex.py:68: AssertionError
+_______________ test_blacklist_path_points_directly_at_skill_md _______________
+
+tmp_path = WindowsPath('C:/Users/Justin/AppData/Local/Temp/pytest-of-Justin/pytest-3/test_blacklist_path_points_dir0')
+
+    def test_blacklist_path_points_directly_at_skill_md(tmp_path):
+        """FIX-3 / FIX-10(c): a [[skills.config]] entry whose path points DIRECTLY
+        at SKILL.md (not the parent dir) must still exclude the skill — covers the
+        non-is_dir() branch of _parse_blacklist."""
+        cfg_dir = tmp_path / "builder"
+        (cfg_dir / "skills" / ".system").mkdir(parents=True)
+        (cfg_dir / "AGENTS.md").write_text("# a")
+    
+        # Two skills under the system bundle
+        banned_md = cfg_dir / "skills" / ".system" / "banned-direct" / "SKILL.md"
+        banned_md.parent.mkdir(parents=True)
+        banned_md.write_text("# Banned")
+    
+        ok_md = cfg_dir / "skills" / ".system" / "ok-direct" / "SKILL.md"
+        ok_md.parent.mkdir(parents=True)
+        ok_md.write_text("# OK")
+    
+        # Blacklist entry points DIRECTLY at the SKILL.md file (not the dir).
+        config_toml = cfg_dir / "config.toml"
+        config_toml.write_text(
+            f'[[skills.config]]\npath = "{banned_md.resolve()}"\nenabled = false\n'
+        )
+    
+        agents = parse_codex(tmp_path, user_scope_path=None)
+        assert len(agents) == 1
+        skill_names = {s.name for s in agents[0].accessible_skills}
+        assert "ok-direct" in skill_names
+>       assert "banned-direct" not in skill_names
+E       AssertionError: assert 'banned-direct' not in {'banned-direct', 'ok-direct'}
+
+tests\test_codex.py:98: AssertionError
+____________________ test_cwd_scan_finds_workspace_configs ____________________
+
+tmp_path = WindowsPath('C:/Users/Justin/AppData/Local/Temp/pytest-of-Justin/pytest-3/test_cwd_scan_finds_workspace_0')
+
+    def test_cwd_scan_finds_workspace_configs(tmp_path):
+        (tmp_path / "_home").mkdir(exist_ok=True)
+        _mk(tmp_path / "claude" / "wrangler" / "settings.json")
+        (tmp_path / "claude" / "wrangler" / "skills").mkdir()
+        _mk(tmp_path / "claude" / "builder" / "settings.json")
+        (tmp_path / "claude" / "builder" / "skills").mkdir()
+        _mk(tmp_path / "codex" / "wrangler" / "config.toml")
+        (tmp_path / "codex" / "wrangler" / "skills" / ".system").mkdir(parents=True)
+        (tmp_path / "hermes" / "profiles" / "profile-a").mkdir(parents=True)
+        (tmp_path / "hermes" / "profiles" / "profile-a" / "config.yaml").write_text("skills: {}\n")
+        (tmp_path / "hermes" / "profiles" / "profile-a" / "skills").mkdir()
+        rc, doc, err = _run(["--root", str(tmp_path)], home=tmp_path / "_home")
+        assert rc == 0, err
+        cc = {a["id"] for a in doc["platforms"]["claude_code"]["agents"] if not a["excluded"]}
+        assert {"claude-wrangler", "claude-builder"} <= cc
+>       assert {a["id"] for a in doc["platforms"]["codex"]["agents"]} == {"codex-wrangler"}
+E       AssertionError: assert {'codex-.code...dex-wrangler'} == {'codex-wrangler'}
+E         
+E         Extra items in the left set:
+E         'codex-.codex'
+E         'codex-browser'
+E         'codex-computer-use'
+E         Use -v to get more diff
+
+tests\test_discover.py:72: AssertionError
+____________________ test_fork_claude_skills_not_an_agent _____________________
+
+tmp_path = WindowsPath('C:/Users/Justin/AppData/Local/Temp/pytest-of-Justin/pytest-3/test_fork_claude_skills_not_an0')
+
+    def test_fork_claude_skills_not_an_agent(tmp_path):
+        (tmp_path / "_home").mkdir(exist_ok=True)
+        fk = tmp_path / "profile-a" / "repos" / "x-fork" / ".claude" / "skills" / "foo"
+        fk.mkdir(parents=True)
+        (fk / "SKILL.md").write_text("---\nname: foo\n---\n")
+        _mk(tmp_path / "claude" / "wrangler" / "settings.json")
+        (tmp_path / "claude" / "wrangler" / "skills").mkdir()
+        rc, doc, err = _run(["--root", str(tmp_path)], home=tmp_path / "_home")
+        ids = {a["id"] for a in doc["platforms"]["claude_code"]["agents"]}
+>       assert ids == {"claude-wrangler"}
+E       AssertionError: assert {'claude-.cla...ude-wrangler'} == {'claude-wrangler'}
+E         
+E         Extra items in the left set:
+E         'claude-.claude'
+E         Use -v to get more diff
+
+tests\test_discover.py:112: AssertionError
+_____________________ test_openclaw_symmetric_local_scan ______________________
+
+tmp_path = WindowsPath('C:/Users/Justin/AppData/Local/Temp/pytest-of-Justin/pytest-3/test_openclaw_symmetric_local_0')
+
+    def test_openclaw_symmetric_local_scan(tmp_path):
+        (tmp_path / "_home").mkdir(exist_ok=True)
+        rc, doc, _ = _run(["--root", str(tmp_path)], home=tmp_path / "_home")
+        assert doc["platforms"]["openclaw"]["detected"] is False
+        assert "openclaw.json" in doc["platforms"]["openclaw"]["not_detected_reason"]
+        (tmp_path / "openclaw").mkdir()
+        (tmp_path / "openclaw" / "openclaw.json").write_text(
+            '{"agents":{"list":[{"id":"agent-a","workspace":"' + str(tmp_path / "ws") + '"}]}}')
+        (tmp_path / "ws").mkdir()
+        rc, doc, err = _run(["--root", str(tmp_path)], home=tmp_path / "_home")
+        assert rc == 0, err
+>       assert doc["platforms"]["openclaw"]["detected"] is True
+E       assert False is True
+
+tests\test_discover.py:126: AssertionError
+_______________ test_excluded_claude_does_not_climb_above_root ________________
+
+tmp_path = WindowsPath('C:/Users/Justin/AppData/Local/Temp/pytest-of-Justin/pytest-3/test_excluded_claude_does_not_0')
+
+    def test_excluded_claude_does_not_climb_above_root(tmp_path):
+        """P2-B: when root itself is a claude config dir (contains settings.json),
+        _excluded_claude must not climb above root and must not return anything from
+        root's siblings (i.e. directories outside the scan root).
+    
+        Layout:
+            tmp_path/
+                root/           \u2190 the scan root; contains settings.json \u2192 it IS the config
+                    settings.json
+                    skills/
+                other/          \u2190 sibling of root (outside scan tree)
+                    CLAUDE.md   \u2190 has CLAUDE.md but no settings.json
+        """
+        root = tmp_path / "root"
+        (root / "skills").mkdir(parents=True)
+        (root / "settings.json").write_text("{}")
+        # Sibling outside scan root — should be invisible to _excluded_claude
+        other = tmp_path / "other"
+        other.mkdir()
+        (other / "CLAUDE.md").write_text("# other")
+    
+        _home = tmp_path / "_home"
+        _home.mkdir()
+    
+        rc, doc, err = _run(["--root", str(root)], home=_home)
+        assert rc == 0, err
+    
+        cc_agents = doc["platforms"]["claude_code"]["agents"]
+        # Nothing from outside root should appear
+        config_dirs = {a["config_dir"] for a in cc_agents}
+        root_r = str(root.resolve())
+        for cd in config_dirs:
+>           assert cd.startswith(root_r), (
+                f"config_dir {cd!r} is outside scan root {root_r!r}"
+            )
+E           AssertionError: config_dir 'C:\\Users\\Justin\\.claude' is outside scan root 'C:\\Users\\Justin\\AppData\\Local\\Temp\\pytest-of-Justin\\pytest-3\\test_excluded_claude_does_not_0\\root'
+E           assert False
+E            +  where False = <built-in method startswith of str object at 0x0000024BDA1BA600>('C:\\Users\\Justin\\AppData\\Local\\Temp\\pytest-of-Justin\\pytest-3\\test_excluded_claude_does_not_0\\root')
+E            +    where <built-in method startswith of str object at 0x0000024BDA1BA600> = 'C:\\Users\\Justin\\.claude'.startswith
+
+tests\test_discover.py:263: AssertionError
+___________________________ test_expand_with_tilde ____________________________
+
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x0000024BDAA3EB70>
+
+    def test_expand_with_tilde(monkeypatch):
+        monkeypatch.setenv("HOME", "/home/me")
+        expanded, undefined = expand_path("~/skills")
+>       assert expanded == "/home/me/skills"
+E       AssertionError: assert 'C:\\Users\\Justin/skills' == '/home/me/skills'
+E         
+E         - /home/me/skills
+E         + C:\Users\Justin/skills
+
+tests\test_env_expand.py:14: AssertionError
+______________________ test_end_to_end_lightweight_dedup ______________________
+
+tmp_path = WindowsPath('C:/Users/Justin/AppData/Local/Temp/pytest-of-Justin/pytest-3/test_end_to_end_lightweight_de0')
+
+    def test_end_to_end_lightweight_dedup(tmp_path):
+        # one claude config with two content-identical skill copies (same dir name)
+        cfgs = tmp_path / "claude"
+        builder = cfgs / "builder"
+        (builder / "skills" / "gog").mkdir(parents=True)
+        (builder / "skills" / "gog" / "SKILL.md").write_text("---\nname: gog\n---\nBODY")
+        (builder / "settings.json").write_text("{}")
+        (builder / "CLAUDE.md").write_text("#")
+        vault = tmp_path / "v"
+        vault.mkdir()
+        (vault / ".skill-graph-builder.manifest.toml").write_text(
+            f'vault = "{vault}"\nscope = "user"\n[platforms.claude_code]\n'
+            f'configs = ["{builder}"]\n')
+        r = _gen("--vault", str(vault))
+>       assert r.returncode == 0, r.stderr
+E       AssertionError: manifest TOML parse failed (C:\Users\Justin\AppData\Local\Temp\pytest-of-Justin\pytest-3\test_end_to_end_lightweight_de0\v\.skill-graph-builder.manifest.toml): Invalid hex value (at line 1, column 14)
+E         
+E       assert 1 == 0
+E        +  where 1 = CompletedProcess(args=['C:\\Users\\Justin\\.claude\\jobs\\9f3eb07d\\tmp\\agent-skill-graph-trial\\venv\\Scripts\\pytho...\\test_end_to_end_lightweight_de0\\v\\.skill-graph-builder.manifest.toml): Invalid hex value (at line 1, column 14)\n').returncode
+
+tests\test_generate.py:39: AssertionError
+________________ test_missing_listed_config_degrades_not_exit1 ________________
+
+tmp_path = WindowsPath('C:/Users/Justin/AppData/Local/Temp/pytest-of-Justin/pytest-3/test_missing_listed_config_deg0')
+
+    def test_missing_listed_config_degrades_not_exit1(tmp_path):
+        vault = tmp_path / "v"
+        vault.mkdir()
+        (vault / ".skill-graph-builder.manifest.toml").write_text(
+            f'vault = "{vault}"\nscope = "user"\n[platforms.claude_code]\n'
+            f'configs = ["{tmp_path}/gone"]\n')
+        r = _gen("--vault", str(vault))
+>       assert r.returncode == 0          # degrade, NOT exit 1 (spec §4.6)
+        ^^^^^^^^^^^^^^^^^^^^^^^^
+E       AssertionError: assert 1 == 0
+E        +  where 1 = CompletedProcess(args=['C:\\Users\\Justin\\.claude\\jobs\\9f3eb07d\\tmp\\agent-skill-graph-trial\\venv\\Scripts\\pytho...\\test_missing_listed_config_deg0\\v\\.skill-graph-builder.manifest.toml): Invalid hex value (at line 1, column 14)\n').returncode
+
+tests\test_generate.py:57: AssertionError
+______________ test_run_log_records_provenance_of_deduped_copies ______________
+
+tmp_path = WindowsPath('C:/Users/Justin/AppData/Local/Temp/pytest-of-Justin/pytest-3/test_run_log_records_provenanc0')
+
+    def test_run_log_records_provenance_of_deduped_copies(tmp_path):
+        # two config dirs sharing a parent, each with a content-identical same-named
+        # skill -> collapses to ONE node; the run log must list BOTH source paths
+        # and BOTH agents under that atomic id (spec \xa74.6/\xa76 "debug \u53ef\u8ffd").
+        cfgs = tmp_path / "claude"
+        for name in ("builder", "wrangler"):
+            d = cfgs / name
+            (d / "skills" / "gog").mkdir(parents=True)
+            (d / "skills" / "gog" / "SKILL.md").write_text("---\nname: gog\n---\nBODY")
+            (d / "settings.json").write_text("{}")
+            (d / "CLAUDE.md").write_text("#")
+        vault = tmp_path / "v"
+        vault.mkdir()
+        (vault / ".skill-graph-builder.manifest.toml").write_text(
+            f'vault = "{vault}"\nscope = "user"\n[platforms.claude_code]\n'
+            f'configs = ["{cfgs / "builder"}", "{cfgs / "wrangler"}"]\n')
+        r = _gen("--vault", str(vault))
+>       assert r.returncode == 0, r.stderr
+E       AssertionError: manifest TOML parse failed (C:\Users\Justin\AppData\Local\Temp\pytest-of-Justin\pytest-3\test_run_log_records_provenanc0\v\.skill-graph-builder.manifest.toml): Invalid hex value (at line 1, column 14)
+E         
+E       assert 1 == 0
+E        +  where 1 = CompletedProcess(args=['C:\\Users\\Justin\\.claude\\jobs\\9f3eb07d\\tmp\\agent-skill-graph-trial\\venv\\Scripts\\pytho...\\test_run_log_records_provenanc0\\v\\.skill-graph-builder.manifest.toml): Invalid hex value (at line 1, column 14)\n').returncode
+
+tests\test_generate.py:77: AssertionError
+_____________ test_single_toplevel_config_dir_with_settings_json ______________
+
+tmp_path = WindowsPath('C:/Users/Justin/AppData/Local/Temp/pytest-of-Justin/pytest-3/test_single_toplevel_config_di0')
+
+    def test_single_toplevel_config_dir_with_settings_json(tmp_path):
+        """FIX-1: configs: [~/.claude] — where ~/.claude IS the config dir (directly
+        contains settings.json, no extra nesting) — must yield exactly one agent and
+        its skill symlink, without scanning the whole parent directory."""
+        # Simulate ~/.claude layout: the config dir itself contains settings.json.
+        dotclaude = tmp_path / ".claude"
+        (dotclaude / "skills" / "gog").mkdir(parents=True)
+        (dotclaude / "skills" / "gog" / "SKILL.md").write_text("---\nname: gog\n---\nBODY")
+        (dotclaude / "settings.json").write_text("{}")
+        (dotclaude / "CLAUDE.md").write_text("#")
+    
+        # Add a sibling dir that also has settings.json — must NOT be picked up.
+        sibling = tmp_path / "other-config"
+        (sibling / "skills").mkdir(parents=True)
+        (sibling / "settings.json").write_text("{}")
+    
+        vault = tmp_path / "v"
+        vault.mkdir()
+        (vault / ".skill-graph-builder.manifest.toml").write_text(
+            f'vault = "{vault}"\nscope = "user"\n[platforms.claude_code]\n'
+            f'configs = ["{dotclaude}"]\n')
+        r = _gen("--vault", str(vault))
+>       assert r.returncode == 0, r.stderr
+E       AssertionError: manifest TOML parse failed (C:\Users\Justin\AppData\Local\Temp\pytest-of-Justin\pytest-3\test_single_toplevel_config_di0\v\.skill-graph-builder.manifest.toml): Invalid hex value (at line 1, column 14)
+E         
+E       assert 1 == 0
+E        +  where 1 = CompletedProcess(args=['C:\\Users\\Justin\\.claude\\jobs\\9f3eb07d\\tmp\\agent-skill-graph-trial\\venv\\Scripts\\pytho...\\test_single_toplevel_config_di0\\v\\.skill-graph-builder.manifest.toml): Invalid hex value (at line 1, column 14)\n').returncode
+
+tests\test_generate.py:113: AssertionError
+________________ test_p2b_openclaw_missing_config_file_exits_1 ________________
+
+tmp_path = WindowsPath('C:/Users/Justin/AppData/Local/Temp/pytest-of-Justin/pytest-3/test_p2b_openclaw_missing_conf0')
+
+    def test_p2b_openclaw_missing_config_file_exits_1(tmp_path):
+        """P2-B: manifest with openclaw but no config_file \u2192 exit 1 (ManifestError),
+        NOT exit 2 (internal error).  generate.py must see ManifestError from
+        load_manifest, not a KeyError from _collect_agents.
+        """
+        vault = tmp_path / "v"
+        vault.mkdir()
+        (vault / ".skill-graph-builder.manifest.toml").write_text(
+            f'vault = "{vault}"\nscope = "user"\n[platforms.openclaw]\n'
+            f'user_scope_path = "~/.agents/skills"\n'   # config_file intentionally absent
+        )
+        r = _gen("--vault", str(vault))
+        assert r.returncode == 1, f"Expected exit 1 (ManifestError); got {r.returncode}. stderr={r.stderr}"
+>       assert "config_file" in r.stderr
+E       AssertionError: assert 'config_file' in 'manifest TOML parse failed (C:\\Users\\Justin\\AppData\\Local\\Temp\\pytest-of-Justin\\pytest-3\\test_p2b_openclaw_missing_conf0\\v\\.skill-graph-builder.manifest.toml): Invalid hex value (at line 1, column 14)\n'
+E        +  where 'manifest TOML parse failed (C:\\Users\\Justin\\AppData\\Local\\Temp\\pytest-of-Justin\\pytest-3\\test_p2b_openclaw_missing_conf0\\v\\.skill-graph-builder.manifest.toml): Invalid hex value (at line 1, column 14)\n' = CompletedProcess(args=['C:\\Users\\Justin\\.claude\\jobs\\9f3eb07d\\tmp\\agent-skill-graph-trial\\venv\\Scripts\\pytho...\\test_p2b_openclaw_missing_conf0\\v\\.skill-graph-builder.manifest.toml): Invalid hex value (at line 1, column 14)\n').stderr
+
+tests\test_generate.py:138: AssertionError
+________________ test_p2b_hermes_missing_profiles_dir_exits_1 _________________
+
+tmp_path = WindowsPath('C:/Users/Justin/AppData/Local/Temp/pytest-of-Justin/pytest-3/test_p2b_hermes_missing_profil0')
+
+    def test_p2b_hermes_missing_profiles_dir_exits_1(tmp_path):
+        """P2-B: manifest with hermes but no profiles_dir \u2192 exit 1 (ManifestError),
+        NOT exit 2 (internal error).
+        """
+        vault = tmp_path / "v"
+        vault.mkdir()
+        (vault / ".skill-graph-builder.manifest.toml").write_text(
+            f'vault = "{vault}"\nscope = "user"\n[platforms.hermes]\n'
+            f'profiles = ["profile-a"]\n'   # profiles_dir intentionally absent
+        )
+        r = _gen("--vault", str(vault))
+        assert r.returncode == 1, f"Expected exit 1 (ManifestError); got {r.returncode}. stderr={r.stderr}"
+>       assert "profiles_dir" in r.stderr
+E       AssertionError: assert 'profiles_dir' in 'manifest TOML parse failed (C:\\Users\\Justin\\AppData\\Local\\Temp\\pytest-of-Justin\\pytest-3\\test_p2b_hermes_missing_profil0\\v\\.skill-graph-builder.manifest.toml): Invalid hex value (at line 1, column 14)\n'
+E        +  where 'manifest TOML parse failed (C:\\Users\\Justin\\AppData\\Local\\Temp\\pytest-of-Justin\\pytest-3\\test_p2b_hermes_missing_profil0\\v\\.skill-graph-builder.manifest.toml): Invalid hex value (at line 1, column 14)\n' = CompletedProcess(args=['C:\\Users\\Justin\\.claude\\jobs\\9f3eb07d\\tmp\\agent-skill-graph-trial\\venv\\Scripts\\pytho...\\test_p2b_hermes_missing_profil0\\v\\.skill-graph-builder.manifest.toml): Invalid hex value (at line 1, column 14)\n').stderr
+
+tests\test_generate.py:153: AssertionError
+____________ test_p2_r4_openclaw_config_file_empty_string_exits_1 _____________
+
+tmp_path = WindowsPath('C:/Users/Justin/AppData/Local/Temp/pytest-of-Justin/pytest-3/test_p2_r4_openclaw_config_fil0')
+
+    def test_p2_r4_openclaw_config_file_empty_string_exits_1(tmp_path):
+        """P2 R4: manifest with openclaw.config_file: '' \u2192 exit 1 (ManifestError)."""
+        vault = tmp_path / "v"
+        vault.mkdir()
+        (vault / ".skill-graph-builder.manifest.toml").write_text(
+            f'vault = "{vault}"\nscope = "user"\n[platforms.openclaw]\n'
+            f'config_file = ""\n'
+        )
+        r = _gen("--vault", str(vault))
+        assert r.returncode == 1, (
+            f"Expected exit 1 (ManifestError for empty config_file); "
+            f"got {r.returncode}. stderr={r.stderr}"
+        )
+>       assert "config_file" in r.stderr
+E       AssertionError: assert 'config_file' in 'manifest TOML parse failed (C:\\Users\\Justin\\AppData\\Local\\Temp\\pytest-of-Justin\\pytest-3\\test_p2_r4_openclaw_config_fil0\\v\\.skill-graph-builder.manifest.toml): Invalid hex value (at line 1, column 14)\n'
+E        +  where 'manifest TOML parse failed (C:\\Users\\Justin\\AppData\\Local\\Temp\\pytest-of-Justin\\pytest-3\\test_p2_r4_openclaw_config_fil0\\v\\.skill-graph-builder.manifest.toml): Invalid hex value (at line 1, column 14)\n' = CompletedProcess(args=['C:\\Users\\Justin\\.claude\\jobs\\9f3eb07d\\tmp\\agent-skill-graph-trial\\venv\\Scripts\\pytho...\\test_p2_r4_openclaw_config_fil0\\v\\.skill-graph-builder.manifest.toml): Invalid hex value (at line 1, column 14)\n').stderr
+
+tests\test_generate.py:184: AssertionError
+______________ test_two_configs_sharing_same_parent_single_parse ______________
+
+tmp_path = WindowsPath('C:/Users/Justin/AppData/Local/Temp/pytest-of-Justin/pytest-3/test_two_configs_sharing_same_0')
+
+    def test_two_configs_sharing_same_parent_single_parse(tmp_path):
+        """FIX-1 + FIX-5 (O(n²)): two configs from the same parent dir should yield
+        both agents (each parsed correctly) and the parent is effectively scanned once
+        per group (not per config). Verifies grouping logic is correct."""
+        cfgs = tmp_path / "claude"
+        for name in ("work", "personal"):
+            d = cfgs / name
+            (d / "skills" / "shared").mkdir(parents=True)
+            (d / "skills" / "shared" / "SKILL.md").write_text(f"---\nname: {name}-skill\n---\nBODY")
+            (d / "settings.json").write_text("{}")
+            (d / "CLAUDE.md").write_text("#")
+        vault = tmp_path / "v"
+        vault.mkdir()
+        (vault / ".skill-graph-builder.manifest.toml").write_text(
+            f'vault = "{vault}"\nscope = "user"\n[platforms.claude_code]\n'
+            f'configs = ["{cfgs / "work"}", "{cfgs / "personal"}"]\n')
+        r = _gen("--vault", str(vault))
+>       assert r.returncode == 0, r.stderr
+E       AssertionError: manifest TOML parse failed (C:\Users\Justin\AppData\Local\Temp\pytest-of-Justin\pytest-3\test_two_configs_sharing_same_0\v\.skill-graph-builder.manifest.toml): Invalid hex value (at line 1, column 14)
+E         
+E       assert 1 == 0
+E        +  where 1 = CompletedProcess(args=['C:\\Users\\Justin\\.claude\\jobs\\9f3eb07d\\tmp\\agent-skill-graph-trial\\venv\\Scripts\\pytho...\\test_two_configs_sharing_same_0\\v\\.skill-graph-builder.manifest.toml): Invalid hex value (at line 1, column 14)\n').returncode
+
+tests\test_generate.py:204: AssertionError
+_____________ test_codex_single_root_config_dir_with_config_toml ______________
+
+tmp_path = WindowsPath('C:/Users/Justin/AppData/Local/Temp/pytest-of-Justin/pytest-3/test_codex_single_root_config_0')
+
+    def test_codex_single_root_config_dir_with_config_toml(tmp_path):
+        """P1: manifest codex.configs: [~/.codex] where ~/.codex IS the config dir
+        (directly contains config.toml, no extra nesting) must yield exactly one
+        agent and must NOT scan siblings from the same parent.
+        Mirrors test_single_toplevel_config_dir_with_settings_json for claude_code.
+        """
+        dotcodex = tmp_path / ".codex"
+        (dotcodex / "skills" / ".system" / "gog").mkdir(parents=True)
+        (dotcodex / "skills" / ".system" / "gog" / "SKILL.md").write_text(
+            "---\nname: gog\n---\nBODY")
+        (dotcodex / "config.toml").write_text("")
+        (dotcodex / "AGENTS.md").write_text("#")
+    
+        # Add a sibling dir that also has config.toml — must NOT be picked up.
+        sibling = tmp_path / "other-codex"
+        (sibling / "skills" / ".system").mkdir(parents=True)
+        (sibling / "config.toml").write_text("")
+    
+        vault = tmp_path / "v"
+        vault.mkdir()
+        (vault / ".skill-graph-builder.manifest.toml").write_text(
+            f'vault = "{vault}"\nscope = "user"\n[platforms.codex]\n'
+            f'configs = ["{dotcodex}"]\n')
+        r = _gen("--vault", str(vault))
+>       assert r.returncode == 0, r.stderr
+E       AssertionError: manifest TOML parse failed (C:\Users\Justin\AppData\Local\Temp\pytest-of-Justin\pytest-3\test_codex_single_root_config_0\v\.skill-graph-builder.manifest.toml): Invalid hex value (at line 1, column 14)
+E         
+E       assert 1 == 0
+E        +  where 1 = CompletedProcess(args=['C:\\Users\\Justin\\.claude\\jobs\\9f3eb07d\\tmp\\agent-skill-graph-trial\\venv\\Scripts\\pytho...\\test_codex_single_root_config_0\\v\\.skill-graph-builder.manifest.toml): Invalid hex value (at line 1, column 14)\n').returncode
+
+tests\test_generate.py:237: AssertionError
+__________________ test_codex_child_configs_layout_unchanged __________________
+
+tmp_path = WindowsPath('C:/Users/Justin/AppData/Local/Temp/pytest-of-Justin/pytest-3/test_codex_child_configs_layou0')
+
+    def test_codex_child_configs_layout_unchanged(tmp_path):
+        """P1: the standard multi-profile layout (parent dir with N child config
+        subdirs, no config.toml at parent) still works end-to-end.
+        """
+        cfgs = tmp_path / "codex"
+        for name in ("work", "personal"):
+            d = cfgs / name
+            (d / "skills" / ".system" / f"{name}-skill").mkdir(parents=True)
+            (d / "skills" / ".system" / f"{name}-skill" / "SKILL.md").write_text(
+                f"---\nname: {name}-skill\n---\nBODY")
+            (d / "config.toml").write_text("")
+            (d / "AGENTS.md").write_text("#")
+        vault = tmp_path / "v"
+        vault.mkdir()
+        (vault / ".skill-graph-builder.manifest.toml").write_text(
+            f'vault = "{vault}"\nscope = "user"\n[platforms.codex]\n'
+            f'configs = ["{cfgs / "work"}", "{cfgs / "personal"}"]\n')
+        r = _gen("--vault", str(vault))
+>       assert r.returncode == 0, r.stderr
+E       AssertionError: manifest TOML parse failed (C:\Users\Justin\AppData\Local\Temp\pytest-of-Justin\pytest-3\test_codex_child_configs_layou0\v\.skill-graph-builder.manifest.toml): Invalid hex value (at line 1, column 14)
+E         
+E       assert 1 == 0
+E        +  where 1 = CompletedProcess(args=['C:\\Users\\Justin\\.claude\\jobs\\9f3eb07d\\tmp\\agent-skill-graph-trial\\venv\\Scripts\\pytho...\\test_codex_child_configs_layou0\\v\\.skill-graph-builder.manifest.toml): Invalid hex value (at line 1, column 14)\n').returncode
+
+tests\test_generate.py:268: AssertionError
+________________________ test_e2e_cwd_scan_to_generate ________________________
+
+tmp_path = WindowsPath('C:/Users/Justin/AppData/Local/Temp/pytest-of-Justin/pytest-3/test_e2e_cwd_scan_to_generate0')
+
+    @pytest.mark.skipif(
+        importlib.util.find_spec("yaml") is None,
+        reason="e2e path needs Hermes parsing (optional PyYAML)",
+    )
+    def test_e2e_cwd_scan_to_generate(tmp_path):
+        # synthetic ~/work-like tree: 2 claude + 1 codex + 1 hermes
+        for n in ("wrangler", "builder"):
+            d = tmp_path / "claude" / n
+            (d / "skills" / "gog").mkdir(parents=True)
+            (d / "skills" / "gog" / "SKILL.md").write_text("---\nname: gog\n---\nB")
+            (d / "settings.json").write_text("{}")
+            (d / "CLAUDE.md").write_text("#")
+        cx = tmp_path / "codex" / "wrangler"
+        (cx / "skills" / ".system").mkdir(parents=True)
+        (cx / "config.toml").write_text("")
+        hp = tmp_path / "hermes" / "profiles" / "profile-a"
+        (hp / "skills").mkdir(parents=True)
+        (hp / "config.yaml").write_text("skills: {}\n")
+    
+        # Build an isolated env: strip real CLAUDE_CONFIG_DIR/CODEX_HOME so discover
+        # returns only tmp_path agents (not real on-disk configs), and set HOME to a
+        # pristine subdir so ~/.openclaw/~/.hermes/~/.claude/~/.codex don't bleed in.
+        _home = tmp_path / "_home"
+        _home.mkdir()
+        _env = {**os.environ}
+        _env.pop("CLAUDE_CONFIG_DIR", None)
+        _env.pop("CODEX_HOME", None)
+        _env["HOME"] = str(_home)
+    
+        import json as _j
+        rc = subprocess.run([sys.executable, "-m", "scripts.discover", "--root", str(tmp_path)],
+                            cwd=SKILL, capture_output=True, text=True, env=_env)
+        assert rc.returncode == 0, rc.stderr
+        doc = _j.loads(rc.stdout)
+        cc_dirs = [a["config_dir"] for a in doc["platforms"]["claude_code"]["agents"]
+                   if not a["excluded"]]
+        cx_dirs = [a["config_dir"] for a in doc["platforms"]["codex"]["agents"]]
+        vault = tmp_path / "v"
+        vault.mkdir()
+        hermes_profiles_dir = str(tmp_path / "hermes" / "profiles")
+        cc_list = ", ".join(f'"{d}"' for d in cc_dirs)
+        cx_list = ", ".join(f'"{d}"' for d in cx_dirs)
+        man = (
+            f'vault = "{vault}"\n'
+            f'scope = "user"\n'
+            f'[platforms.claude_code]\n'
+            f'configs = [{cc_list}]\n'
+            f'[platforms.codex]\n'
+            f'configs = [{cx_list}]\n'
+            f'[platforms.hermes]\n'
+            f'profiles_dir = "{hermes_profiles_dir}"\n'
+            f'profiles = ["profile-a"]\n'
+        )
+        (vault / ".skill-graph-builder.manifest.toml").write_text(man)
+        g = subprocess.run([sys.executable, "-m", "scripts.generate", "--vault", str(vault)],
+                           cwd=SKILL, capture_output=True, text=True, env=_env)
+>       assert g.returncode == 0, g.stderr
+E       AssertionError: manifest TOML parse failed (C:\Users\Justin\AppData\Local\Temp\pytest-of-Justin\pytest-3\test_e2e_cwd_scan_to_generate0\v\.skill-graph-builder.manifest.toml): Invalid hex value (at line 1, column 14)
+E         
+E       assert 1 == 0
+E        +  where 1 = CompletedProcess(args=['C:\\Users\\Justin\\.claude\\jobs\\9f3eb07d\\tmp\\agent-skill-graph-trial\\venv\\Scripts\\pytho...3\\test_e2e_cwd_scan_to_generate0\\v\\.skill-graph-builder.manifest.toml): Invalid hex value (at line 1, column 14)\n').returncode
+
+tests\test_generate.py:329: AssertionError
+_______________________ test_parse_returns_three_agents _______________________
+
+text = '{\n  "skills": {\n    "load": {\n      "extraDirs": ["C:\\Users\\Justin\\AppData\\Local\\Temp\\pytest-of-Justin\\pyte...n\\pytest-3\\test_parse_returns_three_agent0\\workspaces/empty-array",\n        "skills": []\n      }\n    ]\n  }\n}\n'
+source = 'C:\\Users\\Justin\\AppData\\Local\\Temp\\pytest-of-Justin\\pytest-3\\test_parse_returns_three_agent0\\openclaw.json'
+
+    def loads_tolerant(text: str, *, source: str | None = None):
+        """Parse `text` as JSON, tolerating // and /* */ comments and trailing
+        commas. Returns the decoded Python object.
+    
+        Strategy: try strict json.loads first (fast path, zero risk for already
+        valid JSON), then retry once after the string-aware pre-clean. If both
+        fail, raise Json5LiteError with an actionable message.
+    
+        `source` (optional) names the origin (e.g. a file path) so the error
+        message points the user at the right place instead of a bare decode stack.
+        """
+        try:
+            return json.loads(text)
+        except (json.JSONDecodeError, ValueError):
+            pass
+    
+        try:
+            cleaned = _strip_comments_and_trailing_commas(text)
+>           return json.loads(cleaned)
+                   ^^^^^^^^^^^^^^^^^^^
+
+scripts\json5_lite.py:161: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+C:\Users\Justin\AppData\Local\Programs\Python\Python312\Lib\json\__init__.py:346: in loads
+    return _default_decoder.decode(s)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^
+C:\Users\Justin\AppData\Local\Programs\Python\Python312\Lib\json\decoder.py:338: in decode
+    obj, end = self.raw_decode(s, idx=_w(s, 0).end())
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = <json.decoder.JSONDecoder object at 0x0000024BD84C0B60>
+s = '{\n  "skills": {\n    "load": {\n      "extraDirs": ["C:\\Users\\Justin\\AppData\\Local\\Temp\\pytest-of-Justin\\pyte...n\\pytest-3\\test_parse_returns_three_agent0\\workspaces/empty-array",\n        "skills": []\n      }\n    ]\n  }\n}\n'
+idx = 0
+
+    def raw_decode(self, s, idx=0):
+        """Decode a JSON document from ``s`` (a ``str`` beginning with
+        a JSON document) and return a 2-tuple of the Python
+        representation and the index in ``s`` where the document ended.
+    
+        This can be used to decode a JSON document from a string that may
+        have extraneous data at the end.
+    
+        """
+        try:
+>           obj, end = self.scan_once(s, idx)
+                       ^^^^^^^^^^^^^^^^^^^^^^
+E           json.decoder.JSONDecodeError: Invalid \escape: line 4 column 24 (char 53)
+
+C:\Users\Justin\AppData\Local\Programs\Python\Python312\Lib\json\decoder.py:354: JSONDecodeError
+
+The above exception was the direct cause of the following exception:
+
+config_file = WindowsPath('C:/Users/Justin/AppData/Local/Temp/pytest-of-Justin/pytest-3/test_parse_returns_three_agent0/openclaw.json')
+user_scope_path = None, openclaw_user_dir = None, bundled_skills_dir = None
+agents = None
+
+    def parse_openclaw(
+        config_file: Path,
+        user_scope_path: Path | None,
+        openclaw_user_dir: Path | None,
+        bundled_skills_dir: Path | None,
+        agents: list[str] | None = None,
+    ) -> list[AgentRecord]:
+        """Parse openclaw.json. Returns one AgentRecord per agent in agents.list."""
+        config_file = Path(config_file).expanduser()
+        if not config_file.exists():
+            return []
+        # Real openclaw.json files are JSON5 (OpenClaw's own loader accepts
+        # comments + trailing commas). Strict json.loads would crash the whole
+        # sync on a perfectly valid hand-edited config, so parse tolerantly and
+        # surface a clear, file-scoped error on genuine corruption.
+        try:
+>           data = loads_tolerant(config_file.read_text(), source=str(config_file))
+                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+scripts\platforms\openclaw.py:228: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+text = '{\n  "skills": {\n    "load": {\n      "extraDirs": ["C:\\Users\\Justin\\AppData\\Local\\Temp\\pytest-of-Justin\\pyte...n\\pytest-3\\test_parse_returns_three_agent0\\workspaces/empty-array",\n        "skills": []\n      }\n    ]\n  }\n}\n'
+source = 'C:\\Users\\Justin\\AppData\\Local\\Temp\\pytest-of-Justin\\pytest-3\\test_parse_returns_three_agent0\\openclaw.json'
+
+    def loads_tolerant(text: str, *, source: str | None = None):
+        """Parse `text` as JSON, tolerating // and /* */ comments and trailing
+        commas. Returns the decoded Python object.
+    
+        Strategy: try strict json.loads first (fast path, zero risk for already
+        valid JSON), then retry once after the string-aware pre-clean. If both
+        fail, raise Json5LiteError with an actionable message.
+    
+        `source` (optional) names the origin (e.g. a file path) so the error
+        message points the user at the right place instead of a bare decode stack.
+        """
+        try:
+            return json.loads(text)
+        except (json.JSONDecodeError, ValueError):
+            pass
+    
+        try:
+            cleaned = _strip_comments_and_trailing_commas(text)
+            return json.loads(cleaned)
+        except (json.JSONDecodeError, ValueError) as exc:
+            where = f" in {source}" if source else ""
+>           raise Json5LiteError(
+                f"Could not parse JSON5-tolerant content{where}: {exc}. "
+                f"This reader handles // and /* */ comments and trailing commas "
+                f"only; other JSON5 syntax (unquoted keys, single-quoted strings) "
+                f"is not supported."
+            ) from exc
+E           scripts.json5_lite.Json5LiteError: Could not parse JSON5-tolerant content in C:\Users\Justin\AppData\Local\Temp\pytest-of-Justin\pytest-3\test_parse_returns_three_agent0\openclaw.json: Invalid \escape: line 4 column 24 (char 53). This reader handles // and /* */ comments and trailing commas only; other JSON5 syntax (unquoted keys, single-quoted strings) is not supported.
+
+scripts\json5_lite.py:164: Json5LiteError
+
+The above exception was the direct cause of the following exception:
+
+tmp_path = WindowsPath('C:/Users/Justin/AppData/Local/Temp/pytest-of-Justin/pytest-3/test_parse_returns_three_agent0')
+
+    def test_parse_returns_three_agents(tmp_path):
+        cfg = _setup(tmp_path)
+>       agents = parse_openclaw(cfg, user_scope_path=None, openclaw_user_dir=None, bundled_skills_dir=None)
+                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests\test_openclaw.py:38: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+config_file = WindowsPath('C:/Users/Justin/AppData/Local/Temp/pytest-of-Justin/pytest-3/test_parse_returns_three_agent0/openclaw.json')
+user_scope_path = None, openclaw_user_dir = None, bundled_skills_dir = None
+agents = None
+
+    def parse_openclaw(
+        config_file: Path,
+        user_scope_path: Path | None,
+        openclaw_user_dir: Path | None,
+        bundled_skills_dir: Path | None,
+        agents: list[str] | None = None,
+    ) -> list[AgentRecord]:
+        """Parse openclaw.json. Returns one AgentRecord per agent in agents.list."""
+        config_file = Path(config_file).expanduser()
+        if not config_file.exists():
+            return []
+        # Real openclaw.json files are JSON5 (OpenClaw's own loader accepts
+        # comments + trailing commas). Strict json.loads would crash the whole
+        # sync on a perfectly valid hand-edited config, so parse tolerantly and
+        # surface a clear, file-scoped error on genuine corruption.
+        try:
+            data = loads_tolerant(config_file.read_text(), source=str(config_file))
+        except Json5LiteError as exc:
+>           raise Json5LiteError(
+                f"Failed to parse OpenClaw config {config_file}: {exc}"
+            ) from exc
+E           scripts.json5_lite.Json5LiteError: Failed to parse OpenClaw config C:\Users\Justin\AppData\Local\Temp\pytest-of-Justin\pytest-3\test_parse_returns_three_agent0\openclaw.json: Could not parse JSON5-tolerant content in C:\Users\Justin\AppData\Local\Temp\pytest-of-Justin\pytest-3\test_parse_returns_three_agent0\openclaw.json: Invalid \escape: line 4 column 24 (char 53). This reader handles // and /* */ comments and trailing commas only; other JSON5 syntax (unquoted keys, single-quoted strings) is not supported.
+
+scripts\platforms\openclaw.py:230: Json5LiteError
+_________________ test_allowlist_filters_by_frontmatter_name __________________
+
+text = '{\n  "skills": {\n    "load": {\n      "extraDirs": ["C:\\Users\\Justin\\AppData\\Local\\Temp\\pytest-of-Justin\\pyte...n\\pytest-3\\test_allowlist_filters_by_fron0\\workspaces/empty-array",\n        "skills": []\n      }\n    ]\n  }\n}\n'
+source = 'C:\\Users\\Justin\\AppData\\Local\\Temp\\pytest-of-Justin\\pytest-3\\test_allowlist_filters_by_fron0\\openclaw.json'
+
+    def loads_tolerant(text: str, *, source: str | None = None):
+        """Parse `text` as JSON, tolerating // and /* */ comments and trailing
+        commas. Returns the decoded Python object.
+    
+        Strategy: try strict json.loads first (fast path, zero risk for already
+        valid JSON), then retry once after the string-aware pre-clean. If both
+        fail, raise Json5LiteError with an actionable message.
+    
+        `source` (optional) names the origin (e.g. a file path) so the error
+        message points the user at the right place instead of a bare decode stack.
+        """
+        try:
+            return json.loads(text)
+        except (json.JSONDecodeError, ValueError):
+            pass
+    
+        try:
+            cleaned = _strip_comments_and_trailing_commas(text)
+>           return json.loads(cleaned)
+                   ^^^^^^^^^^^^^^^^^^^
+
+scripts\json5_lite.py:161: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+C:\Users\Justin\AppData\Local\Programs\Python\Python312\Lib\json\__init__.py:346: in loads
+    return _default_decoder.decode(s)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^
+C:\Users\Justin\AppData\Local\Programs\Python\Python312\Lib\json\decoder.py:338: in decode
+    obj, end = self.raw_decode(s, idx=_w(s, 0).end())
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = <json.decoder.JSONDecoder object at 0x0000024BD84C0B60>
+s = '{\n  "skills": {\n    "load": {\n      "extraDirs": ["C:\\Users\\Justin\\AppData\\Local\\Temp\\pytest-of-Justin\\pyte...n\\pytest-3\\test_allowlist_filters_by_fron0\\workspaces/empty-array",\n        "skills": []\n      }\n    ]\n  }\n}\n'
+idx = 0
+
+    def raw_decode(self, s, idx=0):
+        """Decode a JSON document from ``s`` (a ``str`` beginning with
+        a JSON document) and return a 2-tuple of the Python
+        representation and the index in ``s`` where the document ended.
+    
+        This can be used to decode a JSON document from a string that may
+        have extraneous data at the end.
+    
+        """
+        try:
+>           obj, end = self.scan_once(s, idx)
+                       ^^^^^^^^^^^^^^^^^^^^^^
+E           json.decoder.JSONDecodeError: Invalid \escape: line 4 column 24 (char 53)
+
+C:\Users\Justin\AppData\Local\Programs\Python\Python312\Lib\json\decoder.py:354: JSONDecodeError
+
+The above exception was the direct cause of the following exception:
+
+config_file = WindowsPath('C:/Users/Justin/AppData/Local/Temp/pytest-of-Justin/pytest-3/test_allowlist_filters_by_fron0/openclaw.json')
+user_scope_path = None, openclaw_user_dir = None, bundled_skills_dir = None
+agents = None
+
+    def parse_openclaw(
+        config_file: Path,
+        user_scope_path: Path | None,
+        openclaw_user_dir: Path | None,
+        bundled_skills_dir: Path | None,
+        agents: list[str] | None = None,
+    ) -> list[AgentRecord]:
+        """Parse openclaw.json. Returns one AgentRecord per agent in agents.list."""
+        config_file = Path(config_file).expanduser()
+        if not config_file.exists():
+            return []
+        # Real openclaw.json files are JSON5 (OpenClaw's own loader accepts
+        # comments + trailing commas). Strict json.loads would crash the whole
+        # sync on a perfectly valid hand-edited config, so parse tolerantly and
+        # surface a clear, file-scoped error on genuine corruption.
+        try:
+>           data = loads_tolerant(config_file.read_text(), source=str(config_file))
+                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+scripts\platforms\openclaw.py:228: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+text = '{\n  "skills": {\n    "load": {\n      "extraDirs": ["C:\\Users\\Justin\\AppData\\Local\\Temp\\pytest-of-Justin\\pyte...n\\pytest-3\\test_allowlist_filters_by_fron0\\workspaces/empty-array",\n        "skills": []\n      }\n    ]\n  }\n}\n'
+source = 'C:\\Users\\Justin\\AppData\\Local\\Temp\\pytest-of-Justin\\pytest-3\\test_allowlist_filters_by_fron0\\openclaw.json'
+
+    def loads_tolerant(text: str, *, source: str | None = None):
+        """Parse `text` as JSON, tolerating // and /* */ comments and trailing
+        commas. Returns the decoded Python object.
+    
+        Strategy: try strict json.loads first (fast path, zero risk for already
+        valid JSON), then retry once after the string-aware pre-clean. If both
+        fail, raise Json5LiteError with an actionable message.
+    
+        `source` (optional) names the origin (e.g. a file path) so the error
+        message points the user at the right place instead of a bare decode stack.
+        """
+        try:
+            return json.loads(text)
+        except (json.JSONDecodeError, ValueError):
+            pass
+    
+        try:
+            cleaned = _strip_comments_and_trailing_commas(text)
+            return json.loads(cleaned)
+        except (json.JSONDecodeError, ValueError) as exc:
+            where = f" in {source}" if source else ""
+>           raise Json5LiteError(
+                f"Could not parse JSON5-tolerant content{where}: {exc}. "
+                f"This reader handles // and /* */ comments and trailing commas "
+                f"only; other JSON5 syntax (unquoted keys, single-quoted strings) "
+                f"is not supported."
+            ) from exc
+E           scripts.json5_lite.Json5LiteError: Could not parse JSON5-tolerant content in C:\Users\Justin\AppData\Local\Temp\pytest-of-Justin\pytest-3\test_allowlist_filters_by_fron0\openclaw.json: Invalid \escape: line 4 column 24 (char 53). This reader handles // and /* */ comments and trailing commas only; other JSON5 syntax (unquoted keys, single-quoted strings) is not supported.
+
+scripts\json5_lite.py:164: Json5LiteError
+
+The above exception was the direct cause of the following exception:
+
+tmp_path = WindowsPath('C:/Users/Justin/AppData/Local/Temp/pytest-of-Justin/pytest-3/test_allowlist_filters_by_fron0')
+
+    def test_allowlist_filters_by_frontmatter_name(tmp_path):
+        cfg = _setup(tmp_path)
+>       agents = {a.id: a for a in parse_openclaw(cfg, None, None, None)}
+                                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests\test_openclaw.py:44: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+config_file = WindowsPath('C:/Users/Justin/AppData/Local/Temp/pytest-of-Justin/pytest-3/test_allowlist_filters_by_fron0/openclaw.json')
+user_scope_path = None, openclaw_user_dir = None, bundled_skills_dir = None
+agents = None
+
+    def parse_openclaw(
+        config_file: Path,
+        user_scope_path: Path | None,
+        openclaw_user_dir: Path | None,
+        bundled_skills_dir: Path | None,
+        agents: list[str] | None = None,
+    ) -> list[AgentRecord]:
+        """Parse openclaw.json. Returns one AgentRecord per agent in agents.list."""
+        config_file = Path(config_file).expanduser()
+        if not config_file.exists():
+            return []
+        # Real openclaw.json files are JSON5 (OpenClaw's own loader accepts
+        # comments + trailing commas). Strict json.loads would crash the whole
+        # sync on a perfectly valid hand-edited config, so parse tolerantly and
+        # surface a clear, file-scoped error on genuine corruption.
+        try:
+            data = loads_tolerant(config_file.read_text(), source=str(config_file))
+        except Json5LiteError as exc:
+>           raise Json5LiteError(
+                f"Failed to parse OpenClaw config {config_file}: {exc}"
+            ) from exc
+E           scripts.json5_lite.Json5LiteError: Failed to parse OpenClaw config C:\Users\Justin\AppData\Local\Temp\pytest-of-Justin\pytest-3\test_allowlist_filters_by_fron0\openclaw.json: Could not parse JSON5-tolerant content in C:\Users\Justin\AppData\Local\Temp\pytest-of-Justin\pytest-3\test_allowlist_filters_by_fron0\openclaw.json: Invalid \escape: line 4 column 24 (char 53). This reader handles // and /* */ comments and trailing commas only; other JSON5 syntax (unquoted keys, single-quoted strings) is not supported.
+
+scripts\platforms\openclaw.py:230: Json5LiteError
+____________ test_missing_skills_key_unrestricted_when_no_defaults ____________
+
+tmp_path = WindowsPath('C:/Users/Justin/AppData/Local/Temp/pytest-of-Justin/pytest-3/test_missing_skills_key_unrest0')
+
+    def test_missing_skills_key_unrestricted_when_no_defaults(tmp_path):
+        cfg = _setup(tmp_path)
+>       data = json.loads(cfg.read_text())
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests\test_openclaw.py:52: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+C:\Users\Justin\AppData\Local\Programs\Python\Python312\Lib\json\__init__.py:346: in loads
+    return _default_decoder.decode(s)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^
+C:\Users\Justin\AppData\Local\Programs\Python\Python312\Lib\json\decoder.py:338: in decode
+    obj, end = self.raw_decode(s, idx=_w(s, 0).end())
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = <json.decoder.JSONDecoder object at 0x0000024BD84C0B60>
+s = '{\n  "skills": {\n    "load": {\n      "extraDirs": ["C:\\Users\\Justin\\AppData\\Local\\Temp\\pytest-of-Justin\\pyte...n\\pytest-3\\test_missing_skills_key_unrest0\\workspaces/empty-array",\n        "skills": []\n      }\n    ]\n  }\n}\n'
+idx = 0
+
+    def raw_decode(self, s, idx=0):
+        """Decode a JSON document from ``s`` (a ``str`` beginning with
+        a JSON document) and return a 2-tuple of the Python
+        representation and the index in ``s`` where the document ended.
+    
+        This can be used to decode a JSON document from a string that may
+        have extraneous data at the end.
+    
+        """
+        try:
+>           obj, end = self.scan_once(s, idx)
+                       ^^^^^^^^^^^^^^^^^^^^^^
+E           json.decoder.JSONDecodeError: Invalid \escape: line 4 column 24 (char 53)
+
+C:\Users\Justin\AppData\Local\Programs\Python\Python312\Lib\json\decoder.py:354: JSONDecodeError
+_____________ test_missing_skills_key_uses_defaults_when_present ______________
+
+text = '{\n  "skills": {\n    "load": {\n      "extraDirs": ["C:\\Users\\Justin\\AppData\\Local\\Temp\\pytest-of-Justin\\pyte...n\\pytest-3\\test_missing_skills_key_uses_d0\\workspaces/empty-array",\n        "skills": []\n      }\n    ]\n  }\n}\n'
+source = 'C:\\Users\\Justin\\AppData\\Local\\Temp\\pytest-of-Justin\\pytest-3\\test_missing_skills_key_uses_d0\\openclaw.json'
+
+    def loads_tolerant(text: str, *, source: str | None = None):
+        """Parse `text` as JSON, tolerating // and /* */ comments and trailing
+        commas. Returns the decoded Python object.
+    
+        Strategy: try strict json.loads first (fast path, zero risk for already
+        valid JSON), then retry once after the string-aware pre-clean. If both
+        fail, raise Json5LiteError with an actionable message.
+    
+        `source` (optional) names the origin (e.g. a file path) so the error
+        message points the user at the right place instead of a bare decode stack.
+        """
+        try:
+            return json.loads(text)
+        except (json.JSONDecodeError, ValueError):
+            pass
+    
+        try:
+            cleaned = _strip_comments_and_trailing_commas(text)
+>           return json.loads(cleaned)
+                   ^^^^^^^^^^^^^^^^^^^
+
+scripts\json5_lite.py:161: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+C:\Users\Justin\AppData\Local\Programs\Python\Python312\Lib\json\__init__.py:346: in loads
+    return _default_decoder.decode(s)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^
+C:\Users\Justin\AppData\Local\Programs\Python\Python312\Lib\json\decoder.py:338: in decode
+    obj, end = self.raw_decode(s, idx=_w(s, 0).end())
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = <json.decoder.JSONDecoder object at 0x0000024BD84C0B60>
+s = '{\n  "skills": {\n    "load": {\n      "extraDirs": ["C:\\Users\\Justin\\AppData\\Local\\Temp\\pytest-of-Justin\\pyte...n\\pytest-3\\test_missing_skills_key_uses_d0\\workspaces/empty-array",\n        "skills": []\n      }\n    ]\n  }\n}\n'
+idx = 0
+
+    def raw_decode(self, s, idx=0):
+        """Decode a JSON document from ``s`` (a ``str`` beginning with
+        a JSON document) and return a 2-tuple of the Python
+        representation and the index in ``s`` where the document ended.
+    
+        This can be used to decode a JSON document from a string that may
+        have extraneous data at the end.
+    
+        """
+        try:
+>           obj, end = self.scan_once(s, idx)
+                       ^^^^^^^^^^^^^^^^^^^^^^
+E           json.decoder.JSONDecodeError: Invalid \escape: line 4 column 24 (char 53)
+
+C:\Users\Justin\AppData\Local\Programs\Python\Python312\Lib\json\decoder.py:354: JSONDecodeError
+
+The above exception was the direct cause of the following exception:
+
+config_file = WindowsPath('C:/Users/Justin/AppData/Local/Temp/pytest-of-Justin/pytest-3/test_missing_skills_key_uses_d0/openclaw.json')
+user_scope_path = None, openclaw_user_dir = None, bundled_skills_dir = None
+agents = None
+
+    def parse_openclaw(
+        config_file: Path,
+        user_scope_path: Path | None,
+        openclaw_user_dir: Path | None,
+        bundled_skills_dir: Path | None,
+        agents: list[str] | None = None,
+    ) -> list[AgentRecord]:
+        """Parse openclaw.json. Returns one AgentRecord per agent in agents.list."""
+        config_file = Path(config_file).expanduser()
+        if not config_file.exists():
+            return []
+        # Real openclaw.json files are JSON5 (OpenClaw's own loader accepts
+        # comments + trailing commas). Strict json.loads would crash the whole
+        # sync on a perfectly valid hand-edited config, so parse tolerantly and
+        # surface a clear, file-scoped error on genuine corruption.
+        try:
+>           data = loads_tolerant(config_file.read_text(), source=str(config_file))
+                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+scripts\platforms\openclaw.py:228: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+text = '{\n  "skills": {\n    "load": {\n      "extraDirs": ["C:\\Users\\Justin\\AppData\\Local\\Temp\\pytest-of-Justin\\pyte...n\\pytest-3\\test_missing_skills_key_uses_d0\\workspaces/empty-array",\n        "skills": []\n      }\n    ]\n  }\n}\n'
+source = 'C:\\Users\\Justin\\AppData\\Local\\Temp\\pytest-of-Justin\\pytest-3\\test_missing_skills_key_uses_d0\\openclaw.json'
+
+    def loads_tolerant(text: str, *, source: str | None = None):
+        """Parse `text` as JSON, tolerating // and /* */ comments and trailing
+        commas. Returns the decoded Python object.
+    
+        Strategy: try strict json.loads first (fast path, zero risk for already
+        valid JSON), then retry once after the string-aware pre-clean. If both
+        fail, raise Json5LiteError with an actionable message.
+    
+        `source` (optional) names the origin (e.g. a file path) so the error
+        message points the user at the right place instead of a bare decode stack.
+        """
+        try:
+            return json.loads(text)
+        except (json.JSONDecodeError, ValueError):
+            pass
+    
+        try:
+            cleaned = _strip_comments_and_trailing_commas(text)
+            return json.loads(cleaned)
+        except (json.JSONDecodeError, ValueError) as exc:
+            where = f" in {source}" if source else ""
+>           raise Json5LiteError(
+                f"Could not parse JSON5-tolerant content{where}: {exc}. "
+                f"This reader handles // and /* */ comments and trailing commas "
+                f"only; other JSON5 syntax (unquoted keys, single-quoted strings) "
+                f"is not supported."
+            ) from exc
+E           scripts.json5_lite.Json5LiteError: Could not parse JSON5-tolerant content in C:\Users\Justin\AppData\Local\Temp\pytest-of-Justin\pytest-3\test_missing_skills_key_uses_d0\openclaw.json: Invalid \escape: line 4 column 24 (char 53). This reader handles // and /* */ comments and trailing commas only; other JSON5 syntax (unquoted keys, single-quoted strings) is not supported.
+
+scripts\json5_lite.py:164: Json5LiteError
+
+The above exception was the direct cause of the following exception:
+
+tmp_path = WindowsPath('C:/Users/Justin/AppData/Local/Temp/pytest-of-Justin/pytest-3/test_missing_skills_key_uses_d0')
+
+    def test_missing_skills_key_uses_defaults_when_present(tmp_path):
+        cfg = _setup(tmp_path)  # fixture sets defaults.skills = []
+>       agents = {a.id: a for a in parse_openclaw(cfg, None, None, None)}
+                                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests\test_openclaw.py:64: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+config_file = WindowsPath('C:/Users/Justin/AppData/Local/Temp/pytest-of-Justin/pytest-3/test_missing_skills_key_uses_d0/openclaw.json')
+user_scope_path = None, openclaw_user_dir = None, bundled_skills_dir = None
+agents = None
+
+    def parse_openclaw(
+        config_file: Path,
+        user_scope_path: Path | None,
+        openclaw_user_dir: Path | None,
+        bundled_skills_dir: Path | None,
+        agents: list[str] | None = None,
+    ) -> list[AgentRecord]:
+        """Parse openclaw.json. Returns one AgentRecord per agent in agents.list."""
+        config_file = Path(config_file).expanduser()
+        if not config_file.exists():
+            return []
+        # Real openclaw.json files are JSON5 (OpenClaw's own loader accepts
+        # comments + trailing commas). Strict json.loads would crash the whole
+        # sync on a perfectly valid hand-edited config, so parse tolerantly and
+        # surface a clear, file-scoped error on genuine corruption.
+        try:
+            data = loads_tolerant(config_file.read_text(), source=str(config_file))
+        except Json5LiteError as exc:
+>           raise Json5LiteError(
+                f"Failed to parse OpenClaw config {config_file}: {exc}"
+            ) from exc
+E           scripts.json5_lite.Json5LiteError: Failed to parse OpenClaw config C:\Users\Justin\AppData\Local\Temp\pytest-of-Justin\pytest-3\test_missing_skills_key_uses_d0\openclaw.json: Could not parse JSON5-tolerant content in C:\Users\Justin\AppData\Local\Temp\pytest-of-Justin\pytest-3\test_missing_skills_key_uses_d0\openclaw.json: Invalid \escape: line 4 column 24 (char 53). This reader handles // and /* */ comments and trailing commas only; other JSON5 syntax (unquoted keys, single-quoted strings) is not supported.
+
+scripts\platforms\openclaw.py:230: Json5LiteError
+______________________ test_empty_array_means_no_skills _______________________
+
+text = '{\n  "skills": {\n    "load": {\n      "extraDirs": ["C:\\Users\\Justin\\AppData\\Local\\Temp\\pytest-of-Justin\\pyte...n\\pytest-3\\test_empty_array_means_no_skil0\\workspaces/empty-array",\n        "skills": []\n      }\n    ]\n  }\n}\n'
+source = 'C:\\Users\\Justin\\AppData\\Local\\Temp\\pytest-of-Justin\\pytest-3\\test_empty_array_means_no_skil0\\openclaw.json'
+
+    def loads_tolerant(text: str, *, source: str | None = None):
+        """Parse `text` as JSON, tolerating // and /* */ comments and trailing
+        commas. Returns the decoded Python object.
+    
+        Strategy: try strict json.loads first (fast path, zero risk for already
+        valid JSON), then retry once after the string-aware pre-clean. If both
+        fail, raise Json5LiteError with an actionable message.
+    
+        `source` (optional) names the origin (e.g. a file path) so the error
+        message points the user at the right place instead of a bare decode stack.
+        """
+        try:
+            return json.loads(text)
+        except (json.JSONDecodeError, ValueError):
+            pass
+    
+        try:
+            cleaned = _strip_comments_and_trailing_commas(text)
+>           return json.loads(cleaned)
+                   ^^^^^^^^^^^^^^^^^^^
+
+scripts\json5_lite.py:161: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+C:\Users\Justin\AppData\Local\Programs\Python\Python312\Lib\json\__init__.py:346: in loads
+    return _default_decoder.decode(s)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^
+C:\Users\Justin\AppData\Local\Programs\Python\Python312\Lib\json\decoder.py:338: in decode
+    obj, end = self.raw_decode(s, idx=_w(s, 0).end())
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = <json.decoder.JSONDecoder object at 0x0000024BD84C0B60>
+s = '{\n  "skills": {\n    "load": {\n      "extraDirs": ["C:\\Users\\Justin\\AppData\\Local\\Temp\\pytest-of-Justin\\pyte...n\\pytest-3\\test_empty_array_means_no_skil0\\workspaces/empty-array",\n        "skills": []\n      }\n    ]\n  }\n}\n'
+idx = 0
+
+    def raw_decode(self, s, idx=0):
+        """Decode a JSON document from ``s`` (a ``str`` beginning with
+        a JSON document) and return a 2-tuple of the Python
+        representation and the index in ``s`` where the document ended.
+    
+        This can be used to decode a JSON document from a string that may
+        have extraneous data at the end.
+    
+        """
+        try:
+>           obj, end = self.scan_once(s, idx)
+                       ^^^^^^^^^^^^^^^^^^^^^^
+E           json.decoder.JSONDecodeError: Invalid \escape: line 4 column 24 (char 53)
+
+C:\Users\Justin\AppData\Local\Programs\Python\Python312\Lib\json\decoder.py:354: JSONDecodeError
+
+The above exception was the direct cause of the following exception:
+
+config_file = WindowsPath('C:/Users/Justin/AppData/Local/Temp/pytest-of-Justin/pytest-3/test_empty_array_means_no_skil0/openclaw.json')
+user_scope_path = None, openclaw_user_dir = None, bundled_skills_dir = None
+agents = None
+
+    def parse_openclaw(
+        config_file: Path,
+        user_scope_path: Path | None,
+        openclaw_user_dir: Path | None,
+        bundled_skills_dir: Path | None,
+        agents: list[str] | None = None,
+    ) -> list[AgentRecord]:
+        """Parse openclaw.json. Returns one AgentRecord per agent in agents.list."""
+        config_file = Path(config_file).expanduser()
+        if not config_file.exists():
+            return []
+        # Real openclaw.json files are JSON5 (OpenClaw's own loader accepts
+        # comments + trailing commas). Strict json.loads would crash the whole
+        # sync on a perfectly valid hand-edited config, so parse tolerantly and
+        # surface a clear, file-scoped error on genuine corruption.
+        try:
+>           data = loads_tolerant(config_file.read_text(), source=str(config_file))
+                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+scripts\platforms\openclaw.py:228: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+text = '{\n  "skills": {\n    "load": {\n      "extraDirs": ["C:\\Users\\Justin\\AppData\\Local\\Temp\\pytest-of-Justin\\pyte...n\\pytest-3\\test_empty_array_means_no_skil0\\workspaces/empty-array",\n        "skills": []\n      }\n    ]\n  }\n}\n'
+source = 'C:\\Users\\Justin\\AppData\\Local\\Temp\\pytest-of-Justin\\pytest-3\\test_empty_array_means_no_skil0\\openclaw.json'
+
+    def loads_tolerant(text: str, *, source: str | None = None):
+        """Parse `text` as JSON, tolerating // and /* */ comments and trailing
+        commas. Returns the decoded Python object.
+    
+        Strategy: try strict json.loads first (fast path, zero risk for already
+        valid JSON), then retry once after the string-aware pre-clean. If both
+        fail, raise Json5LiteError with an actionable message.
+    
+        `source` (optional) names the origin (e.g. a file path) so the error
+        message points the user at the right place instead of a bare decode stack.
+        """
+        try:
+            return json.loads(text)
+        except (json.JSONDecodeError, ValueError):
+            pass
+    
+        try:
+            cleaned = _strip_comments_and_trailing_commas(text)
+            return json.loads(cleaned)
+        except (json.JSONDecodeError, ValueError) as exc:
+            where = f" in {source}" if source else ""
+>           raise Json5LiteError(
+                f"Could not parse JSON5-tolerant content{where}: {exc}. "
+                f"This reader handles // and /* */ comments and trailing commas "
+                f"only; other JSON5 syntax (unquoted keys, single-quoted strings) "
+                f"is not supported."
+            ) from exc
+E           scripts.json5_lite.Json5LiteError: Could not parse JSON5-tolerant content in C:\Users\Justin\AppData\Local\Temp\pytest-of-Justin\pytest-3\test_empty_array_means_no_skil0\openclaw.json: Invalid \escape: line 4 column 24 (char 53). This reader handles // and /* */ comments and trailing commas only; other JSON5 syntax (unquoted keys, single-quoted strings) is not supported.
+
+scripts\json5_lite.py:164: Json5LiteError
+
+The above exception was the direct cause of the following exception:
+
+tmp_path = WindowsPath('C:/Users/Justin/AppData/Local/Temp/pytest-of-Justin/pytest-3/test_empty_array_means_no_skil0')
+
+    def test_empty_array_means_no_skills(tmp_path):
+        cfg = _setup(tmp_path)
+>       agents = {a.id: a for a in parse_openclaw(cfg, None, None, None)}
+                                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests\test_openclaw.py:70: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+config_file = WindowsPath('C:/Users/Justin/AppData/Local/Temp/pytest-of-Justin/pytest-3/test_empty_array_means_no_skil0/openclaw.json')
+user_scope_path = None, openclaw_user_dir = None, bundled_skills_dir = None
+agents = None
+
+    def parse_openclaw(
+        config_file: Path,
+        user_scope_path: Path | None,
+        openclaw_user_dir: Path | None,
+        bundled_skills_dir: Path | None,
+        agents: list[str] | None = None,
+    ) -> list[AgentRecord]:
+        """Parse openclaw.json. Returns one AgentRecord per agent in agents.list."""
+        config_file = Path(config_file).expanduser()
+        if not config_file.exists():
+            return []
+        # Real openclaw.json files are JSON5 (OpenClaw's own loader accepts
+        # comments + trailing commas). Strict json.loads would crash the whole
+        # sync on a perfectly valid hand-edited config, so parse tolerantly and
+        # surface a clear, file-scoped error on genuine corruption.
+        try:
+            data = loads_tolerant(config_file.read_text(), source=str(config_file))
+        except Json5LiteError as exc:
+>           raise Json5LiteError(
+                f"Failed to parse OpenClaw config {config_file}: {exc}"
+            ) from exc
+E           scripts.json5_lite.Json5LiteError: Failed to parse OpenClaw config C:\Users\Justin\AppData\Local\Temp\pytest-of-Justin\pytest-3\test_empty_array_means_no_skil0\openclaw.json: Could not parse JSON5-tolerant content in C:\Users\Justin\AppData\Local\Temp\pytest-of-Justin\pytest-3\test_empty_array_means_no_skil0\openclaw.json: Invalid \escape: line 4 column 24 (char 53). This reader handles // and /* */ comments and trailing commas only; other JSON5 syntax (unquoted keys, single-quoted strings) is not supported.
+
+scripts\platforms\openclaw.py:230: Json5LiteError
+________________ test_workspace_own_visible_when_unrestricted _________________
+
+tmp_path = WindowsPath('C:/Users/Justin/AppData/Local/Temp/pytest-of-Justin/pytest-3/test_workspace_own_visible_whe0')
+
+    def test_workspace_own_visible_when_unrestricted(tmp_path):
+        cfg = _setup(tmp_path)
+>       data = json.loads(cfg.read_text())
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests\test_openclaw.py:76: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+C:\Users\Justin\AppData\Local\Programs\Python\Python312\Lib\json\__init__.py:346: in loads
+    return _default_decoder.decode(s)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^
+C:\Users\Justin\AppData\Local\Programs\Python\Python312\Lib\json\decoder.py:338: in decode
+    obj, end = self.raw_decode(s, idx=_w(s, 0).end())
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = <json.decoder.JSONDecoder object at 0x0000024BD84C0B60>
+s = '{\n  "skills": {\n    "load": {\n      "extraDirs": ["C:\\Users\\Justin\\AppData\\Local\\Temp\\pytest-of-Justin\\pyte...n\\pytest-3\\test_workspace_own_visible_whe0\\workspaces/empty-array",\n        "skills": []\n      }\n    ]\n  }\n}\n'
+idx = 0
+
+    def raw_decode(self, s, idx=0):
+        """Decode a JSON document from ``s`` (a ``str`` beginning with
+        a JSON document) and return a 2-tuple of the Python
+        representation and the index in ``s`` where the document ended.
+    
+        This can be used to decode a JSON document from a string that may
+        have extraneous data at the end.
+    
+        """
+        try:
+>           obj, end = self.scan_once(s, idx)
+                       ^^^^^^^^^^^^^^^^^^^^^^
+E           json.decoder.JSONDecodeError: Invalid \escape: line 4 column 24 (char 53)
+
+C:\Users\Justin\AppData\Local\Programs\Python\Python312\Lib\json\decoder.py:354: JSONDecodeError
+________________ test_workspace_wins_when_same_name_as_shared _________________
+
+tmp_path = WindowsPath('C:/Users/Justin/AppData/Local/Temp/pytest-of-Justin/pytest-3/test_workspace_wins_when_same_0')
+
+    def test_workspace_wins_when_same_name_as_shared(tmp_path):
+        """When workspace AND extraDirs both have 'collide' skill, workspace's record wins
+        (matches real OpenClaw loader: high tier overwrites low tier in by-name dict)."""
+        cfg = _setup(tmp_path)
+>       data = json.loads(cfg.read_text())
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests\test_openclaw.py:89: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+C:\Users\Justin\AppData\Local\Programs\Python\Python312\Lib\json\__init__.py:346: in loads
+    return _default_decoder.decode(s)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^
+C:\Users\Justin\AppData\Local\Programs\Python\Python312\Lib\json\decoder.py:338: in decode
+    obj, end = self.raw_decode(s, idx=_w(s, 0).end())
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = <json.decoder.JSONDecoder object at 0x0000024BD84C0B60>
+s = '{\n  "skills": {\n    "load": {\n      "extraDirs": ["C:\\Users\\Justin\\AppData\\Local\\Temp\\pytest-of-Justin\\pyte...n\\pytest-3\\test_workspace_wins_when_same_0\\workspaces/empty-array",\n        "skills": []\n      }\n    ]\n  }\n}\n'
+idx = 0
+
+    def raw_decode(self, s, idx=0):
+        """Decode a JSON document from ``s`` (a ``str`` beginning with
+        a JSON document) and return a 2-tuple of the Python
+        representation and the index in ``s`` where the document ended.
+    
+        This can be used to decode a JSON document from a string that may
+        have extraneous data at the end.
+    
+        """
+        try:
+>           obj, end = self.scan_once(s, idx)
+                       ^^^^^^^^^^^^^^^^^^^^^^
+E           json.decoder.JSONDecodeError: Invalid \escape: line 4 column 24 (char 53)
+
+C:\Users\Justin\AppData\Local\Programs\Python\Python312\Lib\json\decoder.py:354: JSONDecodeError
+___________________ test_entries_enabled_false_blacklisted ____________________
+
+tmp_path = WindowsPath('C:/Users/Justin/AppData/Local/Temp/pytest-of-Justin/pytest-3/test_entries_enabled_false_bla0')
+
+    def test_entries_enabled_false_blacklisted(tmp_path):
+        cfg = _setup(tmp_path)
+>       data = json.loads(cfg.read_text())
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests\test_openclaw.py:104: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+C:\Users\Justin\AppData\Local\Programs\Python\Python312\Lib\json\__init__.py:346: in loads
+    return _default_decoder.decode(s)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^
+C:\Users\Justin\AppData\Local\Programs\Python\Python312\Lib\json\decoder.py:338: in decode
+    obj, end = self.raw_decode(s, idx=_w(s, 0).end())
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = <json.decoder.JSONDecoder object at 0x0000024BD84C0B60>
+s = '{\n  "skills": {\n    "load": {\n      "extraDirs": ["C:\\Users\\Justin\\AppData\\Local\\Temp\\pytest-of-Justin\\pyte...n\\pytest-3\\test_entries_enabled_false_bla0\\workspaces/empty-array",\n        "skills": []\n      }\n    ]\n  }\n}\n'
+idx = 0
+
+    def raw_decode(self, s, idx=0):
+        """Decode a JSON document from ``s`` (a ``str`` beginning with
+        a JSON document) and return a 2-tuple of the Python
+        representation and the index in ``s`` where the document ended.
+    
+        This can be used to decode a JSON document from a string that may
+        have extraneous data at the end.
+    
+        """
+        try:
+>           obj, end = self.scan_once(s, idx)
+                       ^^^^^^^^^^^^^^^^^^^^^^
+E           json.decoder.JSONDecodeError: Invalid \escape: line 4 column 24 (char 53)
+
+C:\Users\Justin\AppData\Local\Programs\Python\Python312\Lib\json\decoder.py:354: JSONDecodeError
+___________________ test_skill_without_description_excluded ___________________
+
+tmp_path = WindowsPath('C:/Users/Justin/AppData/Local/Temp/pytest-of-Justin/pytest-3/test_skill_without_description0')
+
+    def test_skill_without_description_excluded(tmp_path):
+        """OpenClaw requires both name and description in frontmatter."""
+        cfg = _setup(tmp_path)
+>       data = json.loads(cfg.read_text())
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests\test_openclaw.py:116: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+C:\Users\Justin\AppData\Local\Programs\Python\Python312\Lib\json\__init__.py:346: in loads
+    return _default_decoder.decode(s)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^
+C:\Users\Justin\AppData\Local\Programs\Python\Python312\Lib\json\decoder.py:338: in decode
+    obj, end = self.raw_decode(s, idx=_w(s, 0).end())
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = <json.decoder.JSONDecoder object at 0x0000024BD84C0B60>
+s = '{\n  "skills": {\n    "load": {\n      "extraDirs": ["C:\\Users\\Justin\\AppData\\Local\\Temp\\pytest-of-Justin\\pyte...n\\pytest-3\\test_skill_without_description0\\workspaces/empty-array",\n        "skills": []\n      }\n    ]\n  }\n}\n'
+idx = 0
+
+    def raw_decode(self, s, idx=0):
+        """Decode a JSON document from ``s`` (a ``str`` beginning with
+        a JSON document) and return a 2-tuple of the Python
+        representation and the index in ``s`` where the document ended.
+    
+        This can be used to decode a JSON document from a string that may
+        have extraneous data at the end.
+    
+        """
+        try:
+>           obj, end = self.scan_once(s, idx)
+                       ^^^^^^^^^^^^^^^^^^^^^^
+E           json.decoder.JSONDecodeError: Invalid \escape: line 4 column 24 (char 53)
+
+C:\Users\Justin\AppData\Local\Programs\Python\Python312\Lib\json\decoder.py:354: JSONDecodeError
+_______________________ test_deep_nested_skill_excluded _______________________
+
+tmp_path = WindowsPath('C:/Users/Justin/AppData/Local/Temp/pytest-of-Justin/pytest-3/test_deep_nested_skill_exclude0')
+
+    def test_deep_nested_skill_excluded(tmp_path):
+        """OpenClaw scan limits depth to dir/X/SKILL.md or dir/cat/X/SKILL.md.
+        Deeper nesting is not loaded."""
+        cfg = _setup(tmp_path)
+>       data = json.loads(cfg.read_text())
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests\test_openclaw.py:130: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+C:\Users\Justin\AppData\Local\Programs\Python\Python312\Lib\json\__init__.py:346: in loads
+    return _default_decoder.decode(s)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^
+C:\Users\Justin\AppData\Local\Programs\Python\Python312\Lib\json\decoder.py:338: in decode
+    obj, end = self.raw_decode(s, idx=_w(s, 0).end())
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = <json.decoder.JSONDecoder object at 0x0000024BD84C0B60>
+s = '{\n  "skills": {\n    "load": {\n      "extraDirs": ["C:\\Users\\Justin\\AppData\\Local\\Temp\\pytest-of-Justin\\pyte...n\\pytest-3\\test_deep_nested_skill_exclude0\\workspaces/empty-array",\n        "skills": []\n      }\n    ]\n  }\n}\n'
+idx = 0
+
+    def raw_decode(self, s, idx=0):
+        """Decode a JSON document from ``s`` (a ``str`` beginning with
+        a JSON document) and return a 2-tuple of the Python
+        representation and the index in ``s`` where the document ended.
+    
+        This can be used to decode a JSON document from a string that may
+        have extraneous data at the end.
+    
+        """
+        try:
+>           obj, end = self.scan_once(s, idx)
+                       ^^^^^^^^^^^^^^^^^^^^^^
+E           json.decoder.JSONDecodeError: Invalid \escape: line 4 column 24 (char 53)
+
+C:\Users\Justin\AppData\Local\Programs\Python\Python312\Lib\json\decoder.py:354: JSONDecodeError
+_________________________ test_grouped_skill_included _________________________
+
+tmp_path = WindowsPath('C:/Users/Justin/AppData/Local/Temp/pytest-of-Justin/pytest-3/test_grouped_skill_included0')
+
+    def test_grouped_skill_included(tmp_path):
+        """Skill at dir/cat/X/SKILL.md (depth 2) IS loaded (grouped category)."""
+        cfg = _setup(tmp_path)
+>       data = json.loads(cfg.read_text())
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests\test_openclaw.py:144: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+C:\Users\Justin\AppData\Local\Programs\Python\Python312\Lib\json\__init__.py:346: in loads
+    return _default_decoder.decode(s)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^
+C:\Users\Justin\AppData\Local\Programs\Python\Python312\Lib\json\decoder.py:338: in decode
+    obj, end = self.raw_decode(s, idx=_w(s, 0).end())
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = <json.decoder.JSONDecoder object at 0x0000024BD84C0B60>
+s = '{\n  "skills": {\n    "load": {\n      "extraDirs": ["C:\\Users\\Justin\\AppData\\Local\\Temp\\pytest-of-Justin\\pyte...stin\\pytest-3\\test_grouped_skill_included0\\workspaces/empty-array",\n        "skills": []\n      }\n    ]\n  }\n}\n'
+idx = 0
+
+    def raw_decode(self, s, idx=0):
+        """Decode a JSON document from ``s`` (a ``str`` beginning with
+        a JSON document) and return a 2-tuple of the Python
+        representation and the index in ``s`` where the document ended.
+    
+        This can be used to decode a JSON document from a string that may
+        have extraneous data at the end.
+    
+        """
+        try:
+>           obj, end = self.scan_once(s, idx)
+                       ^^^^^^^^^^^^^^^^^^^^^^
+E           json.decoder.JSONDecodeError: Invalid \escape: line 4 column 24 (char 53)
+
+C:\Users\Justin\AppData\Local\Programs\Python\Python312\Lib\json\decoder.py:354: JSONDecodeError
+_____________________ test_runtime_gating_noted_in_agent ______________________
+
+text = '{\n  "skills": {\n    "load": {\n      "extraDirs": ["C:\\Users\\Justin\\AppData\\Local\\Temp\\pytest-of-Justin\\pyte...n\\pytest-3\\test_runtime_gating_noted_in_a0\\workspaces/empty-array",\n        "skills": []\n      }\n    ]\n  }\n}\n'
+source = 'C:\\Users\\Justin\\AppData\\Local\\Temp\\pytest-of-Justin\\pytest-3\\test_runtime_gating_noted_in_a0\\openclaw.json'
+
+    def loads_tolerant(text: str, *, source: str | None = None):
+        """Parse `text` as JSON, tolerating // and /* */ comments and trailing
+        commas. Returns the decoded Python object.
+    
+        Strategy: try strict json.loads first (fast path, zero risk for already
+        valid JSON), then retry once after the string-aware pre-clean. If both
+        fail, raise Json5LiteError with an actionable message.
+    
+        `source` (optional) names the origin (e.g. a file path) so the error
+        message points the user at the right place instead of a bare decode stack.
+        """
+        try:
+            return json.loads(text)
+        except (json.JSONDecodeError, ValueError):
+            pass
+    
+        try:
+            cleaned = _strip_comments_and_trailing_commas(text)
+>           return json.loads(cleaned)
+                   ^^^^^^^^^^^^^^^^^^^
+
+scripts\json5_lite.py:161: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+C:\Users\Justin\AppData\Local\Programs\Python\Python312\Lib\json\__init__.py:346: in loads
+    return _default_decoder.decode(s)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^
+C:\Users\Justin\AppData\Local\Programs\Python\Python312\Lib\json\decoder.py:338: in decode
+    obj, end = self.raw_decode(s, idx=_w(s, 0).end())
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = <json.decoder.JSONDecoder object at 0x0000024BD84C0B60>
+s = '{\n  "skills": {\n    "load": {\n      "extraDirs": ["C:\\Users\\Justin\\AppData\\Local\\Temp\\pytest-of-Justin\\pyte...n\\pytest-3\\test_runtime_gating_noted_in_a0\\workspaces/empty-array",\n        "skills": []\n      }\n    ]\n  }\n}\n'
+idx = 0
+
+    def raw_decode(self, s, idx=0):
+        """Decode a JSON document from ``s`` (a ``str`` beginning with
+        a JSON document) and return a 2-tuple of the Python
+        representation and the index in ``s`` where the document ended.
+    
+        This can be used to decode a JSON document from a string that may
+        have extraneous data at the end.
+    
+        """
+        try:
+>           obj, end = self.scan_once(s, idx)
+                       ^^^^^^^^^^^^^^^^^^^^^^
+E           json.decoder.JSONDecodeError: Invalid \escape: line 4 column 24 (char 53)
+
+C:\Users\Justin\AppData\Local\Programs\Python\Python312\Lib\json\decoder.py:354: JSONDecodeError
+
+The above exception was the direct cause of the following exception:
+
+config_file = WindowsPath('C:/Users/Justin/AppData/Local/Temp/pytest-of-Justin/pytest-3/test_runtime_gating_noted_in_a0/openclaw.json')
+user_scope_path = None, openclaw_user_dir = None, bundled_skills_dir = None
+agents = None
+
+    def parse_openclaw(
+        config_file: Path,
+        user_scope_path: Path | None,
+        openclaw_user_dir: Path | None,
+        bundled_skills_dir: Path | None,
+        agents: list[str] | None = None,
+    ) -> list[AgentRecord]:
+        """Parse openclaw.json. Returns one AgentRecord per agent in agents.list."""
+        config_file = Path(config_file).expanduser()
+        if not config_file.exists():
+            return []
+        # Real openclaw.json files are JSON5 (OpenClaw's own loader accepts
+        # comments + trailing commas). Strict json.loads would crash the whole
+        # sync on a perfectly valid hand-edited config, so parse tolerantly and
+        # surface a clear, file-scoped error on genuine corruption.
+        try:
+>           data = loads_tolerant(config_file.read_text(), source=str(config_file))
+                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+scripts\platforms\openclaw.py:228: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+text = '{\n  "skills": {\n    "load": {\n      "extraDirs": ["C:\\Users\\Justin\\AppData\\Local\\Temp\\pytest-of-Justin\\pyte...n\\pytest-3\\test_runtime_gating_noted_in_a0\\workspaces/empty-array",\n        "skills": []\n      }\n    ]\n  }\n}\n'
+source = 'C:\\Users\\Justin\\AppData\\Local\\Temp\\pytest-of-Justin\\pytest-3\\test_runtime_gating_noted_in_a0\\openclaw.json'
+
+    def loads_tolerant(text: str, *, source: str | None = None):
+        """Parse `text` as JSON, tolerating // and /* */ comments and trailing
+        commas. Returns the decoded Python object.
+    
+        Strategy: try strict json.loads first (fast path, zero risk for already
+        valid JSON), then retry once after the string-aware pre-clean. If both
+        fail, raise Json5LiteError with an actionable message.
+    
+        `source` (optional) names the origin (e.g. a file path) so the error
+        message points the user at the right place instead of a bare decode stack.
+        """
+        try:
+            return json.loads(text)
+        except (json.JSONDecodeError, ValueError):
+            pass
+    
+        try:
+            cleaned = _strip_comments_and_trailing_commas(text)
+            return json.loads(cleaned)
+        except (json.JSONDecodeError, ValueError) as exc:
+            where = f" in {source}" if source else ""
+>           raise Json5LiteError(
+                f"Could not parse JSON5-tolerant content{where}: {exc}. "
+                f"This reader handles // and /* */ comments and trailing commas "
+                f"only; other JSON5 syntax (unquoted keys, single-quoted strings) "
+                f"is not supported."
+            ) from exc
+E           scripts.json5_lite.Json5LiteError: Could not parse JSON5-tolerant content in C:\Users\Justin\AppData\Local\Temp\pytest-of-Justin\pytest-3\test_runtime_gating_noted_in_a0\openclaw.json: Invalid \escape: line 4 column 24 (char 53). This reader handles // and /* */ comments and trailing commas only; other JSON5 syntax (unquoted keys, single-quoted strings) is not supported.
+
+scripts\json5_lite.py:164: Json5LiteError
+
+The above exception was the direct cause of the following exception:
+
+tmp_path = WindowsPath('C:/Users/Justin/AppData/Local/Temp/pytest-of-Justin/pytest-3/test_runtime_gating_noted_in_a0')
+
+    def test_runtime_gating_noted_in_agent(tmp_path):
+        """Agent notes should mention requires.* is not statically evaluated."""
+        cfg = _setup(tmp_path)
+>       agents = {a.id: a for a in parse_openclaw(cfg, None, None, None)}
+                                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests\test_openclaw.py:156: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+config_file = WindowsPath('C:/Users/Justin/AppData/Local/Temp/pytest-of-Justin/pytest-3/test_runtime_gating_noted_in_a0/openclaw.json')
+user_scope_path = None, openclaw_user_dir = None, bundled_skills_dir = None
+agents = None
+
+    def parse_openclaw(
+        config_file: Path,
+        user_scope_path: Path | None,
+        openclaw_user_dir: Path | None,
+        bundled_skills_dir: Path | None,
+        agents: list[str] | None = None,
+    ) -> list[AgentRecord]:
+        """Parse openclaw.json. Returns one AgentRecord per agent in agents.list."""
+        config_file = Path(config_file).expanduser()
+        if not config_file.exists():
+            return []
+        # Real openclaw.json files are JSON5 (OpenClaw's own loader accepts
+        # comments + trailing commas). Strict json.loads would crash the whole
+        # sync on a perfectly valid hand-edited config, so parse tolerantly and
+        # surface a clear, file-scoped error on genuine corruption.
+        try:
+            data = loads_tolerant(config_file.read_text(), source=str(config_file))
+        except Json5LiteError as exc:
+>           raise Json5LiteError(
+                f"Failed to parse OpenClaw config {config_file}: {exc}"
+            ) from exc
+E           scripts.json5_lite.Json5LiteError: Failed to parse OpenClaw config C:\Users\Justin\AppData\Local\Temp\pytest-of-Justin\pytest-3\test_runtime_gating_noted_in_a0\openclaw.json: Could not parse JSON5-tolerant content in C:\Users\Justin\AppData\Local\Temp\pytest-of-Justin\pytest-3\test_runtime_gating_noted_in_a0\openclaw.json: Invalid \escape: line 4 column 24 (char 53). This reader handles // and /* */ comments and trailing commas only; other JSON5 syntax (unquoted keys, single-quoted strings) is not supported.
+
+scripts\platforms\openclaw.py:230: Json5LiteError
+_________________ test_entries_disabled_by_skill_key_excluded _________________
+
+tmp_path = WindowsPath('C:/Users/Justin/AppData/Local/Temp/pytest-of-Justin/pytest-3/test_entries_disabled_by_skill0')
+
+    def test_entries_disabled_by_skill_key_excluded(tmp_path):
+        """When skill has openclaw.skillKey, entries.enabled lookup uses skillKey too."""
+        cfg = _setup(tmp_path)
+>       data = json.loads(cfg.read_text())
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests\test_openclaw.py:212: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+C:\Users\Justin\AppData\Local\Programs\Python\Python312\Lib\json\__init__.py:346: in loads
+    return _default_decoder.decode(s)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^
+C:\Users\Justin\AppData\Local\Programs\Python\Python312\Lib\json\decoder.py:338: in decode
+    obj, end = self.raw_decode(s, idx=_w(s, 0).end())
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = <json.decoder.JSONDecoder object at 0x0000024BD84C0B60>
+s = '{\n  "skills": {\n    "load": {\n      "extraDirs": ["C:\\Users\\Justin\\AppData\\Local\\Temp\\pytest-of-Justin\\pyte...n\\pytest-3\\test_entries_disabled_by_skill0\\workspaces/empty-array",\n        "skills": []\n      }\n    ]\n  }\n}\n'
+idx = 0
+
+    def raw_decode(self, s, idx=0):
+        """Decode a JSON document from ``s`` (a ``str`` beginning with
+        a JSON document) and return a 2-tuple of the Python
+        representation and the index in ``s`` where the document ended.
+    
+        This can be used to decode a JSON document from a string that may
+        have extraneous data at the end.
+    
+        """
+        try:
+>           obj, end = self.scan_once(s, idx)
+                       ^^^^^^^^^^^^^^^^^^^^^^
+E           json.decoder.JSONDecodeError: Invalid \escape: line 4 column 24 (char 53)
+
+C:\Users\Justin\AppData\Local\Programs\Python\Python312\Lib\json\decoder.py:354: JSONDecodeError
+___________ test_entries_does_not_match_name_when_skillkey_present ____________
+
+tmp_path = WindowsPath('C:/Users/Justin/AppData/Local/Temp/pytest-of-Justin/pytest-3/test_entries_does_not_match_na0')
+
+    def test_entries_does_not_match_name_when_skillkey_present(tmp_path):
+        """resolveSkillKey returns metadata.skillKey ?? name (single value).
+        Don't over-exclude: name "extra-disabled" with explicit skillKey="alive"
+        must NOT be filtered by entries[extra-disabled].enabled=false."""
+        cfg = _setup(tmp_path)
+>       data = json.loads(cfg.read_text())
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests\test_openclaw.py:233: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+C:\Users\Justin\AppData\Local\Programs\Python\Python312\Lib\json\__init__.py:346: in loads
+    return _default_decoder.decode(s)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^
+C:\Users\Justin\AppData\Local\Programs\Python\Python312\Lib\json\decoder.py:338: in decode
+    obj, end = self.raw_decode(s, idx=_w(s, 0).end())
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = <json.decoder.JSONDecoder object at 0x0000024BD84C0B60>
+s = '{\n  "skills": {\n    "load": {\n      "extraDirs": ["C:\\Users\\Justin\\AppData\\Local\\Temp\\pytest-of-Justin\\pyte...n\\pytest-3\\test_entries_does_not_match_na0\\workspaces/empty-array",\n        "skills": []\n      }\n    ]\n  }\n}\n'
+idx = 0
+
+    def raw_decode(self, s, idx=0):
+        """Decode a JSON document from ``s`` (a ``str`` beginning with
+        a JSON document) and return a 2-tuple of the Python
+        representation and the index in ``s`` where the document ended.
+    
+        This can be used to decode a JSON document from a string that may
+        have extraneous data at the end.
+    
+        """
+        try:
+>           obj, end = self.scan_once(s, idx)
+                       ^^^^^^^^^^^^^^^^^^^^^^
+E           json.decoder.JSONDecodeError: Invalid \escape: line 4 column 24 (char 53)
+
+C:\Users\Justin\AppData\Local\Programs\Python\Python312\Lib\json\decoder.py:354: JSONDecodeError
+___________ test_same_name_in_both_workspace_roots_distinct_sources ___________
+
+tmp_path = WindowsPath('C:/Users/Justin/AppData/Local/Temp/pytest-of-Justin/pytest-3/test_same_name_in_both_workspa0')
+
+    def test_same_name_in_both_workspace_roots_distinct_sources(tmp_path):
+        """FIX-4: a skill named 'dup' present in BOTH <ws>/.agents/skills and
+        <ws>/skills must (a) resolve by-name to the workspace/skills tier (5 > 4)
+        and (b) carry distinct source_key per scan root so downstream dedup keeps
+        both as separate vault symlinks."""
+        cfg = _setup(tmp_path)
+>       data = json.loads(cfg.read_text())
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests\test_openclaw.py:255: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+C:\Users\Justin\AppData\Local\Programs\Python\Python312\Lib\json\__init__.py:346: in loads
+    return _default_decoder.decode(s)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^
+C:\Users\Justin\AppData\Local\Programs\Python\Python312\Lib\json\decoder.py:338: in decode
+    obj, end = self.raw_decode(s, idx=_w(s, 0).end())
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = <json.decoder.JSONDecoder object at 0x0000024BD84C0B60>
+s = '{\n  "skills": {\n    "load": {\n      "extraDirs": ["C:\\Users\\Justin\\AppData\\Local\\Temp\\pytest-of-Justin\\pyte...n\\pytest-3\\test_same_name_in_both_workspa0\\workspaces/empty-array",\n        "skills": []\n      }\n    ]\n  }\n}\n'
+idx = 0
+
+    def raw_decode(self, s, idx=0):
+        """Decode a JSON document from ``s`` (a ``str`` beginning with
+        a JSON document) and return a 2-tuple of the Python
+        representation and the index in ``s`` where the document ended.
+    
+        This can be used to decode a JSON document from a string that may
+        have extraneous data at the end.
+    
+        """
+        try:
+>           obj, end = self.scan_once(s, idx)
+                       ^^^^^^^^^^^^^^^^^^^^^^
+E           json.decoder.JSONDecodeError: Invalid \escape: line 4 column 24 (char 53)
+
+C:\Users\Justin\AppData\Local\Programs\Python\Python312\Lib\json\decoder.py:354: JSONDecodeError
+_______________ test_skillkey_under_unrelated_block_is_ignored ________________
+
+tmp_path = WindowsPath('C:/Users/Justin/AppData/Local/Temp/pytest-of-Justin/pytest-3/test_skillkey_under_unrelated_0')
+
+    def test_skillkey_under_unrelated_block_is_ignored(tmp_path):
+        """FIX-1/FIX-2: a `skillKey:` nested under an UNRELATED frontmatter block
+        (e.g. metadata.custom) must NOT be read as the canonical OpenClaw skillKey.
+        Only the top-level `openclaw:` block's skillKey counts."""
+        cfg = _setup(tmp_path)
+>       data = json.loads(cfg.read_text())
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests\test_openclaw.py:277: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+C:\Users\Justin\AppData\Local\Programs\Python\Python312\Lib\json\__init__.py:346: in loads
+    return _default_decoder.decode(s)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^
+C:\Users\Justin\AppData\Local\Programs\Python\Python312\Lib\json\decoder.py:338: in decode
+    obj, end = self.raw_decode(s, idx=_w(s, 0).end())
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = <json.decoder.JSONDecoder object at 0x0000024BD84C0B60>
+s = '{\n  "skills": {\n    "load": {\n      "extraDirs": ["C:\\Users\\Justin\\AppData\\Local\\Temp\\pytest-of-Justin\\pyte...n\\pytest-3\\test_skillkey_under_unrelated_0\\workspaces/empty-array",\n        "skills": []\n      }\n    ]\n  }\n}\n'
+idx = 0
+
+    def raw_decode(self, s, idx=0):
+        """Decode a JSON document from ``s`` (a ``str`` beginning with
+        a JSON document) and return a 2-tuple of the Python
+        representation and the index in ``s`` where the document ended.
+    
+        This can be used to decode a JSON document from a string that may
+        have extraneous data at the end.
+    
+        """
+        try:
+>           obj, end = self.scan_once(s, idx)
+                       ^^^^^^^^^^^^^^^^^^^^^^
+E           json.decoder.JSONDecodeError: Invalid \escape: line 4 column 24 (char 53)
+
+C:\Users\Justin\AppData\Local\Programs\Python\Python312\Lib\json\decoder.py:354: JSONDecodeError
+_________________ test_skillkey_from_openclaw_block_when_crlf _________________
+
+tmp_path = WindowsPath('C:/Users/Justin/AppData/Local/Temp/pytest-of-Justin/pytest-3/test_skillkey_from_openclaw_bl0')
+
+    def test_skillkey_from_openclaw_block_when_crlf(tmp_path):
+        """FIX-1/FIX-3: structured parse still finds openclaw.skillKey, and the
+        frontmatter fence matches on CRLF line endings."""
+        cfg = _setup(tmp_path)
+>       data = json.loads(cfg.read_text())
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests\test_openclaw.py:302: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+C:\Users\Justin\AppData\Local\Programs\Python\Python312\Lib\json\__init__.py:346: in loads
+    return _default_decoder.decode(s)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^
+C:\Users\Justin\AppData\Local\Programs\Python\Python312\Lib\json\decoder.py:338: in decode
+    obj, end = self.raw_decode(s, idx=_w(s, 0).end())
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = <json.decoder.JSONDecoder object at 0x0000024BD84C0B60>
+s = '{\n  "skills": {\n    "load": {\n      "extraDirs": ["C:\\Users\\Justin\\AppData\\Local\\Temp\\pytest-of-Justin\\pyte...n\\pytest-3\\test_skillkey_from_openclaw_bl0\\workspaces/empty-array",\n        "skills": []\n      }\n    ]\n  }\n}\n'
+idx = 0
+
+    def raw_decode(self, s, idx=0):
+        """Decode a JSON document from ``s`` (a ``str`` beginning with
+        a JSON document) and return a 2-tuple of the Python
+        representation and the index in ``s`` where the document ended.
+    
+        This can be used to decode a JSON document from a string that may
+        have extraneous data at the end.
+    
+        """
+        try:
+>           obj, end = self.scan_once(s, idx)
+                       ^^^^^^^^^^^^^^^^^^^^^^
+E           json.decoder.JSONDecodeError: Invalid \escape: line 4 column 24 (char 53)
+
+C:\Users\Justin\AppData\Local\Programs\Python\Python312\Lib\json\decoder.py:354: JSONDecodeError
+________________ test_symlinked_skill_dir_under_extradir_found ________________
+
+tmp_path = WindowsPath('C:/Users/Justin/AppData/Local/Temp/pytest-of-Justin/pytest-3/test_symlinked_skill_dir_under0')
+
+    def test_symlinked_skill_dir_under_extradir_found(tmp_path):
+        """FIX-A regression: _scan_openclaw uses iterdir()+is_dir() (not rglob),
+        and Path.is_dir() follows symlinks, so a symlinked skill dir under an
+        extraDir must still be discovered (depth 1)."""
+        cfg = _setup(tmp_path)
+>       data = json.loads(cfg.read_text())
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests\test_openclaw.py:328: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+C:\Users\Justin\AppData\Local\Programs\Python\Python312\Lib\json\__init__.py:346: in loads
+    return _default_decoder.decode(s)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^
+C:\Users\Justin\AppData\Local\Programs\Python\Python312\Lib\json\decoder.py:338: in decode
+    obj, end = self.raw_decode(s, idx=_w(s, 0).end())
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = <json.decoder.JSONDecoder object at 0x0000024BD84C0B60>
+s = '{\n  "skills": {\n    "load": {\n      "extraDirs": ["C:\\Users\\Justin\\AppData\\Local\\Temp\\pytest-of-Justin\\pyte...n\\pytest-3\\test_symlinked_skill_dir_under0\\workspaces/empty-array",\n        "skills": []\n      }\n    ]\n  }\n}\n'
+idx = 0
+
+    def raw_decode(self, s, idx=0):
+        """Decode a JSON document from ``s`` (a ``str`` beginning with
+        a JSON document) and return a 2-tuple of the Python
+        representation and the index in ``s`` where the document ended.
+    
+        This can be used to decode a JSON document from a string that may
+        have extraneous data at the end.
+    
+        """
+        try:
+>           obj, end = self.scan_once(s, idx)
+                       ^^^^^^^^^^^^^^^^^^^^^^
+E           json.decoder.JSONDecodeError: Invalid \escape: line 4 column 24 (char 53)
+
+C:\Users\Justin\AppData\Local\Programs\Python\Python312\Lib\json\decoder.py:354: JSONDecodeError
+___________________ test_symlinked_grouped_skill_dir_found ____________________
+
+tmp_path = WindowsPath('C:/Users/Justin/AppData/Local/Temp/pytest-of-Justin/pytest-3/test_symlinked_grouped_skill_d0')
+
+    def test_symlinked_grouped_skill_dir_found(tmp_path):
+        """FIX-A regression: a symlinked CATEGORY dir at depth 1 whose real
+        children are skills (depth 2 grouped) must also resolve through the
+        symlink."""
+        cfg = _setup(tmp_path)
+>       data = json.loads(cfg.read_text())
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests\test_openclaw.py:344: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+C:\Users\Justin\AppData\Local\Programs\Python\Python312\Lib\json\__init__.py:346: in loads
+    return _default_decoder.decode(s)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^
+C:\Users\Justin\AppData\Local\Programs\Python\Python312\Lib\json\decoder.py:338: in decode
+    obj, end = self.raw_decode(s, idx=_w(s, 0).end())
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = <json.decoder.JSONDecoder object at 0x0000024BD84C0B60>
+s = '{\n  "skills": {\n    "load": {\n      "extraDirs": ["C:\\Users\\Justin\\AppData\\Local\\Temp\\pytest-of-Justin\\pyte...n\\pytest-3\\test_symlinked_grouped_skill_d0\\workspaces/empty-array",\n        "skills": []\n      }\n    ]\n  }\n}\n'
+idx = 0
+
+    def raw_decode(self, s, idx=0):
+        """Decode a JSON document from ``s`` (a ``str`` beginning with
+        a JSON document) and return a 2-tuple of the Python
+        representation and the index in ``s`` where the document ended.
+    
+        This can be used to decode a JSON document from a string that may
+        have extraneous data at the end.
+    
+        """
+        try:
+>           obj, end = self.scan_once(s, idx)
+                       ^^^^^^^^^^^^^^^^^^^^^^
+E           json.decoder.JSONDecodeError: Invalid \escape: line 4 column 24 (char 53)
+
+C:\Users\Justin\AppData\Local\Programs\Python\Python312\Lib\json\decoder.py:354: JSONDecodeError
+_______________ test_skillkey_from_metadata_openclaw_nested_map _______________
+
+tmp_path = WindowsPath('C:/Users/Justin/AppData/Local/Temp/pytest-of-Justin/pytest-3/test_skillkey_from_metadata_op0')
+
+    def test_skillkey_from_metadata_openclaw_nested_map(tmp_path):
+        """FIX-A: the canonical runtime location is `metadata.openclaw.skillKey`.
+        OpenClaw's frontmatter parser JSON.stringify's any object-valued top-level
+        key, so a nested YAML map `metadata:\\n  openclaw:\\n    skillKey: x`
+        resolves to skillKey 'x' (resolveOpenClawManifestBlock reads `metadata`)."""
+        cfg = _setup(tmp_path)
+>       data = json.loads(cfg.read_text())
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests\test_openclaw.py:550: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+C:\Users\Justin\AppData\Local\Programs\Python\Python312\Lib\json\__init__.py:346: in loads
+    return _default_decoder.decode(s)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^
+C:\Users\Justin\AppData\Local\Programs\Python\Python312\Lib\json\decoder.py:338: in decode
+    obj, end = self.raw_decode(s, idx=_w(s, 0).end())
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = <json.decoder.JSONDecoder object at 0x0000024BD84C0B60>
+s = '{\n  "skills": {\n    "load": {\n      "extraDirs": ["C:\\Users\\Justin\\AppData\\Local\\Temp\\pytest-of-Justin\\pyte...n\\pytest-3\\test_skillkey_from_metadata_op0\\workspaces/empty-array",\n        "skills": []\n      }\n    ]\n  }\n}\n'
+idx = 0
+
+    def raw_decode(self, s, idx=0):
+        """Decode a JSON document from ``s`` (a ``str`` beginning with
+        a JSON document) and return a 2-tuple of the Python
+        representation and the index in ``s`` where the document ended.
+    
+        This can be used to decode a JSON document from a string that may
+        have extraneous data at the end.
+    
+        """
+        try:
+>           obj, end = self.scan_once(s, idx)
+                       ^^^^^^^^^^^^^^^^^^^^^^
+E           json.decoder.JSONDecodeError: Invalid \escape: line 4 column 24 (char 53)
+
+C:\Users\Justin\AppData\Local\Programs\Python\Python312\Lib\json\decoder.py:354: JSONDecodeError
+______________ test_skillkey_from_metadata_openclaw_json_string _______________
+
+tmp_path = WindowsPath('C:/Users/Justin/AppData/Local/Temp/pytest-of-Justin/pytest-3/test_skillkey_from_metadata_op1')
+
+    def test_skillkey_from_metadata_openclaw_json_string(tmp_path):
+        """FIX-A: the inline JSON-string form of `metadata` (what the runtime
+        actually JSON5.parses) must also resolve skillKey."""
+        cfg = _setup(tmp_path)
+>       data = json.loads(cfg.read_text())
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests\test_openclaw.py:575: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+C:\Users\Justin\AppData\Local\Programs\Python\Python312\Lib\json\__init__.py:346: in loads
+    return _default_decoder.decode(s)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^
+C:\Users\Justin\AppData\Local\Programs\Python\Python312\Lib\json\decoder.py:338: in decode
+    obj, end = self.raw_decode(s, idx=_w(s, 0).end())
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = <json.decoder.JSONDecoder object at 0x0000024BD84C0B60>
+s = '{\n  "skills": {\n    "load": {\n      "extraDirs": ["C:\\Users\\Justin\\AppData\\Local\\Temp\\pytest-of-Justin\\pyte...n\\pytest-3\\test_skillkey_from_metadata_op1\\workspaces/empty-array",\n        "skills": []\n      }\n    ]\n  }\n}\n'
+idx = 0
+
+    def raw_decode(self, s, idx=0):
+        """Decode a JSON document from ``s`` (a ``str`` beginning with
+        a JSON document) and return a 2-tuple of the Python
+        representation and the index in ``s`` where the document ended.
+    
+        This can be used to decode a JSON document from a string that may
+        have extraneous data at the end.
+    
+        """
+        try:
+>           obj, end = self.scan_once(s, idx)
+                       ^^^^^^^^^^^^^^^^^^^^^^
+E           json.decoder.JSONDecodeError: Invalid \escape: line 4 column 24 (char 53)
+
+C:\Users\Justin\AppData\Local\Programs\Python\Python312\Lib\json\decoder.py:354: JSONDecodeError
+______________ test_skillkey_from_metadata_legacy_clawdbot_block ______________
+
+tmp_path = WindowsPath('C:/Users/Justin/AppData/Local/Temp/pytest-of-Justin/pytest-3/test_skillkey_from_metadata_le0')
+
+    def test_skillkey_from_metadata_legacy_clawdbot_block(tmp_path):
+        """FIX-A: the runtime accepts the legacy manifest key `clawdbot`
+        (LEGACY_MANIFEST_KEYS) under `metadata`, same as `openclaw`."""
+        cfg = _setup(tmp_path)
+>       data = json.loads(cfg.read_text())
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests\test_openclaw.py:598: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+C:\Users\Justin\AppData\Local\Programs\Python\Python312\Lib\json\__init__.py:346: in loads
+    return _default_decoder.decode(s)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^
+C:\Users\Justin\AppData\Local\Programs\Python\Python312\Lib\json\decoder.py:338: in decode
+    obj, end = self.raw_decode(s, idx=_w(s, 0).end())
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = <json.decoder.JSONDecoder object at 0x0000024BD84C0B60>
+s = '{\n  "skills": {\n    "load": {\n      "extraDirs": ["C:\\Users\\Justin\\AppData\\Local\\Temp\\pytest-of-Justin\\pyte...n\\pytest-3\\test_skillkey_from_metadata_le0\\workspaces/empty-array",\n        "skills": []\n      }\n    ]\n  }\n}\n'
+idx = 0
+
+    def raw_decode(self, s, idx=0):
+        """Decode a JSON document from ``s`` (a ``str`` beginning with
+        a JSON document) and return a 2-tuple of the Python
+        representation and the index in ``s`` where the document ended.
+    
+        This can be used to decode a JSON document from a string that may
+        have extraneous data at the end.
+    
+        """
+        try:
+>           obj, end = self.scan_once(s, idx)
+                       ^^^^^^^^^^^^^^^^^^^^^^
+E           json.decoder.JSONDecodeError: Invalid \escape: line 4 column 24 (char 53)
+
+C:\Users\Justin\AppData\Local\Programs\Python\Python312\Lib\json\decoder.py:354: JSONDecodeError
+___________ test_metadata_openclaw_skillkey_drives_entries_disable ____________
+
+tmp_path = WindowsPath('C:/Users/Justin/AppData/Local/Temp/pytest-of-Justin/pytest-3/test_metadata_openclaw_skillke0')
+
+    def test_metadata_openclaw_skillkey_drives_entries_disable(tmp_path):
+        """FIX-A end-to-end: a skill whose canonical skillKey lives at
+        metadata.openclaw.skillKey must be matched by skills.entries[<key>].enabled
+        =false (previously skill_key was None so the blacklist missed it)."""
+        cfg = _setup(tmp_path)
+>       data = json.loads(cfg.read_text())
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests\test_openclaw.py:624: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+C:\Users\Justin\AppData\Local\Programs\Python\Python312\Lib\json\__init__.py:346: in loads
+    return _default_decoder.decode(s)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^
+C:\Users\Justin\AppData\Local\Programs\Python\Python312\Lib\json\decoder.py:338: in decode
+    obj, end = self.raw_decode(s, idx=_w(s, 0).end())
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = <json.decoder.JSONDecoder object at 0x0000024BD84C0B60>
+s = '{\n  "skills": {\n    "load": {\n      "extraDirs": ["C:\\Users\\Justin\\AppData\\Local\\Temp\\pytest-of-Justin\\pyte...n\\pytest-3\\test_metadata_openclaw_skillke0\\workspaces/empty-array",\n        "skills": []\n      }\n    ]\n  }\n}\n'
+idx = 0
+
+    def raw_decode(self, s, idx=0):
+        """Decode a JSON document from ``s`` (a ``str`` beginning with
+        a JSON document) and return a 2-tuple of the Python
+        representation and the index in ``s`` where the document ended.
+    
+        This can be used to decode a JSON document from a string that may
+        have extraneous data at the end.
+    
+        """
+        try:
+>           obj, end = self.scan_once(s, idx)
+                       ^^^^^^^^^^^^^^^^^^^^^^
+E           json.decoder.JSONDecodeError: Invalid \escape: line 4 column 24 (char 53)
+
+C:\Users\Justin\AppData\Local\Programs\Python\Python312\Lib\json\decoder.py:354: JSONDecodeError
+_________ test_skillkey_under_metadata_unrelated_block_still_ignored __________
+
+tmp_path = WindowsPath('C:/Users/Justin/AppData/Local/Temp/pytest-of-Justin/pytest-3/test_skillkey_under_metadata_u0')
+
+    def test_skillkey_under_metadata_unrelated_block_still_ignored(tmp_path):
+        """FIX-A: a skillKey under metadata.<unrelated> (e.g. metadata.custom)
+        must still NOT be read — only the openclaw/clawdbot manifest sub-objects
+        of `metadata` count."""
+        cfg = _setup(tmp_path)
+>       data = json.loads(cfg.read_text())
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests\test_openclaw.py:652: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+C:\Users\Justin\AppData\Local\Programs\Python\Python312\Lib\json\__init__.py:346: in loads
+    return _default_decoder.decode(s)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^
+C:\Users\Justin\AppData\Local\Programs\Python\Python312\Lib\json\decoder.py:338: in decode
+    obj, end = self.raw_decode(s, idx=_w(s, 0).end())
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = <json.decoder.JSONDecoder object at 0x0000024BD84C0B60>
+s = '{\n  "skills": {\n    "load": {\n      "extraDirs": ["C:\\Users\\Justin\\AppData\\Local\\Temp\\pytest-of-Justin\\pyte...n\\pytest-3\\test_skillkey_under_metadata_u0\\workspaces/empty-array",\n        "skills": []\n      }\n    ]\n  }\n}\n'
+idx = 0
+
+    def raw_decode(self, s, idx=0):
+        """Decode a JSON document from ``s`` (a ``str`` beginning with
+        a JSON document) and return a 2-tuple of the Python
+        representation and the index in ``s`` where the document ended.
+    
+        This can be used to decode a JSON document from a string that may
+        have extraneous data at the end.
+    
+        """
+        try:
+>           obj, end = self.scan_once(s, idx)
+                       ^^^^^^^^^^^^^^^^^^^^^^
+E           json.decoder.JSONDecodeError: Invalid \escape: line 4 column 24 (char 53)
+
+C:\Users\Justin\AppData\Local\Programs\Python\Python312\Lib\json\decoder.py:354: JSONDecodeError
+__________________ test_skillkey_from_json5_metadata_string ___________________
+
+tmp_path = WindowsPath('C:/Users/Justin/AppData/Local/Temp/pytest-of-Justin/pytest-3/test_skillkey_from_json5_metad0')
+
+    def test_skillkey_from_json5_metadata_string(tmp_path):
+        """FIX-B: a SKILL.md whose `metadata` is a JSON5 string with a trailing
+        comma + a // comment (accepted by the OpenClaw runtime which JSON5.parses
+        it; strict json.loads would reject the trailing comma) declaring
+        openclaw.skillKey must resolve, mirroring runtime fidelity."""
+        cfg = _setup(tmp_path)
+>       data = json.loads(cfg.read_text())
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests\test_openclaw.py:792: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+C:\Users\Justin\AppData\Local\Programs\Python\Python312\Lib\json\__init__.py:346: in loads
+    return _default_decoder.decode(s)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^
+C:\Users\Justin\AppData\Local\Programs\Python\Python312\Lib\json\decoder.py:338: in decode
+    obj, end = self.raw_decode(s, idx=_w(s, 0).end())
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = <json.decoder.JSONDecoder object at 0x0000024BD84C0B60>
+s = '{\n  "skills": {\n    "load": {\n      "extraDirs": ["C:\\Users\\Justin\\AppData\\Local\\Temp\\pytest-of-Justin\\pyte...n\\pytest-3\\test_skillkey_from_json5_metad0\\workspaces/empty-array",\n        "skills": []\n      }\n    ]\n  }\n}\n'
+idx = 0
+
+    def raw_decode(self, s, idx=0):
+        """Decode a JSON document from ``s`` (a ``str`` beginning with
+        a JSON document) and return a 2-tuple of the Python
+        representation and the index in ``s`` where the document ended.
+    
+        This can be used to decode a JSON document from a string that may
+        have extraneous data at the end.
+    
+        """
+        try:
+>           obj, end = self.scan_once(s, idx)
+                       ^^^^^^^^^^^^^^^^^^^^^^
+E           json.decoder.JSONDecodeError: Invalid \escape: line 4 column 24 (char 53)
+
+C:\Users\Justin\AppData\Local\Programs\Python\Python312\Lib\json\decoder.py:354: JSONDecodeError
+__________________________ test_agents_filter_subset __________________________
+
+text = '{"agents":{"list":[{"id":"agent-a","workspace":"C:\\Users\\Justin\\AppData\\Local\\Temp\\pytest-of-Justin\\pytest-3\\...ace":"C:\\Users\\Justin\\AppData\\Local\\Temp\\pytest-of-Justin\\pytest-3\\test_agents_filter_subset0\\ws_agent_b"}]}}'
+source = 'C:\\Users\\Justin\\AppData\\Local\\Temp\\pytest-of-Justin\\pytest-3\\test_agents_filter_subset0\\openclaw.json'
+
+    def loads_tolerant(text: str, *, source: str | None = None):
+        """Parse `text` as JSON, tolerating // and /* */ comments and trailing
+        commas. Returns the decoded Python object.
+    
+        Strategy: try strict json.loads first (fast path, zero risk for already
+        valid JSON), then retry once after the string-aware pre-clean. If both
+        fail, raise Json5LiteError with an actionable message.
+    
+        `source` (optional) names the origin (e.g. a file path) so the error
+        message points the user at the right place instead of a bare decode stack.
+        """
+        try:
+            return json.loads(text)
+        except (json.JSONDecodeError, ValueError):
+            pass
+    
+        try:
+            cleaned = _strip_comments_and_trailing_commas(text)
+>           return json.loads(cleaned)
+                   ^^^^^^^^^^^^^^^^^^^
+
+scripts\json5_lite.py:161: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+C:\Users\Justin\AppData\Local\Programs\Python\Python312\Lib\json\__init__.py:346: in loads
+    return _default_decoder.decode(s)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^
+C:\Users\Justin\AppData\Local\Programs\Python\Python312\Lib\json\decoder.py:338: in decode
+    obj, end = self.raw_decode(s, idx=_w(s, 0).end())
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = <json.decoder.JSONDecoder object at 0x0000024BD84C0B60>
+s = '{"agents":{"list":[{"id":"agent-a","workspace":"C:\\Users\\Justin\\AppData\\Local\\Temp\\pytest-of-Justin\\pytest-3\\...ace":"C:\\Users\\Justin\\AppData\\Local\\Temp\\pytest-of-Justin\\pytest-3\\test_agents_filter_subset0\\ws_agent_b"}]}}'
+idx = 0
+
+    def raw_decode(self, s, idx=0):
+        """Decode a JSON document from ``s`` (a ``str`` beginning with
+        a JSON document) and return a 2-tuple of the Python
+        representation and the index in ``s`` where the document ended.
+    
+        This can be used to decode a JSON document from a string that may
+        have extraneous data at the end.
+    
+        """
+        try:
+>           obj, end = self.scan_once(s, idx)
+                       ^^^^^^^^^^^^^^^^^^^^^^
+E           json.decoder.JSONDecodeError: Invalid \escape: line 1 column 51 (char 50)
+
+C:\Users\Justin\AppData\Local\Programs\Python\Python312\Lib\json\decoder.py:354: JSONDecodeError
+
+The above exception was the direct cause of the following exception:
+
+config_file = WindowsPath('C:/Users/Justin/AppData/Local/Temp/pytest-of-Justin/pytest-3/test_agents_filter_subset0/openclaw.json')
+user_scope_path = None, openclaw_user_dir = None, bundled_skills_dir = None
+agents = ['agent-a']
+
+    def parse_openclaw(
+        config_file: Path,
+        user_scope_path: Path | None,
+        openclaw_user_dir: Path | None,
+        bundled_skills_dir: Path | None,
+        agents: list[str] | None = None,
+    ) -> list[AgentRecord]:
+        """Parse openclaw.json. Returns one AgentRecord per agent in agents.list."""
+        config_file = Path(config_file).expanduser()
+        if not config_file.exists():
+            return []
+        # Real openclaw.json files are JSON5 (OpenClaw's own loader accepts
+        # comments + trailing commas). Strict json.loads would crash the whole
+        # sync on a perfectly valid hand-edited config, so parse tolerantly and
+        # surface a clear, file-scoped error on genuine corruption.
+        try:
+>           data = loads_tolerant(config_file.read_text(), source=str(config_file))
+                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+scripts\platforms\openclaw.py:228: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+text = '{"agents":{"list":[{"id":"agent-a","workspace":"C:\\Users\\Justin\\AppData\\Local\\Temp\\pytest-of-Justin\\pytest-3\\...ace":"C:\\Users\\Justin\\AppData\\Local\\Temp\\pytest-of-Justin\\pytest-3\\test_agents_filter_subset0\\ws_agent_b"}]}}'
+source = 'C:\\Users\\Justin\\AppData\\Local\\Temp\\pytest-of-Justin\\pytest-3\\test_agents_filter_subset0\\openclaw.json'
+
+    def loads_tolerant(text: str, *, source: str | None = None):
+        """Parse `text` as JSON, tolerating // and /* */ comments and trailing
+        commas. Returns the decoded Python object.
+    
+        Strategy: try strict json.loads first (fast path, zero risk for already
+        valid JSON), then retry once after the string-aware pre-clean. If both
+        fail, raise Json5LiteError with an actionable message.
+    
+        `source` (optional) names the origin (e.g. a file path) so the error
+        message points the user at the right place instead of a bare decode stack.
+        """
+        try:
+            return json.loads(text)
+        except (json.JSONDecodeError, ValueError):
+            pass
+    
+        try:
+            cleaned = _strip_comments_and_trailing_commas(text)
+            return json.loads(cleaned)
+        except (json.JSONDecodeError, ValueError) as exc:
+            where = f" in {source}" if source else ""
+>           raise Json5LiteError(
+                f"Could not parse JSON5-tolerant content{where}: {exc}. "
+                f"This reader handles // and /* */ comments and trailing commas "
+                f"only; other JSON5 syntax (unquoted keys, single-quoted strings) "
+                f"is not supported."
+            ) from exc
+E           scripts.json5_lite.Json5LiteError: Could not parse JSON5-tolerant content in C:\Users\Justin\AppData\Local\Temp\pytest-of-Justin\pytest-3\test_agents_filter_subset0\openclaw.json: Invalid \escape: line 1 column 51 (char 50). This reader handles // and /* */ comments and trailing commas only; other JSON5 syntax (unquoted keys, single-quoted strings) is not supported.
+
+scripts\json5_lite.py:164: Json5LiteError
+
+The above exception was the direct cause of the following exception:
+
+tmp_path = WindowsPath('C:/Users/Justin/AppData/Local/Temp/pytest-of-Justin/pytest-3/test_agents_filter_subset0')
+
+    def test_agents_filter_subset(tmp_path):
+        cfg = tmp_path / "openclaw.json"
+        cfg.write_text(
+            '{"agents":{"list":['
+            '{"id":"agent-a","workspace":"' + str(tmp_path / "ws_agent_a") + '"},'
+            '{"id":"agent-b","workspace":"' + str(tmp_path / "ws_agent_b") + '"}'
+            ']}}'
+        )
+        (tmp_path / "ws_agent_a").mkdir()
+        (tmp_path / "ws_agent_b").mkdir()
+>       ids = {a.id for a in parse_openclaw(
+            cfg, user_scope_path=None, openclaw_user_dir=None,
+            bundled_skills_dir=None, agents=["agent-a"])}
+
+tests\test_openclaw.py:833: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+config_file = WindowsPath('C:/Users/Justin/AppData/Local/Temp/pytest-of-Justin/pytest-3/test_agents_filter_subset0/openclaw.json')
+user_scope_path = None, openclaw_user_dir = None, bundled_skills_dir = None
+agents = ['agent-a']
+
+    def parse_openclaw(
+        config_file: Path,
+        user_scope_path: Path | None,
+        openclaw_user_dir: Path | None,
+        bundled_skills_dir: Path | None,
+        agents: list[str] | None = None,
+    ) -> list[AgentRecord]:
+        """Parse openclaw.json. Returns one AgentRecord per agent in agents.list."""
+        config_file = Path(config_file).expanduser()
+        if not config_file.exists():
+            return []
+        # Real openclaw.json files are JSON5 (OpenClaw's own loader accepts
+        # comments + trailing commas). Strict json.loads would crash the whole
+        # sync on a perfectly valid hand-edited config, so parse tolerantly and
+        # surface a clear, file-scoped error on genuine corruption.
+        try:
+            data = loads_tolerant(config_file.read_text(), source=str(config_file))
+        except Json5LiteError as exc:
+>           raise Json5LiteError(
+                f"Failed to parse OpenClaw config {config_file}: {exc}"
+            ) from exc
+E           scripts.json5_lite.Json5LiteError: Failed to parse OpenClaw config C:\Users\Justin\AppData\Local\Temp\pytest-of-Justin\pytest-3\test_agents_filter_subset0\openclaw.json: Could not parse JSON5-tolerant content in C:\Users\Justin\AppData\Local\Temp\pytest-of-Justin\pytest-3\test_agents_filter_subset0\openclaw.json: Invalid \escape: line 1 column 51 (char 50). This reader handles // and /* */ comments and trailing commas only; other JSON5 syntax (unquoted keys, single-quoted strings) is not supported.
+
+scripts\platforms\openclaw.py:230: Json5LiteError
+_________________________ test_agents_none_means_all __________________________
+
+text = '{"agents":{"list":[{"id":"agent-a","workspace":"C:\\Users\\Justin\\AppData\\Local\\Temp\\pytest-of-Justin\\pytest-3\\..."workspace":"C:\\Users\\Justin\\AppData\\Local\\Temp\\pytest-of-Justin\\pytest-3\\test_agents_none_means_all0\\w2"}]}}'
+source = 'C:\\Users\\Justin\\AppData\\Local\\Temp\\pytest-of-Justin\\pytest-3\\test_agents_none_means_all0\\openclaw.json'
+
+    def loads_tolerant(text: str, *, source: str | None = None):
+        """Parse `text` as JSON, tolerating // and /* */ comments and trailing
+        commas. Returns the decoded Python object.
+    
+        Strategy: try strict json.loads first (fast path, zero risk for already
+        valid JSON), then retry once after the string-aware pre-clean. If both
+        fail, raise Json5LiteError with an actionable message.
+    
+        `source` (optional) names the origin (e.g. a file path) so the error
+        message points the user at the right place instead of a bare decode stack.
+        """
+        try:
+            return json.loads(text)
+        except (json.JSONDecodeError, ValueError):
+            pass
+    
+        try:
+            cleaned = _strip_comments_and_trailing_commas(text)
+>           return json.loads(cleaned)
+                   ^^^^^^^^^^^^^^^^^^^
+
+scripts\json5_lite.py:161: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+C:\Users\Justin\AppData\Local\Programs\Python\Python312\Lib\json\__init__.py:346: in loads
+    return _default_decoder.decode(s)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^
+C:\Users\Justin\AppData\Local\Programs\Python\Python312\Lib\json\decoder.py:338: in decode
+    obj, end = self.raw_decode(s, idx=_w(s, 0).end())
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = <json.decoder.JSONDecoder object at 0x0000024BD84C0B60>
+s = '{"agents":{"list":[{"id":"agent-a","workspace":"C:\\Users\\Justin\\AppData\\Local\\Temp\\pytest-of-Justin\\pytest-3\\..."workspace":"C:\\Users\\Justin\\AppData\\Local\\Temp\\pytest-of-Justin\\pytest-3\\test_agents_none_means_all0\\w2"}]}}'
+idx = 0
+
+    def raw_decode(self, s, idx=0):
+        """Decode a JSON document from ``s`` (a ``str`` beginning with
+        a JSON document) and return a 2-tuple of the Python
+        representation and the index in ``s`` where the document ended.
+    
+        This can be used to decode a JSON document from a string that may
+        have extraneous data at the end.
+    
+        """
+        try:
+>           obj, end = self.scan_once(s, idx)
+                       ^^^^^^^^^^^^^^^^^^^^^^
+E           json.decoder.JSONDecodeError: Invalid \escape: line 1 column 51 (char 50)
+
+C:\Users\Justin\AppData\Local\Programs\Python\Python312\Lib\json\decoder.py:354: JSONDecodeError
+
+The above exception was the direct cause of the following exception:
+
+config_file = WindowsPath('C:/Users/Justin/AppData/Local/Temp/pytest-of-Justin/pytest-3/test_agents_none_means_all0/openclaw.json')
+user_scope_path = None, openclaw_user_dir = None, bundled_skills_dir = None
+agents = None
+
+    def parse_openclaw(
+        config_file: Path,
+        user_scope_path: Path | None,
+        openclaw_user_dir: Path | None,
+        bundled_skills_dir: Path | None,
+        agents: list[str] | None = None,
+    ) -> list[AgentRecord]:
+        """Parse openclaw.json. Returns one AgentRecord per agent in agents.list."""
+        config_file = Path(config_file).expanduser()
+        if not config_file.exists():
+            return []
+        # Real openclaw.json files are JSON5 (OpenClaw's own loader accepts
+        # comments + trailing commas). Strict json.loads would crash the whole
+        # sync on a perfectly valid hand-edited config, so parse tolerantly and
+        # surface a clear, file-scoped error on genuine corruption.
+        try:
+>           data = loads_tolerant(config_file.read_text(), source=str(config_file))
+                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+scripts\platforms\openclaw.py:228: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+text = '{"agents":{"list":[{"id":"agent-a","workspace":"C:\\Users\\Justin\\AppData\\Local\\Temp\\pytest-of-Justin\\pytest-3\\..."workspace":"C:\\Users\\Justin\\AppData\\Local\\Temp\\pytest-of-Justin\\pytest-3\\test_agents_none_means_all0\\w2"}]}}'
+source = 'C:\\Users\\Justin\\AppData\\Local\\Temp\\pytest-of-Justin\\pytest-3\\test_agents_none_means_all0\\openclaw.json'
+
+    def loads_tolerant(text: str, *, source: str | None = None):
+        """Parse `text` as JSON, tolerating // and /* */ comments and trailing
+        commas. Returns the decoded Python object.
+    
+        Strategy: try strict json.loads first (fast path, zero risk for already
+        valid JSON), then retry once after the string-aware pre-clean. If both
+        fail, raise Json5LiteError with an actionable message.
+    
+        `source` (optional) names the origin (e.g. a file path) so the error
+        message points the user at the right place instead of a bare decode stack.
+        """
+        try:
+            return json.loads(text)
+        except (json.JSONDecodeError, ValueError):
+            pass
+    
+        try:
+            cleaned = _strip_comments_and_trailing_commas(text)
+            return json.loads(cleaned)
+        except (json.JSONDecodeError, ValueError) as exc:
+            where = f" in {source}" if source else ""
+>           raise Json5LiteError(
+                f"Could not parse JSON5-tolerant content{where}: {exc}. "
+                f"This reader handles // and /* */ comments and trailing commas "
+                f"only; other JSON5 syntax (unquoted keys, single-quoted strings) "
+                f"is not supported."
+            ) from exc
+E           scripts.json5_lite.Json5LiteError: Could not parse JSON5-tolerant content in C:\Users\Justin\AppData\Local\Temp\pytest-of-Justin\pytest-3\test_agents_none_means_all0\openclaw.json: Invalid \escape: line 1 column 51 (char 50). This reader handles // and /* */ comments and trailing commas only; other JSON5 syntax (unquoted keys, single-quoted strings) is not supported.
+
+scripts\json5_lite.py:164: Json5LiteError
+
+The above exception was the direct cause of the following exception:
+
+tmp_path = WindowsPath('C:/Users/Justin/AppData/Local/Temp/pytest-of-Justin/pytest-3/test_agents_none_means_all0')
+
+    def test_agents_none_means_all(tmp_path):
+        cfg = tmp_path / "openclaw.json"
+        cfg.write_text(
+            '{"agents":{"list":['
+            '{"id":"agent-a","workspace":"' + str(tmp_path / "w1") + '"},'
+            '{"id":"agent-b","workspace":"' + str(tmp_path / "w2") + '"}'
+            ']}}'
+        )
+        (tmp_path / "w1").mkdir()
+        (tmp_path / "w2").mkdir()
+>       ids = {a.id for a in parse_openclaw(
+            cfg, user_scope_path=None, openclaw_user_dir=None,
+            bundled_skills_dir=None, agents=None)}
+
+tests\test_openclaw.py:849: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+config_file = WindowsPath('C:/Users/Justin/AppData/Local/Temp/pytest-of-Justin/pytest-3/test_agents_none_means_all0/openclaw.json')
+user_scope_path = None, openclaw_user_dir = None, bundled_skills_dir = None
+agents = None
+
+    def parse_openclaw(
+        config_file: Path,
+        user_scope_path: Path | None,
+        openclaw_user_dir: Path | None,
+        bundled_skills_dir: Path | None,
+        agents: list[str] | None = None,
+    ) -> list[AgentRecord]:
+        """Parse openclaw.json. Returns one AgentRecord per agent in agents.list."""
+        config_file = Path(config_file).expanduser()
+        if not config_file.exists():
+            return []
+        # Real openclaw.json files are JSON5 (OpenClaw's own loader accepts
+        # comments + trailing commas). Strict json.loads would crash the whole
+        # sync on a perfectly valid hand-edited config, so parse tolerantly and
+        # surface a clear, file-scoped error on genuine corruption.
+        try:
+            data = loads_tolerant(config_file.read_text(), source=str(config_file))
+        except Json5LiteError as exc:
+>           raise Json5LiteError(
+                f"Failed to parse OpenClaw config {config_file}: {exc}"
+            ) from exc
+E           scripts.json5_lite.Json5LiteError: Failed to parse OpenClaw config C:\Users\Justin\AppData\Local\Temp\pytest-of-Justin\pytest-3\test_agents_none_means_all0\openclaw.json: Could not parse JSON5-tolerant content in C:\Users\Justin\AppData\Local\Temp\pytest-of-Justin\pytest-3\test_agents_none_means_all0\openclaw.json: Invalid \escape: line 1 column 51 (char 50). This reader handles // and /* */ comments and trailing commas only; other JSON5 syntax (unquoted keys, single-quoted strings) is not supported.
+
+scripts\platforms\openclaw.py:230: Json5LiteError
+___________________ test_agent_id_path_traversal_sanitized ____________________
+
+text = '{"agents":{"list":[{"id":"../../evil","workspace":"C:\\Users\\Justin\\AppData\\Local\\Temp\\pytest-of-Justin\\pytest-3\\test_agent_id_path_traversal_s0\\ws"}]}}'
+source = 'C:\\Users\\Justin\\AppData\\Local\\Temp\\pytest-of-Justin\\pytest-3\\test_agent_id_path_traversal_s0\\openclaw.json'
+
+    def loads_tolerant(text: str, *, source: str | None = None):
+        """Parse `text` as JSON, tolerating // and /* */ comments and trailing
+        commas. Returns the decoded Python object.
+    
+        Strategy: try strict json.loads first (fast path, zero risk for already
+        valid JSON), then retry once after the string-aware pre-clean. If both
+        fail, raise Json5LiteError with an actionable message.
+    
+        `source` (optional) names the origin (e.g. a file path) so the error
+        message points the user at the right place instead of a bare decode stack.
+        """
+        try:
+            return json.loads(text)
+        except (json.JSONDecodeError, ValueError):
+            pass
+    
+        try:
+            cleaned = _strip_comments_and_trailing_commas(text)
+>           return json.loads(cleaned)
+                   ^^^^^^^^^^^^^^^^^^^
+
+scripts\json5_lite.py:161: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+C:\Users\Justin\AppData\Local\Programs\Python\Python312\Lib\json\__init__.py:346: in loads
+    return _default_decoder.decode(s)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^
+C:\Users\Justin\AppData\Local\Programs\Python\Python312\Lib\json\decoder.py:338: in decode
+    obj, end = self.raw_decode(s, idx=_w(s, 0).end())
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = <json.decoder.JSONDecoder object at 0x0000024BD84C0B60>
+s = '{"agents":{"list":[{"id":"../../evil","workspace":"C:\\Users\\Justin\\AppData\\Local\\Temp\\pytest-of-Justin\\pytest-3\\test_agent_id_path_traversal_s0\\ws"}]}}'
+idx = 0
+
+    def raw_decode(self, s, idx=0):
+        """Decode a JSON document from ``s`` (a ``str`` beginning with
+        a JSON document) and return a 2-tuple of the Python
+        representation and the index in ``s`` where the document ended.
+    
+        This can be used to decode a JSON document from a string that may
+        have extraneous data at the end.
+    
+        """
+        try:
+>           obj, end = self.scan_once(s, idx)
+                       ^^^^^^^^^^^^^^^^^^^^^^
+E           json.decoder.JSONDecodeError: Invalid \escape: line 1 column 54 (char 53)
+
+C:\Users\Justin\AppData\Local\Programs\Python\Python312\Lib\json\decoder.py:354: JSONDecodeError
+
+The above exception was the direct cause of the following exception:
+
+config_file = WindowsPath('C:/Users/Justin/AppData/Local/Temp/pytest-of-Justin/pytest-3/test_agent_id_path_traversal_s0/openclaw.json')
+user_scope_path = None, openclaw_user_dir = None, bundled_skills_dir = None
+agents = None
+
+    def parse_openclaw(
+        config_file: Path,
+        user_scope_path: Path | None,
+        openclaw_user_dir: Path | None,
+        bundled_skills_dir: Path | None,
+        agents: list[str] | None = None,
+    ) -> list[AgentRecord]:
+        """Parse openclaw.json. Returns one AgentRecord per agent in agents.list."""
+        config_file = Path(config_file).expanduser()
+        if not config_file.exists():
+            return []
+        # Real openclaw.json files are JSON5 (OpenClaw's own loader accepts
+        # comments + trailing commas). Strict json.loads would crash the whole
+        # sync on a perfectly valid hand-edited config, so parse tolerantly and
+        # surface a clear, file-scoped error on genuine corruption.
+        try:
+>           data = loads_tolerant(config_file.read_text(), source=str(config_file))
+                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+scripts\platforms\openclaw.py:228: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+text = '{"agents":{"list":[{"id":"../../evil","workspace":"C:\\Users\\Justin\\AppData\\Local\\Temp\\pytest-of-Justin\\pytest-3\\test_agent_id_path_traversal_s0\\ws"}]}}'
+source = 'C:\\Users\\Justin\\AppData\\Local\\Temp\\pytest-of-Justin\\pytest-3\\test_agent_id_path_traversal_s0\\openclaw.json'
+
+    def loads_tolerant(text: str, *, source: str | None = None):
+        """Parse `text` as JSON, tolerating // and /* */ comments and trailing
+        commas. Returns the decoded Python object.
+    
+        Strategy: try strict json.loads first (fast path, zero risk for already
+        valid JSON), then retry once after the string-aware pre-clean. If both
+        fail, raise Json5LiteError with an actionable message.
+    
+        `source` (optional) names the origin (e.g. a file path) so the error
+        message points the user at the right place instead of a bare decode stack.
+        """
+        try:
+            return json.loads(text)
+        except (json.JSONDecodeError, ValueError):
+            pass
+    
+        try:
+            cleaned = _strip_comments_and_trailing_commas(text)
+            return json.loads(cleaned)
+        except (json.JSONDecodeError, ValueError) as exc:
+            where = f" in {source}" if source else ""
+>           raise Json5LiteError(
+                f"Could not parse JSON5-tolerant content{where}: {exc}. "
+                f"This reader handles // and /* */ comments and trailing commas "
+                f"only; other JSON5 syntax (unquoted keys, single-quoted strings) "
+                f"is not supported."
+            ) from exc
+E           scripts.json5_lite.Json5LiteError: Could not parse JSON5-tolerant content in C:\Users\Justin\AppData\Local\Temp\pytest-of-Justin\pytest-3\test_agent_id_path_traversal_s0\openclaw.json: Invalid \escape: line 1 column 54 (char 53). This reader handles // and /* */ comments and trailing commas only; other JSON5 syntax (unquoted keys, single-quoted strings) is not supported.
+
+scripts\json5_lite.py:164: Json5LiteError
+
+The above exception was the direct cause of the following exception:
+
+tmp_path = WindowsPath('C:/Users/Justin/AppData/Local/Temp/pytest-of-Justin/pytest-3/test_agent_id_path_traversal_s0')
+
+    def test_agent_id_path_traversal_sanitized(tmp_path):
+        """FIX-2: an agent id like '../../evil' from openclaw.json must be sanitized
+        before use in AgentRecord.id, preventing path traversal in vault filenames."""
+        cfg = tmp_path / "openclaw.json"
+        cfg.write_text(
+            '{"agents":{"list":['
+            '{"id":"../../evil","workspace":"' + str(tmp_path / "ws") + '"}'
+            ']}}'
+        )
+        (tmp_path / "ws").mkdir()
+>       agents = parse_openclaw(cfg, user_scope_path=None, openclaw_user_dir=None,
+                                bundled_skills_dir=None, agents=None)
+
+tests\test_openclaw.py:865: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+config_file = WindowsPath('C:/Users/Justin/AppData/Local/Temp/pytest-of-Justin/pytest-3/test_agent_id_path_traversal_s0/openclaw.json')
+user_scope_path = None, openclaw_user_dir = None, bundled_skills_dir = None
+agents = None
+
+    def parse_openclaw(
+        config_file: Path,
+        user_scope_path: Path | None,
+        openclaw_user_dir: Path | None,
+        bundled_skills_dir: Path | None,
+        agents: list[str] | None = None,
+    ) -> list[AgentRecord]:
+        """Parse openclaw.json. Returns one AgentRecord per agent in agents.list."""
+        config_file = Path(config_file).expanduser()
+        if not config_file.exists():
+            return []
+        # Real openclaw.json files are JSON5 (OpenClaw's own loader accepts
+        # comments + trailing commas). Strict json.loads would crash the whole
+        # sync on a perfectly valid hand-edited config, so parse tolerantly and
+        # surface a clear, file-scoped error on genuine corruption.
+        try:
+            data = loads_tolerant(config_file.read_text(), source=str(config_file))
+        except Json5LiteError as exc:
+>           raise Json5LiteError(
+                f"Failed to parse OpenClaw config {config_file}: {exc}"
+            ) from exc
+E           scripts.json5_lite.Json5LiteError: Failed to parse OpenClaw config C:\Users\Justin\AppData\Local\Temp\pytest-of-Justin\pytest-3\test_agent_id_path_traversal_s0\openclaw.json: Could not parse JSON5-tolerant content in C:\Users\Justin\AppData\Local\Temp\pytest-of-Justin\pytest-3\test_agent_id_path_traversal_s0\openclaw.json: Invalid \escape: line 1 column 54 (char 53). This reader handles // and /* */ comments and trailing commas only; other JSON5 syntax (unquoted keys, single-quoted strings) is not supported.
+
+scripts\platforms\openclaw.py:230: Json5LiteError
+_______________ test_colliding_sanitized_ids_are_disambiguated ________________
+
+text = '{"agents":{"list":[{"id":"a/b","workspace":"C:\\Users\\Justin\\AppData\\Local\\Temp\\pytest-of-Justin\\pytest-3\\test...space":"C:\\Users\\Justin\\AppData\\Local\\Temp\\pytest-of-Justin\\pytest-3\\test_colliding_sanitized_ids_a0\\ws2"}]}}'
+source = 'C:\\Users\\Justin\\AppData\\Local\\Temp\\pytest-of-Justin\\pytest-3\\test_colliding_sanitized_ids_a0\\openclaw.json'
+
+    def loads_tolerant(text: str, *, source: str | None = None):
+        """Parse `text` as JSON, tolerating // and /* */ comments and trailing
+        commas. Returns the decoded Python object.
+    
+        Strategy: try strict json.loads first (fast path, zero risk for already
+        valid JSON), then retry once after the string-aware pre-clean. If both
+        fail, raise Json5LiteError with an actionable message.
+    
+        `source` (optional) names the origin (e.g. a file path) so the error
+        message points the user at the right place instead of a bare decode stack.
+        """
+        try:
+            return json.loads(text)
+        except (json.JSONDecodeError, ValueError):
+            pass
+    
+        try:
+            cleaned = _strip_comments_and_trailing_commas(text)
+>           return json.loads(cleaned)
+                   ^^^^^^^^^^^^^^^^^^^
+
+scripts\json5_lite.py:161: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+C:\Users\Justin\AppData\Local\Programs\Python\Python312\Lib\json\__init__.py:346: in loads
+    return _default_decoder.decode(s)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^
+C:\Users\Justin\AppData\Local\Programs\Python\Python312\Lib\json\decoder.py:338: in decode
+    obj, end = self.raw_decode(s, idx=_w(s, 0).end())
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = <json.decoder.JSONDecoder object at 0x0000024BD84C0B60>
+s = '{"agents":{"list":[{"id":"a/b","workspace":"C:\\Users\\Justin\\AppData\\Local\\Temp\\pytest-of-Justin\\pytest-3\\test...space":"C:\\Users\\Justin\\AppData\\Local\\Temp\\pytest-of-Justin\\pytest-3\\test_colliding_sanitized_ids_a0\\ws2"}]}}'
+idx = 0
+
+    def raw_decode(self, s, idx=0):
+        """Decode a JSON document from ``s`` (a ``str`` beginning with
+        a JSON document) and return a 2-tuple of the Python
+        representation and the index in ``s`` where the document ended.
+    
+        This can be used to decode a JSON document from a string that may
+        have extraneous data at the end.
+    
+        """
+        try:
+>           obj, end = self.scan_once(s, idx)
+                       ^^^^^^^^^^^^^^^^^^^^^^
+E           json.decoder.JSONDecodeError: Invalid \escape: line 1 column 47 (char 46)
+
+C:\Users\Justin\AppData\Local\Programs\Python\Python312\Lib\json\decoder.py:354: JSONDecodeError
+
+The above exception was the direct cause of the following exception:
+
+config_file = WindowsPath('C:/Users/Justin/AppData/Local/Temp/pytest-of-Justin/pytest-3/test_colliding_sanitized_ids_a0/openclaw.json')
+user_scope_path = None, openclaw_user_dir = None, bundled_skills_dir = None
+agents = None
+
+    def parse_openclaw(
+        config_file: Path,
+        user_scope_path: Path | None,
+        openclaw_user_dir: Path | None,
+        bundled_skills_dir: Path | None,
+        agents: list[str] | None = None,
+    ) -> list[AgentRecord]:
+        """Parse openclaw.json. Returns one AgentRecord per agent in agents.list."""
+        config_file = Path(config_file).expanduser()
+        if not config_file.exists():
+            return []
+        # Real openclaw.json files are JSON5 (OpenClaw's own loader accepts
+        # comments + trailing commas). Strict json.loads would crash the whole
+        # sync on a perfectly valid hand-edited config, so parse tolerantly and
+        # surface a clear, file-scoped error on genuine corruption.
+        try:
+>           data = loads_tolerant(config_file.read_text(), source=str(config_file))
+                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+scripts\platforms\openclaw.py:228: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+text = '{"agents":{"list":[{"id":"a/b","workspace":"C:\\Users\\Justin\\AppData\\Local\\Temp\\pytest-of-Justin\\pytest-3\\test...space":"C:\\Users\\Justin\\AppData\\Local\\Temp\\pytest-of-Justin\\pytest-3\\test_colliding_sanitized_ids_a0\\ws2"}]}}'
+source = 'C:\\Users\\Justin\\AppData\\Local\\Temp\\pytest-of-Justin\\pytest-3\\test_colliding_sanitized_ids_a0\\openclaw.json'
+
+    def loads_tolerant(text: str, *, source: str | None = None):
+        """Parse `text` as JSON, tolerating // and /* */ comments and trailing
+        commas. Returns the decoded Python object.
+    
+        Strategy: try strict json.loads first (fast path, zero risk for already
+        valid JSON), then retry once after the string-aware pre-clean. If both
+        fail, raise Json5LiteError with an actionable message.
+    
+        `source` (optional) names the origin (e.g. a file path) so the error
+        message points the user at the right place instead of a bare decode stack.
+        """
+        try:
+            return json.loads(text)
+        except (json.JSONDecodeError, ValueError):
+            pass
+    
+        try:
+            cleaned = _strip_comments_and_trailing_commas(text)
+            return json.loads(cleaned)
+        except (json.JSONDecodeError, ValueError) as exc:
+            where = f" in {source}" if source else ""
+>           raise Json5LiteError(
+                f"Could not parse JSON5-tolerant content{where}: {exc}. "
+                f"This reader handles // and /* */ comments and trailing commas "
+                f"only; other JSON5 syntax (unquoted keys, single-quoted strings) "
+                f"is not supported."
+            ) from exc
+E           scripts.json5_lite.Json5LiteError: Could not parse JSON5-tolerant content in C:\Users\Justin\AppData\Local\Temp\pytest-of-Justin\pytest-3\test_colliding_sanitized_ids_a0\openclaw.json: Invalid \escape: line 1 column 47 (char 46). This reader handles // and /* */ comments and trailing commas only; other JSON5 syntax (unquoted keys, single-quoted strings) is not supported.
+
+scripts\json5_lite.py:164: Json5LiteError
+
+The above exception was the direct cause of the following exception:
+
+tmp_path = WindowsPath('C:/Users/Justin/AppData/Local/Temp/pytest-of-Justin/pytest-3/test_colliding_sanitized_ids_a0')
+
+    def test_colliding_sanitized_ids_are_disambiguated(tmp_path):
+        """P1-B: two entries with distinct raw ids that sanitize to the same base
+        (e.g. 'a/b' and 'a-b' both \u2192 'a-b') must produce two AgentRecords with
+        DISTINCT .id values, both path-safe (no '/' or '..').
+        """
+        cfg = tmp_path / "openclaw.json"
+        ws1 = tmp_path / "ws1"
+        ws2 = tmp_path / "ws2"
+        ws1.mkdir()
+        ws2.mkdir()
+        cfg.write_text(
+            '{"agents":{"list":['
+            '{"id":"a/b","workspace":"' + str(ws1) + '"},'
+            '{"id":"a-b","workspace":"' + str(ws2) + '"}'
+            ']}}'
+        )
+>       agents = parse_openclaw(cfg, user_scope_path=None, openclaw_user_dir=None,
+                                bundled_skills_dir=None, agents=None)
+
+tests\test_openclaw.py:900: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+config_file = WindowsPath('C:/Users/Justin/AppData/Local/Temp/pytest-of-Justin/pytest-3/test_colliding_sanitized_ids_a0/openclaw.json')
+user_scope_path = None, openclaw_user_dir = None, bundled_skills_dir = None
+agents = None
+
+    def parse_openclaw(
+        config_file: Path,
+        user_scope_path: Path | None,
+        openclaw_user_dir: Path | None,
+        bundled_skills_dir: Path | None,
+        agents: list[str] | None = None,
+    ) -> list[AgentRecord]:
+        """Parse openclaw.json. Returns one AgentRecord per agent in agents.list."""
+        config_file = Path(config_file).expanduser()
+        if not config_file.exists():
+            return []
+        # Real openclaw.json files are JSON5 (OpenClaw's own loader accepts
+        # comments + trailing commas). Strict json.loads would crash the whole
+        # sync on a perfectly valid hand-edited config, so parse tolerantly and
+        # surface a clear, file-scoped error on genuine corruption.
+        try:
+            data = loads_tolerant(config_file.read_text(), source=str(config_file))
+        except Json5LiteError as exc:
+>           raise Json5LiteError(
+                f"Failed to parse OpenClaw config {config_file}: {exc}"
+            ) from exc
+E           scripts.json5_lite.Json5LiteError: Failed to parse OpenClaw config C:\Users\Justin\AppData\Local\Temp\pytest-of-Justin\pytest-3\test_colliding_sanitized_ids_a0\openclaw.json: Could not parse JSON5-tolerant content in C:\Users\Justin\AppData\Local\Temp\pytest-of-Justin\pytest-3\test_colliding_sanitized_ids_a0\openclaw.json: Invalid \escape: line 1 column 47 (char 46). This reader handles // and /* */ comments and trailing commas only; other JSON5 syntax (unquoted keys, single-quoted strings) is not supported.
+
+scripts\platforms\openclaw.py:230: Json5LiteError
+_____________ test_colliding_traversal_and_safe_id_disambiguated ______________
+
+text = '{"agents":{"list":[{"id":"../../evil","workspace":"C:\\Users\\Justin\\AppData\\Local\\Temp\\pytest-of-Justin\\pytest-...space":"C:\\Users\\Justin\\AppData\\Local\\Temp\\pytest-of-Justin\\pytest-3\\test_colliding_traversal_and_s0\\ws2"}]}}'
+source = 'C:\\Users\\Justin\\AppData\\Local\\Temp\\pytest-of-Justin\\pytest-3\\test_colliding_traversal_and_s0\\openclaw.json'
+
+    def loads_tolerant(text: str, *, source: str | None = None):
+        """Parse `text` as JSON, tolerating // and /* */ comments and trailing
+        commas. Returns the decoded Python object.
+    
+        Strategy: try strict json.loads first (fast path, zero risk for already
+        valid JSON), then retry once after the string-aware pre-clean. If both
+        fail, raise Json5LiteError with an actionable message.
+    
+        `source` (optional) names the origin (e.g. a file path) so the error
+        message points the user at the right place instead of a bare decode stack.
+        """
+        try:
+            return json.loads(text)
+        except (json.JSONDecodeError, ValueError):
+            pass
+    
+        try:
+            cleaned = _strip_comments_and_trailing_commas(text)
+>           return json.loads(cleaned)
+                   ^^^^^^^^^^^^^^^^^^^
+
+scripts\json5_lite.py:161: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+C:\Users\Justin\AppData\Local\Programs\Python\Python312\Lib\json\__init__.py:346: in loads
+    return _default_decoder.decode(s)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^
+C:\Users\Justin\AppData\Local\Programs\Python\Python312\Lib\json\decoder.py:338: in decode
+    obj, end = self.raw_decode(s, idx=_w(s, 0).end())
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = <json.decoder.JSONDecoder object at 0x0000024BD84C0B60>
+s = '{"agents":{"list":[{"id":"../../evil","workspace":"C:\\Users\\Justin\\AppData\\Local\\Temp\\pytest-of-Justin\\pytest-...space":"C:\\Users\\Justin\\AppData\\Local\\Temp\\pytest-of-Justin\\pytest-3\\test_colliding_traversal_and_s0\\ws2"}]}}'
+idx = 0
+
+    def raw_decode(self, s, idx=0):
+        """Decode a JSON document from ``s`` (a ``str`` beginning with
+        a JSON document) and return a 2-tuple of the Python
+        representation and the index in ``s`` where the document ended.
+    
+        This can be used to decode a JSON document from a string that may
+        have extraneous data at the end.
+    
+        """
+        try:
+>           obj, end = self.scan_once(s, idx)
+                       ^^^^^^^^^^^^^^^^^^^^^^
+E           json.decoder.JSONDecodeError: Invalid \escape: line 1 column 54 (char 53)
+
+C:\Users\Justin\AppData\Local\Programs\Python\Python312\Lib\json\decoder.py:354: JSONDecodeError
+
+The above exception was the direct cause of the following exception:
+
+config_file = WindowsPath('C:/Users/Justin/AppData/Local/Temp/pytest-of-Justin/pytest-3/test_colliding_traversal_and_s0/openclaw.json')
+user_scope_path = None, openclaw_user_dir = None, bundled_skills_dir = None
+agents = None
+
+    def parse_openclaw(
+        config_file: Path,
+        user_scope_path: Path | None,
+        openclaw_user_dir: Path | None,
+        bundled_skills_dir: Path | None,
+        agents: list[str] | None = None,
+    ) -> list[AgentRecord]:
+        """Parse openclaw.json. Returns one AgentRecord per agent in agents.list."""
+        config_file = Path(config_file).expanduser()
+        if not config_file.exists():
+            return []
+        # Real openclaw.json files are JSON5 (OpenClaw's own loader accepts
+        # comments + trailing commas). Strict json.loads would crash the whole
+        # sync on a perfectly valid hand-edited config, so parse tolerantly and
+        # surface a clear, file-scoped error on genuine corruption.
+        try:
+>           data = loads_tolerant(config_file.read_text(), source=str(config_file))
+                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+scripts\platforms\openclaw.py:228: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+text = '{"agents":{"list":[{"id":"../../evil","workspace":"C:\\Users\\Justin\\AppData\\Local\\Temp\\pytest-of-Justin\\pytest-...space":"C:\\Users\\Justin\\AppData\\Local\\Temp\\pytest-of-Justin\\pytest-3\\test_colliding_traversal_and_s0\\ws2"}]}}'
+source = 'C:\\Users\\Justin\\AppData\\Local\\Temp\\pytest-of-Justin\\pytest-3\\test_colliding_traversal_and_s0\\openclaw.json'
+
+    def loads_tolerant(text: str, *, source: str | None = None):
+        """Parse `text` as JSON, tolerating // and /* */ comments and trailing
+        commas. Returns the decoded Python object.
+    
+        Strategy: try strict json.loads first (fast path, zero risk for already
+        valid JSON), then retry once after the string-aware pre-clean. If both
+        fail, raise Json5LiteError with an actionable message.
+    
+        `source` (optional) names the origin (e.g. a file path) so the error
+        message points the user at the right place instead of a bare decode stack.
+        """
+        try:
+            return json.loads(text)
+        except (json.JSONDecodeError, ValueError):
+            pass
+    
+        try:
+            cleaned = _strip_comments_and_trailing_commas(text)
+            return json.loads(cleaned)
+        except (json.JSONDecodeError, ValueError) as exc:
+            where = f" in {source}" if source else ""
+>           raise Json5LiteError(
+                f"Could not parse JSON5-tolerant content{where}: {exc}. "
+                f"This reader handles // and /* */ comments and trailing commas "
+                f"only; other JSON5 syntax (unquoted keys, single-quoted strings) "
+                f"is not supported."
+            ) from exc
+E           scripts.json5_lite.Json5LiteError: Could not parse JSON5-tolerant content in C:\Users\Justin\AppData\Local\Temp\pytest-of-Justin\pytest-3\test_colliding_traversal_and_s0\openclaw.json: Invalid \escape: line 1 column 54 (char 53). This reader handles // and /* */ comments and trailing commas only; other JSON5 syntax (unquoted keys, single-quoted strings) is not supported.
+
+scripts\json5_lite.py:164: Json5LiteError
+
+The above exception was the direct cause of the following exception:
+
+tmp_path = WindowsPath('C:/Users/Justin/AppData/Local/Temp/pytest-of-Justin/pytest-3/test_colliding_traversal_and_s0')
+
+    def test_colliding_traversal_and_safe_id_disambiguated(tmp_path):
+        """P1-B: '../../evil' and 'evil' both sanitize to 'evil'. With collision
+        resistance, both must get distinct ids — no overwrite.
+        """
+        cfg = tmp_path / "openclaw.json"
+        ws1 = tmp_path / "ws1"
+        ws2 = tmp_path / "ws2"
+        ws1.mkdir()
+        ws2.mkdir()
+        cfg.write_text(
+            '{"agents":{"list":['
+            '{"id":"../../evil","workspace":"' + str(ws1) + '"},'
+            '{"id":"evil","workspace":"' + str(ws2) + '"}'
+            ']}}'
+        )
+>       agents = parse_openclaw(cfg, user_scope_path=None, openclaw_user_dir=None,
+                                bundled_skills_dir=None, agents=None)
+
+tests\test_openclaw.py:931: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+config_file = WindowsPath('C:/Users/Justin/AppData/Local/Temp/pytest-of-Justin/pytest-3/test_colliding_traversal_and_s0/openclaw.json')
+user_scope_path = None, openclaw_user_dir = None, bundled_skills_dir = None
+agents = None
+
+    def parse_openclaw(
+        config_file: Path,
+        user_scope_path: Path | None,
+        openclaw_user_dir: Path | None,
+        bundled_skills_dir: Path | None,
+        agents: list[str] | None = None,
+    ) -> list[AgentRecord]:
+        """Parse openclaw.json. Returns one AgentRecord per agent in agents.list."""
+        config_file = Path(config_file).expanduser()
+        if not config_file.exists():
+            return []
+        # Real openclaw.json files are JSON5 (OpenClaw's own loader accepts
+        # comments + trailing commas). Strict json.loads would crash the whole
+        # sync on a perfectly valid hand-edited config, so parse tolerantly and
+        # surface a clear, file-scoped error on genuine corruption.
+        try:
+            data = loads_tolerant(config_file.read_text(), source=str(config_file))
+        except Json5LiteError as exc:
+>           raise Json5LiteError(
+                f"Failed to parse OpenClaw config {config_file}: {exc}"
+            ) from exc
+E           scripts.json5_lite.Json5LiteError: Failed to parse OpenClaw config C:\Users\Justin\AppData\Local\Temp\pytest-of-Justin\pytest-3\test_colliding_traversal_and_s0\openclaw.json: Could not parse JSON5-tolerant content in C:\Users\Justin\AppData\Local\Temp\pytest-of-Justin\pytest-3\test_colliding_traversal_and_s0\openclaw.json: Invalid \escape: line 1 column 54 (char 53). This reader handles // and /* */ comments and trailing commas only; other JSON5 syntax (unquoted keys, single-quoted strings) is not supported.
+
+scripts\platforms\openclaw.py:230: Json5LiteError
+______________________ test_single_normal_id_stays_clean ______________________
+
+text = '{"agents":{"list":[{"id":"agent-a","workspace":"C:\\Users\\Justin\\AppData\\Local\\Temp\\pytest-of-Justin\\pytest-3\\test_single_normal_id_stays_cl0\\ws"}]}}'
+source = 'C:\\Users\\Justin\\AppData\\Local\\Temp\\pytest-of-Justin\\pytest-3\\test_single_normal_id_stays_cl0\\openclaw.json'
+
+    def loads_tolerant(text: str, *, source: str | None = None):
+        """Parse `text` as JSON, tolerating // and /* */ comments and trailing
+        commas. Returns the decoded Python object.
+    
+        Strategy: try strict json.loads first (fast path, zero risk for already
+        valid JSON), then retry once after the string-aware pre-clean. If both
+        fail, raise Json5LiteError with an actionable message.
+    
+        `source` (optional) names the origin (e.g. a file path) so the error
+        message points the user at the right place instead of a bare decode stack.
+        """
+        try:
+            return json.loads(text)
+        except (json.JSONDecodeError, ValueError):
+            pass
+    
+        try:
+            cleaned = _strip_comments_and_trailing_commas(text)
+>           return json.loads(cleaned)
+                   ^^^^^^^^^^^^^^^^^^^
+
+scripts\json5_lite.py:161: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+C:\Users\Justin\AppData\Local\Programs\Python\Python312\Lib\json\__init__.py:346: in loads
+    return _default_decoder.decode(s)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^
+C:\Users\Justin\AppData\Local\Programs\Python\Python312\Lib\json\decoder.py:338: in decode
+    obj, end = self.raw_decode(s, idx=_w(s, 0).end())
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = <json.decoder.JSONDecoder object at 0x0000024BD84C0B60>
+s = '{"agents":{"list":[{"id":"agent-a","workspace":"C:\\Users\\Justin\\AppData\\Local\\Temp\\pytest-of-Justin\\pytest-3\\test_single_normal_id_stays_cl0\\ws"}]}}'
+idx = 0
+
+    def raw_decode(self, s, idx=0):
+        """Decode a JSON document from ``s`` (a ``str`` beginning with
+        a JSON document) and return a 2-tuple of the Python
+        representation and the index in ``s`` where the document ended.
+    
+        This can be used to decode a JSON document from a string that may
+        have extraneous data at the end.
+    
+        """
+        try:
+>           obj, end = self.scan_once(s, idx)
+                       ^^^^^^^^^^^^^^^^^^^^^^
+E           json.decoder.JSONDecodeError: Invalid \escape: line 1 column 51 (char 50)
+
+C:\Users\Justin\AppData\Local\Programs\Python\Python312\Lib\json\decoder.py:354: JSONDecodeError
+
+The above exception was the direct cause of the following exception:
+
+config_file = WindowsPath('C:/Users/Justin/AppData/Local/Temp/pytest-of-Justin/pytest-3/test_single_normal_id_stays_cl0/openclaw.json')
+user_scope_path = None, openclaw_user_dir = None, bundled_skills_dir = None
+agents = None
+
+    def parse_openclaw(
+        config_file: Path,
+        user_scope_path: Path | None,
+        openclaw_user_dir: Path | None,
+        bundled_skills_dir: Path | None,
+        agents: list[str] | None = None,
+    ) -> list[AgentRecord]:
+        """Parse openclaw.json. Returns one AgentRecord per agent in agents.list."""
+        config_file = Path(config_file).expanduser()
+        if not config_file.exists():
+            return []
+        # Real openclaw.json files are JSON5 (OpenClaw's own loader accepts
+        # comments + trailing commas). Strict json.loads would crash the whole
+        # sync on a perfectly valid hand-edited config, so parse tolerantly and
+        # surface a clear, file-scoped error on genuine corruption.
+        try:
+>           data = loads_tolerant(config_file.read_text(), source=str(config_file))
+                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+scripts\platforms\openclaw.py:228: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+text = '{"agents":{"list":[{"id":"agent-a","workspace":"C:\\Users\\Justin\\AppData\\Local\\Temp\\pytest-of-Justin\\pytest-3\\test_single_normal_id_stays_cl0\\ws"}]}}'
+source = 'C:\\Users\\Justin\\AppData\\Local\\Temp\\pytest-of-Justin\\pytest-3\\test_single_normal_id_stays_cl0\\openclaw.json'
+
+    def loads_tolerant(text: str, *, source: str | None = None):
+        """Parse `text` as JSON, tolerating // and /* */ comments and trailing
+        commas. Returns the decoded Python object.
+    
+        Strategy: try strict json.loads first (fast path, zero risk for already
+        valid JSON), then retry once after the string-aware pre-clean. If both
+        fail, raise Json5LiteError with an actionable message.
+    
+        `source` (optional) names the origin (e.g. a file path) so the error
+        message points the user at the right place instead of a bare decode stack.
+        """
+        try:
+            return json.loads(text)
+        except (json.JSONDecodeError, ValueError):
+            pass
+    
+        try:
+            cleaned = _strip_comments_and_trailing_commas(text)
+            return json.loads(cleaned)
+        except (json.JSONDecodeError, ValueError) as exc:
+            where = f" in {source}" if source else ""
+>           raise Json5LiteError(
+                f"Could not parse JSON5-tolerant content{where}: {exc}. "
+                f"This reader handles // and /* */ comments and trailing commas "
+                f"only; other JSON5 syntax (unquoted keys, single-quoted strings) "
+                f"is not supported."
+            ) from exc
+E           scripts.json5_lite.Json5LiteError: Could not parse JSON5-tolerant content in C:\Users\Justin\AppData\Local\Temp\pytest-of-Justin\pytest-3\test_single_normal_id_stays_cl0\openclaw.json: Invalid \escape: line 1 column 51 (char 50). This reader handles // and /* */ comments and trailing commas only; other JSON5 syntax (unquoted keys, single-quoted strings) is not supported.
+
+scripts\json5_lite.py:164: Json5LiteError
+
+The above exception was the direct cause of the following exception:
+
+tmp_path = WindowsPath('C:/Users/Justin/AppData/Local/Temp/pytest-of-Justin/pytest-3/test_single_normal_id_stays_cl0')
+
+    def test_single_normal_id_stays_clean(tmp_path):
+        """P1-B: a single non-colliding id must NOT get a hash suffix appended —
+        it stays as plain sanitize_base(raw) (e.g. 'agent-a' \u2192 'openclaw-agent-a').
+        """
+        cfg = tmp_path / "openclaw.json"
+        ws = tmp_path / "ws"
+        ws.mkdir()
+        cfg.write_text(
+            '{"agents":{"list":['
+            '{"id":"agent-a","workspace":"' + str(ws) + '"}'
+            ']}}'
+        )
+>       agents = parse_openclaw(cfg, user_scope_path=None, openclaw_user_dir=None,
+                                bundled_skills_dir=None, agents=None)
+
+tests\test_openclaw.py:955: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+config_file = WindowsPath('C:/Users/Justin/AppData/Local/Temp/pytest-of-Justin/pytest-3/test_single_normal_id_stays_cl0/openclaw.json')
+user_scope_path = None, openclaw_user_dir = None, bundled_skills_dir = None
+agents = None
+
+    def parse_openclaw(
+        config_file: Path,
+        user_scope_path: Path | None,
+        openclaw_user_dir: Path | None,
+        bundled_skills_dir: Path | None,
+        agents: list[str] | None = None,
+    ) -> list[AgentRecord]:
+        """Parse openclaw.json. Returns one AgentRecord per agent in agents.list."""
+        config_file = Path(config_file).expanduser()
+        if not config_file.exists():
+            return []
+        # Real openclaw.json files are JSON5 (OpenClaw's own loader accepts
+        # comments + trailing commas). Strict json.loads would crash the whole
+        # sync on a perfectly valid hand-edited config, so parse tolerantly and
+        # surface a clear, file-scoped error on genuine corruption.
+        try:
+            data = loads_tolerant(config_file.read_text(), source=str(config_file))
+        except Json5LiteError as exc:
+>           raise Json5LiteError(
+                f"Failed to parse OpenClaw config {config_file}: {exc}"
+            ) from exc
+E           scripts.json5_lite.Json5LiteError: Failed to parse OpenClaw config C:\Users\Justin\AppData\Local\Temp\pytest-of-Justin\pytest-3\test_single_normal_id_stays_cl0\openclaw.json: Could not parse JSON5-tolerant content in C:\Users\Justin\AppData\Local\Temp\pytest-of-Justin\pytest-3\test_single_normal_id_stays_cl0\openclaw.json: Invalid \escape: line 1 column 51 (char 50). This reader handles // and /* */ comments and trailing commas only; other JSON5 syntax (unquoted keys, single-quoted strings) is not supported.
+
+scripts\platforms\openclaw.py:230: Json5LiteError
+__________________ test_collision_ids_are_stable_across_runs __________________
+
+text = '{"agents":{"list":[{"id":"a/b","workspace":"C:\\Users\\Justin\\AppData\\Local\\Temp\\pytest-of-Justin\\pytest-3\\test...space":"C:\\Users\\Justin\\AppData\\Local\\Temp\\pytest-of-Justin\\pytest-3\\test_collision_ids_are_stable_0\\ws2"}]}}'
+source = 'C:\\Users\\Justin\\AppData\\Local\\Temp\\pytest-of-Justin\\pytest-3\\test_collision_ids_are_stable_0\\openclaw.json'
+
+    def loads_tolerant(text: str, *, source: str | None = None):
+        """Parse `text` as JSON, tolerating // and /* */ comments and trailing
+        commas. Returns the decoded Python object.
+    
+        Strategy: try strict json.loads first (fast path, zero risk for already
+        valid JSON), then retry once after the string-aware pre-clean. If both
+        fail, raise Json5LiteError with an actionable message.
+    
+        `source` (optional) names the origin (e.g. a file path) so the error
+        message points the user at the right place instead of a bare decode stack.
+        """
+        try:
+            return json.loads(text)
+        except (json.JSONDecodeError, ValueError):
+            pass
+    
+        try:
+            cleaned = _strip_comments_and_trailing_commas(text)
+>           return json.loads(cleaned)
+                   ^^^^^^^^^^^^^^^^^^^
+
+scripts\json5_lite.py:161: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+C:\Users\Justin\AppData\Local\Programs\Python\Python312\Lib\json\__init__.py:346: in loads
+    return _default_decoder.decode(s)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^
+C:\Users\Justin\AppData\Local\Programs\Python\Python312\Lib\json\decoder.py:338: in decode
+    obj, end = self.raw_decode(s, idx=_w(s, 0).end())
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = <json.decoder.JSONDecoder object at 0x0000024BD84C0B60>
+s = '{"agents":{"list":[{"id":"a/b","workspace":"C:\\Users\\Justin\\AppData\\Local\\Temp\\pytest-of-Justin\\pytest-3\\test...space":"C:\\Users\\Justin\\AppData\\Local\\Temp\\pytest-of-Justin\\pytest-3\\test_collision_ids_are_stable_0\\ws2"}]}}'
+idx = 0
+
+    def raw_decode(self, s, idx=0):
+        """Decode a JSON document from ``s`` (a ``str`` beginning with
+        a JSON document) and return a 2-tuple of the Python
+        representation and the index in ``s`` where the document ended.
+    
+        This can be used to decode a JSON document from a string that may
+        have extraneous data at the end.
+    
+        """
+        try:
+>           obj, end = self.scan_once(s, idx)
+                       ^^^^^^^^^^^^^^^^^^^^^^
+E           json.decoder.JSONDecodeError: Invalid \escape: line 1 column 47 (char 46)
+
+C:\Users\Justin\AppData\Local\Programs\Python\Python312\Lib\json\decoder.py:354: JSONDecodeError
+
+The above exception was the direct cause of the following exception:
+
+config_file = WindowsPath('C:/Users/Justin/AppData/Local/Temp/pytest-of-Justin/pytest-3/test_collision_ids_are_stable_0/openclaw.json')
+user_scope_path = None, openclaw_user_dir = None, bundled_skills_dir = None
+agents = None
+
+    def parse_openclaw(
+        config_file: Path,
+        user_scope_path: Path | None,
+        openclaw_user_dir: Path | None,
+        bundled_skills_dir: Path | None,
+        agents: list[str] | None = None,
+    ) -> list[AgentRecord]:
+        """Parse openclaw.json. Returns one AgentRecord per agent in agents.list."""
+        config_file = Path(config_file).expanduser()
+        if not config_file.exists():
+            return []
+        # Real openclaw.json files are JSON5 (OpenClaw's own loader accepts
+        # comments + trailing commas). Strict json.loads would crash the whole
+        # sync on a perfectly valid hand-edited config, so parse tolerantly and
+        # surface a clear, file-scoped error on genuine corruption.
+        try:
+>           data = loads_tolerant(config_file.read_text(), source=str(config_file))
+                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+scripts\platforms\openclaw.py:228: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+text = '{"agents":{"list":[{"id":"a/b","workspace":"C:\\Users\\Justin\\AppData\\Local\\Temp\\pytest-of-Justin\\pytest-3\\test...space":"C:\\Users\\Justin\\AppData\\Local\\Temp\\pytest-of-Justin\\pytest-3\\test_collision_ids_are_stable_0\\ws2"}]}}'
+source = 'C:\\Users\\Justin\\AppData\\Local\\Temp\\pytest-of-Justin\\pytest-3\\test_collision_ids_are_stable_0\\openclaw.json'
+
+    def loads_tolerant(text: str, *, source: str | None = None):
+        """Parse `text` as JSON, tolerating // and /* */ comments and trailing
+        commas. Returns the decoded Python object.
+    
+        Strategy: try strict json.loads first (fast path, zero risk for already
+        valid JSON), then retry once after the string-aware pre-clean. If both
+        fail, raise Json5LiteError with an actionable message.
+    
+        `source` (optional) names the origin (e.g. a file path) so the error
+        message points the user at the right place instead of a bare decode stack.
+        """
+        try:
+            return json.loads(text)
+        except (json.JSONDecodeError, ValueError):
+            pass
+    
+        try:
+            cleaned = _strip_comments_and_trailing_commas(text)
+            return json.loads(cleaned)
+        except (json.JSONDecodeError, ValueError) as exc:
+            where = f" in {source}" if source else ""
+>           raise Json5LiteError(
+                f"Could not parse JSON5-tolerant content{where}: {exc}. "
+                f"This reader handles // and /* */ comments and trailing commas "
+                f"only; other JSON5 syntax (unquoted keys, single-quoted strings) "
+                f"is not supported."
+            ) from exc
+E           scripts.json5_lite.Json5LiteError: Could not parse JSON5-tolerant content in C:\Users\Justin\AppData\Local\Temp\pytest-of-Justin\pytest-3\test_collision_ids_are_stable_0\openclaw.json: Invalid \escape: line 1 column 47 (char 46). This reader handles // and /* */ comments and trailing commas only; other JSON5 syntax (unquoted keys, single-quoted strings) is not supported.
+
+scripts\json5_lite.py:164: Json5LiteError
+
+The above exception was the direct cause of the following exception:
+
+tmp_path = WindowsPath('C:/Users/Justin/AppData/Local/Temp/pytest-of-Justin/pytest-3/test_collision_ids_are_stable_0')
+
+    def test_collision_ids_are_stable_across_runs(tmp_path):
+        """P1-B: the disambiguated ids are deterministic (sha256-based), not
+        iteration-order-dependent — two identical parse calls must return the same ids.
+        """
+        cfg = tmp_path / "openclaw.json"
+        ws1 = tmp_path / "ws1"
+        ws2 = tmp_path / "ws2"
+        ws1.mkdir()
+        ws2.mkdir()
+        cfg.write_text(
+            '{"agents":{"list":['
+            '{"id":"a/b","workspace":"' + str(ws1) + '"},'
+            '{"id":"a-b","workspace":"' + str(ws2) + '"}'
+            ']}}'
+        )
+>       run1 = {a.id for a in parse_openclaw(cfg, None, None, None)}
+                              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests\test_openclaw.py:976: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+config_file = WindowsPath('C:/Users/Justin/AppData/Local/Temp/pytest-of-Justin/pytest-3/test_collision_ids_are_stable_0/openclaw.json')
+user_scope_path = None, openclaw_user_dir = None, bundled_skills_dir = None
+agents = None
+
+    def parse_openclaw(
+        config_file: Path,
+        user_scope_path: Path | None,
+        openclaw_user_dir: Path | None,
+        bundled_skills_dir: Path | None,
+        agents: list[str] | None = None,
+    ) -> list[AgentRecord]:
+        """Parse openclaw.json. Returns one AgentRecord per agent in agents.list."""
+        config_file = Path(config_file).expanduser()
+        if not config_file.exists():
+            return []
+        # Real openclaw.json files are JSON5 (OpenClaw's own loader accepts
+        # comments + trailing commas). Strict json.loads would crash the whole
+        # sync on a perfectly valid hand-edited config, so parse tolerantly and
+        # surface a clear, file-scoped error on genuine corruption.
+        try:
+            data = loads_tolerant(config_file.read_text(), source=str(config_file))
+        except Json5LiteError as exc:
+>           raise Json5LiteError(
+                f"Failed to parse OpenClaw config {config_file}: {exc}"
+            ) from exc
+E           scripts.json5_lite.Json5LiteError: Failed to parse OpenClaw config C:\Users\Justin\AppData\Local\Temp\pytest-of-Justin\pytest-3\test_collision_ids_are_stable_0\openclaw.json: Could not parse JSON5-tolerant content in C:\Users\Justin\AppData\Local\Temp\pytest-of-Justin\pytest-3\test_collision_ids_are_stable_0\openclaw.json: Invalid \escape: line 1 column 47 (char 46). This reader handles // and /* */ comments and trailing commas only; other JSON5 syntax (unquoted keys, single-quoted strings) is not supported.
+
+scripts\platforms\openclaw.py:230: Json5LiteError
+___________________ test_symlink_escaping_root_not_followed ___________________
+
+tmp_path = WindowsPath('C:/Users/Justin/AppData/Local/Temp/pytest-of-Justin/pytest-3/test_symlink_escaping_root_not0')
+
+    def test_symlink_escaping_root_not_followed(tmp_path):
+        """P2: a symlink whose realpath escapes the scan root must NOT be descended.
+    
+        Layout:
+            <outside>/          \u2190 outside the scan root
+                settings.json   \u2190 would appear if the escaping symlink is followed
+            <root>/
+                link -> <outside>   \u2190 dir symlink whose realpath escapes root
+                inside/
+                    settings.json   \u2190 INSIDE root, must be found
+                a -> <root>/inside  \u2190 in-root symlink (realpath under root), must be followed
+    
+        Assertions:
+        - <outside>/settings.json is NOT in results (link is not descended)
+        - <root>/inside/settings.json IS found (real path)
+        - <root>/a -> <root>/inside is still followed (in-root symlink)
+        """
+        outside = tmp_path / "outside"
+        outside.mkdir()
+        _mk(outside / "settings.json")
+    
+        root = tmp_path / "root"
+        root.mkdir()
+    
+        # In-root directory with a real settings.json
+        inside = root / "inside"
+        inside.mkdir()
+        _mk(inside / "settings.json")
+    
+        # Escaping symlink: root/link -> outside (realpath escapes root)
+        (root / "link").symlink_to(outside, target_is_directory=True)
+    
+        # In-root symlink: root/a -> root/inside (realpath still inside root)
+        (root / "a").symlink_to(inside, target_is_directory=True)
+    
+        r = find_platform_configs(root)
+        found_dirs = {str(p) for p in r["claude_code"]}
+    
+        # inside must be found (real path)
+>       assert inside in r["claude_code"], f"inside not found; found={r['claude_code']}"
+E       AssertionError: inside not found; found=[WindowsPath('C:/Users/Justin/AppData/Local/Temp/pytest-of-Justin/pytest-3/test_symlink_escaping_root_not0/root/a')]
+E       assert WindowsPath('C:/Users/Justin/AppData/Local/Temp/pytest-of-Justin/pytest-3/test_symlink_escaping_root_not0/root/inside') in [WindowsPath('C:/Users/Justin/AppData/Local/Temp/pytest-of-Justin/pytest-3/test_symlink_escaping_root_not0/root/a')]
+
+tests\test_scan.py:217: AssertionError
+_______________ test_skill_md_describes_new_flow_not_old_config _______________
+
+    def test_skill_md_describes_new_flow_not_old_config():
+>       t = SKILL_MD.read_text()
+            ^^^^^^^^^^^^^^^^^^^^
+
+tests\test_skill_md.py:9: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+C:\Users\Justin\AppData\Local\Programs\Python\Python312\Lib\pathlib.py:1028: in read_text
+    return f.read()
+           ^^^^^^^^
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = <encodings.cp1252.IncrementalDecoder object at 0x0000024BDAC1E3F0>
+input = b'---\nname: skill-graph-builder\ndescription: Build an interactive Obsidian skill-graph vault mapping which agents ca...` section listing every deduplicated skill\'s physical sources and the agents that use it (traceable for debugging).\n'
+final = True
+
+    def decode(self, input, final=False):
+>       return codecs.charmap_decode(input,self.errors,decoding_table)[0]
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E       UnicodeDecodeError: 'charmap' codec can't decode byte 0x8d in position 413: character maps to <undefined>
+
+C:\Users\Justin\AppData\Local\Programs\Python\Python312\Lib\encodings\cp1252.py:23: UnicodeDecodeError
+___________________ test_skill_md_no_bare_python_invocation ___________________
+
+    def test_skill_md_no_bare_python_invocation():
+>       t = SKILL_MD.read_text()
+            ^^^^^^^^^^^^^^^^^^^^
+
+tests\test_skill_md.py:24: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+C:\Users\Justin\AppData\Local\Programs\Python\Python312\Lib\pathlib.py:1028: in read_text
+    return f.read()
+           ^^^^^^^^
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = <encodings.cp1252.IncrementalDecoder object at 0x0000024BDAC1F2C0>
+input = b'---\nname: skill-graph-builder\ndescription: Build an interactive Obsidian skill-graph vault mapping which agents ca...` section listing every deduplicated skill\'s physical sources and the agents that use it (traceable for debugging).\n'
+final = True
+
+    def decode(self, input, final=False):
+>       return codecs.charmap_decode(input,self.errors,decoding_table)[0]
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E       UnicodeDecodeError: 'charmap' codec can't decode byte 0x8d in position 413: character maps to <undefined>
+
+C:\Users\Justin\AppData\Local\Programs\Python\Python312\Lib\encodings\cp1252.py:23: UnicodeDecodeError
+______________________ test_skill_md_describes_cwd_scan _______________________
+
+    def test_skill_md_describes_cwd_scan():
+>       t = SKILL_MD.read_text()
+            ^^^^^^^^^^^^^^^^^^^^
+
+tests\test_skill_md.py:31: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+C:\Users\Justin\AppData\Local\Programs\Python\Python312\Lib\pathlib.py:1028: in read_text
+    return f.read()
+           ^^^^^^^^
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = <encodings.cp1252.IncrementalDecoder object at 0x0000024BDAC18EF0>
+input = b'---\nname: skill-graph-builder\ndescription: Build an interactive Obsidian skill-graph vault mapping which agents ca...` section listing every deduplicated skill\'s physical sources and the agents that use it (traceable for debugging).\n'
+final = True
+
+    def decode(self, input, final=False):
+>       return codecs.charmap_decode(input,self.errors,decoding_table)[0]
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E       UnicodeDecodeError: 'charmap' codec can't decode byte 0x8d in position 413: character maps to <undefined>
+
+C:\Users\Justin\AppData\Local\Programs\Python\Python312\Lib\encodings\cp1252.py:23: UnicodeDecodeError
+=========================== short test summary info ===========================
+FAILED tests/test_codex.py::test_blacklist_excluded_skill_not_in_accessible
+FAILED tests/test_codex.py::test_blacklist_path_points_directly_at_skill_md
+FAILED tests/test_discover.py::test_cwd_scan_finds_workspace_configs - Assert...
+FAILED tests/test_discover.py::test_fork_claude_skills_not_an_agent - Asserti...
+FAILED tests/test_discover.py::test_openclaw_symmetric_local_scan - assert Fa...
+FAILED tests/test_discover.py::test_excluded_claude_does_not_climb_above_root
+FAILED tests/test_env_expand.py::test_expand_with_tilde - AssertionError: ass...
+FAILED tests/test_generate.py::test_end_to_end_lightweight_dedup - AssertionE...
+FAILED tests/test_generate.py::test_missing_listed_config_degrades_not_exit1
+FAILED tests/test_generate.py::test_run_log_records_provenance_of_deduped_copies
+FAILED tests/test_generate.py::test_single_toplevel_config_dir_with_settings_json
+FAILED tests/test_generate.py::test_p2b_openclaw_missing_config_file_exits_1
+FAILED tests/test_generate.py::test_p2b_hermes_missing_profiles_dir_exits_1
+FAILED tests/test_generate.py::test_p2_r4_openclaw_config_file_empty_string_exits_1
+FAILED tests/test_generate.py::test_two_configs_sharing_same_parent_single_parse
+FAILED tests/test_generate.py::test_codex_single_root_config_dir_with_config_toml
+FAILED tests/test_generate.py::test_codex_child_configs_layout_unchanged - As...
+FAILED tests/test_generate.py::test_e2e_cwd_scan_to_generate - AssertionError...
+FAILED tests/test_openclaw.py::test_parse_returns_three_agents - scripts.json...
+FAILED tests/test_openclaw.py::test_allowlist_filters_by_frontmatter_name - s...
+FAILED tests/test_openclaw.py::test_missing_skills_key_unrestricted_when_no_defaults
+FAILED tests/test_openclaw.py::test_missing_skills_key_uses_defaults_when_present
+FAILED tests/test_openclaw.py::test_empty_array_means_no_skills - scripts.jso...
+FAILED tests/test_openclaw.py::test_workspace_own_visible_when_unrestricted
+FAILED tests/test_openclaw.py::test_workspace_wins_when_same_name_as_shared
+FAILED tests/test_openclaw.py::test_entries_enabled_false_blacklisted - json....
+FAILED tests/test_openclaw.py::test_skill_without_description_excluded - json...
+FAILED tests/test_openclaw.py::test_deep_nested_skill_excluded - json.decoder...
+FAILED tests/test_openclaw.py::test_grouped_skill_included - json.decoder.JSO...
+FAILED tests/test_openclaw.py::test_runtime_gating_noted_in_agent - scripts.j...
+FAILED tests/test_openclaw.py::test_entries_disabled_by_skill_key_excluded - ...
+FAILED tests/test_openclaw.py::test_entries_does_not_match_name_when_skillkey_present
+FAILED tests/test_openclaw.py::test_same_name_in_both_workspace_roots_distinct_sources
+FAILED tests/test_openclaw.py::test_skillkey_under_unrelated_block_is_ignored
+FAILED tests/test_openclaw.py::test_skillkey_from_openclaw_block_when_crlf - ...
+FAILED tests/test_openclaw.py::test_symlinked_skill_dir_under_extradir_found
+FAILED tests/test_openclaw.py::test_symlinked_grouped_skill_dir_found - json....
+FAILED tests/test_openclaw.py::test_skillkey_from_metadata_openclaw_nested_map
+FAILED tests/test_openclaw.py::test_skillkey_from_metadata_openclaw_json_string
+FAILED tests/test_openclaw.py::test_skillkey_from_metadata_legacy_clawdbot_block
+FAILED tests/test_openclaw.py::test_metadata_openclaw_skillkey_drives_entries_disable
+FAILED tests/test_openclaw.py::test_skillkey_under_metadata_unrelated_block_still_ignored
+FAILED tests/test_openclaw.py::test_skillkey_from_json5_metadata_string - jso...
+FAILED tests/test_openclaw.py::test_agents_filter_subset - scripts.json5_lite...
+FAILED tests/test_openclaw.py::test_agents_none_means_all - scripts.json5_lit...
+FAILED tests/test_openclaw.py::test_agent_id_path_traversal_sanitized - scrip...
+FAILED tests/test_openclaw.py::test_colliding_sanitized_ids_are_disambiguated
+FAILED tests/test_openclaw.py::test_colliding_traversal_and_safe_id_disambiguated
+FAILED tests/test_openclaw.py::test_single_normal_id_stays_clean - scripts.js...
+FAILED tests/test_openclaw.py::test_collision_ids_are_stable_across_runs - sc...
+FAILED tests/test_scan.py::test_symlink_escaping_root_not_followed - Assertio...
+FAILED tests/test_skill_md.py::test_skill_md_describes_new_flow_not_old_config
+FAILED tests/test_skill_md.py::test_skill_md_no_bare_python_invocation - Unic...
+FAILED tests/test_skill_md.py::test_skill_md_describes_cwd_scan - UnicodeDeco...
+54 failed, 184 passed in 10.42s

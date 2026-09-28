@@ -1,0 +1,182 @@
+[
+  {
+    "source": "ask-matt",
+    "target": "grill-with-docs"
+  },
+  {
+    "source": "ask-matt",
+    "target": "wayfinder"
+  },
+  {
+    "source": "ask-matt",
+    "target": "to-questionnaire"
+  },
+  {
+    "source": "ask-matt",
+    "target": "prototype"
+  },
+  {
+    "source": "ask-matt",
+    "target": "wizard"
+  },
+  {
+    "source": "ask-matt",
+    "target": "tdd"
+  },
+  {
+    "source": "ask-matt",
+    "target": "teach"
+  },
+  {
+    "source": "ask-matt",
+    "target": "handoff"
+  },
+  {
+    "source": "ask-matt",
+    "target": "diagnosing-bugs"
+  },
+  {
+    "source": "ask-matt",
+    "target": "grilling"
+  },
+  {
+    "source": "ask-matt",
+    "target": "triage"
+  },
+  {
+    "source": "ask-matt",
+    "target": "improve-codebase-architecture"
+  },
+  {
+    "source": "ask-matt",
+    "target": "implement"
+  },
+  {
+    "source": "ask-matt",
+    "target": "codebase-design"
+  },
+  {
+    "source": "ask-matt",
+    "target": "setup-matt-pocock-skills"
+  },
+  {
+    "source": "ask-matt",
+    "target": "to-spec"
+  },
+  {
+    "source": "ask-matt",
+    "target": "grill-me"
+  },
+  {
+    "source": "ask-matt",
+    "target": "resolving-merge-conflicts"
+  },
+  {
+    "source": "ask-matt",
+    "target": "to-tickets"
+  },
+  {
+    "source": "ask-matt",
+    "target": "research"
+  },
+  {
+    "source": "ask-matt",
+    "target": "pr"
+  },
+  {
+    "source": "ask-matt",
+    "target": "writing-for-agents"
+  },
+  {
+    "source": "ask-matt",
+    "target": "code-review"
+  },
+  {
+    "source": "ask-matt",
+    "target": "wait-what"
+  },
+  {
+    "source": "ask-matt",
+    "target": "domain-modeling"
+  },
+  {
+    "source": "code-review",
+    "target": "setup-matt-pocock-skills"
+  },
+  {
+    "source": "implement",
+    "target": "tdd"
+  },
+  {
+    "source": "implement",
+    "target": "code-review"
+  },
+  {
+    "source": "implement-spec",
+    "target": "code-review"
+  },
+  {
+    "source": "improve-codebase-architecture",
+    "target": "codebase-design"
+  },
+  {
+    "source": "loop-me",
+    "target": "grilling"
+  },
+  {
+    "source": "retro",
+    "target": "writing-for-agents"
+  },
+  {
+    "source": "scaffold-exercises",
+    "target": "pr"
+  },
+  {
+    "source": "setup-matt-pocock-skills",
+    "target": "triage"
+  },
+  {
+    "source": "setup-matt-pocock-skills",
+    "target": "to-spec"
+  },
+  {
+    "source": "setup-matt-pocock-skills",
+    "target": "to-tickets"
+  },
+  {
+    "source": "setup-pre-commit",
+    "target": "pr"
+  },
+  {
+    "source": "tdd",
+    "target": "code-review"
+  },
+  {
+    "source": "to-spec",
+    "target": "setup-matt-pocock-skills"
+  },
+  {
+    "source": "to-tickets",
+    "target": "setup-matt-pocock-skills"
+  },
+  {
+    "source": "triage",
+    "target": "setup-matt-pocock-skills"
+  },
+  {
+    "source": "wayfinder",
+    "target": "prototype"
+  },
+  {
+    "source": "wayfinder",
+    "target": "grilling"
+  },
+  {
+    "source": "wayfinder",
+    "target": "setup-matt-pocock-skills"
+  },
+  {
+    "source": "wayfinder",
+    "target": "research"
+  }
+]

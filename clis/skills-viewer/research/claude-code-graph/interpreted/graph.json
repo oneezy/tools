@@ -1,0 +1,628 @@
+{
+  "plugin": {
+    "name": "mattpocock-skills",
+    "version": "0.0.0",
+    "path": "C:\\Users\\Justin\\.claude\\jobs\\9f3eb07d\\tmp\\claude-code-graph-trial\\plugin"
+  },
+  "components": {
+    "commands": [],
+    "skills": [
+      {
+        "name": "ask-matt",
+        "file": "skills/ask-matt/SKILL.md",
+        "description": "Ask which skill or flow fits your situation. A router over the skills in this repo.",
+        "allowedTools": [],
+        "frontmatter": {
+          "disable-model-invocation": "true"
+        }
+      },
+      {
+        "name": "claude-handoff",
+        "file": "skills/claude-handoff/SKILL.md",
+        "description": "Hand the current conversation off to a fresh background agent that picks up the work immediately.",
+        "allowedTools": [],
+        "frontmatter": {
+          "argument-hint": "\"What will the next session be used for?\"",
+          "disable-model-invocation": "true"
+        }
+      },
+      {
+        "name": "code-review",
+        "file": "skills/code-review/SKILL.md",
+        "description": "\"Review the changes since a fixed point (commit, branch, tag, or merge-base) along two axes: Standards (does the code follow this repo's documented coding standards?) and Spec (does the code match what the originating issue/spec asked for?). Runs both reviews in parallel sub-agents and reports them side by side. Use when the user wants to review a branch, a PR, work-in-progress changes, or asks to \\\"review since X\\\".\"",
+        "allowedTools": [],
+        "frontmatter": {}
+      },
+      {
+        "name": "codebase-design",
+        "file": "skills/codebase-design/SKILL.md",
+        "description": "Shared vocabulary for designing deep modules. Use when the user wants to design or improve a module's interface, find deepening opportunities, decide where a seam goes, make code more testable or AI-navigable, or when another skill needs the deep-module vocabulary.",
+        "allowedTools": [],
+        "frontmatter": {}
+      },
+      {
+        "name": "diagnosing-bugs",
+        "file": "skills/diagnosing-bugs/SKILL.md",
+        "description": "Diagnosis loop for hard bugs and performance regressions. Use when the user says \"diagnose\"/\"debug this\", or reports something broken/throwing/failing/slow.",
+        "allowedTools": [],
+        "frontmatter": {}
+      },
+      {
+        "name": "domain-modeling",
+        "file": "skills/domain-modeling/SKILL.md",
+        "description": "Build and sharpen a project's domain model. Use when discussing codebase terminology, writing or editing a CONTEXT.md, or recording or editing an ADR.",
+        "allowedTools": [],
+        "frontmatter": {}
+      },
+      {
+        "name": "git-guardrails-claude-code",
+        "file": "skills/git-guardrails-claude-code/SKILL.md",
+        "description": "Set up Claude Code hooks to block dangerous git commands (push, reset --hard, clean, branch -D, etc.) before they execute. Use when user wants to prevent destructive git operations, add git safety hooks, or block git push/reset in Claude Code.",
+        "allowedTools": [],
+        "frontmatter": {}
+      },
+      {
+        "name": "grill-me",
+        "file": "skills/grill-me/SKILL.md",
+        "description": "A relentless interview to sharpen a plan or design.",
+        "allowedTools": [],
+        "frontmatter": {
+          "disable-model-invocation": "true"
+        }
+      },
+      {
+        "name": "grill-with-docs",
+        "file": "skills/grill-with-docs/SKILL.md",
+        "description": "A relentless interview to sharpen a plan or design, which also creates docs (ADR's and glossary) as we go.",
+        "allowedTools": [],
+        "frontmatter": {
+          "disable-model-invocation": "true"
+        }
+      },
+      {
+        "name": "grilling",
+        "file": "skills/grilling/SKILL.md",
+        "description": "Grill the user relentlessly about a plan, decision, or idea. Use when the user wants to stress-test their thinking, or uses any 'grill' trigger phrases.",
+        "allowedTools": [],
+        "frontmatter": {}
+      },
+      {
+        "name": "handoff",
+        "file": "skills/handoff/SKILL.md",
+        "description": "Compact the current conversation into a handoff document for another agent to pick up.",
+        "allowedTools": [],
+        "frontmatter": {
+          "argument-hint": "\"What will the next session be used for?\"",
+          "disable-model-invocation": "true"
+        }
+      },
+      {
+        "name": "implement",
+        "file": "skills/implement/SKILL.md",
+        "description": "\"Implement a piece of work based on a spec or set of tickets.\"",
+        "allowedTools": [],
+        "frontmatter": {
+          "disable-model-invocation": "true"
+        }
+      },
+      {
+        "name": "implement-spec",
+        "file": "skills/implement-spec/SKILL.md",
+        "description": "\"Implement a specification in code.\"",
+        "allowedTools": [],
+        "frontmatter": {
+          "disable-model-invocation": "true"
+        }
+      },
+      {
+        "name": "improve-codebase-architecture",
+        "file": "skills/improve-codebase-architecture/SKILL.md",
+        "description": "Scan a codebase for deepening opportunities, present them as a visual HTML report, then grill through whichever one you pick.",
+        "allowedTools": [],
+        "frontmatter": {
+          "disable-model-invocation": "true"
+        }
+      },
+      {
+        "name": "loop-me",
+        "file": "skills/loop-me/SKILL.md",
+        "description": "Grill me about specs for the workflows I want to build, within this workspace.",
+        "allowedTools": [],
+        "frontmatter": {
+          "disable-model-invocation": "true",
+          "argument-hint": "\"A workflow to design, or nothing to go find one\""
+        }
+      },
+      {
+        "name": "migrate-to-shoehorn",
+        "file": "skills/migrate-to-shoehorn/SKILL.md",
+        "description": "Migrate test files from `as` type assertions to @total-typescript/shoehorn. Use when user mentions shoehorn, wants to replace `as` in tests, or needs partial test data.",
+        "allowedTools": [],
+        "frontmatter": {}
+      },
+      {
+        "name": "pr",
+        "file": "skills/pr/SKILL.md",
+        "description": "\"Use when writing a PR body.\"",
+        "allowedTools": [],
+        "frontmatter": {
+          "metadata": ""
+        }
+      },
+      {
+        "name": "prototype",
+        "file": "skills/prototype/SKILL.md",
+        "description": "Build a throwaway prototype to answer a design question. Use when the user wants to sanity-check whether a state model or logic feels right, or explore what a UI should look like.",
+        "allowedTools": [],
+        "frontmatter": {}
+      },
+      {
+        "name": "research",
+        "file": "skills/research/SKILL.md",
+        "description": "Investigate a question against high-trust primary sources and capture the findings as a Markdown file in the repo. Use when the user wants a topic researched, docs or API facts gathered, or reading legwork delegated to a background agent.",
+        "allowedTools": [],
+        "frontmatter": {}
+      },
+      {
+        "name": "resolving-merge-conflicts",
+        "file": "skills/resolving-merge-conflicts/SKILL.md",
+        "description": "\"Use when you need to resolve an in-progress git merge/rebase conflict.\"",
+        "allowedTools": [],
+        "frontmatter": {}
+      },
+      {
+        "name": "retro",
+        "file": "skills/retro/SKILL.md",
+        "description": "\"Conduct a retrospective on a coding session.\"",
+        "allowedTools": [],
+        "frontmatter": {
+          "disable-model-invocation": "true"
+        }
+      },
+      {
+        "name": "scaffold-exercises",
+        "file": "skills/scaffold-exercises/SKILL.md",
+        "description": "Create exercise directory structures with sections, problems, solutions, and explainers that pass linting. Use when user wants to scaffold exercises, create exercise stubs, or set up a new course section.",
+        "allowedTools": [],
+        "frontmatter": {}
+      },
+      {
+        "name": "setup-matt-pocock-skills",
+        "file": "skills/setup-matt-pocock-skills/SKILL.md",
+        "description": "\"Configure this repo for the engineering skills: set up its issue tracker, triage label vocabulary, and domain doc layout. Run once before first use of the other engineering skills.\"",
+        "allowedTools": [],
+        "frontmatter": {
+          "disable-model-invocation": "true"
+        }
+      },
+      {
+        "name": "setup-pre-commit",
+        "file": "skills/setup-pre-commit/SKILL.md",
+        "description": "Set up Husky pre-commit hooks with lint-staged (Prettier), type checking, and tests in the current repo. Use when user wants to add pre-commit hooks, set up Husky, configure lint-staged, or add commit-time formatting/typechecking/testing.",
+        "allowedTools": [],
+        "frontmatter": {}
+      },
+      {
+        "name": "setup-ts-deep-modules",
+        "file": "skills/setup-ts-deep-modules/SKILL.md",
+        "description": "Wire dependency-cruiser into a TypeScript repo so each package is a deep module, with implementation hidden in subfolders and reachable only through its entry-point files. User-invoked.",
+        "allowedTools": [],
+        "frontmatter": {
+          "disable-model-invocation": "true"
+        }
+      },
+      {
+        "name": "tdd",
+        "file": "skills/tdd/SKILL.md",
+        "description": "Test-driven development. Use when the user wants to build features or fix bugs test-first, mentions \"red-green-refactor\", or wants integration tests.",
+        "allowedTools": [],
+        "frontmatter": {}
+      },
+      {
+        "name": "teach",
+        "file": "skills/teach/SKILL.md",
+        "description": "Teach the user a new skill or concept, within this workspace.",
+        "allowedTools": [],
+        "frontmatter": {
+          "disable-model-invocation": "true",
+          "argument-hint": "\"What would you like to learn about?\""
+        }
+      },
+      {
+        "name": "to-questionnaire",
+        "file": "skills/to-questionnaire/SKILL.md",
+        "description": "Turn a decision you can't fully answer into a questionnaire for someone else to fill in.",
+        "allowedTools": [],
+        "frontmatter": {
+          "disable-model-invocation": "true"
+        }
+      },
+      {
+        "name": "to-spec",
+        "file": "skills/to-spec/SKILL.md",
+        "description": "\"Turn the current conversation into a spec and publish it to the project issue tracker: no interview, just synthesis of what you've already discussed.\"",
+        "allowedTools": [],
+        "frontmatter": {
+          "disable-model-invocation": "true"
+        }
+      },
+      {
+        "name": "to-tickets",
+        "file": "skills/to-tickets/SKILL.md",
+        "description": "Break a plan, spec, or the current conversation into a set of tracer-bullet tickets, each declaring its blocking edges, published to the configured tracker (edges as text in one file per ticket locally, or native blocking links on a real tracker).",
+        "allowedTools": [],
+        "frontmatter": {
+          "disable-model-invocation": "true"
+        }
+      },
+      {
+        "name": "triage",
+        "file": "skills/triage/SKILL.md",
+        "description": "Move issues and external PRs through a state machine of triage roles, categorise, verify, grill if needed, and write agent-ready briefs.",
+        "allowedTools": [],
+        "frontmatter": {
+          "disable-model-invocation": "true"
+        }
+      },
+      {
+        "name": "wait-what",
+        "file": "skills/wait-what/SKILL.md",
+        "description": "\"Stop. That last message did not land: re-pitch it.\"",
+        "allowedTools": [],
+        "frontmatter": {
+          "disable-model-invocation": "true"
+        }
+      },
+      {
+        "name": "wayfinder",
+        "file": "skills/wayfinder/SKILL.md",
+        "description": "Plan a huge chunk of work (more than one agent session can hold) as a shared map of decision tickets on your issue tracker, and resolve them one at a time until the way to the destination is clear.",
+        "allowedTools": [],
+        "frontmatter": {
+          "disable-model-invocation": "true"
+        }
+      },
+      {
+        "name": "wizard",
+        "file": "skills/wizard/SKILL.md",
+        "description": "Generate an interactive bash wizard that walks a human through steps only they can perform. Use when provisioning infrastructure, setting up credentials or CI secrets, walking an unfamiliar third-party dashboard, or running a one-off migration or cutover. Don't invoke this for steps the agent can perform itself.",
+        "allowedTools": [],
+        "frontmatter": {}
+      },
+      {
+        "name": "writing-beats",
+        "file": "skills/writing-beats/SKILL.md",
+        "description": "Writing, exploit; assemble raw material into a journey of beats, grounding each term before a beat leans on it.",
+        "allowedTools": [],
+        "frontmatter": {
+          "disable-model-invocation": "true"
+        }
+      },
+      {
+        "name": "writing-for-agents",
+        "file": "skills/writing-for-agents/SKILL.md",
+        "description": "Writing documents for agents. Use when creating or editing skills, or modifying AGENTS.md or CLAUDE.md.",
+        "allowedTools": [],
+        "frontmatter": {}
+      },
+      {
+        "name": "writing-fragments",
+        "file": "skills/writing-fragments/SKILL.md",
+        "description": "\"Writing, explore: mine raw fragments, no structure yet.\"",
+        "allowedTools": [],
+        "frontmatter": {
+          "disable-model-invocation": "true"
+        }
+      },
+      {
+        "name": "writing-shape",
+        "file": "skills/writing-shape/SKILL.md",
+        "description": "\"Writing, exploit: shape raw material into an article, paragraph by paragraph.\"",
+        "allowedTools": [],
+        "frontmatter": {
+          "disable-model-invocation": "true"
+        }
+      }
+    ],
+    "hooks": [],
+    "agents": []
+  },
+  "dependencies": {
+    "commandToSkill": {},
+    "skillToTools": {},
+    "skillToSkill": {
+      "ask-matt": [
+        "code-review",
+        "codebase-design",
+        "diagnosing-bugs",
+        "domain-modeling",
+        "grill-me",
+        "grill-with-docs",
+        "grilling",
+        "handoff",
+        "implement",
+        "improve-codebase-architecture",
+        "prototype",
+        "research",
+        "resolving-merge-conflicts",
+        "setup-matt-pocock-skills",
+        "tdd",
+        "teach",
+        "to-questionnaire",
+        "to-spec",
+        "to-tickets",
+        "triage",
+        "wait-what",
+        "wayfinder",
+        "wizard",
+        "writing-for-agents"
+      ],
+      "code-review": [
+        "setup-matt-pocock-skills"
+      ],
+      "grill-me": [
+        "grilling"
+      ],
+      "grill-with-docs": [
+        "domain-modeling",
+        "grilling"
+      ],
+      "implement": [
+        "code-review",
+        "tdd"
+      ],
+      "implement-spec": [
+        "code-review"
+      ],
+      "improve-codebase-architecture": [
+        "codebase-design",
+        "domain-modeling",
+        "grilling"
+      ],
+      "loop-me": [
+        "grilling"
+      ],
+      "retro": [
+        "writing-for-agents"
+      ],
+      "setup-matt-pocock-skills": [
+        "domain-modeling",
+        "grill-with-docs",
+        "grilling",
+        "improve-codebase-architecture",
+        "pr",
+        "prototype",
+        "research",
+        "to-spec",
+        "to-tickets",
+        "triage",
+        "wayfinder"
+      ],
+      "setup-ts-deep-modules": [
+        "codebase-design"
+      ],
+      "tdd": [
+        "code-review",
+        "codebase-design"
+      ],
+      "to-spec": [
+        "setup-matt-pocock-skills"
+      ],
+      "to-tickets": [
+        "setup-matt-pocock-skills"
+      ],
+      "triage": [
+        "domain-modeling",
+        "grilling",
+        "setup-matt-pocock-skills"
+      ],
+      "wayfinder": [
+        "domain-modeling",
+        "grilling",
+        "prototype",
+        "research",
+        "setup-matt-pocock-skills"
+      ]
+    },
+    "hookToEvent": {}
+  },
+  "stats": {
+    "totalCommands": 0,
+    "totalSkills": 38,
+    "totalHooks": 0,
+    "totalAgents": 0
+  },
+  "_mode": "interpreted",
+  "_edgeKinds": {
+    "ask-matt->code-review": [
+      "slash"
+    ],
+    "ask-matt->codebase-design": [
+      "slash"
+    ],
+    "ask-matt->diagnosing-bugs": [
+      "slash"
+    ],
+    "ask-matt->domain-modeling": [
+      "slash"
+    ],
+    "ask-matt->grill-me": [
+      "slash"
+    ],
+    "ask-matt->grill-with-docs": [
+      "backtick",
+      "slash"
+    ],
+    "ask-matt->grilling": [
+      "slash"
+    ],
+    "ask-matt->handoff": [
+      "slash"
+    ],
+    "ask-matt->implement": [
+      "slash"
+    ],
+    "ask-matt->improve-codebase-architecture": [
+      "slash"
+    ],
+    "ask-matt->prototype": [
+      "slash"
+    ],
+    "ask-matt->research": [
+      "slash"
+    ],
+    "ask-matt->resolving-merge-conflicts": [
+      "slash"
+    ],
+    "ask-matt->setup-matt-pocock-skills": [
+      "slash"
+    ],
+    "ask-matt->tdd": [
+      "slash"
+    ],
+    "ask-matt->teach": [
+      "slash"
+    ],
+    "ask-matt->to-questionnaire": [
+      "slash"
+    ],
+    "ask-matt->to-spec": [
+      "slash"
+    ],
+    "ask-matt->to-tickets": [
+      "slash"
+    ],
+    "ask-matt->triage": [
+      "slash"
+    ],
+    "ask-matt->wait-what": [
+      "slash"
+    ],
+    "ask-matt->wayfinder": [
+      "slash"
+    ],
+    "ask-matt->wizard": [
+      "slash"
+    ],
+    "ask-matt->writing-for-agents": [
+      "slash"
+    ],
+    "code-review->setup-matt-pocock-skills": [
+      "slash"
+    ],
+    "grill-me->grilling": [
+      "Skill-tool-quoted"
+    ],
+    "grill-with-docs->domain-modeling": [
+      "Skill-tool-quoted"
+    ],
+    "grill-with-docs->grilling": [
+      "Skill-tool-quoted"
+    ],
+    "implement->code-review": [
+      "slash"
+    ],
+    "implement->tdd": [
+      "slash"
+    ],
+    "implement-spec->code-review": [
+      "slash"
+    ],
+    "improve-codebase-architecture->codebase-design": [
+      "Skill-tool-quoted",
+      "slash"
+    ],
+    "improve-codebase-architecture->domain-modeling": [
+      "Skill-tool-quoted"
+    ],
+    "improve-codebase-architecture->grilling": [
+      "Skill-tool-quoted"
+    ],
+    "loop-me->grilling": [
+      "slash"
+    ],
+    "retro->writing-for-agents": [
+      "Skill-tool-quoted",
+      "backtick",
+      "the-X-skill"
+    ],
+    "setup-matt-pocock-skills->domain-modeling": [
+      "slash"
+    ],
+    "setup-matt-pocock-skills->grill-with-docs": [
+      "slash"
+    ],
+    "setup-matt-pocock-skills->grilling": [
+      "backtick"
+    ],
+    "setup-matt-pocock-skills->improve-codebase-architecture": [
+      "slash"
+    ],
+    "setup-matt-pocock-skills->pr": [
+      "backtick"
+    ],
+    "setup-matt-pocock-skills->prototype": [
+      "backtick"
+    ],
+    "setup-matt-pocock-skills->research": [
+      "backtick"
+    ],
+    "setup-matt-pocock-skills->to-spec": [
+      "backtick"
+    ],
+    "setup-matt-pocock-skills->to-tickets": [
+      "backtick"
+    ],
+    "setup-matt-pocock-skills->triage": [
+      "backtick",
+      "slash",
+      "the-X-skill"
+    ],
+    "setup-matt-pocock-skills->wayfinder": [
+      "slash"
+    ],
+    "setup-ts-deep-modules->codebase-design": [
+      "Skill-tool-quoted"
+    ],
+    "tdd->code-review": [
+      "backtick",
+      "the-X-skill"
+    ],
+    "tdd->codebase-design": [
+      "Skill-tool-quoted"
+    ],
+    "to-spec->setup-matt-pocock-skills": [
+      "slash"
+    ],
+    "to-tickets->setup-matt-pocock-skills": [
+      "slash"
+    ],
+    "triage->domain-modeling": [
+      "Skill-tool-quoted"
+    ],
+    "triage->grilling": [
+      "Skill-tool-quoted"
+    ],
+    "triage->setup-matt-pocock-skills": [
+      "slash"
+    ],
+    "wayfinder->domain-modeling": [
+      "Skill-tool-quoted"
+    ],
+    "wayfinder->grilling": [
+      "Skill-tool-quoted",
+      "backtick"
+    ],
+    "wayfinder->prototype": [
+      "Skill-tool-quoted",
+      "backtick"
+    ],
+    "wayfinder->research": [
+      "Skill-tool-quoted",
+      "backtick"
+    ],
+    "wayfinder->setup-matt-pocock-skills": [
+      "slash"
+    ]
+  }
+}

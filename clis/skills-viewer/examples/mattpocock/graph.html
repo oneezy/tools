@@ -1,0 +1,569 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>mattpocock-skills</title>
+<style>
+  :root {
+    --bg: #fafafa; --panel: #ffffff; --ink: #1f2428; --muted: #6b7280; --line: #e5e7eb; --accent: #1565c0;
+    --auto: #e6f4ea; --auto-ink: #2e7d32; --manual: #fff1e0; --manual-ink: #e65100; --background: #ede7f6; --background-ink: #5e35b1;
+    --warn: #d32f2f;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; background: var(--bg); color: var(--ink); font: 14px/1.4 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+  body { display: grid; grid-template-rows: auto 1fr; height: 100vh; }
+  header { display: flex; flex-wrap: wrap; align-items: center; gap: 12px 18px; padding: 10px 16px; background: var(--panel); border-bottom: 1px solid var(--line); }
+  header h1 { font-size: 16px; margin: 0; }
+  header .counts { color: var(--muted); }
+  .legend { display: flex; flex-wrap: wrap; gap: 8px 14px; align-items: center; font-size: 12px; }
+  .legend .sw { display: inline-block; width: 14px; height: 14px; border-radius: 3px; vertical-align: -2px; margin-right: 4px; border: 1px solid; }
+  .legend .ln { display: inline-block; width: 26px; border-top: 2px solid; vertical-align: 3px; margin-right: 4px; }
+  .legend .ln.dash { border-top-style: dashed; }
+  .legend .ln.dot { border-top-style: dotted; }
+  .toolbar { display: flex; flex-wrap: wrap; gap: 6px 12px; align-items: center; margin-left: auto; }
+  .toolbar label { font-size: 12px; color: var(--muted); white-space: nowrap; }
+  button { font: inherit; font-size: 12px; padding: 4px 10px; border: 1px solid var(--line); background: var(--panel); border-radius: 6px; cursor: pointer; }
+  button:hover { border-color: var(--accent); color: var(--accent); }
+  main { display: grid; grid-template-columns: 260px 1fr 340px; min-height: 0; }
+  aside { background: var(--panel); border-right: 1px solid var(--line); display: flex; flex-direction: column; min-height: 0; }
+  aside input { margin: 10px; padding: 7px 10px; border: 1px solid var(--line); border-radius: 6px; font: inherit; }
+  #list { overflow: auto; margin: 0; padding: 0 0 12px; list-style: none; }
+  #list li { padding: 7px 12px; cursor: pointer; border-left: 3px solid transparent; }
+  #list li:hover { background: #f3f4f6; }
+  #list li.active { border-left-color: var(--accent); background: #eef4fb; }
+  #list li .nm { font-weight: 600; }
+  #list li .ds { color: var(--muted); font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .dot { display: inline-block; width: 9px; height: 9px; border-radius: 50%; margin-right: 6px; border: 1px solid; }
+  .dot.auto { background: var(--auto); border-color: var(--auto-ink); }
+  .dot.manual { background: var(--manual); border-color: var(--manual-ink); }
+  .dot.background { background: var(--background); border-color: var(--background-ink); }
+  #canvas { overflow: auto; padding: 16px; position: relative; }
+  #canvas .mermaid { transform-origin: 0 0; display: inline-block; }
+  #canvas svg { max-width: none !important; display: block; }
+  #err { color: var(--warn); white-space: pre-wrap; font-family: ui-monospace, monospace; font-size: 12px; }
+  #detail { background: var(--panel); border-left: 1px solid var(--line); overflow: auto; padding: 14px 16px; }
+  #detail h2 { font-size: 16px; margin: 0 0 4px; }
+  #detail h3 { font-size: 12px; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); margin: 16px 0 6px; }
+  #detail .badge { display: inline-block; font-size: 11px; padding: 2px 7px; border-radius: 10px; border: 1px solid; margin-right: 6px; }
+  #detail .badge.auto { background: var(--auto); border-color: var(--auto-ink); color: var(--auto-ink); }
+  #detail .badge.manual { background: var(--manual); border-color: var(--manual-ink); color: var(--manual-ink); }
+  #detail .badge.background { background: var(--background); border-color: var(--background-ink); color: var(--background-ink); }
+  #detail .badge.entry { background: #fff; border-color: var(--manual-ink); color: var(--manual-ink); font-weight: 600; }
+  #detail .badge.sub { background: #fff; border-color: var(--muted); color: var(--muted); }
+  #detail p.desc { margin: 8px 0; }
+  #detail .edge { padding: 6px 8px; border: 1px solid var(--line); border-radius: 6px; margin-bottom: 6px; }
+  #detail .edge .t { font-weight: 600; cursor: pointer; color: var(--accent); }
+  #detail .edge .k { font-size: 11px; color: var(--muted); margin-left: 6px; }
+  #detail .edge .w { color: var(--warn); font-size: 11px; margin-left: 6px; }
+  #detail .ev { font-family: ui-monospace, monospace; font-size: 11px; color: #374151; background: #f6f8fa; padding: 4px 6px; border-radius: 4px; margin-top: 4px; white-space: pre-wrap; word-break: break-word; }
+  #detail .ev b { color: var(--accent); }
+  #detail code { font-size: 12px; background: #f6f8fa; padding: 1px 4px; border-radius: 3px; }
+  #detail .path { font-size: 11px; color: var(--muted); word-break: break-all; }
+  #detail details { margin-top: 8px; }
+  #detail pre { font-size: 11px; background: #f6f8fa; padding: 8px; border-radius: 6px; overflow: auto; }
+  /* fixed-size skill cards inside the diagram (HTML labels) */
+  .sk { width: 176px; height: 66px; overflow: hidden; text-align: left; line-height: 1.25; padding: 0 2px; white-space: normal; }
+  .sk * { white-space: normal; }
+  .sk-name { font-weight: 700; font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .sk-desc { font-size: 10.5px; color: #4b5563; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; max-height: 27px; word-break: break-word; }
+  .sk-mode { font-size: 9.5px; color: #6b7280; text-transform: uppercase; letter-spacing: .05em; }
+  .sk-inst .sk-name { font-weight: 600; }
+  .node { cursor: pointer; }
+  .node:hover rect { filter: brightness(0.96); }
+  #unresolved { font-size: 12px; color: var(--muted); }
+  #watch { font-size: 11px; color: var(--muted); }
+  @media (max-width: 1000px) { main { grid-template-columns: 1fr; grid-template-rows: auto 1fr auto; } aside { max-height: 30vh; } #detail { max-height: 40vh; } }
+</style>
+</head>
+<body>
+<header>
+  <h1>mattpocock-skills</h1>
+  <span class="counts" id="counts"></span>
+  <span class="legend">
+    <span><i class="sw" style="background:var(--auto);border-color:var(--auto-ink)"></i>auto (agent or /slash)</span>
+    <span><i class="sw" style="background:var(--manual);border-color:var(--manual-ink)"></i>manual-only (/slash)</span>
+    <span><i class="sw" style="background:var(--background);border-color:var(--background-ink)"></i>model-only (hidden)</span>
+    <span>▶ entry point</span><span>↳ sub-skill</span>
+    <span><i class="ln" style="border-color:#1565c0"></i>calls</span>
+    <span><i class="ln dash" style="border-color:#6a1b9a"></i>suggests</span>
+    <span><i class="ln" style="border-color:#2e7d32;border-top-width:3px"></i>needs first</span>
+    <span><i class="ln dot" style="border-color:#9e9e9e"></i>reference</span>
+    <span><i class="ln" style="border-color:#d32f2f"></i>⚠ calls a manual-only skill</span>
+  </span>
+  <span class="toolbar">
+    <label><input type="checkbox" id="optFlows" checked /> flows</label>
+    <label><input type="checkbox" id="optSug" /> suggests</label>
+    <label><input type="checkbox" id="optRefs" /> references</label>
+    <label><input type="checkbox" id="optFiles" /> files</label>
+    <label><input type="checkbox" id="optTB" /> top-down</label>
+    <button id="btnAll">Whole library</button>
+    <button id="btnFit" title="fit the diagram to the window">Fit</button>
+    <button id="btnZoomOut">−</button>
+    <button id="btnZoomIn">+</button>
+    <span id="zoomPct" style="font-size:12px;color:var(--muted);min-width:3em">100%</span>
+    <button id="btnCopy">Copy Mermaid</button>
+    <button id="btnMmd">Download .mmd</button>
+    <button id="btnJson">Download graph.json</button>
+    <span id="watch"></span>
+  </span>
+</header>
+<main>
+  <aside>
+    <input id="search" type="search" placeholder="Search skills…" autofocus />
+    <ul id="list"></ul>
+  </aside>
+  <section id="canvas"><div id="err"></div><div class="mermaid" id="diagram"></div></section>
+  <section id="detail"><p class="path">Click a skill in the list or the diagram. The whole library is shown until you do.</p><div id="unresolved"></div></section>
+</main>
+
+<script type="application/json" id="graph-data">{"meta":{"generatedAt":"2026-09-28T00:36:41.150Z","roots":["V:\\dev\\tools\\.claude\\worktrees\\tools-skills-viewer\\clis\\skills-viewer\\fixtures\\mattpocock-skills"],"skillCount":38,"edgeCount":52,"flowCount":9,"version":"0.1.0"},"nodes":[{"id":"ask-matt","name":"ask-matt","description":"Ask which skill or flow fits your situation. A router over the skills in this repo.","mode":"manual","invocation":{"claude":"manual","codex":"manual"},"entry":true,"subSkill":false,"dir":"V:\\dev\\tools\\.claude\\worktrees\\tools-skills-viewer\\clis\\skills-viewer\\fixtures\\mattpocock-skills\\ask-matt","file":"V:\\dev\\tools\\.claude\\worktrees\\tools-skills-viewer\\clis\\skills-viewer\\fixtures\\mattpocock-skills\\ask-matt\\SKILL.md","bodyLines":86,"scripts":[],"references":[],"frontmatter":{"name":"ask-matt","description":"Ask which skill or flow fits your situation. A router over the skills in this repo.","disable-model-invocation":true}},{"id":"claude-handoff","name":"claude-handoff","description":"Hand the current conversation off to a fresh background agent that picks up the work immediately.","mode":"manual","invocation":{"claude":"manual","codex":"manual"},"entry":true,"subSkill":false,"dir":"V:\\dev\\tools\\.claude\\worktrees\\tools-skills-viewer\\clis\\skills-viewer\\fixtures\\mattpocock-skills\\claude-handoff","file":"V:\\dev\\tools\\.claude\\worktrees\\tools-skills-viewer\\clis\\skills-viewer\\fixtures\\mattpocock-skills\\claude-handoff\\SKILL.md","bodyLines":13,"scripts":[],"references":[],"frontmatter":{"name":"claude-handoff","description":"Hand the current conversation off to a fresh background agent that picks up the work immediately.","argument-hint":"What will the next session be used for?","disable-model-invocation":true},"argumentHint":"What will the next session be used for?"},{"id":"code-review","name":"code-review","description":"Review the changes since a fixed point (commit, branch, tag, or merge-base) along two axes: Standards (does the code follow this repo's documented coding standards?) and Spec (does the code match what the originating issue/spec asked for?). Runs both reviews in parallel sub-agents and reports them side by side. Use when the user wants to review a branch, a PR, work-in-progress changes, or asks to \"review since X\".","mode":"auto","invocation":{"claude":"auto","codex":"auto"},"entry":false,"subSkill":true,"dir":"V:\\dev\\tools\\.claude\\worktrees\\tools-skills-viewer\\clis\\skills-viewer\\fixtures\\mattpocock-skills\\code-review","file":"V:\\dev\\tools\\.claude\\worktrees\\tools-skills-viewer\\clis\\skills-viewer\\fixtures\\mattpocock-skills\\code-review\\SKILL.md","bodyLines":84,"scripts":[],"references":[],"frontmatter":{"name":"code-review","description":"Review the changes since a fixed point (commit, branch, tag, or merge-base) along two axes: Standards (does the code follow this repo's documented coding standards?) and Spec (does the code match what the originating issue/spec asked for?). Runs both reviews in parallel sub-agents and reports them side by side. Use when the user wants to review a branch, a PR, work-in-progress changes, or asks to \"review since X\"."}},{"id":"codebase-design","name":"codebase-design","description":"Shared vocabulary for designing deep modules. Use when the user wants to design or improve a module's interface, find deepening opportunities, decide where a seam goes, make code more testable or AI-navigable, or when another skill needs the deep-module vocabulary.","mode":"auto","invocation":{"claude":"auto","codex":"auto"},"entry":false,"subSkill":true,"dir":"V:\\dev\\tools\\.claude\\worktrees\\tools-skills-viewer\\clis\\skills-viewer\\fixtures\\mattpocock-skills\\codebase-design","file":"V:\\dev\\tools\\.claude\\worktrees\\tools-skills-viewer\\clis\\skills-viewer\\fixtures\\mattpocock-skills\\codebase-design\\SKILL.md","bodyLines":111,"scripts":[],"references":[],"frontmatter":{"name":"codebase-design","description":"Shared vocabulary for designing deep modules. Use when the user wants to design or improve a module's interface, find deepening opportunities, decide where a seam goes, make code more testable or AI-navigable, or when another skill needs the deep-module vocabulary."}},{"id":"diagnosing-bugs","name":"diagnosing-bugs","description":"Diagnosis loop for hard bugs and performance regressions. Use when the user says \"diagnose\"/\"debug this\", or reports something broken/throwing/failing/slow.","mode":"auto","invocation":{"claude":"auto","codex":"auto"},"entry":false,"subSkill":false,"dir":"V:\\dev\\tools\\.claude\\worktrees\\tools-skills-viewer\\clis\\skills-viewer\\fixtures\\mattpocock-skills\\diagnosing-bugs","file":"V:\\dev\\tools\\.claude\\worktrees\\tools-skills-viewer\\clis\\skills-viewer\\fixtures\\mattpocock-skills\\diagnosing-bugs\\SKILL.md","bodyLines":135,"scripts":["hitl-loop.template.sh"],"references":[],"frontmatter":{"name":"diagnosing-bugs","description":"Diagnosis loop for hard bugs and performance regressions. Use when the user says \"diagnose\"/\"debug this\", or reports something broken/throwing/failing/slow."}},{"id":"domain-modeling","name":"domain-modeling","description":"Build and sharpen a project's domain model. Use when discussing codebase terminology, writing or editing a CONTEXT.md, or recording or editing an ADR.","mode":"auto","invocation":{"claude":"auto","codex":"auto"},"entry":false,"subSkill":true,"dir":"V:\\dev\\tools\\.claude\\worktrees\\tools-skills-viewer\\clis\\skills-viewer\\fixtures\\mattpocock-skills\\domain-modeling","file":"V:\\dev\\tools\\.claude\\worktrees\\tools-skills-viewer\\clis\\skills-viewer\\fixtures\\mattpocock-skills\\domain-modeling\\SKILL.md","bodyLines":71,"scripts":[],"references":[],"frontmatter":{"name":"domain-modeling","description":"Build and sharpen a project's domain model. Use when discussing codebase terminology, writing or editing a CONTEXT.md, or recording or editing an ADR."}},{"id":"git-guardrails-claude-code","name":"git-guardrails-claude-code","description":"Set up Claude Code hooks to block dangerous git commands (push, reset --hard, clean, branch -D, etc.) before they execute. Use when user wants to prevent destructive git operations, add git safety hooks, or block git push/reset in Claude Code.","mode":"auto","invocation":{"claude":"auto","codex":"auto"},"entry":false,"subSkill":false,"dir":"V:\\dev\\tools\\.claude\\worktrees\\tools-skills-viewer\\clis\\skills-viewer\\fixtures\\mattpocock-skills\\git-guardrails-claude-code","file":"V:\\dev\\tools\\.claude\\worktrees\\tools-skills-viewer\\clis\\skills-viewer\\fixtures\\mattpocock-skills\\git-guardrails-claude-code\\SKILL.md","bodyLines":92,"scripts":["block-dangerous-git.sh"],"references":[],"frontmatter":{"name":"git-guardrails-claude-code","description":"Set up Claude Code hooks to block dangerous git commands (push, reset --hard, clean, branch -D, etc.) before they execute. Use when user wants to prevent destructive git operations, add git safety hooks, or block git push/reset in Claude Code."}},{"id":"grill-me","name":"grill-me","description":"A relentless interview to sharpen a plan or design.","mode":"manual","invocation":{"claude":"manual","codex":"manual"},"entry":false,"subSkill":false,"dir":"V:\\dev\\tools\\.claude\\worktrees\\tools-skills-viewer\\clis\\skills-viewer\\fixtures\\mattpocock-skills\\grill-me","file":"V:\\dev\\tools\\.claude\\worktrees\\tools-skills-viewer\\clis\\skills-viewer\\fixtures\\mattpocock-skills\\grill-me\\SKILL.md","bodyLines":3,"scripts":[],"references":[],"frontmatter":{"name":"grill-me","description":"A relentless interview to sharpen a plan or design.","disable-model-invocation":true}},{"id":"grill-with-docs","name":"grill-with-docs","description":"A relentless interview to sharpen a plan or design, which also creates docs (ADR's and glossary) as we go.","mode":"manual","invocation":{"claude":"manual","codex":"manual"},"entry":false,"subSkill":false,"dir":"V:\\dev\\tools\\.claude\\worktrees\\tools-skills-viewer\\clis\\skills-viewer\\fixtures\\mattpocock-skills\\grill-with-docs","file":"V:\\dev\\tools\\.claude\\worktrees\\tools-skills-viewer\\clis\\skills-viewer\\fixtures\\mattpocock-skills\\grill-with-docs\\SKILL.md","bodyLines":3,"scripts":[],"references":[],"frontmatter":{"name":"grill-with-docs","description":"A relentless interview to sharpen a plan or design, which also creates docs (ADR's and glossary) as we go.","disable-model-invocation":true}},{"id":"grilling","name":"grilling","description":"Grill the user relentlessly about a plan, decision, or idea. Use when the user wants to stress-test their thinking, or uses any 'grill' trigger phrases.","mode":"auto","invocation":{"claude":"auto","codex":"auto"},"entry":false,"subSkill":true,"dir":"V:\\dev\\tools\\.claude\\worktrees\\tools-skills-viewer\\clis\\skills-viewer\\fixtures\\mattpocock-skills\\grilling","file":"V:\\dev\\tools\\.claude\\worktrees\\tools-skills-viewer\\clis\\skills-viewer\\fixtures\\mattpocock-skills\\grilling\\SKILL.md","bodyLines":25,"scripts":[],"references":[],"frontmatter":{"name":"grilling","description":"Grill the user relentlessly about a plan, decision, or idea. Use when the user wants to stress-test their thinking, or uses any 'grill' trigger phrases."}},{"id":"handoff","name":"handoff","description":"Compact the current conversation into a handoff document for another agent to pick up.","mode":"manual","invocation":{"claude":"manual","codex":"manual"},"entry":false,"subSkill":false,"dir":"V:\\dev\\tools\\.claude\\worktrees\\tools-skills-viewer\\clis\\skills-viewer\\fixtures\\mattpocock-skills\\handoff","file":"V:\\dev\\tools\\.claude\\worktrees\\tools-skills-viewer\\clis\\skills-viewer\\fixtures\\mattpocock-skills\\handoff\\SKILL.md","bodyLines":11,"scripts":[],"references":[],"frontmatter":{"name":"handoff","description":"Compact the current conversation into a handoff document for another agent to pick up.","argument-hint":"What will the next session be used for?","disable-model-invocation":true},"argumentHint":"What will the next session be used for?"},{"id":"implement","name":"implement","description":"Implement a piece of work based on a spec or set of tickets.","mode":"manual","invocation":{"claude":"manual","codex":"manual"},"entry":false,"subSkill":false,"dir":"V:\\dev\\tools\\.claude\\worktrees\\tools-skills-viewer\\clis\\skills-viewer\\fixtures\\mattpocock-skills\\implement","file":"V:\\dev\\tools\\.claude\\worktrees\\tools-skills-viewer\\clis\\skills-viewer\\fixtures\\mattpocock-skills\\implement\\SKILL.md","bodyLines":11,"scripts":[],"references":[],"frontmatter":{"name":"implement","description":"Implement a piece of work based on a spec or set of tickets.","disable-model-invocation":true}},{"id":"implement-spec","name":"implement-spec","description":"Implement a specification in code.","mode":"manual","invocation":{"claude":"manual","codex":"manual"},"entry":true,"subSkill":false,"dir":"V:\\dev\\tools\\.claude\\worktrees\\tools-skills-viewer\\clis\\skills-viewer\\fixtures\\mattpocock-skills\\implement-spec","file":"V:\\dev\\tools\\.claude\\worktrees\\tools-skills-viewer\\clis\\skills-viewer\\fixtures\\mattpocock-skills\\implement-spec\\SKILL.md","bodyLines":31,"scripts":[],"references":[],"frontmatter":{"name":"implement-spec","description":"Implement a specification in code.","disable-model-invocation":true}},{"id":"improve-codebase-architecture","name":"improve-codebase-architecture","description":"Scan a codebase for deepening opportunities, present them as a visual HTML report, then grill through whichever one you pick.","mode":"manual","invocation":{"claude":"manual","codex":"manual"},"entry":false,"subSkill":false,"dir":"V:\\dev\\tools\\.claude\\worktrees\\tools-skills-viewer\\clis\\skills-viewer\\fixtures\\mattpocock-skills\\improve-codebase-architecture","file":"V:\\dev\\tools\\.claude\\worktrees\\tools-skills-viewer\\clis\\skills-viewer\\fixtures\\mattpocock-skills\\improve-codebase-architecture\\SKILL.md","bodyLines":67,"scripts":[],"references":[],"frontmatter":{"name":"improve-codebase-architecture","description":"Scan a codebase for deepening opportunities, present them as a visual HTML report, then grill through whichever one you pick.","disable-model-invocation":true}},{"id":"loop-me","name":"loop-me","description":"Grill me about specs for the workflows I want to build, within this workspace.","mode":"manual","invocation":{"claude":"manual","codex":"manual"},"entry":true,"subSkill":false,"dir":"V:\\dev\\tools\\.claude\\worktrees\\tools-skills-viewer\\clis\\skills-viewer\\fixtures\\mattpocock-skills\\loop-me","file":"V:\\dev\\tools\\.claude\\worktrees\\tools-skills-viewer\\clis\\skills-viewer\\fixtures\\mattpocock-skills\\loop-me\\SKILL.md","bodyLines":27,"scripts":[],"references":[],"frontmatter":{"name":"loop-me","description":"Grill me about specs for the workflows I want to build, within this workspace.","disable-model-invocation":true,"argument-hint":"A workflow to design, or nothing to go find one"},"argumentHint":"A workflow to design, or nothing to go find one"},{"id":"migrate-to-shoehorn","name":"migrate-to-shoehorn","description":"Migrate test files from `as` type assertions to @total-typescript/shoehorn. Use when user mentions shoehorn, wants to replace `as` in tests, or needs partial test data.","mode":"auto","invocation":{"claude":"auto","codex":"auto"},"entry":false,"subSkill":false,"dir":"V:\\dev\\tools\\.claude\\worktrees\\tools-skills-viewer\\clis\\skills-viewer\\fixtures\\mattpocock-skills\\migrate-to-shoehorn","file":"V:\\dev\\tools\\.claude\\worktrees\\tools-skills-viewer\\clis\\skills-viewer\\fixtures\\mattpocock-skills\\migrate-to-shoehorn\\SKILL.md","bodyLines":115,"scripts":[],"references":[],"frontmatter":{"name":"migrate-to-shoehorn","description":"Migrate test files from `as` type assertions to @total-typescript/shoehorn. Use when user mentions shoehorn, wants to replace `as` in tests, or needs partial test data."}},{"id":"pr","name":"pr","description":"Use when writing a PR body.","mode":"auto","invocation":{"claude":"auto","codex":"auto"},"entry":false,"subSkill":false,"dir":"V:\\dev\\tools\\.claude\\worktrees\\tools-skills-viewer\\clis\\skills-viewer\\fixtures\\mattpocock-skills\\pr","file":"V:\\dev\\tools\\.claude\\worktrees\\tools-skills-viewer\\clis\\skills-viewer\\fixtures\\mattpocock-skills\\pr\\SKILL.md","bodyLines":159,"scripts":[],"references":[],"frontmatter":{"name":"pr","description":"Use when writing a PR body.","metadata":{"credits":{"skill":"show-me","author":"Dex Horthy","organisation":"Humanlayer","url":"https://github.com/humanlayer/skills/blob/main/plugins/show-me/skills/show-me/SKILL.md"}}}},{"id":"prototype","name":"prototype","description":"Build a throwaway prototype to answer a design question. Use when the user wants to sanity-check whether a state model or logic feels right, or explore what a UI should look like.","mode":"auto","invocation":{"claude":"auto","codex":"auto"},"entry":false,"subSkill":true,"dir":"V:\\dev\\tools\\.claude\\worktrees\\tools-skills-viewer\\clis\\skills-viewer\\fixtures\\mattpocock-skills\\prototype","file":"V:\\dev\\tools\\.claude\\worktrees\\tools-skills-viewer\\clis\\skills-viewer\\fixtures\\mattpocock-skills\\prototype\\SKILL.md","bodyLines":23,"scripts":[],"references":[],"frontmatter":{"name":"prototype","description":"Build a throwaway prototype to answer a design question. Use when the user wants to sanity-check whether a state model or logic feels right, or explore what a UI should look like."}},{"id":"research","name":"research","description":"Investigate a question against high-trust primary sources and capture the findings as a Markdown file in the repo. Use when the user wants a topic researched, docs or API facts gathered, or reading legwork delegated to a background agent.","mode":"auto","invocation":{"claude":"auto","codex":"auto"},"entry":false,"subSkill":true,"dir":"V:\\dev\\tools\\.claude\\worktrees\\tools-skills-viewer\\clis\\skills-viewer\\fixtures\\mattpocock-skills\\research","file":"V:\\dev\\tools\\.claude\\worktrees\\tools-skills-viewer\\clis\\skills-viewer\\fixtures\\mattpocock-skills\\research\\SKILL.md","bodyLines":9,"scripts":[],"references":[],"frontmatter":{"name":"research","description":"Investigate a question against high-trust primary sources and capture the findings as a Markdown file in the repo. Use when the user wants a topic researched, docs or API facts gathered, or reading legwork delegated to a background agent."}},{"id":"resolving-merge-conflicts","name":"resolving-merge-conflicts","description":"Use when you need to resolve an in-progress git merge/rebase conflict.","mode":"auto","invocation":{"claude":"auto","codex":"auto"},"entry":false,"subSkill":false,"dir":"V:\\dev\\tools\\.claude\\worktrees\\tools-skills-viewer\\clis\\skills-viewer\\fixtures\\mattpocock-skills\\resolving-merge-conflicts","file":"V:\\dev\\tools\\.claude\\worktrees\\tools-skills-viewer\\clis\\skills-viewer\\fixtures\\mattpocock-skills\\resolving-merge-conflicts\\SKILL.md","bodyLines":11,"scripts":[],"references":[],"frontmatter":{"name":"resolving-merge-conflicts","description":"Use when you need to resolve an in-progress git merge/rebase conflict."}},{"id":"retro","name":"retro","description":"Conduct a retrospective on a coding session.","mode":"manual","invocation":{"claude":"manual","codex":"manual"},"entry":true,"subSkill":false,"dir":"V:\\dev\\tools\\.claude\\worktrees\\tools-skills-viewer\\clis\\skills-viewer\\fixtures\\mattpocock-skills\\retro","file":"V:\\dev\\tools\\.claude\\worktrees\\tools-skills-viewer\\clis\\skills-viewer\\fixtures\\mattpocock-skills\\retro\\SKILL.md","bodyLines":40,"scripts":[],"references":[],"frontmatter":{"name":"retro","description":"Conduct a retrospective on a coding session.","disable-model-invocation":true}},{"id":"scaffold-exercises","name":"scaffold-exercises","description":"Create exercise directory structures with sections, problems, solutions, and explainers that pass linting. Use when user wants to scaffold exercises, create exercise stubs, or set up a new course section.","mode":"auto","invocation":{"claude":"auto","codex":"auto"},"entry":false,"subSkill":false,"dir":"V:\\dev\\tools\\.claude\\worktrees\\tools-skills-viewer\\clis\\skills-viewer\\fixtures\\mattpocock-skills\\scaffold-exercises","file":"V:\\dev\\tools\\.claude\\worktrees\\tools-skills-viewer\\clis\\skills-viewer\\fixtures\\mattpocock-skills\\scaffold-exercises\\SKILL.md","bodyLines":103,"scripts":[],"references":[],"frontmatter":{"name":"scaffold-exercises","description":"Create exercise directory structures with sections, problems, solutions, and explainers that pass linting. Use when user wants to scaffold exercises, create exercise stubs, or set up a new course section."}},{"id":"setup-matt-pocock-skills","name":"setup-matt-pocock-skills","description":"Configure this repo for the engineering skills: set up its issue tracker, triage label vocabulary, and domain doc layout. Run once before first use of the other engineering skills.","mode":"manual","invocation":{"claude":"manual","codex":"manual"},"entry":true,"subSkill":false,"dir":"V:\\dev\\tools\\.claude\\worktrees\\tools-skills-viewer\\clis\\skills-viewer\\fixtures\\mattpocock-skills\\setup-matt-pocock-skills","file":"V:\\dev\\tools\\.claude\\worktrees\\tools-skills-viewer\\clis\\skills-viewer\\fixtures\\mattpocock-skills\\setup-matt-pocock-skills\\SKILL.md","bodyLines":112,"scripts":[],"references":[],"frontmatter":{"name":"setup-matt-pocock-skills","description":"Configure this repo for the engineering skills: set up its issue tracker, triage label vocabulary, and domain doc layout. Run once before first use of the other engineering skills.","disable-model-invocation":true}},{"id":"setup-pre-commit","name":"setup-pre-commit","description":"Set up Husky pre-commit hooks with lint-staged (Prettier), type checking, and tests in the current repo. Use when user wants to add pre-commit hooks, set up Husky, configure lint-staged, or add commit-time formatting/typechecking/testing.","mode":"auto","invocation":{"claude":"auto","codex":"auto"},"entry":false,"subSkill":false,"dir":"V:\\dev\\tools\\.claude\\worktrees\\tools-skills-viewer\\clis\\skills-viewer\\fixtures\\mattpocock-skills\\setup-pre-commit","file":"V:\\dev\\tools\\.claude\\worktrees\\tools-skills-viewer\\clis\\skills-viewer\\fixtures\\mattpocock-skills\\setup-pre-commit\\SKILL.md","bodyLines":88,"scripts":[],"references":[],"frontmatter":{"name":"setup-pre-commit","description":"Set up Husky pre-commit hooks with lint-staged (Prettier), type checking, and tests in the current repo. Use when user wants to add pre-commit hooks, set up Husky, configure lint-staged, or add commit-time formatting/typechecking/testing."}},{"id":"setup-ts-deep-modules","name":"setup-ts-deep-modules","description":"Wire dependency-cruiser into a TypeScript repo so each package is a deep module, with implementation hidden in subfolders and reachable only through its entry-point files. User-invoked.","mode":"manual","invocation":{"claude":"manual","codex":"manual"},"entry":true,"subSkill":false,"dir":"V:\\dev\\tools\\.claude\\worktrees\\tools-skills-viewer\\clis\\skills-viewer\\fixtures\\mattpocock-skills\\setup-ts-deep-modules","file":"V:\\dev\\tools\\.claude\\worktrees\\tools-skills-viewer\\clis\\skills-viewer\\fixtures\\mattpocock-skills\\setup-ts-deep-modules\\SKILL.md","bodyLines":98,"scripts":[],"references":[],"frontmatter":{"name":"setup-ts-deep-modules","description":"Wire dependency-cruiser into a TypeScript repo so each package is a deep module, with implementation hidden in subfolders and reachable only through its entry-point files. User-invoked.","disable-model-invocation":true}},{"id":"tdd","name":"tdd","description":"Test-driven development. Use when the user wants to build features or fix bugs test-first, mentions \"red-green-refactor\", or wants integration tests.","mode":"auto","invocation":{"claude":"auto","codex":"auto"},"entry":false,"subSkill":true,"dir":"V:\\dev\\tools\\.claude\\worktrees\\tools-skills-viewer\\clis\\skills-viewer\\fixtures\\mattpocock-skills\\tdd","file":"V:\\dev\\tools\\.claude\\worktrees\\tools-skills-viewer\\clis\\skills-viewer\\fixtures\\mattpocock-skills\\tdd\\SKILL.md","bodyLines":35,"scripts":[],"references":[],"frontmatter":{"name":"tdd","description":"Test-driven development. Use when the user wants to build features or fix bugs test-first, mentions \"red-green-refactor\", or wants integration tests."}},{"id":"teach","name":"teach","description":"Teach the user a new skill or concept, within this workspace.","mode":"manual","invocation":{"claude":"manual","codex":"manual"},"entry":false,"subSkill":false,"dir":"V:\\dev\\tools\\.claude\\worktrees\\tools-skills-viewer\\clis\\skills-viewer\\fixtures\\mattpocock-skills\\teach","file":"V:\\dev\\tools\\.claude\\worktrees\\tools-skills-viewer\\clis\\skills-viewer\\fixtures\\mattpocock-skills\\teach\\SKILL.md","bodyLines":135,"scripts":[],"references":[],"frontmatter":{"name":"teach","description":"Teach the user a new skill or concept, within this workspace.","disable-model-invocation":true,"argument-hint":"What would you like to learn about?"},"argumentHint":"What would you like to learn about?"},{"id":"to-questionnaire","name":"to-questionnaire","description":"Turn a decision you can't fully answer into a questionnaire for someone else to fill in.","mode":"manual","invocation":{"claude":"manual","codex":"manual"},"entry":false,"subSkill":false,"dir":"V:\\dev\\tools\\.claude\\worktrees\\tools-skills-viewer\\clis\\skills-viewer\\fixtures\\mattpocock-skills\\to-questionnaire","file":"V:\\dev\\tools\\.claude\\worktrees\\tools-skills-viewer\\clis\\skills-viewer\\fixtures\\mattpocock-skills\\to-questionnaire\\SKILL.md","bodyLines":50,"scripts":[],"references":[],"frontmatter":{"name":"to-questionnaire","description":"Turn a decision you can't fully answer into a questionnaire for someone else to fill in.","disable-model-invocation":true}},{"id":"to-spec","name":"to-spec","description":"Turn the current conversation into a spec and publish it to the project issue tracker: no interview, just synthesis of what you've already discussed.","mode":"manual","invocation":{"claude":"manual","codex":"manual"},"entry":false,"subSkill":false,"dir":"V:\\dev\\tools\\.claude\\worktrees\\tools-skills-viewer\\clis\\skills-viewer\\fixtures\\mattpocock-skills\\to-spec","file":"V:\\dev\\tools\\.claude\\worktrees\\tools-skills-viewer\\clis\\skills-viewer\\fixtures\\mattpocock-skills\\to-spec\\SKILL.md","bodyLines":71,"scripts":[],"references":[],"frontmatter":{"name":"to-spec","description":"Turn the current conversation into a spec and publish it to the project issue tracker: no interview, just synthesis of what you've already discussed.","disable-model-invocation":true}},{"id":"to-tickets","name":"to-tickets","description":"Break a plan, spec, or the current conversation into a set of tracer-bullet tickets, each declaring its blocking edges, published to the configured tracker (edges as text in one file per ticket locally, or native blocking links on a real tracker).","mode":"manual","invocation":{"claude":"manual","codex":"manual"},"entry":false,"subSkill":false,"dir":"V:\\dev\\tools\\.claude\\worktrees\\tools-skills-viewer\\clis\\skills-viewer\\fixtures\\mattpocock-skills\\to-tickets","file":"V:\\dev\\tools\\.claude\\worktrees\\tools-skills-viewer\\clis\\skills-viewer\\fixtures\\mattpocock-skills\\to-tickets\\SKILL.md","bodyLines":101,"scripts":[],"references":[],"frontmatter":{"name":"to-tickets","description":"Break a plan, spec, or the current conversation into a set of tracer-bullet tickets, each declaring its blocking edges, published to the configured tracker (edges as text in one file per ticket locally, or native blocking links on a real tracker).","disable-model-invocation":true}},{"id":"triage","name":"triage","description":"Move issues and external PRs through a state machine of triage roles, categorise, verify, grill if needed, and write agent-ready briefs.","mode":"manual","invocation":{"claude":"manual","codex":"manual"},"entry":false,"subSkill":false,"dir":"V:\\dev\\tools\\.claude\\worktrees\\tools-skills-viewer\\clis\\skills-viewer\\fixtures\\mattpocock-skills\\triage","file":"V:\\dev\\tools\\.claude\\worktrees\\tools-skills-viewer\\clis\\skills-viewer\\fixtures\\mattpocock-skills\\triage\\SKILL.md","bodyLines":108,"scripts":[],"references":[],"frontmatter":{"name":"triage","description":"Move issues and external PRs through a state machine of triage roles, categorise, verify, grill if needed, and write agent-ready briefs.","disable-model-invocation":true}},{"id":"wait-what","name":"wait-what","description":"Stop. That last message did not land: re-pitch it.","mode":"manual","invocation":{"claude":"manual","codex":"manual"},"entry":false,"subSkill":false,"dir":"V:\\dev\\tools\\.claude\\worktrees\\tools-skills-viewer\\clis\\skills-viewer\\fixtures\\mattpocock-skills\\wait-what","file":"V:\\dev\\tools\\.claude\\worktrees\\tools-skills-viewer\\clis\\skills-viewer\\fixtures\\mattpocock-skills\\wait-what\\SKILL.md","bodyLines":3,"scripts":[],"references":[],"frontmatter":{"name":"wait-what","description":"Stop. That last message did not land: re-pitch it.","disable-model-invocation":true}},{"id":"wayfinder","name":"wayfinder","description":"Plan a huge chunk of work (more than one agent session can hold) as a shared map of decision tickets on your issue tracker, and resolve them one at a time until the way to the destination is clear.","mode":"manual","invocation":{"claude":"manual","codex":"manual"},"entry":false,"subSkill":false,"dir":"V:\\dev\\tools\\.claude\\worktrees\\tools-skills-viewer\\clis\\skills-viewer\\fixtures\\mattpocock-skills\\wayfinder","file":"V:\\dev\\tools\\.claude\\worktrees\\tools-skills-viewer\\clis\\skills-viewer\\fixtures\\mattpocock-skills\\wayfinder\\SKILL.md","bodyLines":124,"scripts":[],"references":[],"frontmatter":{"name":"wayfinder","description":"Plan a huge chunk of work (more than one agent session can hold) as a shared map of decision tickets on your issue tracker, and resolve them one at a time until the way to the destination is clear.","disable-model-invocation":true}},{"id":"wizard","name":"wizard","description":"Generate an interactive bash wizard that walks a human through steps only they can perform. Use when provisioning infrastructure, setting up credentials or CI secrets, walking an unfamiliar third-party dashboard, or running a one-off migration or cutover. Don't invoke this for steps the agent can perform itself.","mode":"auto","invocation":{"claude":"auto","codex":"auto"},"entry":false,"subSkill":false,"dir":"V:\\dev\\tools\\.claude\\worktrees\\tools-skills-viewer\\clis\\skills-viewer\\fixtures\\mattpocock-skills\\wizard","file":"V:\\dev\\tools\\.claude\\worktrees\\tools-skills-viewer\\clis\\skills-viewer\\fixtures\\mattpocock-skills\\wizard\\SKILL.md","bodyLines":41,"scripts":[],"references":[],"frontmatter":{"name":"wizard","description":"Generate an interactive bash wizard that walks a human through steps only they can perform. Use when provisioning infrastructure, setting up credentials or CI secrets, walking an unfamiliar third-party dashboard, or running a one-off migration or cutover. Don't invoke this for steps the agent can perform itself."}},{"id":"writing-beats","name":"writing-beats","description":"Writing, exploit; assemble raw material into a journey of beats, grounding each term before a beat leans on it.","mode":"manual","invocation":{"claude":"manual","codex":"manual"},"entry":true,"subSkill":false,"dir":"V:\\dev\\tools\\.claude\\worktrees\\tools-skills-viewer\\clis\\skills-viewer\\fixtures\\mattpocock-skills\\writing-beats","file":"V:\\dev\\tools\\.claude\\worktrees\\tools-skills-viewer\\clis\\skills-viewer\\fixtures\\mattpocock-skills\\writing-beats\\SKILL.md","bodyLines":63,"scripts":[],"references":[],"frontmatter":{"name":"writing-beats","description":"Writing, exploit; assemble raw material into a journey of beats, grounding each term before a beat leans on it.","disable-model-invocation":true}},{"id":"writing-for-agents","name":"writing-for-agents","description":"Writing documents for agents. Use when creating or editing skills, or modifying AGENTS.md or CLAUDE.md.","mode":"auto","invocation":{"claude":"auto","codex":"auto"},"entry":false,"subSkill":true,"dir":"V:\\dev\\tools\\.claude\\worktrees\\tools-skills-viewer\\clis\\skills-viewer\\fixtures\\mattpocock-skills\\writing-for-agents","file":"V:\\dev\\tools\\.claude\\worktrees\\tools-skills-viewer\\clis\\skills-viewer\\fixtures\\mattpocock-skills\\writing-for-agents\\SKILL.md","bodyLines":78,"scripts":[],"references":[],"frontmatter":{"name":"writing-for-agents","description":"Writing documents for agents. Use when creating or editing skills, or modifying AGENTS.md or CLAUDE.md."}},{"id":"writing-fragments","name":"writing-fragments","description":"Writing, explore: mine raw fragments, no structure yet.","mode":"manual","invocation":{"claude":"manual","codex":"manual"},"entry":true,"subSkill":false,"dir":"V:\\dev\\tools\\.claude\\worktrees\\tools-skills-viewer\\clis\\skills-viewer\\fixtures\\mattpocock-skills\\writing-fragments","file":"V:\\dev\\tools\\.claude\\worktrees\\tools-skills-viewer\\clis\\skills-viewer\\fixtures\\mattpocock-skills\\writing-fragments\\SKILL.md","bodyLines":75,"scripts":[],"references":[],"frontmatter":{"name":"writing-fragments","description":"Writing, explore: mine raw fragments, no structure yet.","disable-model-invocation":true}},{"id":"writing-shape","name":"writing-shape","description":"Writing, exploit: shape raw material into an article, paragraph by paragraph.","mode":"manual","invocation":{"claude":"manual","codex":"manual"},"entry":true,"subSkill":false,"dir":"V:\\dev\\tools\\.claude\\worktrees\\tools-skills-viewer\\clis\\skills-viewer\\fixtures\\mattpocock-skills\\writing-shape","file":"V:\\dev\\tools\\.claude\\worktrees\\tools-skills-viewer\\clis\\skills-viewer\\fixtures\\mattpocock-skills\\writing-shape\\SKILL.md","bodyLines":75,"scripts":[],"references":[],"frontmatter":{"name":"writing-shape","description":"Writing, exploit: shape raw material into an article, paragraph by paragraph.","disable-model-invocation":true}}],"edges":[{"source":"ask-matt","target":"code-review","type":"suggests","evidence":[{"line":26,"snippet":"Either way, **`/implement`** builds each issue by driving **`/tdd`** internally (one red-green slice at a time), then closes out by running **`/code-review`**, a two-axis review (Standards + Spec) of the diff, before ...","pattern":"slash","type":"suggests"},{"line":26,"snippet":"Either way, **`/implement`** builds each issue by driving **`/tdd`** internally (one red-green slice at a time), then closes out by running **`/code-review`**, a two-axis review (Standards + Spec) of the diff, before ...","pattern":"slash","type":"reference"}]},{"source":"ask-matt","target":"codebase-design","type":"suggests","evidence":[{"line":59,"snippet":"- **`/codebase-design`** is the deep-module vocabulary (module, interface, depth, seam, adapter, leverage, locality) for designing a module's *shape*: a lot of behaviour behind a small interface at a clean seam. `/tdd...","pattern":"slash","type":"suggests"},{"line":52,"snippet":"- **`/improve-codebase-architecture`** runs whenever you have a spare moment to keep the codebase good for agents to operate in. It surfaces **deepening opportunities**; picking one _generates an idea_ you can take in...","pattern":"slash","type":"reference"}]},{"source":"ask-matt","target":"diagnosing-bugs","type":"suggests","evidence":[{"line":42,"snippet":"- **Something's broken** → **`/diagnosing-bugs`**. For the hard ones: the bug that resists a first glance, the intermittent flake, the regression that crept in between two known-good states. It refuses to theorise unt...","pattern":"slash","type":"suggests"}]},{"source":"ask-matt","target":"domain-modeling","type":"suggests","evidence":[{"line":58,"snippet":"- **`/domain-modeling`**: sharpen the project's *domain* language: challenge a fuzzy term, resolve an overloaded word (\"account\" doing three jobs), record a hard-to-reverse decision as an ADR. It's the active discipli...","pattern":"slash","type":"suggests"}]},{"source":"ask-matt","target":"grill-me","type":"suggests","evidence":[{"line":17,"snippet":"1. **`/grill-with-docs`** sharpens the idea by interview. Start here whenever you are **working in a working directory**: it's stateful, retaining what it learns in `CONTEXT.md` and ADRs. (No working directory? Use `/...","pattern":"slash","type":"suggests"},{"line":77,"snippet":"- **`/grill-me`**: the same relentless interview as `/grill-with-docs`, but **stateless**: it saves nothing locally and builds no `CONTEXT.md`. Reach for it when you are **not working in a working directory** (sharpen...","pattern":"slash","type":"suggests"},{"line":82,"snippet":"- **`/to-questionnaire`** comes in when the thing blocking you isn't in your head or the codebase but in **someone else's**, and it writes them a questionnaire to fill in. It's the inverse of `/grill-me`: instead of i...","pattern":"slash","type":"suggests"},{"line":78,"snippet":"- **`/grilling`** is the interview primitive itself: rounds, the frontier, facts are the agent's job and decisions are yours. `/grill-me` and `/grill-with-docs` are the two named ways in, and `/triage`, `/wayfinder` a...","pattern":"slash","type":"reference"}]},{"source":"ask-matt","target":"grill-with-docs","type":"suggests","evidence":[{"line":84,"snippet":"- **`/wait-what`** is the corrective for a message that didn't land. Use it mid-conversation, inside any other skill, and the agent re-pitches what it just said with the context you were missing, in plain English, usi...","pattern":"slash","type":"prerequisite"},{"line":17,"snippet":"1. **`/grill-with-docs`** sharpens the idea by interview. Start here whenever you are **working in a working directory**: it's stateful, retaining what it learns in `CONTEXT.md` and ADRs. (No working directory? Use `/...","pattern":"slash","type":"suggests"},{"line":44,"snippet":"- **A huge, foggy effort: a greenfield project or a huge feature build, too big for one session** → **`/wayfinder`**, the most cognitively demanding flow here. When the way from here to the destination isn't visible y...","pattern":"slash","type":"suggests"},{"line":58,"snippet":"- **`/domain-modeling`**: sharpen the project's *domain* language: challenge a fuzzy term, resolve an overloaded word (\"account\" doing three jobs), record a hard-to-reverse decision as an ADR. It's the active discipli...","pattern":"slash","type":"suggests"},{"line":77,"snippet":"- **`/grill-me`**: the same relentless interview as `/grill-with-docs`, but **stateless**: it saves nothing locally and builds no `CONTEXT.md`. Reach for it when you are **not working in a working directory** (sharpen...","pattern":"slash","type":"suggests"},{"line":78,"snippet":"- **`/grilling`** is the interview primitive itself: rounds, the frontier, facts are the agent's job and decisions are yours. `/grill-me` and `/grill-with-docs` are the two named ways in, and `/triage`, `/wayfinder` a...","pattern":"slash","type":"suggests"},{"line":17,"snippet":"1. **`/grill-with-docs`** sharpens the idea by interview. Start here whenever you are **working in a working directory**: it's stateful, retaining what it learns in `CONTEXT.md` and ADRs. (No working directory? Use `/...","pattern":"backtick","type":"reference"},{"line":52,"snippet":"- **`/improve-codebase-architecture`** runs whenever you have a spare moment to keep the codebase good for agents to operate in. It surfaces **deepening opportunities**; picking one _generates an idea_ you can take in...","pattern":"slash","type":"reference"},{"line":77,"snippet":"- **`/grill-me`**: the same relentless interview as `/grill-with-docs`, but **stateless**: it saves nothing locally and builds no `CONTEXT.md`. Reach for it when you are **not working in a working directory** (sharpen...","pattern":"slash","type":"reference"},{"line":81,"snippet":"- **`/research`**: delegate reading legwork to a **background agent**: it investigates a question against **primary sources**, then leaves a cited Markdown file in the repo. Keep working while it reads. The file it pr...","pattern":"slash","type":"reference"},{"line":82,"snippet":"- **`/to-questionnaire`** comes in when the thing blocking you isn't in your head or the codebase but in **someone else's**, and it writes them a questionnaire to fill in. It's the inverse of `/grill-me`: instead of i...","pattern":"slash","type":"reference"}]},{"source":"ask-matt","target":"grilling","type":"suggests","evidence":[{"line":78,"snippet":"- **`/grilling`** is the interview primitive itself: rounds, the frontier, facts are the agent's job and decisions are yours. `/grill-me` and `/grill-with-docs` are the two named ways in, and `/triage`, `/wayfinder` a...","pattern":"slash","type":"suggests"},{"line":17,"snippet":"1. **`/grill-with-docs`** sharpens the idea by interview. Start here whenever you are **working in a working directory**: it's stateful, retaining what it learns in `CONTEXT.md` and ADRs. (No working directory? Use `/...","pattern":"slash","type":"reference"}]},{"source":"ask-matt","target":"handoff","type":"suggests","evidence":[{"line":18,"snippet":"2. **Branch: can you settle every question in conversation?** If a question needs a runnable answer (state, business logic, a UI you have to see), detour through a prototype, bridged by **`/handoff`** in both directio...","pattern":"slash","type":"suggests"},{"line":19,"snippet":"- **`/handoff`** out, then open a fresh session against that file,","pattern":"slash","type":"suggests"},{"line":21,"snippet":"- **`/handoff`** back what you learned, and reference it from the original idea thread.","pattern":"slash","type":"suggests"},{"line":67,"snippet":"- **`/handoff`** writes a portable markdown file. Narrow: only for a **new harness**, a **new directory**, a **colleague**, or forking a side task **mid-phase**. What it buys is portability.","pattern":"slash","type":"suggests"},{"line":18,"snippet":"2. **Branch: can you settle every question in conversation?** If a question needs a runnable answer (state, business logic, a UI you have to see), detour through a prototype, bridged by **`/handoff`** in both directio...","pattern":"slash","type":"reference"}]},{"source":"ask-matt","target":"implement","type":"suggests","evidence":[{"line":24,"snippet":"- **No** → **`/implement`** right here, in the same context window.","pattern":"slash","type":"suggests"},{"line":26,"snippet":"Either way, **`/implement`** builds each issue by driving **`/tdd`** internally (one red-green slice at a time), then closes out by running **`/code-review`**, a two-axis review (Standards + Spec) of the diff, before ...","pattern":"slash","type":"suggests"},{"line":23,"snippet":"- **Yes** → **`/to-spec`** (turn the thread into a spec), then **`/to-tickets`** to split it into tracer-bullet tickets, each declaring its **blocking edges**. On a local tracker that's one file per ticket under `.scr...","pattern":"slash","type":"reference"},{"line":30,"snippet":"Keep steps 1–3 in **one unbroken context window** (don't compact or clear until after `/to-tickets`) so the grilling, spec, and tickets all build on the same thinking. Each `/implement` then starts fresh, working from...","pattern":"slash","type":"reference"},{"line":38,"snippet":"- **Bugs and requests piling up** → **`/triage`**. It moves issues through triage roles and produces agent-ready issues, which **`/implement`** later picks up.","pattern":"slash","type":"reference"},{"line":46,"snippet":"When the map clears, **it hands off, it doesn't build**: merge onto the main flow at **`/to-spec`**, which collapses the map's linked decisions into a buildable plan, then `/to-tickets` and `/implement` as usual. Loop...","pattern":"slash","type":"reference"}]},{"source":"ask-matt","target":"improve-codebase-architecture","type":"suggests","evidence":[{"line":42,"snippet":"- **Something's broken** → **`/diagnosing-bugs`**. For the hard ones: the bug that resists a first glance, the intermittent flake, the regression that crept in between two known-good states. It refuses to theorise unt...","pattern":"slash","type":"suggests"},{"line":52,"snippet":"- **`/improve-codebase-architecture`** runs whenever you have a spare moment to keep the codebase good for agents to operate in. It surfaces **deepening opportunities**; picking one _generates an idea_ you can take in...","pattern":"slash","type":"suggests"},{"line":59,"snippet":"- **`/codebase-design`** is the deep-module vocabulary (module, interface, depth, seam, adapter, leverage, locality) for designing a module's *shape*: a lot of behaviour behind a small interface at a clean seam. `/tdd...","pattern":"slash","type":"reference"},{"line":78,"snippet":"- **`/grilling`** is the interview primitive itself: rounds, the frontier, facts are the agent's job and decisions are yours. `/grill-me` and `/grill-with-docs` are the two named ways in, and `/triage`, `/wayfinder` a...","pattern":"slash","type":"reference"}]},{"source":"ask-matt","target":"prototype","type":"suggests","evidence":[{"line":20,"snippet":"- **`/prototype`** to answer the question with throwaway code,","pattern":"slash","type":"suggests"},{"line":80,"snippet":"- **`/prototype`** is a small, throwaway program that answers one design question: does this state model feel right, or what should this UI look like. Throwaway is a constraint on how the code is written, not a promis...","pattern":"slash","type":"suggests"}]},{"source":"ask-matt","target":"research","type":"suggests","evidence":[{"line":81,"snippet":"- **`/research`**: delegate reading legwork to a **background agent**: it investigates a question against **primary sources**, then leaves a cited Markdown file in the repo. Keep working while it reads. The file it pr...","pattern":"slash","type":"suggests"}]},{"source":"ask-matt","target":"resolving-merge-conflicts","type":"suggests","evidence":[{"line":79,"snippet":"- **`/resolving-merge-conflicts`** works an in-progress merge or rebase conflict hunk by hunk, resolving by **intent** traced to each side's primary source rather than by picking lines, then finishes the operation. It...","pattern":"slash","type":"suggests"}]},{"source":"ask-matt","target":"setup-matt-pocock-skills","type":"prerequisite","evidence":[{"line":90,"snippet":"**`/setup-matt-pocock-skills`**: run before your first engineering flow to configure the issue tracker, triage labels, and doc layout the other skills assume. Custom issue trackers also work.","pattern":"slash","type":"prerequisite"}]},{"source":"ask-matt","target":"tdd","type":"reference","evidence":[{"line":26,"snippet":"Either way, **`/implement`** builds each issue by driving **`/tdd`** internally (one red-green slice at a time), then closes out by running **`/code-review`**, a two-axis review (Standards + Spec) of the diff, before ...","pattern":"slash","type":"suggests"},{"line":26,"snippet":"Either way, **`/implement`** builds each issue by driving **`/tdd`** internally (one red-green slice at a time), then closes out by running **`/code-review`**, a two-axis review (Standards + Spec) of the diff, before ...","pattern":"slash","type":"reference"},{"line":59,"snippet":"- **`/codebase-design`** is the deep-module vocabulary (module, interface, depth, seam, adapter, leverage, locality) for designing a module's *shape*: a lot of behaviour behind a small interface at a clean seam. `/tdd...","pattern":"slash","type":"reference"}]},{"source":"ask-matt","target":"teach","type":"suggests","evidence":[{"line":85,"snippet":"- **`/teach`**: learn a concept over multiple sessions, using the current directory as a stateful workspace.","pattern":"slash","type":"suggests"}]},{"source":"ask-matt","target":"to-questionnaire","type":"suggests","evidence":[{"line":82,"snippet":"- **`/to-questionnaire`** comes in when the thing blocking you isn't in your head or the codebase but in **someone else's**, and it writes them a questionnaire to fill in. It's the inverse of `/grill-me`: instead of i...","pattern":"slash","type":"suggests"}]},{"source":"ask-matt","target":"to-spec","type":"reference","evidence":[{"line":23,"snippet":"- **Yes** → **`/to-spec`** (turn the thread into a spec), then **`/to-tickets`** to split it into tracer-bullet tickets, each declaring its **blocking edges**. On a local tracker that's one file per ticket under `.scr...","pattern":"slash","type":"suggests"},{"line":46,"snippet":"When the map clears, **it hands off, it doesn't build**: merge onto the main flow at **`/to-spec`**, which collapses the map's linked decisions into a buildable plan, then `/to-tickets` and `/implement` as usual. Loop...","pattern":"slash","type":"reference"},{"line":82,"snippet":"- **`/to-questionnaire`** comes in when the thing blocking you isn't in your head or the codebase but in **someone else's**, and it writes them a questionnaire to fill in. It's the inverse of `/grill-me`: instead of i...","pattern":"slash","type":"reference"}]},{"source":"ask-matt","target":"to-tickets","type":"reference","evidence":[{"line":23,"snippet":"- **Yes** → **`/to-spec`** (turn the thread into a spec), then **`/to-tickets`** to split it into tracer-bullet tickets, each declaring its **blocking edges**. On a local tracker that's one file per ticket under `.scr...","pattern":"slash","type":"suggests"},{"line":30,"snippet":"Keep steps 1–3 in **one unbroken context window** (don't compact or clear until after `/to-tickets`) so the grilling, spec, and tickets all build on the same thinking. Each `/implement` then starts fresh, working from...","pattern":"slash","type":"reference"},{"line":32,"snippet":"The limit on this is the **[smart zone](https://www.aihero.dev/ai-coding-dictionary/smart-zone)**: the window (~150k tokens on state-of-the-art models) within which the model still reasons sharply. If a session approa...","pattern":"slash","type":"reference"},{"line":40,"snippet":"Triage is only for issues **you didn't create**: bug reports, incoming feature requests, anything that arrives raw. Tickets that `/to-tickets` produced are already agent-ready, so **don't triage them**.","pattern":"slash","type":"reference"},{"line":46,"snippet":"When the map clears, **it hands off, it doesn't build**: merge onto the main flow at **`/to-spec`**, which collapses the map's linked decisions into a buildable plan, then `/to-tickets` and `/implement` as usual. Loop...","pattern":"slash","type":"reference"}]},{"source":"ask-matt","target":"triage","type":"suggests","evidence":[{"line":38,"snippet":"- **Bugs and requests piling up** → **`/triage`**. It moves issues through triage roles and produces agent-ready issues, which **`/implement`** later picks up.","pattern":"slash","type":"suggests"},{"line":78,"snippet":"- **`/grilling`** is the interview primitive itself: rounds, the frontier, facts are the agent's job and decisions are yours. `/grill-me` and `/grill-with-docs` are the two named ways in, and `/triage`, `/wayfinder` a...","pattern":"slash","type":"reference"}]},{"source":"ask-matt","target":"wait-what","type":"suggests","evidence":[{"line":84,"snippet":"- **`/wait-what`** is the corrective for a message that didn't land. Use it mid-conversation, inside any other skill, and the agent re-pitches what it just said with the context you were missing, in plain English, usi...","pattern":"slash","type":"suggests"}]},{"source":"ask-matt","target":"wayfinder","type":"suggests","evidence":[{"line":44,"snippet":"- **A huge, foggy effort: a greenfield project or a huge feature build, too big for one session** → **`/wayfinder`**, the most cognitively demanding flow here. When the way from here to the destination isn't visible y...","pattern":"slash","type":"suggests"},{"line":78,"snippet":"- **`/grilling`** is the interview primitive itself: rounds, the frontier, facts are the agent's job and decisions are yours. `/grill-me` and `/grill-with-docs` are the two named ways in, and `/triage`, `/wayfinder` a...","pattern":"slash","type":"reference"}]},{"source":"ask-matt","target":"wizard","type":"suggests","evidence":[{"line":83,"snippet":"- **`/wizard`** is for the steps only a **human** can take: provisioning infrastructure, setting up credentials or CI secrets, clicking through an unfamiliar third-party dashboard, running a one-off migration or cutov...","pattern":"slash","type":"suggests"}]},{"source":"ask-matt","target":"writing-for-agents","type":"suggests","evidence":[{"line":86,"snippet":"- **`/writing-for-agents`** is the reference for writing documents agents consume: skills, AGENTS.md, pointed-at docs.","pattern":"slash","type":"suggests"}]},{"source":"code-review","target":"setup-matt-pocock-skills","type":"prerequisite","evidence":[{"line":13,"snippet":"The issue tracker should have been provided to you. If `docs/agents/issue-tracker.md` is missing, tell the user to run `/setup-matt-pocock-skills`.","pattern":"slash","type":"prerequisite"}]},{"source":"grill-me","target":"grilling","type":"calls","evidence":[{"line":7,"snippet":"Call the Skill tool with \"grilling\".","pattern":"skill-tool","type":"calls"}]},{"source":"grill-with-docs","target":"domain-modeling","type":"calls","evidence":[{"line":7,"snippet":"Call the Skill tool twice, for \"grilling\" and \"domain-modeling\".","pattern":"skill-tool","type":"calls"}]},{"source":"grill-with-docs","target":"grilling","type":"calls","evidence":[{"line":7,"snippet":"Call the Skill tool twice, for \"grilling\" and \"domain-modeling\".","pattern":"skill-tool","type":"calls"}]},{"source":"implement","target":"code-review","type":"suggests","evidence":[{"line":13,"snippet":"Once done, use /code-review to review the work.","pattern":"slash","type":"suggests"}]},{"source":"implement","target":"tdd","type":"calls","evidence":[{"line":9,"snippet":"Use /tdd where possible, at pre-agreed seams.","pattern":"slash","type":"calls"}]},{"source":"implement-spec","target":"code-review","type":"calls","evidence":[{"line":31,"snippet":"7. Once all tickets are complete, run /code-review on the PR branch. Fix all issues raised by the code review in a single **implementer subagent**.","pattern":"slash","type":"calls"}]},{"source":"improve-codebase-architecture","target":"codebase-design","type":"calls","evidence":[{"line":13,"snippet":"- Call the Skill tool with \"codebase-design\" for the architecture vocabulary (**module**, **interface**, **depth**, **seam**, **adapter**, **leverage**, **locality**) and its principles (the deletion test, \"the interf...","pattern":"skill-tool","type":"calls"},{"line":71,"snippet":"- **Want to explore alternative interfaces for the deepened module?** Call the Skill tool with \"codebase-design\" and use its design-it-twice parallel sub-agent pattern.","pattern":"skill-tool","type":"calls"},{"line":54,"snippet":"**Use CONTEXT.md vocabulary for the domain, and the `/codebase-design` vocabulary for the architecture.** If `CONTEXT.md` defines \"Order,\" talk about \"the Order intake module,\" not \"the FooBarHandler,\" and not \"the Or...","pattern":"slash","type":"reference"}]},{"source":"improve-codebase-architecture","target":"domain-modeling","type":"calls","evidence":[{"line":66,"snippet":"Side effects happen inline as decisions crystallize; call the Skill tool with \"domain-modeling\" to keep the domain model current as you go:","pattern":"skill-tool","type":"calls"}]},{"source":"improve-codebase-architecture","target":"grilling","type":"calls","evidence":[{"line":64,"snippet":"Once the user picks a candidate, call the Skill tool with \"grilling\" to walk the decision tree with them: constraints, dependencies, the shape of the deepened module, what sits behind the seam, what tests survive.","pattern":"skill-tool","type":"calls"}]},{"source":"loop-me","target":"grilling","type":"reference","evidence":[{"line":8,"snippet":"Run a stateful `/grilling` session whose only output is **workflow** specs. Use the grilling discipline (relentless, a round of questions at a time, a recommended answer attached to each) aimed at the vocabulary and g...","pattern":"slash","type":"reference"}]},{"source":"retro","target":"writing-for-agents","type":"calls","evidence":[{"line":11,"snippet":"1. Call the Skill tool with `writing-for-agents` for the writing style guide.","pattern":"skill-tool","type":"calls"},{"line":44,"snippet":"- Skills: use skills for docs (since their description goes into the agent's context window), or for user-invoked commands. Follow the advice in the `writing-for-agents` skill.","pattern":"prose","type":"reference"}]},{"source":"setup-matt-pocock-skills","target":"to-spec","type":"reference","evidence":[{"line":40,"snippet":"> Explainer: The \"issue tracker\" is where issues live for this repo. Skills like `to-tickets`, `triage`, and `to-spec` read from and write to it. They need to know whether to call `gh issue create`, write a markdown f...","pattern":"backtick","type":"reference"}]},{"source":"setup-matt-pocock-skills","target":"to-tickets","type":"reference","evidence":[{"line":40,"snippet":"> Explainer: The \"issue tracker\" is where issues live for this repo. Skills like `to-tickets`, `triage`, and `to-spec` read from and write to it. They need to know whether to call `gh issue create`, write a markdown f...","pattern":"backtick","type":"reference"}]},{"source":"setup-matt-pocock-skills","target":"triage","type":"reference","evidence":[{"line":29,"snippet":"- Is the `triage` skill installed? (a `triage` skill folder alongside this one, or `triage` in your available skills.) This decides whether Section B runs at all.","pattern":"prose","type":"reference"},{"line":36,"snippet":"Lead each section with the recommended answer so the user can accept it in a word. Give a one-line explainer only when the choice genuinely branches; skip the section entirely when exploration already settled it (Sect...","pattern":"backtick","type":"reference"},{"line":40,"snippet":"> Explainer: The \"issue tracker\" is where issues live for this repo. Skills like `to-tickets`, `triage`, and `to-spec` read from and write to it. They need to know whether to call `gh issue create`, write a markdown f...","pattern":"backtick","type":"reference"},{"line":51,"snippet":"**Section B: Triage label vocabulary.** Skip this section entirely if the `triage` skill isn't installed (exploration told you), since an uninstalled skill needs no labels.","pattern":"prose","type":"reference"},{"line":57,"snippet":"The defaults are the five canonical roles, each label string equal to its name: `needs-triage`, `needs-info`, `ready-for-agent`, `ready-for-human`, `wontfix`. On **yes**, write them as-is. Only if the user says no, us...","pattern":"backtick","type":"reference"},{"line":68,"snippet":"- The contents of `docs/agents/issue-tracker.md`, `docs/agents/domain.md`, and `docs/agents/triage-labels.md` (the last only when `triage` is installed)","pattern":"backtick","type":"reference"},{"line":102,"snippet":"Include the `### Triage labels` sub-block, and write `docs/agents/triage-labels.md`, only when `triage` is installed and Section B ran. When it isn't, both are omitted.","pattern":"backtick","type":"reference"},{"line":109,"snippet":"- [triage-labels.md](./triage-labels.md): label mapping (only if `triage` is installed)","pattern":"backtick","type":"reference"}]},{"source":"setup-ts-deep-modules","target":"codebase-design","type":"calls","evidence":[{"line":11,"snippet":"For the vocabulary (deep module, interface, seam, depth), call the Skill tool with \"codebase-design\" and use its language throughout.","pattern":"skill-tool","type":"calls"}]},{"source":"tdd","target":"code-review","type":"reference","evidence":[{"line":38,"snippet":"- **Refactoring is not part of the loop.** It belongs to the review stage (see the `code-review` skill), not the red → green implementation cycle.","pattern":"prose","type":"reference"}]},{"source":"tdd","target":"codebase-design","type":"calls","evidence":[{"line":26,"snippet":"When the shape of that interface is itself in question (how deep the module is, where the seam belongs, what the interface should expose), call the Skill tool with \"codebase-design\" for the vocabulary. It is the share...","pattern":"skill-tool","type":"calls"}]},{"source":"to-spec","target":"setup-matt-pocock-skills","type":"prerequisite","evidence":[{"line":9,"snippet":"The issue tracker and triage label vocabulary should have been provided to you. If not, tell the user to run `/setup-matt-pocock-skills`.","pattern":"slash","type":"prerequisite"}]},{"source":"to-tickets","target":"setup-matt-pocock-skills","type":"prerequisite","evidence":[{"line":11,"snippet":"The issue tracker and triage label vocabulary should have been provided to you. If not, tell the user to run `/setup-matt-pocock-skills`.","pattern":"slash","type":"prerequisite"},{"line":60,"snippet":"Publish the approved tickets. **How** depends on the tracker `/setup-matt-pocock-skills` configured; the tickets are the same either way, only the shape of the blocking edges changes:","pattern":"slash","type":"reference"}]},{"source":"triage","target":"domain-modeling","type":"calls","evidence":[{"line":76,"snippet":"4. **Grill (if needed).** If the request needs fleshing out, call the Skill tool twice, for \"grilling\" and \"domain-modeling\", and grill it into shape a round of questions at a time, sharpening domain terms and updatin...","pattern":"skill-tool","type":"calls"}]},{"source":"triage","target":"grilling","type":"calls","evidence":[{"line":76,"snippet":"4. **Grill (if needed).** If the request needs fleshing out, call the Skill tool twice, for \"grilling\" and \"domain-modeling\", and grill it into shape a round of questions at a time, sharpening domain terms and updatin...","pattern":"skill-tool","type":"calls"}]},{"source":"triage","target":"setup-matt-pocock-skills","type":"prerequisite","evidence":[{"line":43,"snippet":"These are canonical role names. The actual label strings used in the issue tracker may differ. The mapping should have been provided to you. If not, tell the user to run `/setup-matt-pocock-skills`.","pattern":"slash","type":"prerequisite"}]},{"source":"wayfinder","target":"domain-modeling","type":"calls","evidence":[{"line":79,"snippet":"- **Grilling** (HITL): Conversation. The default case. Always call the Skill tool twice, for \"grilling\" and \"domain-modeling\".","pattern":"skill-tool","type":"calls"},{"line":111,"snippet":"1. **Name the destination.** Call the Skill tool twice, for \"grilling\" and \"domain-modeling\", to pin down what this map is finding its way to: the spec, decision, or change. The destination fixes the scope, so it's se...","pattern":"skill-tool","type":"calls"},{"line":124,"snippet":"3. Resolve it. **Zoom as needed**: fetch the full body of any related or closed ticket on demand; call the Skill tool for whichever skills the `## Notes` block names. If in doubt, call the Skill tool twice, for \"grill...","pattern":"skill-tool","type":"calls"}]},{"source":"wayfinder","target":"grilling","type":"calls","evidence":[{"line":79,"snippet":"- **Grilling** (HITL): Conversation. The default case. Always call the Skill tool twice, for \"grilling\" and \"domain-modeling\".","pattern":"skill-tool","type":"calls"},{"line":111,"snippet":"1. **Name the destination.** Call the Skill tool twice, for \"grilling\" and \"domain-modeling\", to pin down what this map is finding its way to: the spec, decision, or change. The destination fixes the scope, so it's se...","pattern":"skill-tool","type":"calls"},{"line":124,"snippet":"3. Resolve it. **Zoom as needed**: fetch the full body of any related or closed ticket on demand; call the Skill tool for whichever skills the `## Notes` block names. If in doubt, call the Skill tool twice, for \"grill...","pattern":"skill-tool","type":"calls"},{"line":65,"snippet":"Each ticket carries a `wayfinder:<type>` label, one of `research`, `prototype`, `grilling`, `task` (see [Ticket Types](#ticket-types)).","pattern":"backtick","type":"reference"}]},{"source":"wayfinder","target":"prototype","type":"calls","evidence":[{"line":78,"snippet":"- **Prototype** (HITL): Raise the fidelity of the discussion by making a cheap, rough, concrete artifact to react to (an outline, a rough take, a stub, or UI/logic code) by calling the Skill tool with \"prototype\". Lin...","pattern":"skill-tool","type":"calls"},{"line":65,"snippet":"Each ticket carries a `wayfinder:<type>` label, one of `research`, `prototype`, `grilling`, `task` (see [Ticket Types](#ticket-types)).","pattern":"backtick","type":"reference"}]},{"source":"wayfinder","target":"research","type":"calls","evidence":[{"line":77,"snippet":"- **Research** (AFK): Reading documentation, third-party APIs, or local resources like knowledge bases to surface a fact a decision waits on. Resolved by a subagent that calls the Skill tool with \"research\". Use when ...","pattern":"skill-tool","type":"calls"},{"line":115,"snippet":"5. **Fire the research subagents.** For each `research` ticket you just created, spin up a subagent that calls the Skill tool with \"research\" to resolve it in parallel, capturing its findings on a throwaway `research/...","pattern":"skill-tool","type":"calls"},{"line":65,"snippet":"Each ticket carries a `wayfinder:<type>` label, one of `research`, `prototype`, `grilling`, `task` (see [Ticket Types](#ticket-types)).","pattern":"backtick","type":"reference"},{"line":115,"snippet":"5. **Fire the research subagents.** For each `research` ticket you just created, spin up a subagent that calls the Skill tool with \"research\" to resolve it in parallel, capturing its findings on a throwaway `research/...","pattern":"backtick","type":"reference"}]},{"source":"wayfinder","target":"setup-matt-pocock-skills","type":"prerequisite","evidence":[{"line":25,"snippet":"**Where the map, its child tickets, blocking, and frontier queries physically live is tracker-specific.** The issue tracker should have been provided to you. If not, tell the user to run `/setup-matt-pocock-skills`. C...","pattern":"slash","type":"prerequisite"}]}],"flows":[{"id":"ask-matt:sequential:1","kind":"sequential","owner":"ask-matt","steps":["grill-with-docs","grill-me","handoff","prototype","to-spec","to-tickets","implement","tdd","code-review"],"label":"ask-matt: steps in order","evidence":[{"line":17,"snippet":"1. **`/grill-with-docs`** sharpens the idea by interview. Start here whenever you are **working in a working directory**: it's stateful, retaining what it learns in `CONTEXT.md` and ADRs. (No working directory? Use `/...","pattern":"flow"},{"line":18,"snippet":"2. **Branch: can you settle every question in conversation?** If a question needs a runnable answer (state, business logic, a UI you have to see), detour through a prototype, bridged by **`/handoff`** in both directio...","pattern":"flow"},{"line":19,"snippet":"- **`/handoff`** out, then open a fresh session against that file,","pattern":"slash"},{"line":20,"snippet":"- **`/prototype`** to answer the question with throwaway code,","pattern":"slash"},{"line":21,"snippet":"- **`/handoff`** back what you learned, and reference it from the original idea thread.","pattern":"slash"},{"line":22,"snippet":"3. **Branch: is this a multi-session build?**","pattern":"flow"},{"line":23,"snippet":"- **Yes** → **`/to-spec`** (turn the thread into a spec), then **`/to-tickets`** to split it into tracer-bullet tickets, each declaring its **blocking edges**. On a local tracker that's one file per ticket under `.scr...","pattern":"slash"},{"line":24,"snippet":"- **No** → **`/implement`** right here, in the same context window.","pattern":"slash"},{"line":26,"snippet":"Either way, **`/implement`** builds each issue by driving **`/tdd`** internally (one red-green slice at a time), then closes out by running **`/code-review`**, a two-axis review (Standards + Spec) of the diff, before ...","pattern":"slash"}]},{"id":"ask-matt:sequential:2","kind":"sequential","owner":"ask-matt","steps":["diagnosing-bugs","improve-codebase-architecture"],"label":"ask-matt: then","evidence":[{"line":42,"snippet":"- **Something's broken** → **`/diagnosing-bugs`**. For the hard ones: the bug that resists a first glance, the intermittent flake, the regression that crept in between two known-good states. It refuses to theorise unt...","pattern":"flow"}]},{"id":"ask-matt:loop:3","kind":"loop","owner":"ask-matt","steps":["diagnosing-bugs"],"label":"loop until it has a **tight feedback loop** (one command that already goes red on *this* bug), then f","evidence":[{"line":42,"snippet":"- **Something's broken** → **`/diagnosing-bugs`**. For the hard ones: the bug that resists a first glance, the intermittent flake, the regression that crept in between two known-good states. It refuses to theorise unt...","pattern":"flow"}],"until":"it has a **tight feedback loop** (one command that already goes red on *this* bug), then f"},{"id":"ask-matt:loop:4","kind":"loop","owner":"ask-matt","steps":["wayfinder"],"label":"loop until the fog is pushed back and the way is clear","evidence":[{"line":44,"snippet":"- **A huge, foggy effort: a greenfield project or a huge feature build, too big for one session** → **`/wayfinder`**, the most cognitively demanding flow here. When the way from here to the destination isn't visible y...","pattern":"flow"}],"until":"the fog is pushed back and the way is clear"},{"id":"ask-matt:loop:5","kind":"loop","owner":"ask-matt","steps":["wizard"],"label":"ask-matt: loop","evidence":[{"line":83,"snippet":"- **`/wizard`** is for the steps only a **human** can take: provisioning infrastructure, setting up credentials or CI secrets, clicking through an unfamiliar third-party dashboard, running a one-off migration or cutov...","pattern":"flow"}]},{"id":"improve-codebase-architecture:parallel:1","kind":"parallel","owner":"improve-codebase-architecture","steps":["codebase-design"],"label":"improve-codebase-architecture: in parallel","evidence":[{"line":71,"snippet":"- **Want to explore alternative interfaces for the deepened module?** Call the Skill tool with \"codebase-design\" and use its design-it-twice parallel sub-agent pattern.","pattern":"flow"}]},{"id":"triage:sequential:1","kind":"sequential","owner":"triage","steps":["grilling","domain-modeling"],"label":"triage: steps in order","evidence":[{"line":76,"snippet":"4. **Grill (if needed).** If the request needs fleshing out, call the Skill tool twice, for \"grilling\" and \"domain-modeling\", and grill it into shape a round of questions at a time, sharpening domain terms and updatin...","pattern":"flow"}]},{"id":"wayfinder:sequential:1","kind":"sequential","owner":"wayfinder","steps":["grilling","domain-modeling","research"],"label":"wayfinder: steps in order","evidence":[{"line":111,"snippet":"1. **Name the destination.** Call the Skill tool twice, for \"grilling\" and \"domain-modeling\", to pin down what this map is finding its way to: the spec, decision, or change. The destination fixes the scope, so it's se...","pattern":"flow"},{"line":115,"snippet":"5. **Fire the research subagents.** For each `research` ticket you just created, spin up a subagent that calls the Skill tool with \"research\" to resolve it in parallel, capturing its findings on a throwaway `research/...","pattern":"flow"}]},{"id":"wayfinder:parallel:2","kind":"parallel","owner":"wayfinder","steps":["research"],"label":"wayfinder: in parallel","evidence":[{"line":115,"snippet":"5. **Fire the research subagents.** For each `research` ticket you just created, spin up a subagent that calls the Skill tool with \"research\" to resolve it in parallel, capturing its findings on a throwaway `research/...","pattern":"flow"}]}],"unresolved":[{"name":"supporting-info","count":3,"sources":["writing-beats","writing-fragments","writing-shape"]},{"name":"what-to-do","count":3,"sources":["writing-beats","writing-fragments","writing-shape"]},{"name":"clear","count":2,"sources":["ask-matt"]},{"name":"compact","count":2,"sources":["ask-matt"]},{"name":"build-tool","count":1,"sources":["retro"]},{"name":"issue-template","count":1,"sources":["to-tickets"]},{"name":"local-ticket-template","count":1,"sources":["to-tickets"]},{"name":"question-example","count":1,"sources":["to-questionnaire"]},{"name":"questionnaire-template","count":1,"sources":["to-questionnaire"]},{"name":"reporter","count":1,"sources":["triage"]},{"name":"spec-template","count":1,"sources":["to-spec"]},{"name":"tmp","count":1,"sources":["improve-codebase-architecture"]},{"name":"user-story-example","count":1,"sources":["to-spec"]},{"name":"vertical-slice-rules","count":1,"sources":["to-tickets"]}]}</script>
+<script type="module">
+const DEFAULTS = { html: false, focus: null, depth: 2, flows: true, references: false, files: false, direction: "LR" };
+function toMermaid(graph, options = {}) {
+    const o = { ...DEFAULTS, ...options };
+    const suggests = o.suggests ?? !!o.focus;
+    const byId = new Map(graph.nodes.map((n) => [n.id, n]));
+    const keepType = (t) => (t === "reference" ? o.references : t === "suggests" ? suggests : true);
+    const included = o.focus ? neighborhood(graph, o.focus, o.depth, keepType) : new Set(graph.nodes.map((n) => n.id));
+    const nodes = graph.nodes.filter((n) => included.has(n.id));
+    const edges = graph.edges.filter((e) => included.has(e.source) && included.has(e.target) && keepType(e.type));
+    const flows = o.flows ? graph.flows.filter((f) => included.has(f.owner) && (!o.focus || f.owner === o.focus || f.steps.includes(o.focus))) : [];
+    const L = [];
+    const links = []; // parallel array of edge kinds for linkStyle
+    const link = (line, kind) => {
+        L.push("  " + line);
+        links.push(kind);
+    };
+    L.push(`flowchart ${o.direction}`);
+    L.push("  %% generated by skills-viewer; every edge is traceable to a SKILL.md line in graph.json");
+    const hasEdge = new Set();
+    for (const e of edges) {
+        hasEdge.add(e.source);
+        hasEdge.add(e.target);
+    }
+    for (const f of flows) {
+        hasEdge.add(f.owner);
+    }
+    // a node with no visible edge is either truly standalone (no edge of any kind in the data)
+    // or only reached by edges this view hides; group the latter under whoever points at it
+    const hiddenSource = (id) => {
+        const e = graph.edges.find((x) => x.target === id && x.source !== id && included.has(x.source) && !keepType(x.type));
+        return e ? e.source : null;
+    };
+    const entries = nodes.filter((n) => n.entry);
+    const loose = nodes.filter((n) => !n.entry && !hasEdge.has(n.id));
+    const standalone = loose.filter((n) => !hiddenSource(n.id));
+    const hiddenGroups = new Map();
+    for (const n of loose) {
+        const src = hiddenSource(n.id);
+        if (src)
+            hiddenGroups.set(src, [...(hiddenGroups.get(src) ?? []), n]);
+    }
+    const rest = nodes.filter((n) => !n.entry && hasEdge.has(n.id));
+    if (entries.length) {
+        L.push(`  subgraph entry ["▶ Entry points (you start here)"]`);
+        L.push(`    direction ${o.direction === "LR" ? "TB" : "LR"}`);
+        for (const n of entries)
+            L.push("    " + nodeLine(n, o.html));
+        L.push("  end");
+    }
+    for (const n of rest)
+        L.push("  " + nodeLine(n, o.html));
+    for (const [src, group] of hiddenGroups) {
+        const label = suggests ? `mentioned by ${byId.get(src)?.name ?? src}` : `${byId.get(src)?.name ?? src} suggests these (turn on "suggests" to see the edges)`;
+        L.push(`  subgraph hidden_${nid(src)} ["${esc(label)}"]`);
+        L.push(`    direction TB`);
+        for (const n of group)
+            L.push("    " + nodeLine(n, o.html));
+        L.push("  end");
+    }
+    if (standalone.length) {
+        L.push(`  subgraph standalone ["Standalone (no links found)"]`);
+        L.push(`    direction TB`);
+        for (const n of standalone)
+            L.push("    " + nodeLine(n, o.html));
+        L.push("  end");
+    }
+    if (o.files) {
+        for (const n of nodes) {
+            for (const f of n.scripts) {
+                const id = fileId(n.id, "s", f);
+                L.push(`  ${id}[/"${esc(f)}"/]:::file`);
+                link(`${nid(n.id)} -.- ${id}`, "file");
+            }
+            for (const f of n.references) {
+                const id = fileId(n.id, "r", f);
+                L.push(`  ${id}[["${esc(f)}"]]:::file`);
+                link(`${nid(n.id)} -.- ${id}`, "file");
+            }
+        }
+    }
+    for (const e of edges)
+        link(edgeLine(e), e.warning ? "warning" : e.type);
+    flows.forEach((f, fi) => {
+        const fid = `flow${fi + 1}`;
+        const inst = (i) => `${fid}_${i + 1}`;
+        const instNode = (i) => {
+            const n = byId.get(f.steps[i]);
+            return n ? instanceLine(inst(i), n, o.html) : `${inst(i)}["${esc(f.steps[i])}"]`;
+        };
+        if (f.kind === "sequential") {
+            L.push(`  subgraph ${fid} ["${esc(f.label)}"]`);
+            L.push(`    direction ${o.direction}`);
+            for (let i = 0; i < f.steps.length; i++)
+                L.push("    " + instNode(i));
+            for (let i = 0; i < f.steps.length - 1; i++)
+                link(`${inst(i)} -- "step ${i + 2}" --> ${inst(i + 1)}`, "flow");
+            L.push(`    ${fid}_result(["result"]):::result`);
+            link(`${inst(f.steps.length - 1)} --> ${fid}_result`, "flow");
+            L.push("  end");
+            link(`${nid(f.owner)} -- "step 1" --> ${inst(0)}`, "flow");
+        }
+        else if (f.kind === "parallel") {
+            L.push(`  subgraph ${fid} ["⫴ ${esc(f.label)}"]`);
+            L.push(`    direction ${o.direction}`);
+            for (let i = 0; i < f.steps.length; i++)
+                L.push("    " + instNode(i));
+            L.push("  end");
+            L.push(`  ${fid}_join(["join → report"]):::result`);
+            for (let i = 0; i < f.steps.length; i++) {
+                link(`${nid(f.owner)} --> ${inst(i)}`, "flow");
+                link(`${inst(i)} --> ${fid}_join`, "flow");
+            }
+        }
+        else {
+            L.push(`  subgraph ${fid} ["↻ ${esc(clean(f.until ? "loop until " + f.until : f.label, 70))}"]`);
+            L.push(`    direction ${o.direction}`);
+            for (let i = 0; i < f.steps.length; i++)
+                L.push("    " + instNode(i));
+            for (let i = 0; i < f.steps.length - 1; i++)
+                link(`${inst(i)} --> ${inst(i + 1)}`, "flow");
+            link(`${inst(f.steps.length - 1)} -. "↻ again" .-> ${inst(0)}`, "loop");
+            L.push("  end");
+            link(`${nid(f.owner)} --> ${inst(0)}`, "flow");
+        }
+    });
+    // styles
+    L.push("  classDef auto fill:#e6f4ea,stroke:#2e7d32,color:#1b3d20");
+    L.push("  classDef manual fill:#fff1e0,stroke:#e65100,color:#4a2600");
+    L.push("  classDef background fill:#ede7f6,stroke:#5e35b1,color:#2a1a4d");
+    L.push("  classDef entry stroke-width:3px");
+    L.push("  classDef inst stroke-dasharray:4 3");
+    L.push("  classDef result fill:#f5f5f5,stroke:#9e9e9e,color:#424242");
+    L.push("  classDef file fill:#fafafa,stroke:#bdbdbd,color:#616161,font-size:11px");
+    links.forEach((kind, i) => {
+        const style = LINK_STYLES[kind];
+        if (style)
+            L.push(`  linkStyle ${i} ${style}`);
+    });
+    if (o.html) {
+        for (const n of nodes)
+            L.push(`  click ${nid(n.id)} call skillClick()`);
+        flows.forEach((f, fi) => f.steps.forEach((_, i) => L.push(`  click flow${fi + 1}_${i + 1} call skillClick()`)));
+    }
+    return L.join("\n") + "\n";
+}
+const LINK_STYLES = {
+    calls: "stroke:#1565c0,stroke-width:2px",
+    suggests: "stroke:#6a1b9a,stroke-width:1.5px",
+    prerequisite: "stroke:#2e7d32,stroke-width:2.5px",
+    reference: "stroke:#9e9e9e,stroke-width:1px",
+    warning: "stroke:#d32f2f,stroke-width:2px",
+    flow: "stroke:#455a64,stroke-width:1.5px",
+    loop: "stroke:#ef6c00,stroke-width:2px",
+    file: "stroke:#bdbdbd,stroke-width:1px",
+};
+/** Skills reachable from the focus: everything downstream by `depth` hops, plus one hop upstream. */
+function neighborhood(graph, focus, depth, keepType) {
+    const keep = (e) => keepType(e.type);
+    const set = new Set([focus]);
+    let frontier = [focus];
+    for (let d = 0; d < depth && frontier.length; d++) {
+        const next = [];
+        for (const id of frontier) {
+            for (const e of graph.edges)
+                if (e.source === id && keep(e) && !set.has(e.target))
+                    (set.add(e.target), next.push(e.target));
+            for (const f of graph.flows)
+                if (f.owner === id)
+                    for (const s of f.steps)
+                        if (!set.has(s))
+                            (set.add(s), next.push(s));
+        }
+        frontier = next;
+    }
+    for (const e of graph.edges)
+        if (e.target === focus && keep(e))
+            set.add(e.source);
+    for (const f of graph.flows)
+        if (f.steps.includes(focus))
+            set.add(f.owner);
+    return set;
+}
+function nid(id) {
+    return "n_" + id.replace(/[^a-zA-Z0-9]/g, "_");
+}
+function fileId(skill, kind, file) {
+    return `${nid(skill)}_${kind}_${file.replace(/[^a-zA-Z0-9]/g, "_")}`;
+}
+function nodeLine(n, html) {
+    // Mermaid accepts one class after ":::"; extra classes go on a separate "class" statement
+    const extra = n.entry ? `
+  class ${nid(n.id)} entry` : "";
+    return `${nid(n.id)}["${label(n, html, false)}"]:::${n.mode}${extra}`;
+}
+function instanceLine(id, n, html) {
+    return `${id}["${label(n, html, true)}"]:::${n.mode}
+  class ${id} inst`;
+}
+function label(n, html, instance) {
+    const badge = n.entry ? "▶ " : n.subSkill ? "↳ " : "";
+    const modeWord = n.mode === "manual" ? "manual" : n.mode === "background" ? "model-only" : "auto";
+    if (!html) {
+        const d = truncate(n.description, instance ? 40 : 70);
+        return esc(`${badge}${n.name}`) + (d ? `<br/><small>${esc(d)}</small>` : "");
+    }
+    const d = truncate(n.description, instance ? 60 : 110);
+    return `<div class='sk sk-${n.mode}${instance ? " sk-inst" : ""}'><div class='sk-name'>${esc(badge + n.name)}</div><div class='sk-desc'>${esc(d)}</div><div class='sk-mode'>${modeWord}</div></div>`;
+}
+function edgeLine(e) {
+    const a = nid(e.source);
+    const b = nid(e.target);
+    switch (e.type) {
+        case "calls":
+            return e.warning ? `${a} -- "⚠ manual-only" --> ${b}` : `${a} --> ${b}`;
+        case "suggests":
+            return `${a} -.-> ${b}`;
+        case "prerequisite":
+            return `${a} ==> ${b}`;
+        default:
+            return `${a} -.- ${b}`;
+    }
+}
+/** strip markdown emphasis/code and truncate, for subgraph titles */
+function clean(s, n) {
+    return truncate(s.replace(/[*_`]+/g, "").replace(/\s+/g, " "), n);
+}
+function truncate(s, n) {
+    const t = s.replace(/\s+/g, " ").trim();
+    return t.length > n ? t.slice(0, n - 1).trimEnd() + "…" : t;
+}
+/** Escape for a double-quoted Mermaid label. */
+function esc(s) {
+    return s.replace(/"/g, "#quot;").replace(/</g, "#lt;").replace(/>/g, "#gt;");
+}
+
+import mermaid from "https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs";
+
+const graph = JSON.parse(document.getElementById("graph-data").textContent);
+const WATCH = true;
+const byId = new Map(graph.nodes.map((n) => [n.id, n]));
+const state = { focus: null, flows: true, suggests: null, references: false, files: false, direction: "LR" };
+let renderSeq = 0;
+
+mermaid.initialize({
+  startOnLoad: false,
+  securityLevel: "loose",
+  theme: "base",
+  themeVariables: { fontFamily: "system-ui, sans-serif", primaryColor: "#e6f4ea", lineColor: "#455a64", fontSize: "13px" },
+  flowchart: { htmlLabels: true, useMaxWidth: false, nodeSpacing: 28, rankSpacing: 48, curve: "basis", padding: 12 },
+  maxTextSize: 900000, maxEdges: 5000,
+});
+
+window.skillClick = (nodeId) => {
+  // n_<id> for skill nodes; flowN_M for instances
+  let id = null;
+  if (nodeId.startsWith("n_")) id = graph.nodes.find((n) => nid(n.id) === nodeId)?.id ?? null;
+  else {
+    const m = /^flow(\d+)_(\d+)$/.exec(nodeId);
+    if (m) {
+      const flows = visibleFlows();
+      const f = flows[Number(m[1]) - 1];
+      id = f ? f.steps[Number(m[2]) - 1] : null;
+    }
+  }
+  if (id) select(id);
+};
+
+function visibleFlows() {
+  const o = currentOptions();
+  const keepType = (t) => (t === "reference" ? o.references : t === "suggests" ? (o.suggests ?? !!o.focus) : true);
+  const included = o.focus ? neighborhood(graph, o.focus, o.depth, keepType) : new Set(graph.nodes.map((n) => n.id));
+  return o.flows ? graph.flows.filter((f) => included.has(f.owner) && (!o.focus || f.owner === o.focus || f.steps.includes(o.focus))) : [];
+}
+
+function currentOptions() {
+  return { html: true, focus: state.focus, depth: 2, flows: state.flows, suggests: state.suggests ?? undefined, references: state.references, files: state.files, direction: state.direction };
+}
+
+async function render() {
+  const seq = ++renderSeq;
+  const code = toMermaid(graph, currentOptions());
+  const el = document.getElementById("diagram");
+  const err = document.getElementById("err");
+  err.textContent = "";
+  try {
+    const { svg, bindFunctions } = await mermaid.render("svg" + seq, code);
+    if (seq !== renderSeq) return;
+    el.innerHTML = svg;
+    bindFunctions?.(el);
+    fit();
+  } catch (e) {
+    err.textContent = "Mermaid could not render this view:\n" + (e?.message ?? e) + "\n\n" + code.slice(0, 2000);
+  }
+}
+
+function syncSuggestBox() {
+  const box = document.getElementById("optSug");
+  box.checked = state.suggests ?? !!state.focus;
+}
+
+let zoom = 1;
+function applyZoom() {
+  const el = document.getElementById("diagram");
+  el.style.transform = `scale(${zoom})`;
+  const svg = el.querySelector("svg");
+  if (svg) {
+    // keep the scroll area in step with the scaled drawing
+    const w = Number(svg.getAttribute("width")) || svg.getBoundingClientRect().width / zoom;
+    const hgt = Number(svg.getAttribute("height")) || svg.getBoundingClientRect().height / zoom;
+    el.parentElement.style.setProperty("--w", w * zoom + "px");
+    el.style.marginBottom = (hgt * zoom - hgt) + "px";
+    el.style.marginRight = (w * zoom - w) + "px";
+  }
+  document.getElementById("zoomPct").textContent = Math.round(zoom * 100) + "%";
+}
+function fit() {
+  const svg = document.querySelector("#diagram svg");
+  const canvas = document.getElementById("canvas");
+  if (!svg) return;
+  const w = Number(svg.getAttribute("width")) || svg.getBBox().width;
+  const hgt = Number(svg.getAttribute("height")) || svg.getBBox().height;
+  const avail = canvas.clientWidth - 40;
+  const availH = canvas.clientHeight - 40;
+  zoom = Math.min(1, avail / w, Math.max(0.25, availH / hgt));
+  applyZoom();
+}
+document.getElementById("btnFit").addEventListener("click", fit);
+document.getElementById("btnZoomIn").addEventListener("click", () => { zoom = Math.min(3, zoom * 1.25); applyZoom(); });
+document.getElementById("btnZoomOut").addEventListener("click", () => { zoom = Math.max(0.1, zoom / 1.25); applyZoom(); });
+document.getElementById("canvas").addEventListener("wheel", (e) => {
+  if (!e.ctrlKey) return;
+  e.preventDefault();
+  zoom = Math.min(3, Math.max(0.1, zoom * (e.deltaY < 0 ? 1.1 : 0.9)));
+  applyZoom();
+}, { passive: false });
+
+function select(id) {
+  state.focus = id;
+  syncSuggestBox();
+  document.querySelectorAll("#list li").forEach((li) => li.classList.toggle("active", li.dataset.id === id));
+  document.querySelector("#list li.active")?.scrollIntoView({ block: "nearest" });
+  showDetail(id);
+  render();
+}
+
+function showAll() {
+  state.focus = null;
+  syncSuggestBox();
+  document.querySelectorAll("#list li").forEach((li) => li.classList.remove("active"));
+  document.getElementById("detail").innerHTML = '<p class="path">Whole library. Click a skill to see what it calls and why.</p><div id="unresolved"></div>';
+  renderUnresolved();
+  render();
+}
+
+function h(s) { return String(s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c])); }
+
+function showDetail(id) {
+  const n = byId.get(id);
+  if (!n) return;
+  const out = graph.edges.filter((e) => e.source === id);
+  const inc = graph.edges.filter((e) => e.target === id);
+  const flows = graph.flows.filter((f) => f.owner === id || f.steps.includes(id));
+  const modeWord = { auto: "auto", manual: "manual-only", background: "model-only" }[n.mode];
+  const edgeHtml = (e, dir) => {
+    const other = dir === "out" ? e.target : e.source;
+    const ev = e.evidence.map((v) => `<div class="ev"><b>L${v.line}</b> ${h(v.snippet)}</div>`).join("");
+    return `<div class="edge"><span class="t" data-go="${h(other)}">${dir === "out" ? "→" : "←"} ${h(byId.get(other)?.name ?? other)}</span><span class="k">${e.type}</span>${e.warning ? '<span class="w">⚠ manual-only target: the model may not be able to invoke it</span>' : ""}${ev}</div>`;
+  };
+  const flowHtml = (f) => {
+    const steps = f.steps.map((s) => `<span class="t" data-go="${h(s)}">${h(byId.get(s)?.name ?? s)}</span>`).join(f.kind === "parallel" ? " ⫴ " : " → ");
+    const ev = f.evidence.map((v) => `<div class="ev"><b>L${v.line}</b> ${h(v.snippet)}</div>`).join("");
+    const icon = { sequential: "⇢", parallel: "⫴", loop: "↻" }[f.kind];
+    return `<div class="edge">${icon} <b>${h(f.kind)}</b> in ${h(byId.get(f.owner)?.name ?? f.owner)}: ${steps}${f.until ? `<div class="k">until ${h(f.until)}</div>` : ""}${ev}</div>`;
+  };
+  const fm = Object.entries(n.frontmatter).filter(([k]) => !["name", "description"].includes(k));
+  const inv = `Claude: ${n.invocation.claude}${n.invocation.codex === "manual" ? " · Codex: manual-only ($" + h(n.name) + ")" : " · Codex: $" + h(n.name)}`;
+  document.getElementById("detail").innerHTML = `
+    <h2>${h(n.name)}</h2>
+    <div><span class="badge ${n.mode}">${modeWord}</span>${n.entry ? '<span class="badge entry">▶ entry point</span>' : ""}${n.subSkill ? '<span class="badge sub">↳ sub-skill</span>' : ""}</div>
+    <p class="desc">${h(n.description) || "<i>no description</i>"}</p>
+    <div class="path">${inv}</div>
+    <div class="path">${h(n.file)} · ${n.bodyLines} body lines${n.argumentHint ? " · args: <code>" + h(n.argumentHint) + "</code>" : ""}</div>
+    ${n.allowedTools ? `<div class="path">allowed-tools: ${n.allowedTools.map((t) => "<code>" + h(t) + "</code>").join(" ")}</div>` : ""}
+    <h3>Calls / points to (${out.length})</h3>${out.map((e) => edgeHtml(e, "out")).join("") || '<div class="path">nothing found in the body</div>'}
+    <h3>Called / pointed to by (${inc.length})</h3>${inc.map((e) => edgeHtml(e, "in")).join("") || '<div class="path">no incoming links</div>'}
+    <h3>Flows (${flows.length})</h3>${flows.map(flowHtml).join("") || '<div class="path">no sequential, parallel or loop structure found</div>'}
+    ${n.scripts.length || n.references.length ? `<h3>Files</h3><div class="path">${[...n.scripts.map((s) => "scripts/" + s), ...n.references.map((r) => "references/" + r)].map(h).join("<br/>")}</div>` : ""}
+    ${fm.length ? `<details><summary>frontmatter</summary><pre>${h(JSON.stringify(Object.fromEntries(fm), null, 2))}</pre></details>` : ""}
+  `;
+  document.querySelectorAll("#detail [data-go]").forEach((el) => el.addEventListener("click", () => select(el.dataset.go)));
+}
+
+function renderUnresolved() {
+  const el = document.getElementById("unresolved");
+  if (!el || !graph.unresolved.length) return;
+  el.innerHTML = `<details><summary>${graph.unresolved.length} mentioned names not in this library</summary>` +
+    graph.unresolved.map((u) => `<div>/${h(u.name)} <span class="k">×${u.count} in ${u.sources.map(h).join(", ")}</span></div>`).join("") + "</details>";
+}
+
+function buildList(filter = "") {
+  const q = filter.trim().toLowerCase();
+  const ul = document.getElementById("list");
+  const order = (n) => (n.entry ? 0 : n.mode === "manual" ? 1 : n.mode === "auto" ? 2 : 3);
+  const nodes = graph.nodes.filter((n) => !q || n.id.includes(q) || n.name.toLowerCase().includes(q) || n.description.toLowerCase().includes(q))
+    .sort((a, b) => order(a) - order(b) || a.name.localeCompare(b.name));
+  ul.innerHTML = nodes.map((n) => `<li data-id="${h(n.id)}" class="${state.focus === n.id ? "active" : ""}"><span class="dot ${n.mode}"></span><span class="nm">${n.entry ? "▶ " : n.subSkill ? "↳ " : ""}${h(n.name)}</span><div class="ds">${h(n.description)}</div></li>`).join("");
+  ul.querySelectorAll("li").forEach((li) => li.addEventListener("click", () => select(li.dataset.id)));
+}
+
+document.getElementById("counts").textContent = `${graph.meta.skillCount} skills · ${graph.meta.edgeCount} edges · ${graph.meta.flowCount} flows · ${graph.nodes.filter((n) => n.entry).length} entry points`;
+document.getElementById("search").addEventListener("input", (e) => buildList(e.target.value));
+document.getElementById("btnAll").addEventListener("click", showAll);
+document.getElementById("optFlows").addEventListener("change", (e) => { state.flows = e.target.checked; render(); });
+document.getElementById("optSug").addEventListener("change", (e) => { state.suggests = e.target.checked; render(); });
+document.getElementById("optRefs").addEventListener("change", (e) => { state.references = e.target.checked; render(); });
+document.getElementById("optFiles").addEventListener("change", (e) => { state.files = e.target.checked; render(); });
+document.getElementById("optTB").addEventListener("change", (e) => { state.direction = e.target.checked ? "TB" : "LR"; render(); });
+document.getElementById("btnCopy").addEventListener("click", async () => {
+  const code = toMermaid(graph, { ...currentOptions(), html: false });
+  try { await navigator.clipboard.writeText(code); document.getElementById("btnCopy").textContent = "Copied!"; }
+  catch { prompt("Copy the Mermaid code:", code); }
+  setTimeout(() => (document.getElementById("btnCopy").textContent = "Copy Mermaid"), 1200);
+});
+const download = (name, text, type) => { const a = document.createElement("a"); a.href = URL.createObjectURL(new Blob([text], { type })); a.download = name; a.click(); };
+document.getElementById("btnMmd").addEventListener("click", () => download((state.focus ?? "graph") + ".mmd", toMermaid(graph, { ...currentOptions(), html: false }), "text/plain"));
+document.getElementById("btnJson").addEventListener("click", () => download("graph.json", JSON.stringify(graph, null, 2), "application/json"));
+
+buildList();
+renderUnresolved();
+const initial = new URLSearchParams(location.search).get("skill");
+if (initial && byId.has(initial)) select(initial); else render();
+
+if (WATCH) {
+  const w = document.getElementById("watch");
+  w.textContent = "watching…";
+  let seen = null;
+  setInterval(async () => {
+    try {
+      const r = await fetch("/__version", { cache: "no-store" });
+      const v = (await r.text()).trim();
+      if (seen === null) seen = v;
+      else if (v !== seen) location.reload();
+    } catch { w.textContent = "watch: server gone"; }
+  }, 1000);
+}
+</script>
+</body>
+</html>

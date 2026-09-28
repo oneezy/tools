@@ -1,0 +1,337 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <title>Claude Skills Collection</title>
+    <script src="https://d3js.org/d3.v7.min.js"></script>
+    <style>
+        * { box-sizing: border-box; }
+        body {
+            font-family: system-ui, -apple-system, sans-serif;
+            margin: 0;
+            padding: 0;
+            background: #1a1a2e;
+            color: #eee;
+            overflow: hidden;
+        }
+        .container {
+            display: flex;
+            height: 100vh;
+        }
+        .sidebar {
+            width: 300px;
+            background: #252542;
+            padding: 20px;
+            border-right: 1px solid #3d3d5c;
+            overflow-y: auto;
+            flex-shrink: 0;
+        }
+        .main {
+            flex: 1;
+            position: relative;
+        }
+        h1 {
+            margin: 0 0 20px 0;
+            font-size: 20px;
+            color: #fff;
+        }
+        h2 {
+            margin: 20px 0 10px 0;
+            font-size: 14px;
+            color: #888;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+        }
+        .legend {
+            margin-bottom: 20px;
+        }
+        .legend-item {
+            display: flex;
+            align-items: center;
+            margin: 8px 0;
+            font-size: 13px;
+        }
+        .legend-dot {
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+            margin-right: 10px;
+        }
+        .stat {
+            display: flex;
+            justify-content: space-between;
+            padding: 10px 0;
+            border-bottom: 1px solid #3d3d5c;
+            font-size: 14px;
+        }
+        .stat-value {
+            font-weight: bold;
+            color: #fff;
+        }
+        svg {
+            width: 100%;
+            height: 100%;
+        }
+        .node { cursor: pointer; }
+        .node circle {
+            stroke: #fff;
+            stroke-width: 2px;
+            transition: r 0.2s;
+        }
+        .node:hover circle {
+            r: 25;
+        }
+        .node text {
+            font-size: 11px;
+            fill: #fff;
+            pointer-events: none;
+        }
+        .orchestrator circle { fill: #4CAF50; }
+        .read-only circle { fill: #2196F3; }
+        .hybrid circle { fill: #FF9800; }
+        .link {
+            stroke: #666;
+            stroke-opacity: 0.6;
+            fill: none;
+            marker-end: url(#arrowhead);
+        }
+        .tooltip {
+            position: absolute;
+            background: #333;
+            border: 1px solid #555;
+            padding: 12px;
+            border-radius: 6px;
+            font-size: 13px;
+            max-width: 300px;
+            pointer-events: none;
+            z-index: 1000;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+        }
+        .tooltip-title {
+            font-weight: bold;
+            margin-bottom: 6px;
+            color: #fff;
+        }
+        .tooltip-type {
+            font-size: 11px;
+            color: #888;
+            margin-bottom: 8px;
+        }
+        .tooltip-desc {
+            color: #ccc;
+            line-height: 1.4;
+        }
+        .skill-list {
+            margin-top: 10px;
+        }
+        .skill-item {
+            padding: 8px;
+            margin: 4px 0;
+            background: #1a1a2e;
+            border-radius: 4px;
+            font-size: 13px;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+        }
+        .skill-item:hover {
+            background: #2d2d44;
+        }
+        .skill-item .dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            margin-right: 8px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="sidebar">
+            <h1>Skills Collection</h1>
+
+            <h2>Legend</h2>
+            <div class="legend">
+                <div class="legend-item">
+                    <div class="legend-dot" style="background: #4CAF50"></div>
+                    <span>Orchestrator (context: fork)</span>
+                </div>
+                <div class="legend-item">
+                    <div class="legend-dot" style="background: #2196F3"></div>
+                    <span>Read-only (tool restrictions)</span>
+                </div>
+                <div class="legend-item">
+                    <div class="legend-dot" style="background: #FF9800"></div>
+                    <span>Hybrid (standard)</span>
+                </div>
+            </div>
+
+            <h2>Statistics</h2>
+            <div class="stat">
+                <span>Total Skills</span>
+                <span class="stat-value">39</span>
+            </div>
+            <div class="stat">
+                <span>Orchestrators</span>
+                <span class="stat-value">1</span>
+            </div>
+            <div class="stat">
+                <span>Read-only</span>
+                <span class="stat-value">0</span>
+            </div>
+            <div class="stat">
+                <span>Dependencies</span>
+                <span class="stat-value">45</span>
+            </div>
+
+            <h2>Skills</h2>
+            <div class="skill-list" id="skill-list"></div>
+        </div>
+        <div class="main">
+            <svg id="graph"></svg>
+        </div>
+    </div>
+    <div class="tooltip" id="tooltip" style="display: none;"></div>
+
+    <script>
+        const nodes = [{"id": "ask-matt", "type": "hybrid", "description": "Ask which skill or flow fits your situation. A router over the skills in this repo.", "hasArgs": false, "hasFork": false}, {"id": "claude-handoff", "type": "hybrid", "description": "Hand the current conversation off to a fresh background agent that picks up the work immediately.", "hasArgs": true, "hasFork": false}, {"id": "code-review", "type": "hybrid", "description": "\"Review the changes since a fixed point (commit, branch, tag, or merge-base) along two axes: Standards (does the code follow this repo's documented co...", "hasArgs": false, "hasFork": false}, {"id": "codebase-design", "type": "hybrid", "description": "Shared vocabulary for designing deep modules. Use when the user wants to design or improve a module's interface, find deepening opportunities, decide ...", "hasArgs": false, "hasFork": false}, {"id": "diagnosing-bugs", "type": "hybrid", "description": "Diagnosis loop for hard bugs and performance regressions. Use when the user says \"diagnose\"/\"debug this\", or reports something broken/throwing/failing...", "hasArgs": false, "hasFork": false}, {"id": "domain-modeling", "type": "hybrid", "description": "Build and sharpen a project's domain model. Use when discussing codebase terminology, writing or editing a CONTEXT.md, or recording or editing an ADR.", "hasArgs": false, "hasFork": false}, {"id": "git-guardrails-claude-code", "type": "hybrid", "description": "Set up Claude Code hooks to block dangerous git commands (push, reset --hard, clean, branch -D, etc.) before they execute. Use when user wants to prev...", "hasArgs": false, "hasFork": false}, {"id": "grill-me", "type": "hybrid", "description": "A relentless interview to sharpen a plan or design.", "hasArgs": false, "hasFork": false}, {"id": "grill-with-docs", "type": "hybrid", "description": "A relentless interview to sharpen a plan or design, which also creates docs (ADR's and glossary) as we go.", "hasArgs": false, "hasFork": false}, {"id": "grilling", "type": "hybrid", "description": "Grill the user relentlessly about a plan, decision, or idea. Use when the user wants to stress-test their thinking, or uses any 'grill' trigger phrase...", "hasArgs": false, "hasFork": false}, {"id": "handoff", "type": "hybrid", "description": "Compact the current conversation into a handoff document for another agent to pick up.", "hasArgs": true, "hasFork": false}, {"id": "implement", "type": "hybrid", "description": "\"Implement a piece of work based on a spec or set of tickets.\"", "hasArgs": false, "hasFork": false}, {"id": "implement-spec", "type": "hybrid", "description": "\"Implement a specification in code.\"", "hasArgs": false, "hasFork": false}, {"id": "improve-codebase-architecture", "type": "hybrid", "description": "Scan a codebase for deepening opportunities, present them as a visual HTML report, then grill through whichever one you pick.", "hasArgs": false, "hasFork": false}, {"id": "loop-me", "type": "hybrid", "description": "Grill me about specs for the workflows I want to build, within this workspace.", "hasArgs": true, "hasFork": false}, {"id": "migrate-to-shoehorn", "type": "hybrid", "description": "Migrate test files from `as` type assertions to @total-typescript/shoehorn. Use when user mentions shoehorn, wants to replace `as` in tests, or needs ...", "hasArgs": false, "hasFork": false}, {"id": "pr", "type": "hybrid", "description": "\"Use when writing a PR body.\"", "hasArgs": false, "hasFork": false}, {"id": "prototype", "type": "hybrid", "description": "Build a throwaway prototype to answer a design question. Use when the user wants to sanity-check whether a state model or logic feels right, or explor...", "hasArgs": false, "hasFork": false}, {"id": "research", "type": "hybrid", "description": "Investigate a question against high-trust primary sources and capture the findings as a Markdown file in the repo. Use when the user wants a topic res...", "hasArgs": false, "hasFork": false}, {"id": "resolving-merge-conflicts", "type": "hybrid", "description": "\"Use when you need to resolve an in-progress git merge/rebase conflict.\"", "hasArgs": false, "hasFork": false}, {"id": "retro", "type": "hybrid", "description": "\"Conduct a retrospective on a coding session.\"", "hasArgs": false, "hasFork": false}, {"id": "scaffold-exercises", "type": "hybrid", "description": "Create exercise directory structures with sections, problems, solutions, and explainers that pass linting. Use when user wants to scaffold exercises, ...", "hasArgs": false, "hasFork": false}, {"id": "setup-matt-pocock-skills", "type": "hybrid", "description": "\"Configure this repo for the engineering skills: set up its issue tracker, triage label vocabulary, and domain doc layout. Run once before first use o...", "hasArgs": false, "hasFork": false}, {"id": "setup-pre-commit", "type": "hybrid", "description": "Set up Husky pre-commit hooks with lint-staged (Prettier), type checking, and tests in the current repo. Use when user wants to add pre-commit hooks, ...", "hasArgs": false, "hasFork": false}, {"id": "setup-ts-deep-modules", "type": "hybrid", "description": "Wire dependency-cruiser into a TypeScript repo so each package is a deep module, with implementation hidden in subfolders and reachable only through i...", "hasArgs": false, "hasFork": false}, {"id": "skill-visualizer", "type": "orchestrator", "description": "Generate interactive HTML visualizations of the skills collection, codebase structure, or dependency graphs. Uses D3.js for interactive visualization ...", "hasArgs": true, "hasFork": true}, {"id": "tdd", "type": "hybrid", "description": "Test-driven development. Use when the user wants to build features or fix bugs test-first, mentions \"red-green-refactor\", or wants integration tests.", "hasArgs": false, "hasFork": false}, {"id": "teach", "type": "hybrid", "description": "Teach the user a new skill or concept, within this workspace.", "hasArgs": true, "hasFork": false}, {"id": "to-questionnaire", "type": "hybrid", "description": "Turn a decision you can't fully answer into a questionnaire for someone else to fill in.", "hasArgs": false, "hasFork": false}, {"id": "to-spec", "type": "hybrid", "description": "\"Turn the current conversation into a spec and publish it to the project issue tracker: no interview, just synthesis of what you've already discussed....", "hasArgs": false, "hasFork": false}, {"id": "to-tickets", "type": "hybrid", "description": "Break a plan, spec, or the current conversation into a set of tracer-bullet tickets, each declaring its blocking edges, published to the configured tr...", "hasArgs": false, "hasFork": false}, {"id": "triage", "type": "hybrid", "description": "Move issues and external PRs through a state machine of triage roles, categorise, verify, grill if needed, and write agent-ready briefs.", "hasArgs": false, "hasFork": false}, {"id": "wait-what", "type": "hybrid", "description": "\"Stop. That last message did not land: re-pitch it.\"", "hasArgs": false, "hasFork": false}, {"id": "wayfinder", "type": "hybrid", "description": "Plan a huge chunk of work (more than one agent session can hold) as a shared map of decision tickets on your issue tracker, and resolve them one at a ...", "hasArgs": false, "hasFork": false}, {"id": "wizard", "type": "hybrid", "description": "Generate an interactive bash wizard that walks a human through steps only they can perform. Use when provisioning infrastructure, setting up credentia...", "hasArgs": false, "hasFork": false}, {"id": "writing-beats", "type": "hybrid", "description": "Writing, exploit; assemble raw material into a journey of beats, grounding each term before a beat leans on it.", "hasArgs": false, "hasFork": false}, {"id": "writing-for-agents", "type": "hybrid", "description": "Writing documents for agents. Use when creating or editing skills, or modifying AGENTS.md or CLAUDE.md.", "hasArgs": false, "hasFork": false}, {"id": "writing-fragments", "type": "hybrid", "description": "\"Writing, explore: mine raw fragments, no structure yet.\"", "hasArgs": false, "hasFork": false}, {"id": "writing-shape", "type": "hybrid", "description": "\"Writing, exploit: shape raw material into an article, paragraph by paragraph.\"", "hasArgs": false, "hasFork": false}];
+        const links = [{"source": "ask-matt", "target": "grill-with-docs"}, {"source": "ask-matt", "target": "wayfinder"}, {"source": "ask-matt", "target": "to-questionnaire"}, {"source": "ask-matt", "target": "prototype"}, {"source": "ask-matt", "target": "wizard"}, {"source": "ask-matt", "target": "tdd"}, {"source": "ask-matt", "target": "teach"}, {"source": "ask-matt", "target": "handoff"}, {"source": "ask-matt", "target": "diagnosing-bugs"}, {"source": "ask-matt", "target": "grilling"}, {"source": "ask-matt", "target": "triage"}, {"source": "ask-matt", "target": "improve-codebase-architecture"}, {"source": "ask-matt", "target": "implement"}, {"source": "ask-matt", "target": "codebase-design"}, {"source": "ask-matt", "target": "setup-matt-pocock-skills"}, {"source": "ask-matt", "target": "to-spec"}, {"source": "ask-matt", "target": "grill-me"}, {"source": "ask-matt", "target": "resolving-merge-conflicts"}, {"source": "ask-matt", "target": "to-tickets"}, {"source": "ask-matt", "target": "research"}, {"source": "ask-matt", "target": "pr"}, {"source": "ask-matt", "target": "writing-for-agents"}, {"source": "ask-matt", "target": "code-review"}, {"source": "ask-matt", "target": "wait-what"}, {"source": "ask-matt", "target": "domain-modeling"}, {"source": "code-review", "target": "setup-matt-pocock-skills"}, {"source": "implement", "target": "tdd"}, {"source": "implement", "target": "code-review"}, {"source": "implement-spec", "target": "code-review"}, {"source": "improve-codebase-architecture", "target": "codebase-design"}, {"source": "loop-me", "target": "grilling"}, {"source": "retro", "target": "writing-for-agents"}, {"source": "scaffold-exercises", "target": "pr"}, {"source": "setup-matt-pocock-skills", "target": "triage"}, {"source": "setup-matt-pocock-skills", "target": "to-spec"}, {"source": "setup-matt-pocock-skills", "target": "to-tickets"}, {"source": "setup-pre-commit", "target": "pr"}, {"source": "tdd", "target": "code-review"}, {"source": "to-spec", "target": "setup-matt-pocock-skills"}, {"source": "to-tickets", "target": "setup-matt-pocock-skills"}, {"source": "triage", "target": "setup-matt-pocock-skills"}, {"source": "wayfinder", "target": "prototype"}, {"source": "wayfinder", "target": "grilling"}, {"source": "wayfinder", "target": "setup-matt-pocock-skills"}, {"source": "wayfinder", "target": "research"}];
+
+        const colors = {
+            'orchestrator': '#4CAF50',
+            'read-only': '#2196F3',
+            'hybrid': '#FF9800'
+        };
+
+        // Populate skill list
+        const skillList = document.getElementById('skill-list');
+        nodes.sort((a, b) => a.id.localeCompare(b.id)).forEach(node => {
+            const item = document.createElement('div');
+            item.className = 'skill-item';
+            item.innerHTML = `<div class="dot" style="background: ${colors[node.type]}"></div>${node.id}`;
+            item.onclick = () => highlightNode(node.id);
+            skillList.appendChild(item);
+        });
+
+        // Setup SVG
+        const svg = d3.select("#graph");
+        const container = svg.append("g");
+
+        // Add zoom
+        const zoom = d3.zoom()
+            .scaleExtent([0.3, 3])
+            .on("zoom", (event) => container.attr("transform", event.transform));
+        svg.call(zoom);
+
+        // Add arrow marker
+        svg.append("defs").append("marker")
+            .attr("id", "arrowhead")
+            .attr("viewBox", "-0 -5 10 10")
+            .attr("refX", 25)
+            .attr("refY", 0)
+            .attr("orient", "auto")
+            .attr("markerWidth", 6)
+            .attr("markerHeight", 6)
+            .append("path")
+            .attr("d", "M 0,-5 L 10,0 L 0,5")
+            .attr("fill", "#666");
+
+        // Create simulation
+        const width = document.querySelector('.main').clientWidth;
+        const height = document.querySelector('.main').clientHeight;
+
+        const simulation = d3.forceSimulation(nodes)
+            .force("link", d3.forceLink(links).id(d => d.id).distance(120))
+            .force("charge", d3.forceManyBody().strength(-300))
+            .force("center", d3.forceCenter(width / 2, height / 2))
+            .force("collision", d3.forceCollide().radius(40));
+
+        // Draw links
+        const link = container.append("g")
+            .selectAll("path")
+            .data(links)
+            .join("path")
+            .attr("class", "link");
+
+        // Draw nodes
+        const node = container.append("g")
+            .selectAll("g")
+            .data(nodes)
+            .join("g")
+            .attr("class", d => "node " + d.type)
+            .call(d3.drag()
+                .on("start", dragstarted)
+                .on("drag", dragged)
+                .on("end", dragended));
+
+        node.append("circle")
+            .attr("r", 18);
+
+        node.append("text")
+            .attr("dy", 35)
+            .attr("text-anchor", "middle")
+            .text(d => d.id);
+
+        // Tooltip
+        const tooltip = document.getElementById('tooltip');
+
+        node.on("mouseover", (event, d) => {
+            tooltip.innerHTML = `
+                <div class="tooltip-title">${d.id}</div>
+                <div class="tooltip-type">${d.type.toUpperCase()}</div>
+                <div class="tooltip-desc">${d.description}</div>
+            `;
+            tooltip.style.display = 'block';
+            tooltip.style.left = (event.pageX + 15) + 'px';
+            tooltip.style.top = (event.pageY - 10) + 'px';
+        })
+        .on("mousemove", (event) => {
+            tooltip.style.left = (event.pageX + 15) + 'px';
+            tooltip.style.top = (event.pageY - 10) + 'px';
+        })
+        .on("mouseout", () => {
+            tooltip.style.display = 'none';
+        });
+
+        // Tick function
+        simulation.on("tick", () => {
+            link.attr("d", d => {
+                const dx = d.target.x - d.source.x;
+                const dy = d.target.y - d.source.y;
+                return `M${d.source.x},${d.source.y}L${d.target.x},${d.target.y}`;
+            });
+
+            node.attr("transform", d => `translate(${d.x},${d.y})`);
+        });
+
+        // Drag functions
+        function dragstarted(event) {
+            if (!event.active) simulation.alphaTarget(0.3).restart();
+            event.subject.fx = event.subject.x;
+            event.subject.fy = event.subject.y;
+        }
+
+        function dragged(event) {
+            event.subject.fx = event.x;
+            event.subject.fy = event.y;
+        }
+
+        function dragended(event) {
+            if (!event.active) simulation.alphaTarget(0);
+            event.subject.fx = null;
+            event.subject.fy = null;
+        }
+
+        // Highlight function
+        function highlightNode(nodeId) {
+            const nodeData = nodes.find(n => n.id === nodeId);
+            if (nodeData) {
+                svg.transition().duration(750).call(
+                    zoom.transform,
+                    d3.zoomIdentity.translate(width/2 - nodeData.x, height/2 - nodeData.y)
+                );
+            }
+        }
+    </script>
+</body>
+</html>

@@ -1,0 +1,64 @@
+{
+ "mode": "flat",
+ "vaultFiles": 40,
+ "skillNodes": 38,
+ "edges": [],
+ "unresolved": {
+  "code-review": [
+   "docs/agents/issue-tracker.md"
+  ],
+  "diagnosing-bugs": [
+   "scripts/hitl-loop.template.sh"
+  ],
+  "domain-modeling": [
+   "./CONTEXT-FORMAT.md",
+   "./ADR-FORMAT.md"
+  ],
+  "git-guardrails-claude-code": [
+   ".claude/settings.json",
+   "~/.claude/settings.json",
+   ".claude/hooks/block-dangerous-git.sh",
+   "~/.claude/hooks/block-dangerous-git.sh",
+   "scripts/block-dangerous-git.sh"
+  ],
+  "improve-codebase-architecture": [
+   "<tmpdir>/architecture-review-<timestamp>.html"
+  ],
+  "loop-me": [
+   "workflows/*.md"
+  ],
+  "setup-matt-pocock-skills": [
+   "docs/agents/issue-tracker.md",
+   "docs/agents/domain.md",
+   "docs/agents/triage-labels.md",
+   "docs/agents/*.md",
+   "./issue-tracker-github.md",
+   "./issue-tracker-gitlab.md",
+   "./issue-tracker-local.md",
+   "./triage-labels.md",
+   "./domain.md"
+  ],
+  "setup-ts-deep-modules": [
+   "lib/impl.ts",
+   "tests/example.test.ts",
+   "<packages-root>/README.md",
+   "./dependency-cruiser.config.cjs",
+   "./src/packages/README.md"
+  ],
+  "teach": [
+   "./reference/*.html",
+   "./learning-records/*.md",
+   "./lessons/*.html",
+   "./MISSION-FORMAT.md",
+   "./RESOURCES-FORMAT.md",
+   "./LEARNING-RECORD-FORMAT.md"
+  ],
+  "to-tickets": [
+   ".scratch/<feature-slug>/issues/<NN>-<slug>.md"
+  ],
+  "triage": [
+   ".out-of-scope/*.md"
+  ]
+ },
+ "dropped": {}
+}

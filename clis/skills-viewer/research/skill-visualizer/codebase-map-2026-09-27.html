@@ -1,0 +1,61 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <title>Codebase Structure</title>
+    <style>
+        body {
+            font-family: system-ui, sans-serif;
+            margin: 0;
+            padding: 20px;
+            background: #1a1a2e;
+            color: #eee;
+        }
+        h1 { color: #fff; }
+        .tree { list-style: none; padding-left: 20px; }
+        details { cursor: pointer; }
+        summary { padding: 4px 8px; border-radius: 4px; }
+        summary:hover { background: #2d2d44; }
+        .folder { color: #ffd700; }
+        .file { padding: 4px 8px; display: flex; align-items: center; }
+        .file:hover { background: #2d2d44; }
+        .size { color: #888; margin-left: auto; font-size: 12px; }
+    </style>
+</head>
+<body>
+    <h1>Codebase Structure</h1>
+    <ul class="tree" id="root"></ul>
+    <script>
+        const data = {"name": ".claude", "children": [{"name": "docs", "children": [{"name": "visualizations", "children": [{"name": "deps-map-2026-09-27.html", "size": 21098}, {"name": "skills-map-2026-09-27.html", "size": 21098}], "size": 42196}], "size": 42196}, {"name": "skills", "children": [{"name": "ask-matt", "children": [{"name": "agents", "children": [{"name": "openai.yaml", "size": 137}], "size": 137}, {"name": "PHASE-BOUNDARIES.md", "size": 4249}, {"name": "SKILL.md", "size": 11417}], "size": 15803}, {"name": "claude-handoff", "children": [{"name": "agents", "children": [{"name": "openai.yaml", "size": 141}], "size": 141}, {"name": "SKILL.md", "size": 1301}], "size": 1442}, {"name": "code-review", "children": [{"name": "agents", "children": [{"name": "openai.yaml", "size": 100}], "size": 100}, {"name": "SKILL.md", "size": 6589}], "size": 6689}, {"name": "codebase-design", "children": [{"name": "agents", "children": [{"name": "openai.yaml", "size": 102}], "size": 102}, {"name": "DEEPENING.md", "size": 2553}, {"name": "DESIGN-IT-TWICE.md", "size": 2664}, {"name": "SKILL.md", "size": 6446}], "size": 11765}, {"name": "diagnosing-bugs", "children": [{"name": "agents", "children": [{"name": "openai.yaml", "size": 103}], "size": 103}, {"name": "scripts", "children": [{"name": "hitl-loop.template.sh", "size": 1316}], "size": 1316}, {"name": "SKILL.md", "size": 8529}], "size": 9948}, {"name": "domain-modeling", "children": [{"name": "ADR-FORMAT.md", "size": 2733}, {"name": "agents", "children": [{"name": "openai.yaml", "size": 101}], "size": 101}, {"name": "CONTEXT-FORMAT.md", "size": 2290}, {"name": "SKILL.md", "size": 3331}], "size": 8455}, {"name": "git-guardrails-claude-code", "children": [{"name": "agents", "children": [{"name": "openai.yaml", "size": 112}], "size": 112}, {"name": "scripts", "children": [{"name": "block-dangerous-git.sh", "size": 507}], "size": 507}, {"name": "SKILL.md", "size": 2313}], "size": 2932}, {"name": "grill-me", "children": [{"name": "agents", "children": [{"name": "openai.yaml", "size": 137}], "size": 137}, {"name": "SKILL.md", "size": 157}], "size": 294}, {"name": "grill-with-docs", "children": [{"name": "agents", "children": [{"name": "openai.yaml", "size": 145}], "size": 145}, {"name": "SKILL.md", "size": 247}], "size": 392}, {"name": "grilling", "children": [{"name": "agents", "children": [{"name": "openai.yaml", "size": 113}], "size": 113}, {"name": "SKILL.md", "size": 1987}], "size": 2100}, {"name": "handoff", "children": [{"name": "agents", "children": [{"name": "openai.yaml", "size": 141}], "size": 141}, {"name": "SKILL.md", "size": 894}], "size": 1035}, {"name": "implement", "children": [{"name": "agents", "children": [{"name": "openai.yaml", "size": 139}], "size": 139}, {"name": "SKILL.md", "size": 433}], "size": 572}, {"name": "implement-spec", "children": [{"name": "agents", "children": [{"name": "openai.yaml", "size": 143}], "size": 143}, {"name": "SKILL.md", "size": 2043}], "size": 2186}, {"name": "improve-codebase-architecture", "children": [{"name": "agents", "children": [{"name": "openai.yaml", "size": 166}], "size": 166}, {"name": "HTML-REPORT.md", "size": 6641}, {"name": "SKILL.md", "size": 5993}], "size": 12800}, {"name": "loop-me", "children": [{"name": "agents", "children": [{"name": "openai.yaml", "size": 140}], "size": 140}, {"name": "SKILL.md", "size": 2522}], "size": 2662}, {"name": "migrate-to-shoehorn", "children": [{"name": "agents", "children": [{"name": "openai.yaml", "size": 110}], "size": 110}, {"name": "SKILL.md", "size": 2795}], "size": 2905}, {"name": "pr", "children": [{"name": "agents", "children": [{"name": "openai.yaml", "size": 93}], "size": 93}, {"name": "CREDITS.md", "size": 489}, {"name": "SKILL.md", "size": 4171}], "size": 4753}, {"name": "prototype", "children": [{"name": "agents", "children": [{"name": "openai.yaml", "size": 100}], "size": 100}, {"name": "LOGIC.md", "size": 6036}, {"name": "SKILL.md", "size": 2931}, {"name": "UI.md", "size": 6913}], "size": 15980}, {"name": "research", "children": [{"name": "agents", "children": [{"name": "openai.yaml", "size": 94}], "size": 94}, {"name": "SKILL.md", "size": 794}], "size": 888}, {"name": "resolving-merge-conflicts", "children": [{"name": "agents", "children": [{"name": "openai.yaml", "size": 113}], "size": 113}, {"name": "SKILL.md", "size": 918}], "size": 1031}, {"name": "retro", "children": [{"name": "agents", "children": [{"name": "openai.yaml", "size": 146}], "size": 146}, {"name": "SKILL.md", "size": 4369}], "size": 4515}, {"name": "scaffold-exercises", "children": [{"name": "agents", "children": [{"name": "openai.yaml", "size": 108}], "size": 108}, {"name": "SKILL.md", "size": 3589}], "size": 3697}, {"name": "setup-matt-pocock-skills", "children": [{"name": "agents", "children": [{"name": "openai.yaml", "size": 152}], "size": 152}, {"name": "domain.md", "size": 2033}, {"name": "issue-tracker-github.md", "size": 3731}, {"name": "issue-tracker-gitlab.md", "size": 3809}, {"name": "issue-tracker-local.md", "size": 1810}, {"name": "SKILL.md", "size": 6841}, {"name": "triage-labels.md", "size": 1045}], "size": 19421}, {"name": "setup-pre-commit", "children": [{"name": "agents", "children": [{"name": "openai.yaml", "size": 99}], "size": 99}, {"name": "SKILL.md", "size": 2258}], "size": 2357}, {"name": "setup-ts-deep-modules", "children": [{"name": "agents", "children": [{"name": "openai.yaml", "size": 149}], "size": 149}, {"name": "dependency-cruiser.config.cjs", "size": 3712}, {"name": "SKILL.md", "size": 7546}], "size": 11407}, {"name": "skill-visualizer", "children": [{"name": "scripts", "children": [{"name": "visualize.py", "size": 19804}], "size": 19804}, {"name": "SKILL.md", "size": 2968}], "size": 22772}, {"name": "tdd", "children": [{"name": "agents", "children": [{"name": "openai.yaml", "size": 87}], "size": 87}, {"name": "mocking.md", "size": 1481}, {"name": "SKILL.md", "size": 3549}, {"name": "tests.md", "size": 2214}], "size": 7331}, {"name": "teach", "children": [{"name": "agents", "children": [{"name": "openai.yaml", "size": 139}], "size": 139}, {"name": "GLOSSARY-FORMAT.md", "size": 2122}, {"name": "LEARNING-RECORD-FORMAT.md", "size": 2747}, {"name": "MISSION-FORMAT.md", "size": 1540}, {"name": "RESOURCES-FORMAT.md", "size": 1924}, {"name": "SKILL.md", "size": 9506}], "size": 17978}, {"name": "to-questionnaire", "children": [{"name": "agents", "children": [{"name": "openai.yaml", "size": 166}], "size": 166}, {"name": "SKILL.md", "size": 2904}], "size": 3070}, {"name": "to-spec", "children": [{"name": "agents", "children": [{"name": "openai.yaml", "size": 135}], "size": 135}, {"name": "SKILL.md", "size": 3043}], "size": 3178}, {"name": "to-tickets", "children": [{"name": "agents", "children": [{"name": "openai.yaml", "size": 146}], "size": 146}, {"name": "SKILL.md", "size": 5671}], "size": 5817}, {"name": "triage", "children": [{"name": "AGENT-BRIEF.md", "size": 7942}, {"name": "agents", "children": [{"name": "openai.yaml", "size": 135}], "size": 135}, {"name": "OUT-OF-SCOPE.md", "size": 4667}, {"name": "SKILL.md", "size": 6557}], "size": 19301}, {"name": "wait-what", "children": [{"name": "agents", "children": [{"name": "openai.yaml", "size": 158}], "size": 158}, {"name": "SKILL.md", "size": 394}], "size": 552}, {"name": "wayfinder", "children": [{"name": "agents", "children": [{"name": "openai.yaml", "size": 144}], "size": 144}, {"name": "SKILL.md", "size": 11908}], "size": 12052}, {"name": "wizard", "children": [{"name": "agents", "children": [{"name": "openai.yaml", "size": 96}], "size": 96}, {"name": "SKILL.md", "size": 4123}, {"name": "template.sh", "size": 8567}], "size": 12786}, {"name": "writing-beats", "children": [{"name": "agents", "children": [{"name": "openai.yaml", "size": 142}], "size": 142}, {"name": "SKILL.md", "size": 4855}], "size": 4997}, {"name": "writing-for-agents", "children": [{"name": "agents", "children": [{"name": "openai.yaml", "size": 102}], "size": 102}, {"name": "SKILL-MECHANICS.md", "size": 2629}, {"name": "SKILL.md", "size": 10886}], "size": 13617}, {"name": "writing-fragments", "children": [{"name": "agents", "children": [{"name": "openai.yaml", "size": 140}], "size": 140}, {"name": "SKILL.md", "size": 3558}], "size": 3698}, {"name": "writing-shape", "children": [{"name": "agents", "children": [{"name": "openai.yaml", "size": 144}], "size": 144}, {"name": "SKILL.md", "size": 5922}], "size": 6066}], "size": 279244}], "size": 321440};
+
+        function fmt(b) {
+            if (b < 1024) return b + ' B';
+            if (b < 1048576) return (b/1024).toFixed(1) + ' KB';
+            return (b/1048576).toFixed(1) + ' MB';
+        }
+
+        function render(node, parent) {
+            if (node.children) {
+                const det = document.createElement('details');
+                det.open = parent === document.getElementById('root');
+                det.innerHTML = `<summary><span class="folder">${node.name}</span><span class="size">${fmt(node.size)}</span></summary>`;
+                const ul = document.createElement('ul');
+                ul.className = 'tree';
+                node.children.sort((a,b) => (b.children?1:0)-(a.children?1:0) || a.name.localeCompare(b.name));
+                node.children.forEach(c => render(c, ul));
+                det.appendChild(ul);
+                const li = document.createElement('li');
+                li.appendChild(det);
+                parent.appendChild(li);
+            } else {
+                const li = document.createElement('li');
+                li.className = 'file';
+                li.innerHTML = `${node.name}<span class="size">${fmt(node.size)}</span>`;
+                parent.appendChild(li);
+            }
+        }
+
+        data.children.forEach(c => render(c, document.getElementById('root')));
+    </script>
+</body>
+</html>

@@ -1,0 +1,39 @@
+{
+  "schema_version": 2,
+  "platforms": {
+    "claude_code": {
+      "detected": true,
+      "agents": [
+        {
+          "id": "claude-.claude",
+          "config_dir": "C:\\Users\\Justin\\.claude\\jobs\\9f3eb07d\\tmp\\agent-skill-graph-trial\\home\\.claude",
+          "user_scope_skill_count": 38,
+          "excluded": false,
+          "excluded_reason": null,
+          "discovered_via": "standard-location"
+        }
+      ]
+    },
+    "codex": {
+      "detected": true,
+      "agents": [
+        {
+          "id": "codex-.codex",
+          "config_dir": "C:\\Users\\Justin\\.claude\\jobs\\9f3eb07d\\tmp\\agent-skill-graph-trial\\home\\.codex",
+          "user_scope_skill_count": 38,
+          "excluded": false,
+          "excluded_reason": null,
+          "discovered_via": "standard-location"
+        }
+      ]
+    },
+    "openclaw": {
+      "detected": false,
+      "not_detected_reason": "no openclaw.json under the scan root or standard locations; sync openclaw.json from the gateway host if you want OpenClaw in the graph"
+    },
+    "hermes": {
+      "detected": false,
+      "not_detected_reason": "no profiles/<name>/config.yaml under the scan root or ~/.hermes/profiles"
+    }
+  }
+}

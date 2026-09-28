@@ -1,0 +1,138 @@
+ask-matt | code-review | slash | ask-matt/SKILL.md | 26 | Either way, **`/implement`** builds each issue by driving **`/tdd`** internally (one red-green slice at a time), then cl
+ask-matt | codebase-design | slash | ask-matt/SKILL.md | 52 | - **`/improve-codebase-architecture`** runs whenever you have a spare moment to keep the codebase good for agents to ope
+ask-matt | codebase-design | slash | ask-matt/SKILL.md | 59 | - **`/codebase-design`** is the deep-module vocabulary (module, interface, depth, seam, adapter, leverage, locality) for
+ask-matt | diagnosing-bugs | slash | ask-matt/SKILL.md | 42 | - **Something's broken** → **`/diagnosing-bugs`**. For the hard ones: the bug that resists a first glance, the intermitt
+ask-matt | domain-modeling | slash | ask-matt/SKILL.md | 58 | - **`/domain-modeling`**: sharpen the project's *domain* language: challenge a fuzzy term, resolve an overloaded word ("
+ask-matt | grill-me | slash | ask-matt/SKILL.md | 17 | 1. **`/grill-with-docs`** sharpens the idea by interview. Start here whenever you are **working in a working directory**
+ask-matt | grill-me | slash | ask-matt/SKILL.md | 77 | - **`/grill-me`**: the same relentless interview as `/grill-with-docs`, but **stateless**: it saves nothing locally and 
+ask-matt | grill-me | slash | ask-matt/SKILL.md | 78 | - **`/grilling`** is the interview primitive itself: rounds, the frontier, facts are the agent's job and decisions are y
+ask-matt | grill-me | slash | ask-matt/SKILL.md | 82 | - **`/to-questionnaire`** comes in when the thing blocking you isn't in your head or the codebase but in **someone else'
+ask-matt | grill-with-docs | backtick | ask-matt/SKILL.md | 17 | 1. **`/grill-with-docs`** sharpens the idea by interview. Start here whenever you are **working in a working directory**
+ask-matt | grill-with-docs | slash | ask-matt/SKILL.md | 17 | 1. **`/grill-with-docs`** sharpens the idea by interview. Start here whenever you are **working in a working directory**
+ask-matt | grill-with-docs | slash | ask-matt/SKILL.md | 44 | - **A huge, foggy effort: a greenfield project or a huge feature build, too big for one session** → **`/wayfinder`**, th
+ask-matt | grill-with-docs | slash | ask-matt/SKILL.md | 52 | - **`/improve-codebase-architecture`** runs whenever you have a spare moment to keep the codebase good for agents to ope
+ask-matt | grill-with-docs | slash | ask-matt/SKILL.md | 58 | - **`/domain-modeling`**: sharpen the project's *domain* language: challenge a fuzzy term, resolve an overloaded word ("
+ask-matt | grill-with-docs | slash | ask-matt/SKILL.md | 77 | - **`/grill-me`**: the same relentless interview as `/grill-with-docs`, but **stateless**: it saves nothing locally and 
+ask-matt | grill-with-docs | slash | ask-matt/SKILL.md | 78 | - **`/grilling`** is the interview primitive itself: rounds, the frontier, facts are the agent's job and decisions are y
+ask-matt | grill-with-docs | slash | ask-matt/SKILL.md | 81 | - **`/research`**: delegate reading legwork to a **background agent**: it investigates a question against **primary sour
+ask-matt | grill-with-docs | slash | ask-matt/SKILL.md | 82 | - **`/to-questionnaire`** comes in when the thing blocking you isn't in your head or the codebase but in **someone else'
+ask-matt | grill-with-docs | slash | ask-matt/SKILL.md | 84 | - **`/wait-what`** is the corrective for a message that didn't land. Use it mid-conversation, inside any other skill, an
+ask-matt | grilling | slash | ask-matt/SKILL.md | 17 | 1. **`/grill-with-docs`** sharpens the idea by interview. Start here whenever you are **working in a working directory**
+ask-matt | grilling | slash | ask-matt/SKILL.md | 78 | - **`/grilling`** is the interview primitive itself: rounds, the frontier, facts are the agent's job and decisions are y
+ask-matt | handoff | slash | ask-matt/PHASE-BOUNDARIES.md | 13 | | **`/handoff`** | Write a portable markdown file and seed a session anywhere with it. |
+ask-matt | handoff | slash | ask-matt/PHASE-BOUNDARIES.md | 27 | **3. Do you need to hand off?** `/handoff` is narrow. You need it only when you are:
+ask-matt | handoff | slash | ask-matt/PHASE-BOUNDARIES.md | 34 | That list is the whole clause. What `/handoff` buys is **portability**: a file that travels. If nothing is travelling, y
+ask-matt | handoff | slash | ask-matt/PHASE-BOUNDARIES.md | 49 | | Secondary (`/compact`, `/handoff`) | Lossy       | Less  | Lots         |
+ask-matt | handoff | slash | ask-matt/SKILL.md | 18 | 2. **Branch: can you settle every question in conversation?** If a question needs a runnable answer (state, business log
+ask-matt | handoff | slash | ask-matt/SKILL.md | 19 | - **`/handoff`** out, then open a fresh session against that file,
+ask-matt | handoff | slash | ask-matt/SKILL.md | 21 | - **`/handoff`** back what you learned, and reference it from the original idea thread.
+ask-matt | handoff | slash | ask-matt/SKILL.md | 67 | - **`/handoff`** writes a portable markdown file. Narrow: only for a **new harness**, a **new directory**, a **colleague
+ask-matt | implement | slash | ask-matt/SKILL.md | 23 | - **Yes** → **`/to-spec`** (turn the thread into a spec), then **`/to-tickets`** to split it into tracer-bullet tickets,
+ask-matt | implement | slash | ask-matt/SKILL.md | 24 | - **No** → **`/implement`** right here, in the same context window.
+ask-matt | implement | slash | ask-matt/SKILL.md | 26 | Either way, **`/implement`** builds each issue by driving **`/tdd`** internally (one red-green slice at a time), then cl
+ask-matt | implement | slash | ask-matt/SKILL.md | 30 | Keep steps 1–3 in **one unbroken context window** (don't compact or clear until after `/to-tickets`) so the grilling, sp
+ask-matt | implement | slash | ask-matt/SKILL.md | 38 | - **Bugs and requests piling up** → **`/triage`**. It moves issues through triage roles and produces agent-ready issues,
+ask-matt | implement | slash | ask-matt/SKILL.md | 46 | When the map clears, **it hands off, it doesn't build**: merge onto the main flow at **`/to-spec`**, which collapses the
+ask-matt | improve-codebase-architecture | slash | ask-matt/SKILL.md | 42 | - **Something's broken** → **`/diagnosing-bugs`**. For the hard ones: the bug that resists a first glance, the intermitt
+ask-matt | improve-codebase-architecture | slash | ask-matt/SKILL.md | 52 | - **`/improve-codebase-architecture`** runs whenever you have a spare moment to keep the codebase good for agents to ope
+ask-matt | improve-codebase-architecture | slash | ask-matt/SKILL.md | 59 | - **`/codebase-design`** is the deep-module vocabulary (module, interface, depth, seam, adapter, leverage, locality) for
+ask-matt | improve-codebase-architecture | slash | ask-matt/SKILL.md | 78 | - **`/grilling`** is the interview primitive itself: rounds, the frontier, facts are the agent's job and decisions are y
+ask-matt | prototype | slash | ask-matt/SKILL.md | 20 | - **`/prototype`** to answer the question with throwaway code,
+ask-matt | prototype | slash | ask-matt/SKILL.md | 80 | - **`/prototype`** is a small, throwaway program that answers one design question: does this state model feel right, or 
+ask-matt | research | slash | ask-matt/SKILL.md | 81 | - **`/research`**: delegate reading legwork to a **background agent**: it investigates a question against **primary sour
+ask-matt | resolving-merge-conflicts | slash | ask-matt/SKILL.md | 79 | - **`/resolving-merge-conflicts`** works an in-progress merge or rebase conflict hunk by hunk, resolving by **intent** t
+ask-matt | setup-matt-pocock-skills | slash | ask-matt/SKILL.md | 90 | **`/setup-matt-pocock-skills`**: run before your first engineering flow to configure the issue tracker, triage labels, a
+ask-matt | tdd | slash | ask-matt/SKILL.md | 26 | Either way, **`/implement`** builds each issue by driving **`/tdd`** internally (one red-green slice at a time), then cl
+ask-matt | tdd | slash | ask-matt/SKILL.md | 59 | - **`/codebase-design`** is the deep-module vocabulary (module, interface, depth, seam, adapter, leverage, locality) for
+ask-matt | teach | slash | ask-matt/SKILL.md | 85 | - **`/teach`**: learn a concept over multiple sessions, using the current directory as a stateful workspace.
+ask-matt | to-questionnaire | slash | ask-matt/SKILL.md | 82 | - **`/to-questionnaire`** comes in when the thing blocking you isn't in your head or the codebase but in **someone else'
+ask-matt | to-spec | slash | ask-matt/SKILL.md | 23 | - **Yes** → **`/to-spec`** (turn the thread into a spec), then **`/to-tickets`** to split it into tracer-bullet tickets,
+ask-matt | to-spec | slash | ask-matt/SKILL.md | 46 | When the map clears, **it hands off, it doesn't build**: merge onto the main flow at **`/to-spec`**, which collapses the
+ask-matt | to-spec | slash | ask-matt/SKILL.md | 82 | - **`/to-questionnaire`** comes in when the thing blocking you isn't in your head or the codebase but in **someone else'
+ask-matt | to-tickets | slash | ask-matt/SKILL.md | 23 | - **Yes** → **`/to-spec`** (turn the thread into a spec), then **`/to-tickets`** to split it into tracer-bullet tickets,
+ask-matt | to-tickets | slash | ask-matt/SKILL.md | 30 | Keep steps 1–3 in **one unbroken context window** (don't compact or clear until after `/to-tickets`) so the grilling, sp
+ask-matt | to-tickets | slash | ask-matt/SKILL.md | 32 | The limit on this is the **[smart zone](https://www.aihero.dev/ai-coding-dictionary/smart-zone)**: the window (~150k tok
+ask-matt | to-tickets | slash | ask-matt/SKILL.md | 40 | Triage is only for issues **you didn't create**: bug reports, incoming feature requests, anything that arrives raw. Tick
+ask-matt | to-tickets | slash | ask-matt/SKILL.md | 46 | When the map clears, **it hands off, it doesn't build**: merge onto the main flow at **`/to-spec`**, which collapses the
+ask-matt | triage | slash | ask-matt/SKILL.md | 38 | - **Bugs and requests piling up** → **`/triage`**. It moves issues through triage roles and produces agent-ready issues,
+ask-matt | triage | slash | ask-matt/SKILL.md | 78 | - **`/grilling`** is the interview primitive itself: rounds, the frontier, facts are the agent's job and decisions are y
+ask-matt | wait-what | slash | ask-matt/SKILL.md | 84 | - **`/wait-what`** is the corrective for a message that didn't land. Use it mid-conversation, inside any other skill, an
+ask-matt | wayfinder | slash | ask-matt/SKILL.md | 44 | - **A huge, foggy effort: a greenfield project or a huge feature build, too big for one session** → **`/wayfinder`**, th
+ask-matt | wayfinder | slash | ask-matt/SKILL.md | 78 | - **`/grilling`** is the interview primitive itself: rounds, the frontier, facts are the agent's job and decisions are y
+ask-matt | wizard | slash | ask-matt/SKILL.md | 83 | - **`/wizard`** is for the steps only a **human** can take: provisioning infrastructure, setting up credentials or CI se
+ask-matt | writing-for-agents | slash | ask-matt/SKILL.md | 86 | - **`/writing-for-agents`** is the reference for writing documents agents consume: skills, AGENTS.md, pointed-at docs.
+code-review | setup-matt-pocock-skills | slash | code-review/SKILL.md | 13 | The issue tracker should have been provided to you. If `docs/agents/issue-tracker.md` is missing, tell the user to run `
+grill-me | grilling | Skill-tool-quoted | grill-me/SKILL.md | 7 | Call the Skill tool with "grilling".
+grill-with-docs | domain-modeling | Skill-tool-quoted | grill-with-docs/SKILL.md | 7 | Call the Skill tool twice, for "grilling" and "domain-modeling".
+grill-with-docs | grilling | Skill-tool-quoted | grill-with-docs/SKILL.md | 7 | Call the Skill tool twice, for "grilling" and "domain-modeling".
+implement | code-review | slash | implement/SKILL.md | 13 | Once done, use /code-review to review the work.
+implement | tdd | slash | implement/SKILL.md | 9 | Use /tdd where possible, at pre-agreed seams.
+implement-spec | code-review | slash | implement-spec/SKILL.md | 31 | 7. Once all tickets are complete, run /code-review on the PR branch. Fix all issues raised by the code review in a singl
+improve-codebase-architecture | codebase-design | Skill-tool-quoted | improve-codebase-architecture/SKILL.md | 13 | - Call the Skill tool with "codebase-design" for the architecture vocabulary (**module**, **interface**, **depth**, **se
+improve-codebase-architecture | codebase-design | Skill-tool-quoted | improve-codebase-architecture/SKILL.md | 71 | - **Want to explore alternative interfaces for the deepened module?** Call the Skill tool with "codebase-design" and use
+improve-codebase-architecture | codebase-design | slash | improve-codebase-architecture/HTML-REPORT.md | 42 | The diagrams carry the weight. Prose is sparse, plain, and uses the glossary terms (from the `/codebase-design` skill) w
+improve-codebase-architecture | codebase-design | slash | improve-codebase-architecture/HTML-REPORT.md | 108 | Plain English, concise, but the architectural nouns and verbs come straight from the `/codebase-design` skill. Concision
+improve-codebase-architecture | codebase-design | slash | improve-codebase-architecture/HTML-REPORT.md | 123 | No hedging, no throat-clearing, no "it's worth noting that…". If a sentence could be a bullet, make it a bullet. If a bu
+improve-codebase-architecture | codebase-design | slash | improve-codebase-architecture/SKILL.md | 54 | **Use CONTEXT.md vocabulary for the domain, and the `/codebase-design` vocabulary for the architecture.** If `CONTEXT.md
+improve-codebase-architecture | domain-modeling | Skill-tool-quoted | improve-codebase-architecture/SKILL.md | 66 | Side effects happen inline as decisions crystallize; call the Skill tool with "domain-modeling" to keep the domain model
+improve-codebase-architecture | grilling | Skill-tool-quoted | improve-codebase-architecture/SKILL.md | 64 | Once the user picks a candidate, call the Skill tool with "grilling" to walk the decision tree with them: constraints, d
+loop-me | grilling | slash | loop-me/SKILL.md | 8 | Run a stateful `/grilling` session whose only output is **workflow** specs. Use the grilling discipline (relentless, a r
+retro | writing-for-agents | Skill-tool-quoted | retro/SKILL.md | 11 | 1. Call the Skill tool with `writing-for-agents` for the writing style guide.
+retro | writing-for-agents | backtick | retro/SKILL.md | 11 | 1. Call the Skill tool with `writing-for-agents` for the writing style guide.
+retro | writing-for-agents | backtick | retro/SKILL.md | 44 | - Skills: use skills for docs (since their description goes into the agent's context window), or for user-invoked comman
+retro | writing-for-agents | the-X-skill | retro/SKILL.md | 44 | - Skills: use skills for docs (since their description goes into the agent's context window), or for user-invoked comman
+setup-matt-pocock-skills | domain-modeling | slash | setup-matt-pocock-skills/domain.md | 11 | If any of these files don't exist, **proceed silently**. Don't flag their absence; don't suggest creating them upfront. 
+setup-matt-pocock-skills | domain-modeling | slash | setup-matt-pocock-skills/domain.md | 45 | If the concept you need isn't in the glossary yet, that's a signal: either you're inventing language the project doesn't
+setup-matt-pocock-skills | grill-with-docs | slash | setup-matt-pocock-skills/domain.md | 11 | If any of these files don't exist, **proceed silently**. Don't flag their absence; don't suggest creating them upfront. 
+setup-matt-pocock-skills | grilling | backtick | setup-matt-pocock-skills/issue-tracker-github.md | 41 | - **Child ticket**: an issue linked to the map as a GitHub sub-issue (`gh api` on the sub-issues endpoint). Where sub-is
+setup-matt-pocock-skills | grilling | backtick | setup-matt-pocock-skills/issue-tracker-gitlab.md | 42 | - **Child ticket**: an issue carrying `Part of #<map>` at the top of its description and labels `wayfinder:<type>` (`res
+setup-matt-pocock-skills | grilling | backtick | setup-matt-pocock-skills/issue-tracker-local.md | 26 | - **Child ticket**: `.scratch/<effort>/issues/NN-<slug>.md`, numbered from `01`, with the question in the body. A `Type:
+setup-matt-pocock-skills | improve-codebase-architecture | slash | setup-matt-pocock-skills/domain.md | 11 | If any of these files don't exist, **proceed silently**. Don't flag their absence; don't suggest creating them upfront. 
+setup-matt-pocock-skills | pr | backtick | setup-matt-pocock-skills/issue-tracker-gitlab.md | 13 | - **Merge requests**: GitLab calls PRs "merge requests". Use `glab mr create`, `glab mr view`, `glab mr note`, etc., the
+setup-matt-pocock-skills | prototype | backtick | setup-matt-pocock-skills/issue-tracker-github.md | 41 | - **Child ticket**: an issue linked to the map as a GitHub sub-issue (`gh api` on the sub-issues endpoint). Where sub-is
+setup-matt-pocock-skills | prototype | backtick | setup-matt-pocock-skills/issue-tracker-gitlab.md | 42 | - **Child ticket**: an issue carrying `Part of #<map>` at the top of its description and labels `wayfinder:<type>` (`res
+setup-matt-pocock-skills | prototype | backtick | setup-matt-pocock-skills/issue-tracker-local.md | 26 | - **Child ticket**: `.scratch/<effort>/issues/NN-<slug>.md`, numbered from `01`, with the question in the body. A `Type:
+setup-matt-pocock-skills | research | backtick | setup-matt-pocock-skills/issue-tracker-github.md | 41 | - **Child ticket**: an issue linked to the map as a GitHub sub-issue (`gh api` on the sub-issues endpoint). Where sub-is
+setup-matt-pocock-skills | research | backtick | setup-matt-pocock-skills/issue-tracker-gitlab.md | 42 | - **Child ticket**: an issue carrying `Part of #<map>` at the top of its description and labels `wayfinder:<type>` (`res
+setup-matt-pocock-skills | research | backtick | setup-matt-pocock-skills/issue-tracker-local.md | 26 | - **Child ticket**: `.scratch/<effort>/issues/NN-<slug>.md`, numbered from `01`, with the question in the body. A `Type:
+setup-matt-pocock-skills | to-spec | backtick | setup-matt-pocock-skills/SKILL.md | 40 | > Explainer: The "issue tracker" is where issues live for this repo. Skills like `to-tickets`, `triage`, and `to-spec` r
+setup-matt-pocock-skills | to-tickets | backtick | setup-matt-pocock-skills/SKILL.md | 40 | > Explainer: The "issue tracker" is where issues live for this repo. Skills like `to-tickets`, `triage`, and `to-spec` r
+setup-matt-pocock-skills | triage | backtick | setup-matt-pocock-skills/SKILL.md | 29 | - Is the `triage` skill installed? (a `triage` skill folder alongside this one, or `triage` in your available skills.) T
+setup-matt-pocock-skills | triage | backtick | setup-matt-pocock-skills/SKILL.md | 36 | Lead each section with the recommended answer so the user can accept it in a word. Give a one-line explainer only when t
+setup-matt-pocock-skills | triage | backtick | setup-matt-pocock-skills/SKILL.md | 40 | > Explainer: The "issue tracker" is where issues live for this repo. Skills like `to-tickets`, `triage`, and `to-spec` r
+setup-matt-pocock-skills | triage | backtick | setup-matt-pocock-skills/SKILL.md | 51 | **Section B: Triage label vocabulary.** Skip this section entirely if the `triage` skill isn't installed (exploration to
+setup-matt-pocock-skills | triage | backtick | setup-matt-pocock-skills/SKILL.md | 57 | The defaults are the five canonical roles, each label string equal to its name: `needs-triage`, `needs-info`, `ready-for
+setup-matt-pocock-skills | triage | backtick | setup-matt-pocock-skills/SKILL.md | 68 | - The contents of `docs/agents/issue-tracker.md`, `docs/agents/domain.md`, and `docs/agents/triage-labels.md` (the last 
+setup-matt-pocock-skills | triage | backtick | setup-matt-pocock-skills/SKILL.md | 102 | Include the `### Triage labels` sub-block, and write `docs/agents/triage-labels.md`, only when `triage` is installed and
+setup-matt-pocock-skills | triage | backtick | setup-matt-pocock-skills/SKILL.md | 109 | - [triage-labels.md](./triage-labels.md): label mapping (only if `triage` is installed)
+setup-matt-pocock-skills | triage | slash | setup-matt-pocock-skills/issue-tracker-github.md | 18 | **PRs as a request surface: no.** _(Set to `yes` if this repo treats external PRs as feature requests; `/triage` reads t
+setup-matt-pocock-skills | triage | slash | setup-matt-pocock-skills/issue-tracker-gitlab.md | 19 | **MRs as a request surface: no.** _(Set to `yes` if this repo treats external merge requests as feature requests; `/tria
+setup-matt-pocock-skills | triage | the-X-skill | setup-matt-pocock-skills/SKILL.md | 29 | - Is the `triage` skill installed? (a `triage` skill folder alongside this one, or `triage` in your available skills.) T
+setup-matt-pocock-skills | triage | the-X-skill | setup-matt-pocock-skills/SKILL.md | 51 | **Section B: Triage label vocabulary.** Skip this section entirely if the `triage` skill isn't installed (exploration to
+setup-matt-pocock-skills | wayfinder | slash | setup-matt-pocock-skills/issue-tracker-github.md | 38 | Used by `/wayfinder`. The **map** is a single issue with **child** issues as tickets.
+setup-matt-pocock-skills | wayfinder | slash | setup-matt-pocock-skills/issue-tracker-gitlab.md | 39 | Used by `/wayfinder`. The **map** is a single issue with **child** issues as tickets.
+setup-matt-pocock-skills | wayfinder | slash | setup-matt-pocock-skills/issue-tracker-local.md | 23 | Used by `/wayfinder`. The **map** is a file with one **child** file per ticket.
+setup-ts-deep-modules | codebase-design | Skill-tool-quoted | setup-ts-deep-modules/SKILL.md | 11 | For the vocabulary (deep module, interface, seam, depth), call the Skill tool with "codebase-design" and use its languag
+tdd | code-review | backtick | tdd/SKILL.md | 38 | - **Refactoring is not part of the loop.** It belongs to the review stage (see the `code-review` skill), not the red → g
+tdd | code-review | the-X-skill | tdd/SKILL.md | 38 | - **Refactoring is not part of the loop.** It belongs to the review stage (see the `code-review` skill), not the red → g
+tdd | codebase-design | Skill-tool-quoted | tdd/SKILL.md | 26 | When the shape of that interface is itself in question (how deep the module is, where the seam belongs, what the interfa
+to-spec | setup-matt-pocock-skills | slash | to-spec/SKILL.md | 9 | The issue tracker and triage label vocabulary should have been provided to you. If not, tell the user to run `/setup-mat
+to-tickets | setup-matt-pocock-skills | slash | to-tickets/SKILL.md | 11 | The issue tracker and triage label vocabulary should have been provided to you. If not, tell the user to run `/setup-mat
+to-tickets | setup-matt-pocock-skills | slash | to-tickets/SKILL.md | 60 | Publish the approved tickets. **How** depends on the tracker `/setup-matt-pocock-skills` configured; the tickets are the
+triage | domain-modeling | Skill-tool-quoted | triage/SKILL.md | 76 | 4. **Grill (if needed).** If the request needs fleshing out, call the Skill tool twice, for "grilling" and "domain-model
+triage | grilling | Skill-tool-quoted | triage/SKILL.md | 76 | 4. **Grill (if needed).** If the request needs fleshing out, call the Skill tool twice, for "grilling" and "domain-model
+triage | setup-matt-pocock-skills | slash | triage/SKILL.md | 43 | These are canonical role names. The actual label strings used in the issue tracker may differ. The mapping should have b
+wayfinder | domain-modeling | Skill-tool-quoted | wayfinder/SKILL.md | 79 | - **Grilling** (HITL): Conversation. The default case. Always call the Skill tool twice, for "grilling" and "domain-mode
+wayfinder | domain-modeling | Skill-tool-quoted | wayfinder/SKILL.md | 111 | 1. **Name the destination.** Call the Skill tool twice, for "grilling" and "domain-modeling", to pin down what this map 
+wayfinder | domain-modeling | Skill-tool-quoted | wayfinder/SKILL.md | 124 | 3. Resolve it. **Zoom as needed**: fetch the full body of any related or closed ticket on demand; call the Skill tool fo
+wayfinder | grilling | Skill-tool-quoted | wayfinder/SKILL.md | 79 | - **Grilling** (HITL): Conversation. The default case. Always call the Skill tool twice, for "grilling" and "domain-mode
+wayfinder | grilling | Skill-tool-quoted | wayfinder/SKILL.md | 111 | 1. **Name the destination.** Call the Skill tool twice, for "grilling" and "domain-modeling", to pin down what this map 
+wayfinder | grilling | Skill-tool-quoted | wayfinder/SKILL.md | 124 | 3. Resolve it. **Zoom as needed**: fetch the full body of any related or closed ticket on demand; call the Skill tool fo
+wayfinder | grilling | backtick | wayfinder/SKILL.md | 65 | Each ticket carries a `wayfinder:<type>` label, one of `research`, `prototype`, `grilling`, `task` (see [Ticket Types](#
+wayfinder | prototype | Skill-tool-quoted | wayfinder/SKILL.md | 78 | - **Prototype** (HITL): Raise the fidelity of the discussion by making a cheap, rough, concrete artifact to react to (an
+wayfinder | prototype | backtick | wayfinder/SKILL.md | 65 | Each ticket carries a `wayfinder:<type>` label, one of `research`, `prototype`, `grilling`, `task` (see [Ticket Types](#
+wayfinder | research | Skill-tool-quoted | wayfinder/SKILL.md | 77 | - **Research** (AFK): Reading documentation, third-party APIs, or local resources like knowledge bases to surface a fact
+wayfinder | research | Skill-tool-quoted | wayfinder/SKILL.md | 115 | 5. **Fire the research subagents.** For each `research` ticket you just created, spin up a subagent that calls the Skill
+wayfinder | research | backtick | wayfinder/SKILL.md | 65 | Each ticket carries a `wayfinder:<type>` label, one of `research`, `prototype`, `grilling`, `task` (see [Ticket Types](#
+wayfinder | research | backtick | wayfinder/SKILL.md | 115 | 5. **Fire the research subagents.** For each `research` ticket you just created, spin up a subagent that calls the Skill
+wayfinder | setup-matt-pocock-skills | slash | wayfinder/SKILL.md | 25 | **Where the map, its child tickets, blocking, and frontier queries physically live is tracker-specific.** The issue trac
