@@ -1,5 +1,5 @@
 {
-  "name": "@oneezy/skills-sync",
+  "name": "skills-sync",
   "version": "0.2.0",
   "description": "One skills library, every agent harness, every project on the machine. Restores third-party skills from skills-lock.json, links every skill into Claude Code, Codex, Goose and Hermes, and into the projects you pick.",
   "license": "MIT",
@@ -10,7 +10,8 @@
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "test": "tsc -p tsconfig.json && node --test \"dist/test/*.test.js\"",
-    "start": "node dist/src/cli.js"
+    "start": "node dist/src/cli.js",
+    "prepublishOnly": "npm run build && node --test \"dist/test/*.test.js\""
   },
   "engines": { "node": ">=20" },
   "dependencies": {
