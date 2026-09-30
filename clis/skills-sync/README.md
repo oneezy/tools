@@ -39,7 +39,7 @@ Everything else in it is generated and should be gitignored:
 1. **Find the library.** `--repo`, else `$SKILLS_REPO`, else `~/.skills-sync` (the clone, or a link to wherever the library really lives), else a library folder above the current one (both `skills/` and `skills-lock.json`; never a dot-folder). Found somewhere else than `~/.skills-sync`? A link is left there so the next run finds it from anywhere. Nothing found? Clone one.
 1. **Pull.** Fast-forward the library from its remote, at most every 30 minutes, only when its tree is clean (`--pull` forces, `--no-pull` skips).
 2. **Restore.** Lock entries with no folder in `.agents/skills` are fetched: one shallow clone per source, each skill copied from its recorded path, or found by folder name when upstream moved it. Skills upstream deleted are reported, remembered, and skipped until `--retry`. (`npx skills experimental_install` clones once per skill and stops at the first stale path, so this is done natively.)
-3. **Layers.** `.agents/skills/<name>` links to `skills/<name>` for own skills, listed in a generated `.agents/skills/.gitignore`. Each selected harness that has its own project folder gets one link per working-set entry. Own skills with `disable-model-invocation: true` and no `agents/openai.yaml` get one generated from their frontmatter, so Codex sees the same policy.
+3. **Layers.** `.agents/skills/<name>` links to `skills/<name>` for own skills, listed in a generated `.agents/skills/.gitignore`. Each selected harness that has its own project folder gets one link per working-set entry. With `--sidecars`, own skills that lack `agents/openai.yaml` get one generated from their frontmatter, so Codex sees the same policy; it writes into `skills/`, so it is opt-in.
 4. **User folders.** One link per skill in each selected harness's user skills folder (`~/.claude/skills`, `~/.agents/skills`, `~/.config/goose/skills`, `~/.hermes/skills`), pointing at the real folder. Every project on the machine now sees the set, and an edit in the library is live everywhere.
 5. **Projects.** Optional. Git repos under the dev folder that you check get their skills too: **link** mode makes the same links inside the repo and hides them from git through `.git/info/exclude`; **copy** mode writes real folders meant to be committed, for repos that must carry their own (cloud sessions, other people).
 6. **WSL.** Windows only, optional. Each checked distro runs the same sync for its own user folders through `/mnt/<drive>/…`. The distro needs Node.
@@ -66,7 +66,7 @@ Every answer is also a flag, so scripts and agents never see a prompt:
 --projects a,b | --projects '*' | --no-projects     --dev <dir>     --copy
 --wsl Ubuntu | --wsl '*' | --no-wsl
 --library owner/repo   --pull | --no-pull
---no-restore  --retry  --no-sidecars  --no-layers
+--no-restore  --retry  --sidecars  --no-layers
 --watch  --plan  --quiet  --json  -y  --ask
 ```
 

@@ -39,7 +39,7 @@ Options
   --no-pull / --pull     skip, or force, the library pull (default: at most every 30 minutes)
   --no-restore           do not restore missing lock entries from their sources
   --retry                retry lock entries an earlier run reported as gone upstream
-  --no-sidecars          do not generate agents/openai.yaml for own skills
+  --sidecars             generate agents/openai.yaml for own skills that lack one (writes into skills/, so opt-in)
   --no-layers            leave the library's own layers alone (used inside WSL, where Windows owns them)
   --watch                stay running; redo layers and user folders when skills/ or the lock changes
   --plan                 show what would change, touch nothing
@@ -74,7 +74,7 @@ interface Args {
 }
 
 function parseArgs(argv: string[]): Args {
-  const a: Args = { command: "sync", pull: true, restore: true, retry: false, sidecars: true, layers: true, watch: false, plan: false, quiet: false, json: false, yes: false, ask: false };
+  const a: Args = { command: "sync", pull: true, restore: true, retry: false, sidecars: false, layers: true, watch: false, plan: false, quiet: false, json: false, yes: false, ask: false };
   const list = (v: string) => v.split(",").map((s) => s.trim()).filter(Boolean);
   for (let i = 0; i < argv.length; i++) {
     const x = argv[i];
@@ -101,7 +101,7 @@ function parseArgs(argv: string[]): Args {
     else if (x === "--pull") a.pull = "force";
     else if (x === "--no-restore") a.restore = false;
     else if (x === "--retry") a.retry = true;
-    else if (x === "--no-sidecars") a.sidecars = false;
+    else if (x === "--sidecars") a.sidecars = true;
     else if (x === "--no-layers") a.layers = false;
     else if (x === "--watch") a.watch = true;
     else if (x === "--plan") a.plan = true;
