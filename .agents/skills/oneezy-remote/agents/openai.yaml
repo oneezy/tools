@@ -1,0 +1,5 @@
+interface:
+  display_name: "Oneezy Remote"
+  short_description: "Start, resume, stop or list remote Claude threads"
+policy:
+  allow_implicit_invocation: false

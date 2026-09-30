@@ -1,2 +1,9 @@
 .env
 .env.*
+
+# Git worktree checkouts made by Claude; never commit them.
+.claude/worktrees/
+
+# Python bytecode
+__pycache__/
+*.pyc
