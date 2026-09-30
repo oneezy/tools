@@ -89,13 +89,14 @@ test("grouped and flat own skills sync by folder name into .agents, every layer 
 
 const CLI = path.resolve(import.meta.dirname, "..", "src", "cli.js");
 
-/** Run the CLI against the temp library with the home directory redirected into the temp folder. */
+/** The harness locations the CLI reads from its environment. The child must see the temp home only, whatever the session running the tests has set. */
+const HARNESS_ENV = ["CLAUDE_CONFIG_DIR", "CODEX_HOME", "XDG_CONFIG_HOME", "HERMES_HOME"] as const;
+
+/** Run the CLI against the temp library with the home directory redirected into the temp folder and every harness override dropped, so its harness table is harnessTable(homeDir, {}). */
 function cli(...args: string[]): { status: number | null; stdout: string; stderr: string } {
-  return spawnSync(process.execPath, [CLI, ...args, "--repo", lib.root, "--agents", "claude-code,codex"], {
-    encoding: "utf8",
-    cwd: lib.root,
-    env: { ...process.env, HOME: homeDir, USERPROFILE: homeDir },
-  });
+  const env: NodeJS.ProcessEnv = { ...process.env, HOME: homeDir, USERPROFILE: homeDir };
+  for (const k of HARNESS_ENV) delete env[k];
+  return spawnSync(process.execPath, [CLI, ...args, "--repo", lib.root, "--agents", "claude-code,codex"], { encoding: "utf8", cwd: lib.root, env });
 }
 
 test("status --json names each own skill's plugin id: oneezy, oneezy, none", () => {
@@ -201,4 +202,28 @@ test("sync through the CLI links grouped and flat skills alike; the second run r
   const second = cli("--quiet", "--json", "--no-pull", "--no-projects", "--no-wsl");
   assert.equal(second.status, 0, second.stderr);
   assert.deepEqual((JSON.parse(second.stdout).actions as Array<{ kind: string }>).filter((a) => a.kind !== "skip"), []);
+});
+
+test("harness overrides in the environment running the tests never reach the CLI child: it links into the temp home, not into them", () => {
+  const decoy = path.join(base, "decoy");
+  const saved = HARNESS_ENV.map((k) => [k, process.env[k]] as const);
+  for (const k of HARNESS_ENV) {
+    process.env[k] = path.join(decoy, k);
+    fs.mkdirSync(process.env[k], { recursive: true });
+  }
+  try {
+    const r = cli("--quiet", "--json", "--no-pull", "--no-projects", "--no-wsl");
+    assert.equal(r.status, 0, r.stderr);
+    for (const k of HARNESS_ENV) assert.deepEqual(fs.readdirSync(path.join(decoy, k)), [], `nothing written under $${k}`);
+    for (const [n, dir] of expected()) {
+      const u = path.join(claude.userSkills, n);
+      assert.ok(isLink(u), u);
+      assert.ok(samePath(linkTarget(u)!, dir), `${u} points at the real folder`);
+    }
+  } finally {
+    for (const [k, v] of saved) {
+      if (v === undefined) delete process.env[k];
+      else process.env[k] = v;
+    }
+  }
 });
