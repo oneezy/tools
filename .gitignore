@@ -7,3 +7,6 @@
 # Python bytecode
 __pycache__/
 *.pyc
+# skills are linked by skills-sync, never committed
+.claude/skills/
+.agents/skills/

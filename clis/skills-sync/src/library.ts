@@ -150,23 +150,79 @@ function findSkillByName(root: string, name: string): string | null {
   return null;
 }
 
-/** Walk up from `from` for a folder with skills/ and skills-lock.json (or skills/ alone), then env, then the usual homes. */
+export const DEFAULT_LIBRARY = "oneezy/skills";
+
+/** ~/.skills-sync: the library itself, or a link to wherever the library really lives. */
+export function homeLibrary(home = os.homedir()): string {
+  return path.join(home, ".skills-sync");
+}
+
+/**
+ * Where the library is, in this order: --repo, $SKILLS_REPO, ~/.skills-sync (a clone or a link),
+ * a library folder above the current directory. null when none exists yet.
+ */
 export function findLibrary(from: string, env = process.env, home = os.homedir()): string | null {
+  if (env.SKILLS_REPO && looksLikeLibrary(env.SKILLS_REPO)) return path.resolve(env.SKILLS_REPO);
+  const hl = homeLibrary(home);
+  if (looksLikeLibrary(hl)) return real(hl);
   let dir = path.resolve(from);
   for (;;) {
-    if (looksLikeLibrary(dir)) return dir;
+    // the walk-up never accepts a dot-folder: ~/.claude has a skills/ subfolder too
+    if (!path.basename(dir).startsWith(".") && looksLikeLibrary(dir)) return dir;
     const parent = path.dirname(dir);
     if (parent === dir) break;
     dir = parent;
   }
-  if (env.SKILLS_REPO && looksLikeLibrary(env.SKILLS_REPO)) return path.resolve(env.SKILLS_REPO);
-  for (const c of [path.join(home, "dev", "skills"), path.join(home, "skills")]) if (looksLikeLibrary(c)) return c;
   return null;
 }
 
-export function looksLikeLibrary(dir: string): boolean {
-  return isDir(path.join(dir, "skills")) && (fs.existsSync(path.join(dir, "skills-lock.json")) || fs.readdirSync(path.join(dir, "skills")).some((n) => isSkillDir(path.join(dir, "skills", n))));
+/** Clone `owner/repo` (or a URL) into ~/.skills-sync. */
+export function cloneLibrary(source: string, home = os.homedir(), log: (s: string) => void = () => undefined): { ok: boolean; root: string; error?: string } {
+  const root = homeLibrary(home);
+  const url = /^(https?:|git@|ssh:)/.test(source) ? source : `https://github.com/${source.replace(/\.git$/, "")}.git`;
+  log(`no skills library here yet; cloning ${url} into ${root}`);
+  const r = spawnSync("git", ["clone", "--quiet", url, root], { encoding: "utf8" });
+  if (r.status !== 0) return { ok: false, root, error: (r.stderr ?? "").trim().split("\n").pop() };
+  return { ok: true, root };
 }
+
+/** Fast-forward the library from its remote, at most once per `minutes`, only when the tree is clean. */
+export function pullLibrary(root: string, minutes: number, log: (s: string) => void): "pulled" | "skipped" | "dirty" | "failed" | "throttled" {
+  const stamp = path.join(root, ".git", "skills-sync-pulled");
+  try {
+    const last = fs.statSync(stamp).mtimeMs;
+    if (Date.now() - last < minutes * 60_000) return "throttled";
+  } catch {
+    /* never pulled */
+  }
+  if (!fs.existsSync(path.join(root, ".git"))) return "skipped";
+  const status = spawnSync("git", ["-C", root, "status", "--porcelain", "--untracked-files=no"], { encoding: "utf8" });
+  if (status.status !== 0) return "skipped";
+  if (status.stdout.trim()) return "dirty";
+  const r = spawnSync("git", ["-C", root, "pull", "--ff-only", "--quiet"], { encoding: "utf8", timeout: 20_000 });
+  try {
+    fs.writeFileSync(stamp, new Date().toISOString());
+  } catch {
+    /* stamp is best-effort */
+  }
+  if (r.status !== 0) {
+    log(`library pull skipped: ${(r.stderr ?? "").trim().split("\n").pop()}`);
+    return "failed";
+  }
+  return "pulled";
+}
+
+/**
+ * A library has both skills/ and skills-lock.json, and is never a dot-folder: a harness config dir
+ * such as ~/.claude also has a skills/ subfolder, and must never be mistaken for one.
+ */
+export function looksLikeLibrary(dir: string): boolean {
+  const abs = path.resolve(dir);
+  return isDir(path.join(abs, "skills")) && fs.existsSync(path.join(abs, "skills-lock.json"));
+}
+
+/** An empty lock, for a library that has no third-party skills yet. */
+export const EMPTY_LOCK = JSON.stringify({ version: 1, skills: {} }, null, 2) + "\n";
 
 /**
  * Codex reads policy from agents/openai.yaml next to SKILL.md. Derive it from the Claude frontmatter
