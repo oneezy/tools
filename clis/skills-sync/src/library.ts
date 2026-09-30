@@ -1,4 +1,4 @@
-// The skills library: a folder with skills/<name>/ (own skills) and skills-lock.json (third-party pins).
+// The skills library: a folder with skills/ (own skills, flat or grouped by plugin) and skills-lock.json (third-party pins).
 import { spawnSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
@@ -20,12 +20,43 @@ export class Library {
     return path.join(this.root, "skills-lock.json");
   }
 
+  /** Own skill names, sorted. */
   ownSkills(): string[] {
-    if (!isDir(this.own)) return [];
-    return fs
-      .readdirSync(this.own)
-      .filter((n) => !n.startsWith(".") && isSkillDir(path.join(this.own, n)))
-      .sort();
+    return this.scanOwn().skills.map((s) => s.name);
+  }
+
+  /**
+   * Own skills under skills/: a folder that holds SKILL.md is a flat skill; a folder without one is a
+   * group whose children are skills and whose name is their plugin id. A group's child without SKILL.md
+   * is not a skill, and a second skill with a name already taken (paths in sorted order) loses; both are
+   * reported once and never linked. Dot-folders are skipped at both levels.
+   */
+  scanOwn(): OwnScan {
+    const out: OwnScan = { skills: [], ignored: [] };
+    if (!isDir(this.own)) return out;
+    const taken = new Map<string, string>();
+    const add = (name: string, dir: string, plugin: string | null) => {
+      const first = taken.get(name);
+      if (first) out.ignored.push({ path: dir, note: `same name as ${path.relative(this.root, first).replace(/\\/g, "/")}, which wins; ignored` });
+      else {
+        taken.set(name, dir);
+        out.skills.push({ name, dir, plugin });
+      }
+    };
+    for (const n of folders(this.own)) {
+      const dir = path.join(this.own, n);
+      if (isSkillDir(dir)) {
+        add(n, dir, null);
+        continue;
+      }
+      for (const c of folders(dir)) {
+        const child = path.join(dir, c);
+        if (isSkillDir(child)) add(c, child, n);
+        else out.ignored.push({ path: child, note: "no SKILL.md: not a skill, and only folders directly under skills/ are groups; ignored" });
+      }
+    }
+    out.skills.sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
+    return out;
   }
 
   /** name -> real folder, for every entry of .agents/skills that holds a SKILL.md */
@@ -112,6 +143,29 @@ export class Library {
     }
     return result;
   }
+}
+
+/** One own skill: its folder name (the skill name), its real folder, and the group it sits in. */
+export interface OwnSkill {
+  name: string;
+  dir: string;
+  /** the group's name, which is the plugin id; null for a flat skill */
+  plugin: string | null;
+}
+
+export interface OwnScan {
+  skills: OwnSkill[];
+  /** folders that are not skills where a skill could have been; each is reported once */
+  ignored: Array<{ path: string; note: string }>;
+}
+
+/** Sub-folder names of `dir`, dot-folders excluded, sorted. */
+function folders(dir: string): string[] {
+  return fs
+    .readdirSync(dir, { withFileTypes: true })
+    .filter((e) => e.isDirectory() && !e.name.startsWith("."))
+    .map((e) => e.name)
+    .sort();
 }
 
 export interface LockEntry {
@@ -212,13 +266,16 @@ export function pullLibrary(root: string, minutes: number, log: (s: string) => v
   return "pulled";
 }
 
+/** The files that mark a library, any one of them beside skills/: the sources manifest, its lock, or the legacy lock. */
+export const LIBRARY_MARKERS = ["skills-sources.json", "skills-sources-lock.json", "skills-lock.json"];
+
 /**
- * A library has both skills/ and skills-lock.json, and is never a dot-folder: a harness config dir
+ * A library has skills/ beside one of the marker files, and is never a dot-folder: a harness config dir
  * such as ~/.claude also has a skills/ subfolder, and must never be mistaken for one.
  */
 export function looksLikeLibrary(dir: string): boolean {
   const abs = path.resolve(dir);
-  return isDir(path.join(abs, "skills")) && fs.existsSync(path.join(abs, "skills-lock.json"));
+  return isDir(path.join(abs, "skills")) && LIBRARY_MARKERS.some((m) => fs.existsSync(path.join(abs, m)));
 }
 
 /** An empty lock, for a library that has no third-party skills yet. */

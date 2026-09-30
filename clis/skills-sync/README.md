@@ -18,28 +18,35 @@ Edit a skill in the library and every harness sees the change immediately: the u
 
 ## The library
 
-A skills library is a folder with two committed things:
+A skills library is a folder with `skills/` beside one of three marker files:
 
 | path | holds | written by |
 |---|---|---|
-| `skills/<name>/` | your own skills, bare Agent Skills form (`SKILL.md`, optional `scripts/`, `references/`, `agents/openai.yaml`) | you |
-| `skills-lock.json` | pins for third-party skills: source repo, path, hash | `npx skills add <owner>/<repo>` and `npx skills update` |
+| `skills/<name>/` | a flat own skill, bare Agent Skills form (`SKILL.md`, optional `scripts/`, `references/`, `agents/openai.yaml`) | you |
+| `skills/<group>/<name>/` | an own skill inside a group; the group's name is its plugin id | you |
+| `skills-sources.json` | the sources manifest: third-party repos, policies, selections, plugins | you |
+| `skills-sources-lock.json` | what the last refresh resolved: commit per source, hash per skill | `refresh` |
+| `skills-lock.json` | pins for third-party skills in the `npx skills` format: source repo, path, hash | `npx skills add <owner>/<repo>` and `npx skills update` |
+
+This version recognises the manifest and its lock as library markers; the `refresh` that reads and writes them arrives with 0.3.0, and restoring third-party skills still goes through `skills-lock.json`.
+
+A folder directly under `skills/` that holds `SKILL.md` is a flat own skill. One without `SKILL.md` is a **group**: its children are own skills, and the group's name (`oneezy`, `trident`) is the plugin id they will be packaged under. A skill is known everywhere by its folder name alone, so `skills/oneezy/oneezy-status` links as `oneezy-status`, exactly as `skills/oneezy-status` would, and moving a skill into a group retargets its links without dropping any. Groups do not nest: a `SKILL.md` two levels below a group, or a second skill with a name already taken, is reported once on every run and never linked. `status --json` lists each own skill with its `plugin` (null when flat) and its `path` under the library.
 
 Everything else in it is generated and should be gitignored:
 
 | path | holds |
 |---|---|
-| `.agents/skills/<name>` | the working set: third-party skills restored from the lock, plus one link per own skill. Codex reads this folder directly. |
+| `.agents/skills/<name>` | the working set: third-party skills restored from the lock, plus one link per own skill (flat or grouped). Codex reads this folder directly. |
 | `.claude/skills/<name>`, `.goose/skills/<name>`, `.hermes/skills/<name>` | one link per working-set entry, for each harness that does not read `.agents/skills` |
 
 `oneezy/skills` is one such library; `npx skills add oneezy/skills` installs its own skills anywhere, and cloning it plus one `npx @oneezy/skills-sync` gives a new machine the whole set.
 
 ## What a run does
 
-1. **Find the library.** `--repo`, else `$SKILLS_REPO`, else `~/.skills-sync` (the clone, or a link to wherever the library really lives), else a library folder above the current one (both `skills/` and `skills-lock.json`; never a dot-folder). Found somewhere else than `~/.skills-sync`? A link is left there so the next run finds it from anywhere. Nothing found? Clone one.
+1. **Find the library.** `--repo`, else `$SKILLS_REPO`, else `~/.skills-sync` (the clone, or a link to wherever the library really lives), else a library folder above the current one (`skills/` beside `skills-sources.json`, `skills-sources-lock.json` or `skills-lock.json`; never a dot-folder). Found somewhere else than `~/.skills-sync`? A link is left there so the next run finds it from anywhere. Nothing found? Clone one.
 1. **Pull.** Fast-forward the library from its remote, at most every 30 minutes, only when its tree is clean (`--pull` forces, `--no-pull` skips).
 2. **Restore.** Lock entries with no folder in `.agents/skills` are fetched: one shallow clone per source, each skill copied from its recorded path, or found by folder name when upstream moved it. Skills upstream deleted are reported, remembered, and skipped until `--retry`. (`npx skills experimental_install` clones once per skill and stops at the first stale path, so this is done natively.)
-3. **Layers.** `.agents/skills/<name>` links to `skills/<name>` for own skills, listed in a generated `.agents/skills/.gitignore`. Each selected harness that has its own project folder gets one link per working-set entry. With `--sidecars`, own skills that lack `agents/openai.yaml` get one generated from their frontmatter, so Codex sees the same policy; it writes into `skills/`, so it is opt-in.
+3. **Layers.** `.agents/skills/<name>` links to each own skill's folder (`skills/<name>` or `skills/<group>/<name>`), listed in a generated `.agents/skills/.gitignore`. Each selected harness that has its own project folder gets one link per working-set entry. With `--sidecars`, own skills that lack `agents/openai.yaml` get one generated from their frontmatter, so Codex sees the same policy; it writes into `skills/`, so it is opt-in.
 4. **User folders.** One link per skill in each selected harness's user skills folder (`~/.claude/skills`, `~/.agents/skills`, `~/.config/goose/skills`, `~/.hermes/skills`), pointing at the real folder. Every project on the machine now sees the set, and an edit in the library is live everywhere.
 5. **Projects.** Optional. Git repos under the dev folder that you check get their skills too: **link** mode makes the same links inside the repo and hides them from git through `.git/info/exclude`; **copy** mode writes real folders meant to be committed, for repos that must carry their own (cloud sessions, other people).
 6. **WSL.** Windows only, optional. Each checked distro runs the same sync for its own user folders through `/mnt/<drive>/…`. The distro needs Node.
