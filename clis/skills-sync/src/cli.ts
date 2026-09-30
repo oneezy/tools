@@ -9,7 +9,7 @@ import { gitExclude, isDir, isLink, lexists, linkTarget, real, samePath } from "
 import { detected, harnessTable, type Harness } from "./harnesses.js";
 import { cloneLibrary, DEFAULT_LIBRARY, findLibrary, homeLibrary, Library, looksLikeLibrary, pullLibrary } from "./library.js";
 import { apply, line, Report } from "./plan.js";
-import { findProjects, home, isRepo, layers, projects, status, unlink } from "./steps.js";
+import { findProjects, home, isRepo, layers, projects, status, unlink, type Status } from "./steps.js";
 import { runInWsl, wslDistros } from "./wsl.js";
 
 const VERSION = "0.2.0";
@@ -352,10 +352,18 @@ function printStatus(lib: Library, table: Harness[], json: boolean): void {
     process.stdout.write(JSON.stringify(s, null, 2) + "\n");
     return;
   }
-  process.stdout.write(`library ${s.library}: ${s.own.length} own, ${s.thirdParty.length} third-party, ${s.missingFromLock.length} in the lock but not installed\n`);
+  process.stdout.write(`library ${s.library}: ${s.own.length} own${groupSummary(s)}, ${s.thirdParty.length} third-party, ${s.missingFromLock.length} in the lock but not installed\n`);
   for (const [layer, v] of Object.entries(s.layers)) process.stdout.write(`${layer}: ${v.linked} linked, ${v.missing.length} missing\n`);
   for (const [dir, v] of Object.entries(s.user)) process.stdout.write(`${dir}: ${v.linked} linked, ${v.missing.length} missing\n`);
 }
 
+
+/** " (oneezy: 2, flat: 1)" when any own skill sits in a group; nothing for a flat-only library. */
+function groupSummary(s: Status): string {
+  const counts = new Map<string, number>();
+  for (const o of s.ownSkills) counts.set(o.plugin ?? "flat", (counts.get(o.plugin ?? "flat") ?? 0) + 1);
+  if (![...counts.keys()].some((k) => k !== "flat")) return "";
+  return ` (${[...counts].map(([k, v]) => `${k}: ${v}`).join(", ")})`;
+}
 
 main().catch((e) => bail(String(e?.stack ?? e)));
