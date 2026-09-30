@@ -5,9 +5,8 @@ import os from "node:os";
 import path from "node:path";
 import * as p from "@clack/prompts";
 import { readConfig, writeConfig, type Config } from "./config.js";
-import { gitExclude, isDir, isLink, lexists, linkTarget, real, samePath, under } from "./fs.js";
+import { gitExclude, isDir, isLink, lexists, linkTarget, real, samePath } from "./fs.js";
 import { detected, harnessTable, type Harness } from "./harnesses.js";
-import { ensureProjectHooks, ensureUserHooks } from "./hooks.js";
 import { cloneLibrary, DEFAULT_LIBRARY, findLibrary, homeLibrary, Library, looksLikeLibrary, pullLibrary } from "./library.js";
 import { apply, line, Report } from "./plan.js";
 import { findProjects, home, isRepo, layers, projects, status, unlink } from "./steps.js";
@@ -19,8 +18,6 @@ One skills library, every harness, every project on this machine. Run it anywher
 
   no library on this machine   clone one into ~/.skills-sync (default: ${DEFAULT_LIBRARY}, or --library owner/repo)
   library present              pull it, restore what the lock has, rebuild its layers, link the user folders
-  inside a project repo        add the session hooks and ignore entries once, so every clone and cloud session syncs itself
-  session hook                 runs this same command with --quiet
 
 Usage: skills-sync [command] [options]
 
@@ -39,7 +36,6 @@ Options
   --dev <dir>            folder whose git repos are offered (default: here, or the parent when here is a repo)
   --copy                 projects get real copies instead of links
   --wsl <distros|*>      Windows: also sync the user folders inside these WSL distros; --no-wsl for none
-  --no-hooks             do not write session hooks (user or project)
   --no-pull / --pull     skip, or force, the library pull (default: at most every 30 minutes)
   --no-restore           do not restore missing lock entries from their sources
   --retry                retry lock entries an earlier run reported as gone upstream
@@ -47,7 +43,7 @@ Options
   --no-layers            leave the library's own layers alone (used inside WSL, where Windows owns them)
   --watch                stay running; redo layers and user folders when skills/ or the lock changes
   --plan                 show what would change, touch nothing
-  --quiet                for hooks: no prompts, no WSL fan-out, print only changes and problems
+  --quiet                for scripts: no prompts, no WSL fan-out, print only changes and problems
   --json                 machine output
   -y, --yes              no prompts: flags, then remembered answers, then defaults
   --ask                  prompt even when answers are remembered
@@ -64,7 +60,6 @@ interface Args {
   dev?: string;
   copy?: boolean;
   wsl?: string[] | "*" | false;
-  hooks: boolean;
   pull: boolean | "force";
   restore: boolean;
   retry: boolean;
@@ -79,7 +74,7 @@ interface Args {
 }
 
 function parseArgs(argv: string[]): Args {
-  const a: Args = { command: "sync", hooks: true, pull: true, restore: true, retry: false, sidecars: true, layers: true, watch: false, plan: false, quiet: false, json: false, yes: false, ask: false };
+  const a: Args = { command: "sync", pull: true, restore: true, retry: false, sidecars: true, layers: true, watch: false, plan: false, quiet: false, json: false, yes: false, ask: false };
   const list = (v: string) => v.split(",").map((s) => s.trim()).filter(Boolean);
   for (let i = 0; i < argv.length; i++) {
     const x = argv[i];
@@ -102,7 +97,6 @@ function parseArgs(argv: string[]): Args {
       const v = next();
       a.wsl = v === "*" ? "*" : list(v);
     } else if (x === "--no-wsl") a.wsl = false;
-    else if (x === "--no-hooks") a.hooks = false;
     else if (x === "--no-pull") a.pull = false;
     else if (x === "--pull") a.pull = "force";
     else if (x === "--no-restore") a.restore = false;
@@ -219,7 +213,7 @@ async function main(): Promise<void> {
       if (timer) clearTimeout(timer);
       timer = setTimeout(() => {
         log(`change in ${why}`);
-        runOnce(lib, choices, { ...args, restore: false, hooks: false }, cwd, new Report()).catch((e) => log(String(e)));
+        runOnce(lib, choices, { ...args, restore: false }, cwd, new Report()).catch((e) => log(String(e)));
       }, 400);
     };
     fs.watch(lib.own, { recursive: true }, (_e, f) => trigger(String(f ?? "skills/")));
@@ -328,17 +322,6 @@ async function runOnce(lib: Library, c: Choices, args: Args, cwd: string, report
     projects(lib, c.agents, targets, null, c.mode, pr);
     apply(pr, args.plan, gitExclude);
     report.merge(pr);
-  }
-
-  // 5. hooks: this machine, and the project we were started in
-  if (args.hooks && args.command !== "projects") {
-    const h = new Report();
-    const ids = new Set(c.agents.map((a) => a.id));
-    ensureUserHooks(h, userHome, { claude: ids.has("claude-code") && isDir(path.join(userHome, ".claude")), codex: ids.has("codex") && isDir(path.join(userHome, ".codex")) });
-    const here = real(path.resolve(cwd));
-    if (isRepo(here) && !under(here, lib.root) && !looksLikeLibrary(here)) ensureProjectHooks(h, here);
-    apply(h, args.plan);
-    report.merge(h);
   }
 
   printReport(report, args);
