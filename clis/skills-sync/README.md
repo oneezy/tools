@@ -1,9 +1,9 @@
-# skills-sync
+# @oneezy/skills-sync
 
 One skills library. Every agent harness. Every project on the machine.
 
 ```
-npx skills-sync
+npx @oneezy/skills-sync
 ```
 
 Run it anywhere and it works out the rest:
@@ -32,7 +32,7 @@ Everything else in it is generated and should be gitignored:
 | `.agents/skills/<name>` | the working set: third-party skills restored from the lock, plus one link per own skill. Codex reads this folder directly. |
 | `.claude/skills/<name>`, `.goose/skills/<name>`, `.hermes/skills/<name>` | one link per working-set entry, for each harness that does not read `.agents/skills` |
 
-`oneezy/skills` is one such library; `npx skills add oneezy/skills` installs its own skills anywhere, and cloning it plus one `npx skills-sync` gives a new machine the whole set.
+`oneezy/skills` is one such library; `npx skills add oneezy/skills` installs its own skills anywhere, and cloning it plus one `npx @oneezy/skills-sync` gives a new machine the whole set.
 
 ## What a run does
 

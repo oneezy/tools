@@ -2,7 +2,7 @@
 
 ## Agent skills
 
-Skills are not committed here. They come from the skills library `oneezy/skills`, linked into the harness user folders by `npx skills-sync` (source: `clis/skills-sync`). If a `/oneezy-*` skill you need is missing in this session, run that command (or the `oneezy-skills` skill) and continue.
+Skills are not committed here. They come from the skills library `oneezy/skills`, linked into the harness user folders by `npx @oneezy/skills-sync` (source: `clis/skills-sync`). If a `/oneezy-*` skill you need is missing in this session, run that command (or the `oneezy-skills` skill) and continue.
 
 ### Issue tracker
 
