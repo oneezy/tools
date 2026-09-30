@@ -6,7 +6,16 @@ One skills library. Every agent harness. Every project on the machine.
 npx @oneezy/skills-sync
 ```
 
-Run it from anywhere. The first run asks a few questions and remembers the answers; every later run is silent and changes nothing unless something changed. Node 20+, git. Windows uses junctions (no admin), everything else symlinks.
+Run it anywhere and it works out the rest:
+
+- **No library on this machine?** It clones one into `~/.skills-sync` (default `oneezy/skills`; `--library owner/repo` for another) and asks nothing.
+- **Library present?** It pulls it, restores whatever the lock file has that is missing, rebuilds the library's harness layers, and links every skill into each harness's user folder. Every step is skipped when its result is already right, so a no-op run is silent and fast.
+- **Run inside a project repo?** It adds a session hook for Claude Code and Codex and two ignore entries, once. From then on every clone of that repo, every cloud session and every teammate's machine runs the same command at session start and syncs itself. Skills are never committed to the project.
+- **Session hook fires?** It is this same command with `--quiet`.
+
+First run on a machine with a terminal asks which harnesses, whether to link the user folders, which projects (if any) should carry copies, and (on Windows) which WSL distros. Answers are remembered in `skills-sync.json` beside the lock; `--ask` prompts again. Node 20+, git. Windows uses junctions (no admin), everything else symlinks.
+
+Edit a skill in the library and every harness sees the change immediately: the user-folder entries are links. `git push` from the library is how it reaches other machines; their next session start pulls it.
 
 ## The library
 
@@ -28,12 +37,14 @@ Everything else in it is generated and should be gitignored:
 
 ## What a run does
 
-1. **Find the library.** Walk up from the current folder for `skills/` beside `skills-lock.json`; else `$SKILLS_REPO`; else `~/dev/skills` or `~/skills`; else `--repo <path>`.
+1. **Find the library.** `--repo`, else `$SKILLS_REPO`, else `~/.skills-sync` (the clone, or a link to wherever the library really lives), else a library folder above the current one (both `skills/` and `skills-lock.json`; never a dot-folder). Found somewhere else than `~/.skills-sync`? A link is left there so the next run finds it from anywhere. Nothing found? Clone one.
+1. **Pull.** Fast-forward the library from its remote, at most every 30 minutes, only when its tree is clean (`--pull` forces, `--no-pull` skips).
 2. **Restore.** Lock entries with no folder in `.agents/skills` are fetched: one shallow clone per source, each skill copied from its recorded path, or found by folder name when upstream moved it. Skills upstream deleted are reported, remembered, and skipped until `--retry`. (`npx skills experimental_install` clones once per skill and stops at the first stale path, so this is done natively.)
 3. **Layers.** `.agents/skills/<name>` links to `skills/<name>` for own skills, listed in a generated `.agents/skills/.gitignore`. Each selected harness that has its own project folder gets one link per working-set entry. Own skills with `disable-model-invocation: true` and no `agents/openai.yaml` get one generated from their frontmatter, so Codex sees the same policy.
 4. **User folders.** One link per skill in each selected harness's user skills folder (`~/.claude/skills`, `~/.agents/skills`, `~/.config/goose/skills`, `~/.hermes/skills`), pointing at the real folder. Every project on the machine now sees the set, and an edit in the library is live everywhere.
 5. **Projects.** Optional. Git repos under the dev folder that you check get their skills too: **link** mode makes the same links inside the repo and hides them from git through `.git/info/exclude`; **copy** mode writes real folders meant to be committed, for repos that must carry their own (cloud sessions, other people).
 6. **WSL.** Windows only, optional. Each checked distro runs the same sync for its own user folders through `/mnt/<drive>/…`. The distro needs Node.
+7. **Hooks.** `~/.claude/settings.json` and `~/.codex/hooks.json` get a SessionStart hook running `npx --yes @oneezy/skills-sync --quiet`; so does the project the command was started in (`.claude/settings.json`, `.codex/hooks.json`, plus `.claude/skills/` and `.agents/skills/` in its `.gitignore`). Existing hooks are kept; `--no-hooks` skips this.
 
 Then it prints one line per change and a summary. `--plan` prints the same without touching anything.
 
@@ -55,8 +66,9 @@ Every answer is also a flag, so scripts and agents never see a prompt:
 --global | --no-global
 --projects a,b | --projects '*' | --no-projects     --dev <dir>     --copy
 --wsl Ubuntu | --wsl '*' | --no-wsl
+--library owner/repo   --no-hooks   --pull | --no-pull
 --no-restore  --retry  --no-sidecars  --no-layers
---watch  --plan  --json  -y  --ask
+--watch  --plan  --quiet  --json  -y  --ask
 ```
 
 Commands: `sync` (default), `status`, `unlink` (remove every link this tool made in the user folders), `projects` (only step 5).
