@@ -12,7 +12,7 @@
 #             into dev -> closed and Done, push to main -> Complete, ...). A dispatch with
 #             backfill=true recomputes the whole board from git facts.
 #   estimate  "issue opened", debounced two minutes in a cancel-in-progress group so a burst of new
-#             issues collapses into one run, then /oneezy-estimate (from this repo's skill layers)
+#             issues collapses into one run, then /oneezy-estimate (from oneezy/skills, the skills library)
 #             sizes every unsized open issue with the whole backlog in context. A dispatch with
 #             estimate=true runs it by hand.
 #
@@ -125,19 +125,19 @@ jobs:
         uses: actions/checkout@v4
         with:
           persist-credentials: false
-      - name: Check out /oneezy-estimate
+      - name: Check out /oneezy-estimate from the skills library
         uses: actions/checkout@v4
         with:
-          repository: oneezy/tools
-          ref: ${{ github.repository == 'oneezy/tools' && github.sha || 'main' }}
+          repository: oneezy/skills
+          ref: main
           path: .task-manager
-          sparse-checkout: .claude/skills/oneezy-estimate
+          sparse-checkout: skills/oneezy-estimate
           persist-credentials: false
       - name: Put the skill where Claude Code reads it
         run: |
           mkdir -p .claude/skills
           rm -rf .claude/skills/oneezy-estimate
-          cp -r .task-manager/.claude/skills/oneezy-estimate .claude/skills/oneezy-estimate
+          cp -r .task-manager/skills/oneezy-estimate .claude/skills/oneezy-estimate
           chmod +x .claude/skills/oneezy-estimate/scripts/*.sh
       - name: Run /oneezy-estimate
         uses: anthropics/claude-code-action@v1
