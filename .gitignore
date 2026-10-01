@@ -10,3 +10,8 @@ __pycache__/
 # skills are linked by skills-sync, never committed
 .claude/skills/
 .agents/skills/
+
+# pnpm workspace and Turborepo
+node_modules/
+.turbo/
+dist/

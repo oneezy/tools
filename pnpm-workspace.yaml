@@ -1,0 +1,6 @@
+packages:
+  - "apps/*"
+  - "packages/*"
+  # Temporary: skills-sync stays under clis/ while another branch edits it.
+  # It moves to packages/skills-sync in step 2 of oneezy/tools#75.
+  - "clis/skills-sync"
