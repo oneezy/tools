@@ -39,11 +39,11 @@ function named(v: unknown): Array<[id: string, at: string]> {
   return v.flatMap((x, j): Array<[string, string]> => (typeof x === "string" ? [[x, `[${j}]`]] : []));
 }
 
-/** The first line of an error's message: a YAML parse error carries a code frame after it. */
+/** The first line of an error's message: a YAML parse error says what and where there, and a code frame follows it. */
 export function firstLine(e: unknown): string {
   return String(e instanceof Error ? e.message : e)
     .split("\n")[0]
-    .replace(/ at line \d+, column \d+:?$/, "")
+    .replace(/:$/, "")
     .trim();
 }
 

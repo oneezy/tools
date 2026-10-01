@@ -116,7 +116,8 @@ export function frontmatterProblems(md: string, folder: string): string[] {
   try {
     fm = YAML.parse(m[1]);
   } catch (e) {
-    return [`frontmatter is not YAML (${firstLine(e)})`];
+    // the position YAML gives counts from the frontmatter's first line, not the file's, so it is left out
+    return [`frontmatter is not YAML (${firstLine(e).replace(/ at line \d+, column \d+$/, "")})`];
   }
   if (typeof fm !== "object" || fm === null || Array.isArray(fm)) return ["frontmatter is not a map: name and description are required"];
   const { name, description } = fm as Record<string, unknown>;

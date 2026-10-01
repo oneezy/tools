@@ -136,15 +136,18 @@ test("check exits 0 on a clean library and says what it looked at, writing nothi
   write("skills/oneezy/own-two/SKILL.md", "---\nname: own-two\n---\nno description\n");
   write("skills/flat-one/SKILL.md", "no frontmatter at all\n");
   write("skills/oneezy/Bad_Name/SKILL.md", skillMd("Bad_Name"));
+  write("skills/oneezy/quoted/SKILL.md", '---\nname: quoted\ndescription: "never closed\n---\nbody\n');
   const bad = cli("check");
   assert.equal(bad.status, 1);
   const lines = problems(bad).filter((l) => l.startsWith("skills/"));
-  assert.deepEqual(lines, [
+  assert.deepEqual(lines.slice(0, 4), [
     "skills/oneezy/Bad_Name/SKILL.md: name: Bad_Name is not a valid skill id (lowercase letters, digits and single hyphens, at most 64 characters)",
     "skills/flat-one/SKILL.md: no frontmatter: name and description are required",
     "skills/oneezy/own-one/SKILL.md: name: own-1 is not the folder's name, own-one",
     "skills/oneezy/own-two/SKILL.md: description: missing",
   ]);
+  assert.equal(lines.length, 5);
+  assert.match(lines[4], /^skills\/oneezy\/quoted\/SKILL\.md: frontmatter is not YAML \([^)]+\)$/);
   assert.match(bad.stdout, /^check: \d+ problems?\b/m);
 });
 
@@ -190,7 +193,7 @@ test("a flow.yaml that breaks a rule fails with its path and the rule: a duplica
   assert.deepEqual(lines, [
     "skills/oneezy/after/flow.yaml: $.steps[1].after: no step has the id nope",
     "skills/oneezy/after/flow.yaml: $.steps[2].after[1]: no step has the id gone",
-    "skills/oneezy/broken/flow.yaml: not YAML (Flow sequence in block collection must be sufficiently indented and end with a ])",
+    "skills/oneezy/broken/flow.yaml: not YAML (Flow sequence in block collection must be sufficiently indented and end with a ] at line 3, column 1)",
     "skills/oneezy/dup/flow.yaml: $.steps[2].id: one is already the id of steps[0]",
     "skills/oneezy/extra/flow.yaml: $: missing purpose",
     "skills/oneezy/extra/flow.yaml: $.steps[0].retries: not allowed",

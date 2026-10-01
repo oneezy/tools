@@ -25,7 +25,7 @@ const CRC_TABLE = Uint32Array.from({ length: 256 }, (_, n) => {
 
 export function crc32(bytes: Buffer): number {
   let c = 0xffffffff;
-  for (const b of bytes) c = CRC_TABLE[(c ^ b) & 0xff] ^ (c >>> 8);
+  for (let i = 0; i < bytes.length; i++) c = CRC_TABLE[(c ^ bytes[i]) & 0xff] ^ (c >>> 8);
   return (c ^ 0xffffffff) >>> 0;
 }
 
