@@ -1,0 +1,172 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "skills-sync.json",
+  "description": "The committed config of a skills library: the library itself, the third-party repositories it takes skills from (what is taken from each, renames, per-skill pins, attribution), and the plugins the library builds. Hand-edited and written by add; read by skills-sync refresh, sync and build.",
+  "type": "object",
+  "required": [
+    "version",
+    "sources"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "version": {
+      "const": 1
+    },
+    "library": {
+      "description": "The library itself, for the catalogs and the registry.",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "owner": {
+          "type": "string"
+        },
+        "homepage": {
+          "type": "string"
+        }
+      }
+    },
+    "sources": {
+      "description": "One entry per source id; the id names the snapshot folder upstream/<id> and the plugin built from it.",
+      "type": "object",
+      "additionalProperties": false,
+      "patternProperties": {
+        "^[a-z0-9][a-z0-9-]*$": {
+          "$ref": "#/$defs/source"
+        }
+      }
+    },
+    "plugins": {
+      "description": "One entry per plugin id: an own-skills group or a source.",
+      "type": "object",
+      "additionalProperties": false,
+      "patternProperties": {
+        "^[a-z0-9][a-z0-9-]*$": {
+          "$ref": "#/$defs/plugin"
+        }
+      }
+    }
+  },
+  "$defs": {
+    "name": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*$"
+    },
+    "commit": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{40}$"
+    },
+    "source": {
+      "type": "object",
+      "required": [
+        "repo",
+        "ref",
+        "policy",
+        "skills"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "repo": {
+          "description": "owner/repo on GitHub, a git URL, or a local path.",
+          "type": "string",
+          "minLength": 1
+        },
+        "ref": {
+          "description": "The branch or tag to follow, or a commit to hold.",
+          "type": "string",
+          "minLength": 1
+        },
+        "policy": {
+          "description": "follow: the tip of ref at every refresh. pin: the lock's commit until the lock is edited.",
+          "enum": [
+            "follow",
+            "pin"
+          ]
+        },
+        "root": {
+          "description": "Where skill folders live in the repo (skills, pstack/skills); the repo root when omitted.",
+          "type": "string"
+        },
+        "skills": {
+          "description": "Selected skill folder names: a list, or a map from upstream name to working-set name for renames.",
+          "oneOf": [
+            {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/name"
+              },
+              "uniqueItems": true
+            },
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "patternProperties": {
+                "^[A-Za-z0-9][A-Za-z0-9._-]*$": {
+                  "$ref": "#/$defs/name"
+                }
+              }
+            }
+          ]
+        },
+        "pins": {
+          "description": "Per-skill commits that override the source's policy.",
+          "type": "object",
+          "additionalProperties": false,
+          "patternProperties": {
+            "^[A-Za-z0-9][A-Za-z0-9._-]*$": {
+              "$ref": "#/$defs/commit"
+            }
+          }
+        },
+        "attribution": {
+          "description": "Files copied into the snapshot and every package built from it (LICENSE, README), as upstream paths.",
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
+          "uniqueItems": true
+        }
+      }
+    },
+    "plugin": {
+      "type": "object",
+      "required": [
+        "displayName"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "displayName": {
+          "type": "string",
+          "minLength": 1
+        },
+        "description": {
+          "type": "string"
+        },
+        "group": {
+          "description": "The own-skills group under skills/ this plugin packages.",
+          "$ref": "#/$defs/name"
+        },
+        "source": {
+          "description": "The source id this plugin packages.",
+          "type": "string",
+          "pattern": "^[a-z0-9][a-z0-9-]*$"
+        }
+      },
+      "oneOf": [
+        {
+          "required": [
+            "group"
+          ]
+        },
+        {
+          "required": [
+            "source"
+          ]
+        }
+      ]
+    }
+  }
+}

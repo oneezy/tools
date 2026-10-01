@@ -5,7 +5,7 @@ import path from "node:path";
 
 export type Schema = Record<string, any>;
 
-/** The schema files this package ships, by name (skills-sources, skills-sources-lock). */
+/** The schema files this package ships, by name (skills-sync for the config, skills-sync.local for this machine's answers). */
 export function shippedSchema(name: string): Schema {
   return JSON.parse(fs.readFileSync(path.join(import.meta.dirname, "..", "..", "schemas", `${name}.schema.json`), "utf8")) as Schema;
 }

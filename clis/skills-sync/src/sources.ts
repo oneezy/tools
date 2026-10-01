@@ -93,7 +93,7 @@ export function readManifest(file: string): Manifest {
   } catch (e) {
     throw new Error(`${file}: not JSON (${String(e)})`);
   }
-  const errors = validate(shippedSchema("skills-sources"), parsed);
+  const errors = validate(shippedSchema("skills-sync"), parsed);
   if (errors.length) throw new Error(`${file} is not a valid manifest:\n  ${errors.join("\n  ")}`);
   return parsed as Manifest;
 }

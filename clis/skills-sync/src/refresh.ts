@@ -57,9 +57,9 @@ interface Resolved extends Selected {
 }
 
 export function refresh(lib: Library, opts: RefreshOptions): RefreshResult {
-  const manifest = readManifest(lib.manifestFile);
+  const manifest = readManifest(lib.configFile);
   const old = readSourcesLock(lib.sourcesLockFile);
-  const next: SourcesLock = { version: 1, generated: { manifest: manifestHash(lib.manifestFile) }, sources: {}, releases: old.releases };
+  const next: SourcesLock = { version: 1, generated: { manifest: manifestHash(lib.configFile) }, sources: {}, releases: old.releases };
   const result: RefreshResult = { report: new Report(), sources: {}, gone: [], unlocked: [], problems: [] };
   const report = result.report;
   const staged = new Map<string, Staged>(Object.entries(opts.prestaged ?? {}).map(([id, s]) => [`${id}@${s.commit}`, s]));
@@ -187,7 +187,7 @@ export function refresh(lib: Library, opts: RefreshOptions): RefreshResult {
 
     // 5. snapshots of sources no longer in the manifest
     if (isDir(lib.upstream)) {
-      for (const id of fs.readdirSync(lib.upstream).sort(cmp)) if (!manifest.sources[id] && isDir(path.join(lib.upstream, id))) report.add({ kind: "delete", path: path.join(lib.upstream, id), note: "source no longer in skills-sources.json" });
+      for (const id of fs.readdirSync(lib.upstream).sort(cmp)) if (!manifest.sources[id] && isDir(path.join(lib.upstream, id))) report.add({ kind: "delete", path: path.join(lib.upstream, id), note: "source no longer in skills-sync.json" });
     }
 
     // 6. the working set: one copy per resolved skill with its transforms applied; copies no longer selected go.
@@ -196,7 +196,7 @@ export function refresh(lib: Library, opts: RefreshOptions): RefreshResult {
     const taken = new Map<string, string>();
     for (const r of resolved.sort((a, b) => cmp(a.name, b.name) || cmp(a.source, b.source))) {
       const winner = taken.get(r.name);
-      if (winner) report.add({ kind: "conflict", path: path.join(lib.agents, r.name), note: `${r.source} also selects ${r.upstream} as ${r.name}; ${winner} wins; rename one in skills-sources.json` });
+      if (winner) report.add({ kind: "conflict", path: path.join(lib.agents, r.name), note: `${r.source} also selects ${r.upstream} as ${r.name}; ${winner} wins; rename one in skills-sync.json` });
       else {
         taken.set(r.name, r.source);
         workingCopy(lib, r, own, report);
@@ -206,7 +206,7 @@ export function refresh(lib: Library, opts: RefreshOptions): RefreshResult {
       for (const n of fs.readdirSync(lib.agents).sort(cmp)) {
         const p = path.join(lib.agents, n);
         if (n.startsWith(".") || RESERVED.has(n) || isLink(p) || !isSkillDir(p) || own.has(n) || selected.has(n)) continue;
-        report.add({ kind: "delete", path: p, note: "no longer selected in skills-sources.json" });
+        report.add({ kind: "delete", path: p, note: "no longer selected in skills-sync.json" });
       }
     }
 

@@ -137,27 +137,28 @@ test("a skill that moves from flat into a group keeps its name: every link is re
   assert.deepEqual(runAll().changes(), []);
 });
 
-test("a library is skills/ beside skills-sources.json, skills-sources-lock.json or skills-lock.json; findLibrary order and the dot-folder rule hold", () => {
+test("a library is skills/ beside skills-sync.json or skills-lock.json; findLibrary order and the dot-folder rule hold", () => {
   const mk = (name: string, marker: string | null, withSkills = true) => {
     const d = path.join(base, name);
     fs.mkdirSync(withSkills ? path.join(d, "skills") : d, { recursive: true });
-    if (marker) fs.writeFileSync(path.join(d, marker), "{}");
+    if (marker) fs.writeFileSync(path.join(d, marker), JSON.stringify({ version: 1, sources: {} }));
     return d;
   };
-  assert.ok(looksLikeLibrary(mk("manifest-only", "skills-sources.json")), "manifest, no lock");
-  assert.ok(looksLikeLibrary(mk("sources-lock-only", "skills-sources-lock.json")), "sources lock, no lock");
-  assert.ok(looksLikeLibrary(mk("lock-only", "skills-lock.json")), "the legacy lock still counts");
+  assert.ok(looksLikeLibrary(mk("config-only", "skills-sync.json")), "config, no lock");
+  assert.ok(looksLikeLibrary(mk("lock-only", "skills-lock.json")), "lock, no config");
   assert.ok(!looksLikeLibrary(mk("bare", null)), "skills/ alone is not a library");
-  assert.ok(!looksLikeLibrary(mk("no-skills", "skills-sources.json", false)), "a manifest without skills/ is not a library");
+  assert.ok(!looksLikeLibrary(mk("no-skills", "skills-sync.json", false)), "a config without skills/ is not a library");
+  assert.ok(!looksLikeLibrary(mk("old-manifest", "skills-sources.json")), "the old manifest name is not a marker");
+  assert.ok(!looksLikeLibrary(mk("old-sources-lock", "skills-sources-lock.json")), "the old sources lock is not a marker");
 
   // the walk-up skips a dot-folder that looks like a library and finds the real one above it
-  const dot = mk(path.join("dev", "skills", ".claude"), "skills-sources.json");
+  const dot = mk(path.join("dev", "skills", ".claude"), "skills-sync.json");
   assert.equal(findLibrary(path.join(dot, "skills"), {}, homeDir), lib.root);
   // $SKILLS_REPO beats ~/.skills-sync, which beats the walk-up
-  const other = mk("other", "skills-sources.json");
+  const other = mk("other", "skills-sync.json");
   fs.symlinkSync(other, path.join(homeDir, ".skills-sync"), process.platform === "win32" ? "junction" : "dir");
   assert.equal(findLibrary(lib.own, {}, homeDir), real(other));
-  const third = mk("third", "skills-sources-lock.json");
+  const third = mk("third", "skills-lock.json");
   assert.equal(findLibrary(lib.own, { SKILLS_REPO: third }, homeDir), path.resolve(third));
 });
 

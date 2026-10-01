@@ -36,10 +36,10 @@ export function defaultId(repo: string): string {
 
 export function addSource(lib: Library, spec: string, opts: AddOptions): AddResult {
   const { repo, ref: askedRef } = parseSpec(spec);
-  const manifest: Manifest = lib.hasManifest() ? readManifest(lib.manifestFile) : { version: 1, sources: {}, plugins: {} };
+  const manifest: Manifest = lib.hasConfig() ? readManifest(lib.configFile) : { version: 1, sources: {}, plugins: {} };
   const id = opts.id ?? defaultId(repo);
   if (!/^[a-z0-9][a-z0-9-]*$/.test(id)) return { ok: false, error: `source id ${id} must be lowercase letters, digits and dashes; pass --id` };
-  if (manifest.sources[id]) return { ok: false, error: `source ${id} is already declared in ${path.basename(lib.manifestFile)}; edit it there, or pass --id for a second entry` };
+  if (manifest.sources[id]) return { ok: false, error: `source ${id} is already declared in ${path.basename(lib.configFile)}; edit it there, or pass --id for a second entry` };
   const url = cloneUrl(repo);
   const ref = askedRef ?? defaultBranch(url) ?? "main";
   const r = stage(url, ref, opts.log);

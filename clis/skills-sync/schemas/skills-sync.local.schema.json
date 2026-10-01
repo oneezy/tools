@@ -1,0 +1,69 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "skills-sync.local.json",
+  "description": "This machine's answers to skills-sync, kept beside the committed config and gitignored: which harnesses to sync, whether to link the user folders, which projects and how, which WSL distros, skills an earlier run found gone upstream, and how links are made. Written by the tool after every run; --ask prompts again.",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "agents": {
+      "description": "Harness ids to sync (claude-code, codex, goose, hermes).",
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      },
+      "uniqueItems": true
+    },
+    "global": {
+      "description": "Link every skill into each harness's user skills folder.",
+      "type": "boolean"
+    },
+    "dev": {
+      "description": "The folder whose git repositories are offered as projects.",
+      "type": "string",
+      "minLength": 1
+    },
+    "projects": {
+      "description": "Project folder names under dev that get the skills.",
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      },
+      "uniqueItems": true
+    },
+    "mode": {
+      "description": "How projects get their skills: links hidden from git, or committed copies.",
+      "enum": [
+        "link",
+        "copy"
+      ]
+    },
+    "wsl": {
+      "description": "WSL distro names whose user folders are synced too (Windows).",
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      },
+      "uniqueItems": true
+    },
+    "unavailable": {
+      "description": "Selected skills an earlier refresh or restore could not find upstream; not looked for again until --retry.",
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      },
+      "uniqueItems": true
+    },
+    "links": {
+      "description": "auto: a directory symlink, or a junction when Windows refuses one. symlink or junction: that kind only (--symlinks, --junctions).",
+      "enum": [
+        "auto",
+        "symlink",
+        "junction"
+      ]
+    }
+  }
+}

@@ -5,8 +5,8 @@ import os from "node:os";
 import path from "node:path";
 import * as p from "@clack/prompts";
 import { addSource, manifestText } from "./add.js";
-import { readConfig, writeConfig, type Config } from "./config.js";
-import { gitExclude, isDir, isLink, lexists, linkTarget, real, samePath } from "./fs.js";
+import { LOCAL_NAME, migrateAnswers, readLocal, writeLocal, type LinkMode, type Local } from "./config.js";
+import { gitExclude, isDir, isLink, lexists, linkMode, linkTarget, real, samePath, setLinkMode } from "./fs.js";
 import { detected, harnessTable, type Harness } from "./harnesses.js";
 import { cloneLibrary, DEFAULT_LIBRARY, findLibrary, homeLibrary, Library, looksLikeLibrary, pullLibrary } from "./library.js";
 import { apply, line, Report } from "./plan.js";
@@ -25,13 +25,13 @@ One skills library, every harness, every project on this machine. Run it anywher
 Usage: skills-sync [command] [options]
 
 Commands
-  sync (default)   everything above; with skills-sources.json, the restore is a frozen refresh
+  sync (default)   everything above; with skills-sync.json, the restore is a frozen refresh
   status           what is linked and what is missing
   unlink           remove every link this tool made in the user folders
   projects         only the project step
-  refresh          resolve every source in skills-sources.json: snapshot under upstream/, write the lock,
+  refresh          resolve every source in skills-sync.json: snapshot under upstream/, write the lock,
                    rebuild the third-party working set, regenerate skills-lock.json
-  add <source>     declare a source (owner/repo[#ref], a git URL or a path) in skills-sources.json, then refresh
+  add <source>     declare a source (owner/repo[#ref], a git URL or a path) in skills-sync.json, then refresh
 
 Refresh and add
   --frozen               refresh at the lock's commits; nothing moves (what sync does)
@@ -49,6 +49,8 @@ Options
   --dev <dir>            folder whose git repos are offered (default: here, or the parent when here is a repo)
   --copy                 projects get real copies instead of links
   --wsl <distros|*>      Windows: also sync the user folders inside these WSL distros; --no-wsl for none
+  --symlinks             make directory symlinks only (default: a symlink, or a junction when Windows refuses one)
+  --junctions            Windows: make junctions only; either flag is remembered in ${LOCAL_NAME}
   --no-pull / --pull     skip, or force, the library pull (default: at most every 30 minutes)
   --no-restore           do not restore missing lock entries from their sources (skips the frozen refresh too)
   --retry                look again for skills an earlier run reported gone upstream (sync and refresh)
@@ -61,6 +63,8 @@ Options
   -y, --yes              no prompts: flags, then remembered answers, then defaults
   --ask                  prompt even when answers are remembered
   -h, --help
+
+Answers for this machine (harnesses, projects, WSL distros, link mode) are kept in ${LOCAL_NAME} beside the config.
 `;
 
 interface Args {
@@ -80,6 +84,8 @@ interface Args {
   dev?: string;
   copy?: boolean;
   wsl?: string[] | "*" | false;
+  /** --symlinks or --junctions; remembered in the local file */
+  links?: LinkMode;
   pull: boolean | "force";
   restore: boolean;
   retry: boolean;
@@ -130,6 +136,8 @@ function parseArgs(argv: string[]): Args {
       const v = next();
       a.wsl = v === "*" ? "*" : list(v);
     } else if (x === "--no-wsl") a.wsl = false;
+    else if (x === "--symlinks") a.links = "symlink";
+    else if (x === "--junctions") a.links = "junction";
     else if (x === "--no-pull") a.pull = false;
     else if (x === "--pull") a.pull = "force";
     else if (x === "--no-restore") a.restore = false;
@@ -160,6 +168,7 @@ interface Choices {
   mode: "link" | "copy";
   wsl: string[];
   unavailable: string[];
+  links: LinkMode;
 }
 
 function bail(msg: string): never {
@@ -192,25 +201,33 @@ async function main(): Promise<void> {
       root = c.root;
     }
   }
-  // the first add is how a library gets its manifest: with --repo, skills/ alone is enough for it
+  // the first add is how a library gets its config: with --repo, skills/ alone is enough for it
   const firstAdd = args.command === "add" && !!args.repo && !!root && isDir(path.join(root, "skills"));
   if (!root || (!looksLikeLibrary(root) && !firstAdd)) bail("no skills library found: run this inside one, or pass --repo <path> or --library owner/repo");
   const lib = new Library(root);
 
+  // 2. this machine's answers: the local file, after a 0.2.0 answers file is moved there once; status only reads
+  if (!args.plan && args.command !== "status") migrateAnswers(lib.root, setup);
+  apply(setup, args.plan);
+  const local = readLocal(lib.root);
+  setLinkMode(args.links ?? local.links ?? "auto");
+
   // refresh and add edit the library they are pointed at and nothing else: no pull, no ~/.skills-sync, no harness
-  if (args.command === "refresh") return runRefresh(lib, args, log);
-  if (args.command === "add") return runAdd(lib, args, log);
+  if (args.command === "refresh") return runRefresh(lib, args, log, setup);
+  if (args.command === "add") return runAdd(lib, args, log, setup);
 
   // ~/.skills-sync points at the library from now on, so every later run finds it from anywhere
   const hl = homeLibrary(userHome);
+  const remember = new Report();
   if (!samePath(real(hl), lib.root)) {
-    if (!lexists(hl)) setup.add({ kind: "link", path: hl, target: lib.root, note: "remembers where the library is" });
-    else if (isLink(hl)) setup.add({ kind: "relink", path: hl, target: lib.root, note: `was ${linkTarget(hl)}` });
-    else setup.add({ kind: "conflict", path: hl, note: "a folder is in the way; ~/.skills-sync is not a link to the library" });
+    if (!lexists(hl)) remember.add({ kind: "link", path: hl, target: lib.root, note: "remembers where the library is" });
+    else if (isLink(hl)) remember.add({ kind: "relink", path: hl, target: lib.root, note: `was ${linkTarget(hl)}` });
+    else remember.add({ kind: "conflict", path: hl, note: "a folder is in the way; ~/.skills-sync is not a link to the library" });
   }
-  apply(setup, args.plan);
+  apply(remember, args.plan);
+  setup.merge(remember);
 
-  // 2. keep the library current
+  // 3. keep the library current
   if (args.pull && args.command !== "status" && !args.plan) {
     if (args.pull === "force") {
       try {
@@ -224,11 +241,10 @@ async function main(): Promise<void> {
     if (r === "dirty" && !args.quiet) log("library has local changes; pull skipped");
   }
 
-  const cfg = readConfig(lib.root);
   const table = harnessTable();
 
   if (args.command === "status") {
-    const ids = args.agents ?? cfg.agents;
+    const ids = args.agents ?? local.agents;
     return printStatus(lib, ids ? table.filter((h) => ids.includes(h.id)) : detected(table), args.json);
   }
   if (args.command === "unlink") {
@@ -238,16 +254,16 @@ async function main(): Promise<void> {
     return printReport(r, args);
   }
 
-  // 3. the choices: flags, then remembered answers, then defaults; prompts fill the gaps when interactive
-  const choices = await decide(args, cfg, lib, table, cwd, interactive);
+  // 4. the choices: flags, then remembered answers, then defaults; prompts fill the gaps when interactive
+  const choices = await decide(args, local, lib, table, cwd, interactive);
   if (!choices) return p.cancel("nothing changed");
-  if (!args.plan) saveConfig(lib.root, choices);
+  if (!args.plan) saveLocal(lib.root, choices);
 
-  // 4. run
+  // 5. run
   const run = () => runOnce(lib, choices, args, cwd, setup);
   await run();
   if (args.watch) {
-    log(`watching ${lib.own} and ${path.basename(lib.lockFile)}; ctrl-c to stop`);
+    log(`watching ${lib.own}, ${path.basename(lib.configFile)} and ${path.basename(lib.lockFile)}; ctrl-c to stop`);
     let timer: NodeJS.Timeout | null = null;
     const trigger = (why: string) => {
       if (timer) clearTimeout(timer);
@@ -257,19 +273,20 @@ async function main(): Promise<void> {
       }, 400);
     };
     fs.watch(lib.own, { recursive: true }, (_e, f) => trigger(String(f ?? "skills/")));
-    for (const f of [lib.lockFile, lib.sourcesLockFile]) if (fs.existsSync(f)) fs.watch(f, () => trigger(path.basename(f)));
+    for (const f of [lib.lockFile, lib.configFile, lib.sourcesLockFile]) if (fs.existsSync(f)) fs.watch(f, () => trigger(path.basename(f)));
     await new Promise(() => undefined);
   }
 }
 
 /** refresh: every source per its policy (or the lock's commits with --frozen); gone-upstream skills are remembered like restore's. */
-function runRefresh(lib: Library, args: Args, log: (m: string) => void): void {
-  if (!lib.hasManifest()) bail(`no ${path.basename(lib.manifestFile)} in ${lib.root}; add <source> writes one`);
-  const cfg = readConfig(lib.root);
-  const unavailable = args.retry ? [] : cfg.unavailable ?? [];
+function runRefresh(lib: Library, args: Args, log: (m: string) => void, report: Report): void {
+  if (!lib.hasConfig()) bail(`no ${path.basename(lib.configFile)} in ${lib.root}; add <source> writes one`);
+  const local = readLocal(lib.root);
+  const unavailable = args.retry ? [] : local.unavailable ?? [];
   const r = refresh(lib, { frozen: args.frozen, plan: args.plan, unavailable, log });
   reportRefresh(lib, r, unavailable, args, log, !args.quiet);
-  printReport(r.report, args, { sources: r.sources, gone: r.gone, unlocked: r.unlocked, problems: r.problems });
+  report.merge(r.report);
+  printReport(report, args, { sources: r.sources, gone: r.gone, unlocked: r.unlocked, problems: r.problems });
   if (r.problems.length) process.exitCode = 1;
 }
 
@@ -280,23 +297,23 @@ function runRefresh(lib: Library, args: Args, log: (m: string) => void): void {
 function reportRefresh(lib: Library, r: RefreshResult, unavailable: string[], args: Args, log: (m: string) => void, verbose: boolean): string[] {
   for (const [id, s] of Object.entries(r.sources)) if (s.moved || verbose) log(`${id}: ${s.commit.slice(0, 7)} (${s.date.slice(0, 10)})${s.moved ? ", moved" : ""}`);
   for (const g of r.gone) log(`  gone upstream: ${g}`);
-  if (r.gone.length) log(`  (not in the lock; deselect it in ${path.basename(lib.manifestFile)}, or a copy in skills/ keeps it as your own; --retry checks again)`);
+  if (r.gone.length) log(`  (not in the lock; deselect it in ${path.basename(lib.configFile)}, or a copy in skills/ keeps it as your own; --retry checks again)`);
   if (r.unlocked.length && !args.quiet) log(`${r.unlocked.length} selected skill(s) not in ${path.basename(lib.sourcesLockFile)} (${r.unlocked.join(", ")}); run refresh to resolve them`);
   for (const m of r.problems) log(`failed: ${m}`);
   const gone = r.gone.map((g) => g.split(":")[1]);
   const remembered = [...new Set([...unavailable, ...gone])];
   if (remembered.length && !args.quiet) log(`${remembered.length} selected skill${remembered.length === 1 ? " is" : "s are"} gone upstream (${remembered.join(", ")}); --retry to check again`);
   if (!args.plan) {
-    const cfg = readConfig(lib.root);
-    const next: Config = { ...cfg, unavailable: remembered };
+    const local = readLocal(lib.root);
+    const next: Local = { ...local, unavailable: remembered };
     if (!remembered.length) delete next.unavailable;
-    if (JSON.stringify(next) !== JSON.stringify(cfg)) writeConfig(lib.root, next);
+    if (JSON.stringify(next) !== JSON.stringify(local)) writeLocal(lib.root, next);
   }
   return remembered;
 }
 
-/** add: stage the source, write its manifest entry, then refresh with the staged clone. --plan shows the entry and writes nothing. */
-function runAdd(lib: Library, args: Args, log: (m: string) => void): void {
+/** add: stage the source, write its config entry, then refresh with the staged clone. --plan shows the entry and writes nothing. */
+function runAdd(lib: Library, args: Args, log: (m: string) => void, report: Report): void {
   const spec = args.positional[0];
   if (!spec) bail("add: which source? owner/repo[#ref], a git URL or a local path");
   const r = addSource(lib, spec, { id: args.id, root: args.root, skills: args.skills, as: args.as, log });
@@ -306,40 +323,41 @@ function runAdd(lib: Library, args: Args, log: (m: string) => void): void {
   log(`${r.id}: ${r.entry.repo}@${r.entry.ref} (${r.staged.commit.slice(0, 7)}), ${names} of ${r.found.size} skills under ${r.entry.root ?? "the root"}${renames.length ? `, renaming ${renames.map(([a, b]) => `${a} -> ${b}`).join(", ")}` : ""}`);
   if (args.plan) {
     discard(r.staged);
-    process.stdout.write(`plan: would add to ${lib.manifestFile}:\n${JSON.stringify({ [r.id]: r.entry }, null, 2)}\n`);
+    process.stdout.write(`plan: would add to ${lib.configFile}:\n${JSON.stringify({ [r.id]: r.entry }, null, 2)}\n`);
     return;
   }
-  fs.writeFileSync(lib.manifestFile, manifestText(r.manifest));
-  log(`wrote ${path.basename(lib.manifestFile)}`);
-  const cfg = readConfig(lib.root);
-  const unavailable = args.retry ? [] : cfg.unavailable ?? [];
+  fs.writeFileSync(lib.configFile, manifestText(r.manifest));
+  log(`wrote ${path.basename(lib.configFile)}`);
+  const local = readLocal(lib.root);
+  const unavailable = args.retry ? [] : local.unavailable ?? [];
   const res = refresh(lib, { frozen: false, plan: false, unavailable, log, prestaged: { [r.id]: r.staged } });
   reportRefresh(lib, res, unavailable, args, log, !args.quiet);
-  printReport(res.report, args, { sources: res.sources, gone: res.gone, unlocked: res.unlocked, problems: res.problems });
+  report.merge(res.report);
+  printReport(report, args, { sources: res.sources, gone: res.gone, unlocked: res.unlocked, problems: res.problems });
   if (res.problems.length) process.exitCode = 1;
 }
 
-function saveConfig(root: string, c: Choices): void {
-  const saved: Config = { agents: c.agents.map((h) => h.id), global: c.global, dev: c.dev, projects: c.projects, mode: c.mode, wsl: c.wsl };
+function saveLocal(root: string, c: Choices): void {
+  const saved: Local = { agents: c.agents.map((h) => h.id), global: c.global, dev: c.dev, projects: c.projects, mode: c.mode, wsl: c.wsl, links: c.links };
   if (c.unavailable.length) saved.unavailable = c.unavailable;
-  writeConfig(root, saved);
+  writeLocal(root, saved);
 }
 
-async function decide(args: Args, cfg: Config, lib: Library, table: Harness[], cwd: string, interactive: boolean): Promise<Choices | null> {
+async function decide(args: Args, local: Local, lib: Library, table: Harness[], cwd: string, interactive: boolean): Promise<Choices | null> {
   const found = detected(table);
   const byId = new Map(table.map((h) => [h.id, h]));
   // first run with nothing remembered: only the two harnesses this tool is built around, unless asked
-  let agentIds = args.agents ?? cfg.agents ?? found.filter((h) => h.id === "claude-code" || h.id === "codex").map((h) => h.id);
-  let global = args.global ?? cfg.global ?? true;
+  let agentIds = args.agents ?? local.agents ?? found.filter((h) => h.id === "claude-code" || h.id === "codex").map((h) => h.id);
+  let global = args.global ?? local.global ?? true;
   const here = path.resolve(cwd);
-  let dev = args.dev ? path.resolve(args.dev) : cfg.dev ?? (isRepo(here) && !looksLikeLibrary(here) ? path.dirname(here) : here);
+  let dev = args.dev ? path.resolve(args.dev) : local.dev ?? (isRepo(here) && !looksLikeLibrary(here) ? path.dirname(here) : here);
   const offered = findProjects(dev, lib).map((pp) => path.basename(pp));
-  let projectNames: string[] = args.projects === false ? [] : args.projects === "*" ? offered : args.projects ?? cfg.projects ?? [];
-  let mode: "link" | "copy" = args.copy ? "copy" : cfg.mode ?? "link";
+  let projectNames: string[] = args.projects === false ? [] : args.projects === "*" ? offered : args.projects ?? local.projects ?? [];
+  let mode: "link" | "copy" = args.copy ? "copy" : local.mode ?? "link";
   const distros = args.quiet ? [] : wslDistros();
-  let wsl: string[] = args.wsl === false ? [] : args.wsl === "*" ? distros : args.wsl ?? cfg.wsl ?? [];
+  let wsl: string[] = args.wsl === false ? [] : args.wsl === "*" ? distros : args.wsl ?? local.wsl ?? [];
 
-  const remembered = Object.keys(cfg).length > 0;
+  const remembered = Object.keys(local).length > 0;
   if (interactive && (args.ask || !remembered || args.command === "projects")) {
     if (!remembered) p.intro("skills-sync: first run on this machine");
     const agentsPick = await p.multiselect({
@@ -379,20 +397,19 @@ async function decide(args: Args, cfg: Config, lib: Library, table: Harness[], c
   }
   const agents = agentIds.map((id) => byId.get(id)).filter((h): h is Harness => !!h);
   if (!agents.length) bail("no harness selected; pass --agents claude-code,codex");
-  return { agents, global, dev, projects: projectNames, mode, wsl, unavailable: args.retry ? [] : cfg.unavailable ?? [] };
+  return { agents, global, dev, projects: projectNames, mode, wsl, unavailable: args.retry ? [] : local.unavailable ?? [], links: args.links ?? local.links ?? "auto" };
 }
 
 async function runOnce(lib: Library, c: Choices, args: Args, cwd: string, report: Report): Promise<void> {
   const log = (m: string) => (args.json ? undefined : process.stderr.write(m + "\n"));
-  const userHome = os.homedir();
 
   const missing = lib.missingFromLock().filter((n) => !c.unavailable.includes(n));
-  if (lib.hasManifest() && args.restore && args.command !== "projects" && !args.plan) {
-    // a manifest library: the frozen refresh restores from the lock's commits and rebuilds the working set
+  if (lib.hasConfig() && args.restore && args.command !== "projects" && !args.plan) {
+    // a config library: the frozen refresh restores from the lock's commits and rebuilds the working set
     const r = refresh(lib, { frozen: true, plan: false, unavailable: c.unavailable, log });
     c.unavailable = reportRefresh(lib, r, c.unavailable, args, log, false);
     report.merge(r.report);
-  } else if (lib.hasManifest() && missing.length) log(`${missing.length} lock entries are not installed yet (run without --plan or --no-restore for the frozen refresh that restores them)`);
+  } else if (lib.hasConfig() && missing.length) log(`${missing.length} lock entries are not installed yet (run without --plan or --no-restore for the frozen refresh that restores them)`);
   else if (args.restore && args.command !== "projects" && missing.length && !args.plan) {
     const r = lib.restore(log, missing);
     log(`restored ${r.restored.length} skill(s) from skills-lock.json`);
@@ -401,9 +418,9 @@ async function runOnce(lib: Library, c: Choices, args: Args, cwd: string, report
     if (r.missing.length) log(`  (npx skills remove <name> drops it from the lock; a copy in skills/ keeps it as your own; --retry checks again)`);
     for (const m of r.failed) log(`  failed: ${m}`);
     c.unavailable = [...new Set([...c.unavailable, ...r.missing.map((m) => m.split(":")[0])])];
-    saveConfig(lib.root, c);
+    saveLocal(lib.root, c);
   } else if (missing.length) log(`${missing.length} lock entries are not installed yet (run without --plan or --no-restore to restore them)`);
-  if (c.unavailable.length && !args.quiet && !lib.hasManifest()) log(`${c.unavailable.length} lock entr${c.unavailable.length === 1 ? "y is" : "ies are"} gone upstream (${c.unavailable.join(", ")}); --retry to check again`);
+  if (c.unavailable.length && !args.quiet && !lib.hasConfig()) log(`${c.unavailable.length} lock entr${c.unavailable.length === 1 ? "y is" : "ies are"} gone upstream (${c.unavailable.join(", ")}); --retry to check again`);
 
   if (args.command !== "projects") {
     if (args.layers) {
@@ -440,15 +457,25 @@ function printReport(r: Report, args: Args, extra: Record<string, unknown> = {})
   if (args.json) {
     // a write's payload is the file body; bytes (an attribution file) are summarised, text is kept as before
     const actions = r.actions.map((a) => (Buffer.isBuffer(a.payload) ? { ...a, payload: `<${a.payload.length} bytes>` } : a));
-    process.stdout.write(JSON.stringify({ plan: args.plan, actions, ...extra }, null, 2) + "\n");
+    process.stdout.write(JSON.stringify({ plan: args.plan, actions, links: r.links, linkMode: linkMode(), ...extra }, null, 2) + "\n");
     return;
   }
   const changes = r.changes();
   const conflicts = r.conflicts();
   if (args.quiet && !changes.length && !conflicts.length) return;
   for (const a of r.actions) if (a.kind !== "skip") process.stdout.write(line(a) + "\n");
+  if (r.links.symlink + r.links.junction) process.stdout.write(linksLine(r) + "\n");
   const verb = args.plan ? "would change" : "changed";
   process.stdout.write(`${args.plan ? "plan: " : ""}${changes.length} ${verb}, ${r.skips()} already right, ${conflicts.length} left alone\n`);
+}
+
+/** Which kind of link this run made, and why, when it made any. */
+function linksLine(r: Report): string {
+  const { symlink, junction } = r.links;
+  const mode = linkMode();
+  if (junction && !symlink) return `links: ${junction} made as junctions${mode === "auto" ? " (directory symlinks were refused: Developer Mode or elevation allows them; --junctions makes this the rule)" : " (--junctions)"}`;
+  if (junction) return `links: ${symlink} made as symlinks, ${junction} as junctions (symlinks were refused part way)`;
+  return `links: ${symlink} made as symlinks${mode === "symlink" ? " (--symlinks)" : ""}`;
 }
 
 function printStatus(lib: Library, table: Harness[], json: boolean): void {
@@ -461,7 +488,6 @@ function printStatus(lib: Library, table: Harness[], json: boolean): void {
   for (const [layer, v] of Object.entries(s.layers)) process.stdout.write(`${layer}: ${v.linked} linked, ${v.missing.length} missing\n`);
   for (const [dir, v] of Object.entries(s.user)) process.stdout.write(`${dir}: ${v.linked} linked, ${v.missing.length} missing\n`);
 }
-
 
 /** " (oneezy: 2, flat: 1)" when any own skill sits in a group; nothing for a flat-only library. */
 function groupSummary(s: Status): string {

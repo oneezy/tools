@@ -1,4 +1,4 @@
-// Third-party sources: skills-sources.json declares them, refresh snapshots them under upstream/, writes the lock,
+// Third-party sources: skills-sync.json declares them, refresh snapshots them under upstream/, writes the lock,
 // rebuilds the working set and regenerates skills-lock.json. Upstream is a temp git repository.
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
@@ -84,7 +84,7 @@ function json(file: string): any {
 }
 
 function manifest(sources: Record<string, unknown>): void {
-  fs.writeFileSync(lib.manifestFile, JSON.stringify({ version: 1, sources, plugins: {} }, null, 2) + "\n");
+  fs.writeFileSync(lib.configFile, JSON.stringify({ version: 1, sources, plugins: {} }, null, 2) + "\n");
 }
 
 function source(u: Upstream, extra: Record<string, unknown> = {}): Record<string, unknown> {
@@ -134,7 +134,7 @@ test("refresh snapshots the selected skills and the attribution file, writes .sn
     assert.equal(lock.sources.up.skills[n].hash, recipeHash(path.join(up.dir, "skills", n)), `${n} hash is the recipe's`);
     assert.equal(lock.sources.up.skills[n].hash, recipeHash(path.join(snap, "skills", n)), `${n} snapshot matches`);
   }
-  assert.equal(lock.generated.manifest, createHash("sha256").update(fs.readFileSync(lib.manifestFile)).digest("hex"));
+  assert.equal(lock.generated.manifest, createHash("sha256").update(fs.readFileSync(lib.configFile)).digest("hex"));
 
   const compat = json(lib.lockFile);
   assert.deepEqual(Object.keys(compat.skills), ["a", "b"]);
@@ -271,17 +271,17 @@ test("the hash equals what npx skills 1.7.0 wrote for the same files (a literal 
 test("the manifest and the lock validate against the shipped schemas; an invalid manifest stops refresh naming the path of each problem", async () => {
   const { shippedSchema, validate } = await import("../src/schema.js");
   manifest({ up: source(up, { skills: { a: "a", b: "renamed-b" }, pins: { a: up.head() } }) });
-  const full = { ...json(lib.manifestFile), library: { name: "skills", owner: "oneezy" }, plugins: { up: { displayName: "Up", source: "up" }, oneezy: { displayName: "Oneezy", description: "mine", group: "oneezy" } } };
-  fs.writeFileSync(lib.manifestFile, JSON.stringify(full, null, 2));
-  assert.deepEqual(validate(shippedSchema("skills-sources"), json(lib.manifestFile)), []);
+  const full = { ...json(lib.configFile), library: { name: "skills", owner: "oneezy" }, plugins: { up: { displayName: "Up", source: "up" }, oneezy: { displayName: "Oneezy", description: "mine", group: "oneezy" } } };
+  fs.writeFileSync(lib.configFile, JSON.stringify(full, null, 2));
+  assert.deepEqual(validate(shippedSchema("skills-sync"), json(lib.configFile)), []);
   assert.equal(cli("refresh", "--quiet").status, 0);
   assert.deepEqual(validate(shippedSchema("skills-sources-lock"), json(lib.sourcesLockFile)), []);
 
-  const bad = json(lib.manifestFile);
+  const bad = json(lib.configFile);
   bad.sources.up.policy = "sometimes";
   bad.sources.up.extra = true;
   bad.plugins.up.group = "oneezy";
-  fs.writeFileSync(lib.manifestFile, JSON.stringify(bad));
+  fs.writeFileSync(lib.configFile, JSON.stringify(bad));
   const r = cli("refresh", "--quiet");
   assert.equal(r.status, 1);
   assert.match(r.stderr, /\$\.sources\.up\.policy: must be one of "follow", "pin"/);
@@ -290,12 +290,12 @@ test("the manifest and the lock validate against the shipped schemas; an invalid
   assert.equal(json(lib.sourcesLockFile).sources.up.commit, up.head(), "the lock was left alone");
 });
 
-test("a selected skill missing upstream is reported once, remembered in skills-sync.json, and skipped until --retry; a deselected skill loses its working-set copy and snapshot on the next refresh", () => {
+test("a selected skill missing upstream is reported once, remembered in skills-sync.local.json, and skipped until --retry; a deselected skill loses its working-set copy and snapshot on the next refresh", () => {
   manifest({ up: source(up, { skills: ["a", "b", "zzz"] }) });
   const first = cli("refresh");
   assert.equal(first.status, 0, first.stderr);
   assert.match(first.stderr, /gone upstream: up:zzz/);
-  assert.deepEqual(json(path.join(lib.root, "skills-sync.json")).unavailable, ["zzz"]);
+  assert.deepEqual(json(lib.localFile).unavailable, ["zzz"]);
   assert.deepEqual(Object.keys(json(lib.sourcesLockFile).sources.up.skills), ["a", "b"]);
 
   const second = cli("refresh");
@@ -311,7 +311,7 @@ test("a selected skill missing upstream is reported once, remembered in skills-s
   assert.equal(retry.status, 0, retry.stderr);
   assert.ok("zzz" in json(lib.sourcesLockFile).sources.up.skills);
   assert.ok(fs.existsSync(path.join(lib.agents, "zzz", "SKILL.md")));
-  assert.equal(json(path.join(lib.root, "skills-sync.json")).unavailable, undefined);
+  assert.equal(json(lib.localFile).unavailable, undefined);
 
   manifest({ up: source(up, { skills: ["a", "zzz"] }) });
   const r = cli("refresh", "--json");
@@ -333,7 +333,7 @@ test("add <path to the upstream> writes the manifest entry (default branch, foll
   const clonesBefore = stagedClones();
   const all = cli("add", up.dir, "--quiet");
   assert.equal(all.status, 0, all.stderr);
-  const m = json(lib.manifestFile);
+  const m = json(lib.configFile);
   assert.deepEqual(m, { version: 1, sources: { up: { repo: up.dir, ref: "main", policy: "follow", root: "skills", skills: ["a", "b", "c"], attribution: ["LICENSE"] } }, plugins: {} });
   for (const n of ["a", "b", "c"]) assert.ok(fs.existsSync(path.join(lib.upstream, "up", "skills", n, "SKILL.md")), `${n} snapshotted`);
   assert.deepEqual(Object.keys(json(lib.sourcesLockFile).sources.up.skills), ["a", "b", "c"]);
@@ -344,7 +344,7 @@ test("add <path to the upstream> writes the manifest entry (default branch, foll
 
   const picked = cli("add", up.dir, "--id", "picked", "--root", "skills", "--skills", "a,b", "--as", "b=x-b", "--quiet");
   assert.equal(picked.status, 0, picked.stderr);
-  assert.deepEqual(json(lib.manifestFile).sources.picked, { repo: up.dir, ref: "main", policy: "follow", root: "skills", skills: { a: "a", b: "x-b" }, attribution: ["LICENSE"] });
+  assert.deepEqual(json(lib.configFile).sources.picked, { repo: up.dir, ref: "main", policy: "follow", root: "skills", skills: { a: "a", b: "x-b" }, attribution: ["LICENSE"] });
   assert.ok(fs.existsSync(path.join(lib.upstream, "picked", "skills", "b", "SKILL.md")));
   assert.ok(!fs.existsSync(path.join(lib.upstream, "picked", "skills", "c")));
   assert.ok(fs.readFileSync(path.join(lib.agents, "x-b", "SKILL.md"), "utf8").startsWith("---\nname: x-b\n"));
@@ -352,7 +352,7 @@ test("add <path to the upstream> writes the manifest entry (default branch, foll
   const unknown = cli("add", up.dir, "--id", "nope", "--skills", "a,zzz", "--quiet");
   assert.equal(unknown.status, 1);
   assert.match(unknown.stderr, /zzz/);
-  assert.ok(!("nope" in json(lib.manifestFile).sources), "nothing written for a failed add");
+  assert.ok(!("nope" in json(lib.configFile).sources), "nothing written for a failed add");
 
   assert.deepEqual(fs.readdirSync(homeDir), [], "add writes nothing into the home folder or any harness");
   assert.deepEqual(stagedClones(), clonesBefore, "temp clones deleted");
@@ -369,7 +369,7 @@ test("sync on a manifest library restores from the lock with a frozen refresh (t
   // what a fresh clone of the library has: the manifest and both locks, no generated folders
   fs.rmSync(lib.upstream, { recursive: true });
   fs.rmSync(lib.agents, { recursive: true });
-  fs.rmSync(path.join(lib.root, "skills-sync.json"), { force: true });
+  fs.rmSync(lib.localFile, { force: true });
 
   const sync = () => cli("--quiet", "--json", "--no-pull", "--no-projects", "--no-wsl", "--agents", "claude-code,codex");
   const first = sync();

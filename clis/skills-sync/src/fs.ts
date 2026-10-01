@@ -1,7 +1,27 @@
-// Link primitives that behave the same on Windows (junctions, no admin) and POSIX (symlinks).
+// Link primitives: directory symlinks everywhere, with a junction on Windows when a symlink is refused or asked for.
 import { createHash } from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
+
+/** auto: a directory symlink, a junction when Windows refuses it; symlink or junction: that kind only. */
+export type LinkMode = "auto" | "symlink" | "junction";
+export type LinkKind = "symlink" | "junction";
+
+let mode: LinkMode = "auto";
+
+/** The remembered or forced link mode for this run; read by every makeLink. */
+export function setLinkMode(m: LinkMode): void {
+  mode = m;
+}
+
+export function linkMode(): LinkMode {
+  return mode;
+}
+
+/** The call that makes a link. Tests replace it to make Windows refuse a symlink. */
+export const linkDeps = {
+  symlink: (target: string, link: string, type: "dir" | "junction"): void => fs.symlinkSync(target, link, type),
+};
 
 export function lexists(p: string): boolean {
   try {
@@ -65,9 +85,27 @@ export function real(p: string): string {
   }
 }
 
-export function makeLink(target: string, link: string): void {
+/**
+ * Make `link` point at the folder `target`: a directory symlink first; on Windows, a junction when the symlink is
+ * refused with EPERM (no Developer Mode, not elevated) or when the mode asks for one. POSIX has only symlinks.
+ * Returns the kind made, so the run can say which.
+ */
+export function makeLink(target: string, link: string): LinkKind {
   fs.mkdirSync(path.dirname(link), { recursive: true });
-  fs.symlinkSync(target, link, process.platform === "win32" ? "junction" : "dir");
+  if (process.platform !== "win32") {
+    linkDeps.symlink(target, link, "dir");
+    return "symlink";
+  }
+  if (mode !== "junction") {
+    try {
+      linkDeps.symlink(target, link, "dir");
+      return "symlink";
+    } catch (e) {
+      if (mode === "symlink" || (e as NodeJS.ErrnoException).code !== "EPERM") throw e;
+    }
+  }
+  linkDeps.symlink(target, link, "junction");
+  return "junction";
 }
 
 export function removeLink(link: string): void {
