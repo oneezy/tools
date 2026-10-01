@@ -22,14 +22,20 @@ const GIT = ["-c", "user.name=t", "-c", "user.email=t@example.com", "-c", "commi
 
 /** Run the CLI against the temp library, home redirected into the temp folder, every harness override dropped. */
 function cli(...args: string[]): { status: number | null; stdout: string; stderr: string } {
-  const env: NodeJS.ProcessEnv = { ...process.env, HOME: homeDir, USERPROFILE: homeDir };
-  for (const k of HARNESS_ENV) delete env[k];
-  return spawnSync(process.execPath, [CLI, ...args, "--repo", root], { encoding: "utf8", cwd: root, env });
+  return cliIn(root, ...args);
 }
 
-/** A temp git repository: the library itself, or a source standing in for upstream. */
+/** The same against another library folder: a clone. */
+function cliIn(repo: string, ...args: string[]): { status: number | null; stdout: string; stderr: string } {
+  const env: NodeJS.ProcessEnv = { ...process.env, HOME: homeDir, USERPROFILE: homeDir };
+  for (const k of HARNESS_ENV) delete env[k];
+  return spawnSync(process.execPath, [CLI, ...args, "--repo", repo], { encoding: "utf8", cwd: repo, env });
+}
+
+/** A temp git repository: the library itself, a source standing in for upstream, or (init false) a clone already there. */
 class Repo {
-  constructor(public dir: string) {
+  constructor(public dir: string, init = true) {
+    if (!init) return;
     fs.mkdirSync(dir, { recursive: true });
     this.git("init", "-q", "-b", "main");
   }
@@ -60,7 +66,10 @@ function skillMd(name: string, body = "body"): string {
 
 /** Every file under a folder of the library, relative path with / separators -> bytes. */
 function files(rel: string): Map<string, Buffer> {
-  const dir = path.join(root, rel);
+  return filesIn(path.join(root, rel));
+}
+
+function filesIn(dir: string): Map<string, Buffer> {
   const out = new Map<string, Buffer>();
   const walk = (d: string) => {
     for (const e of fs.readdirSync(d, { withFileTypes: true })) {
@@ -258,6 +267,68 @@ test("two builds of the same input give byte-identical archives and record, from
   assert.deepEqual(now.up, before.up, "the untouched plugin's record is the same");
   assert.notEqual(now.oneezy.sha256, before.oneezy.sha256);
   assert.equal(now.oneezy.version, v3);
+});
+
+const MIT = "MIT License\n\nCopyright (c) 2026 oneezy\n\nPermission is hereby granted, free of charge, to any person obtaining a copy\n";
+
+test("the archives do not depend on the checkout's line endings: a clone git converts to CRLF (core.autocrlf=true) and one it leaves as committed (core.autocrlf=false) give the archives and the record of the library they were cloned from, byte for byte; every text file is archived with LF, a shell script and the library's LICENSE among them, and so is one committed with CRLF, in the library or upstream; a binary file and a file with mixed line endings travel as they are; the working set keeps upstream's bytes", () => {
+  // both repositories commit byte for byte here, whatever this machine's git settings say, so a CRLF file can be committed as one
+  library.git("config", "core.autocrlf", "false");
+  up.git("config", "core.autocrlf", "false");
+  fs.writeFileSync(path.join(up.dir, "skills", "a", "windows.txt"), "upstream\r\nwith CRLF\r\n");
+  up.commit("a CRLF file");
+  const bin = Buffer.from([0, 255, 13, 10, 0, 1, 2, 3]);
+  // binary without a NUL byte: control characters, and CR LF pairs that are data
+  const controls = Buffer.from([1, 2, 3, 13, 10, 4, 5, 6, 7, 14, 15, 16, 13, 10]);
+  write("skills/oneezy/own-one/assets/controls.bin", controls);
+  write("LICENSE", MIT);
+  write("skills/oneezy/own-one/notes/crlf.txt", "one\r\ntwo\r\n");
+  write("skills/oneezy/own-one/notes/mixed.txt", "one\r\ntwo\nthree\r\n");
+  assert.equal(cli("refresh", "--quiet").status, 0);
+  assert.equal(cli(...ALL, "--quiet").status, 0);
+  library.commit("built");
+  const version = json("plugins/oneezy/plugin.json").version;
+  const first = files("artifacts");
+  assert.deepEqual([...first.keys()].sort(), [`oneezy-${version}.zip`, "releases.json", `up-${version}.zip`]);
+  assert.equal(fs.readFileSync(path.join(root, ".agents", "skills", "a", "windows.txt"), "utf8"), "upstream\r\nwith CRLF\r\n", "the working set is upstream's bytes");
+
+  for (const autocrlf of ["true", "false"]) {
+    const clone = path.join(base, `clone-${autocrlf}`);
+    library.git("clone", "-q", "-c", `core.autocrlf=${autocrlf}`, root, clone);
+    const at = new Repo(clone, false);
+    const eol = new Map(at.git("ls-files", "--eol").split(/\r?\n/).map((l) => [l.split("\t")[1], l.split(/\s+/).slice(0, 2).join(" ")]));
+    const converted = autocrlf === "true" ? "i/lf w/crlf" : "i/lf w/lf";
+    for (const f of ["LICENSE", "skills/oneezy/own-one/SKILL.md", "skills/oneezy/own-one/scripts/run.sh"]) assert.equal(eol.get(f), converted, `${f} in the core.autocrlf=${autocrlf} clone`);
+    assert.equal(eol.get("skills/oneezy/own-one/notes/crlf.txt"), "i/crlf w/crlf");
+    assert.equal(cliIn(clone, "refresh", "--frozen", "--quiet").status, 0, "the snapshot and working set from the lock");
+    const r = cliIn(clone, "build", "--artifacts", "--json");
+    assert.equal(r.status, 0, r.stderr);
+    const built = filesIn(path.join(clone, "artifacts"));
+    for (const id of ["oneezy", "up"]) {
+      const name = `${id}-${version}.zip`;
+      assert.ok(built.has(name), `core.autocrlf=${autocrlf}: ${name} among ${[...built.keys()].join(", ")}`);
+      const want = new Map(unzip(first.get(name)!).map((e) => [e.name, e.data]));
+      const differ = unzip(built.get(name)!).filter((e) => !want.get(e.name)?.equals(e.data)).map((e) => e.name);
+      assert.deepEqual(differ, [], `core.autocrlf=${autocrlf}: entries of ${name} that differ from the first build's`);
+    }
+    assert.ok(same(built, first), `core.autocrlf=${autocrlf}: the same archives and releases.json, byte for byte`);
+    assert.equal(cliIn(clone, "build", "--check").status, 0, "and the clone is as built");
+    assert.equal(at.git("status", "--porcelain"), "");
+
+    const own = new Map(unzip(built.get(`oneezy-${version}.zip`)!).map((e) => [e.name, e.data]));
+    assert.equal(own.get("oneezy/skills/own-one/scripts/run.sh")!.toString("utf8"), "#!/bin/sh\necho ünïcode\n", "a script reaches Linux with LF");
+    assert.equal(own.get("oneezy/skills/own-one/SKILL.md")!.toString("utf8"), "---\nname: own-one\ndescription: own-one skill\nmetadata:\n  internal: true\n---\nbody\n");
+    assert.equal(own.get("oneezy/LICENSE")!.toString("utf8"), MIT);
+    assert.equal(own.get("oneezy/skills/own-one/notes/crlf.txt")!.toString("utf8"), "one\ntwo\n", "committed with CRLF: LF in the package");
+    assert.equal(own.get("oneezy/skills/own-one/notes/mixed.txt")!.toString("utf8"), "one\r\ntwo\nthree\r\n", "mixed line endings: as it is");
+    assert.ok(own.get("oneezy/skills/own-one/assets/dot.bin")!.equals(bin), "a binary file: as it is, its CR LF pair too");
+    assert.ok(own.get("oneezy/skills/own-one/assets/controls.bin")!.equals(controls), "and one without a NUL byte");
+    const source = new Map(unzip(built.get(`up-${version}.zip`)!).map((e) => [e.name, e.data]));
+    assert.equal(source.get("up/skills/a/windows.txt")!.toString("utf8"), "upstream\nwith CRLF\n", "a third-party file committed with CRLF: LF in the package");
+  }
+  // the committed package is the same form: what an archive holds is what plugins/<id> holds
+  assert.equal(files("plugins/oneezy").get("skills/own-one/notes/crlf.txt")!.toString("utf8"), "one\ntwo\n");
+  assert.equal(files("plugins/up").get("skills/a/windows.txt")!.toString("utf8"), "upstream\nwith CRLF\n");
 });
 
 test("artifacts/releases.json records per plugin its archive, sha256, version, source commit, entries and the last release the config records (null without one); artifacts/<id>.changes.md appears only when that release's files name a file the new archive lacks, lists them and says the upload must be a new plugin, not an overlay; it goes once the record names no such file", () => {

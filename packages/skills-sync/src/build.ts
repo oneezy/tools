@@ -157,7 +157,7 @@ function resolvePackage(lib: Library, config: Config, id: string, report: Report
     for (const s of own) skills.set(s.name, skillCopy(s.dir, report));
     const licenseFile = ["LICENSE", "LICENSE.md", "LICENSE.txt"].map((n) => path.join(lib.root, n)).find((f) => fs.existsSync(f));
     if (!licenseFile) report.add({ kind: "note", path: where, note: "no LICENSE in the library; the package carries none" });
-    const license = licenseFile ? fs.readFileSync(licenseFile) : null;
+    const license = licenseFile ? lf(fs.readFileSync(licenseFile)) : null;
     return { id, plugin, skills, license, spdx: license ? spdx(license.toString("utf8")) : null, origin: { kind: "own", group: plugin.group } };
   }
   const src = config.sources[plugin.source!];
@@ -192,7 +192,7 @@ function resolvePackage(lib: Library, config: Config, id: string, report: Report
   const licenseRel = (meta.attribution ?? []).find((f) => /^LICENSE(\.|$)/i.test(path.posix.basename(f)));
   const licenseFile = licenseRel ? path.join(snapDir, licenseRel) : null;
   if (!licenseFile || !fs.existsSync(licenseFile)) report.add({ kind: "note", path: where, note: `no LICENSE among the attribution files of ${plugin.source}; the package carries none` });
-  const license = licenseFile && fs.existsSync(licenseFile) ? fs.readFileSync(licenseFile) : null;
+  const license = licenseFile && fs.existsSync(licenseFile) ? lf(fs.readFileSync(licenseFile)) : null;
   return { id, plugin, skills, license, spdx: license ? spdx(license.toString("utf8")) : null, origin: { kind: "source", id: plugin.source!, src, commit: meta.commit, date: meta.date, perSkill } };
 }
 
@@ -325,15 +325,14 @@ export function withInternal(md: string): string {
   return `---${open}${next.join(open)}${close}---` + md.slice(whole.length);
 }
 
-/** The copy of a skill folder that goes into a package: its root SKILL.md transformed, everything else as it is; a link inside is not copied, with a note. */
+/**
+ * The copy of a skill folder that goes into a package: every file in the package's line endings (see `lf`), its root
+ * SKILL.md marked internal, everything else as it is; a link inside is not copied, with a note.
+ */
 function skillCopy(dir: string, report: Report): Map<string, Buffer> {
   const { files, links } = folderFiles(dir);
   for (const l of links) report.add({ kind: "note", path: path.join(dir, l), note: "a link; not copied into the package" });
-  return internalCopy(files);
-}
-
-function internalCopy(files: Map<string, Buffer>): Map<string, Buffer> {
-  const out = new Map(files);
+  const out = new Map([...files].map(([rel, bytes]) => [rel, lf(bytes)]));
   const md = out.get("SKILL.md");
   if (md) out.set("SKILL.md", Buffer.from(withInternal(md.toString("utf8")), "utf8"));
   return out;
@@ -459,6 +458,27 @@ export function asBuilt(have: Buffer, expected: Buffer): boolean {
 function crlf(b: Buffer): Buffer {
   if (b.includes(0) || b.includes(0x0d)) return b;
   return Buffer.from(b.toString("latin1").replace(/\n/g, "\r\n"), "latin1");
+}
+
+/**
+ * A source file in the line endings a package holds: a text file whose line endings are all CRLF gets LF, anything
+ * else stays as it is. The files of a package are read from a checkout, and a checkout that converts on the way out
+ * (core.autocrlf=true) hands a committed LF file over as CRLF; copied as read, the same commit would give another
+ * package there, another archive with another sha256, and a shell script that fails on Linux. A file with a bare LF
+ * (LF or mixed endings) is not a converted one; text is what git takes for it: no NUL, and at most one control
+ * character in 128 bytes.
+ */
+function lf(b: Buffer): Buffer {
+  if (!b.includes("\r\n") || b.includes(0)) return b;
+  let control = 0;
+  for (let i = 0; i < b.length; i++) {
+    const c = b[i];
+    if (c === 0x0a && b[i - 1] !== 0x0d) return b;
+    // every C0 control but BS, HT, LF, FF, CR and ESC, and DEL
+    if (c === 0x7f || (c < 0x20 && ![0x08, 0x09, 0x0a, 0x0c, 0x0d, 0x1b].includes(c))) control++;
+  }
+  if (control > (b.length - control) >> 7) return b;
+  return Buffer.from(b.toString("latin1").replace(/\r\n/g, "\n"), "latin1");
 }
 
 /**

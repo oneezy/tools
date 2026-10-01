@@ -18,7 +18,7 @@ export interface Built {
   version: string;
   /** where its files came from: the upstream commit for a source, the library commit it was built at for an own group; null without git */
   commit: string | null;
-  /** relative path (/ separators) -> bytes, every file of the package */
+  /** relative path (/ separators) -> bytes, every file of the package, in the package's line endings (LF), never the checkout's */
   files: Map<string, Buffer>;
 }
 
