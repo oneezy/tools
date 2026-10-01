@@ -1,7 +1,14 @@
-# Written by task-manager (clis/task-manager-cli in oneezy/tools). The work happens in
+# Written by task-manager (packages/task-manager in oneezy/tools). The work happens in
 # oneezy/tools/.github/workflows/task-manager.yml; this file only says which events to send it.
 # Secrets: PROJECT_PAT (classic PAT, project + repo, held by the account that owns the project) and
 # CLAUDE_CODE_OAUTH_TOKEN (Claude Code subscription token for the estimate job).
+#
+# Status follows git: a branch named <type>/<n>-<slug> or a draft PR puts #n In Progress, a PR
+# marked ready puts it in Review, a merge into dev closes it (Done), a push to main makes it Complete.
+# An agent that begins a ticket with no numbered branch dispatches this workflow with start=<n>.
+# Phases (issues labelled `phase`, from the repo's roadmap) are linked to tasks through Milestones:
+# a task joins a phase by taking the phase's Milestone (gh issue edit <n> --milestone "Phase 5 — ...").
+# The workflow never touches milestones.
 name: task-manager
 
 on:
@@ -24,6 +31,10 @@ on:
         description: Size every unsized open issue now
         type: boolean
         default: false
+      start:
+        description: Issue number to move to In Progress (work begun without a numbered branch)
+        type: string
+        default: ''
 
 permissions:
   contents: read
@@ -37,6 +48,7 @@ jobs:
     with:
       backfill: ${{ inputs.backfill || false }}
       estimate: ${{ inputs.estimate || false }}
+      start: ${{ inputs.start || '' }}
     secrets:
       PROJECT_PAT: ${{ secrets.PROJECT_PAT }}
       CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}

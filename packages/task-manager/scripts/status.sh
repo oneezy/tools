@@ -5,10 +5,10 @@
 #
 # Inputs (env):
 #   REPO                owner/name (default: the current clone)
-#   EVENT               issues | create | pull_request | pull_request_review | push | workflow_dispatch
+#   EVENT               issues | create | pull_request | pull_request_review | push | start | workflow_dispatch
 #   ACTION              the event's action: assigned unassigned reopened labeled opened ready_for_review
 #                       converted_to_draft closed submitted
-#   ISSUE               issue number                      (issues)
+#   ISSUE               issue number                      (issues, start)
 #   LABEL               the label just added              (issues labeled)
 #   REF_TYPE, REF       "branch" and the branch name      (create)
 #   PR                  pull request number               (pull_request, pull_request_review)
@@ -17,6 +17,7 @@
 #   PR_MERGED           true | false                      (pull_request closed)
 #   REVIEW_STATE        approved | changes_requested | commented   (pull_request_review)
 #   PUSH_REF            refs/heads/<branch>               (push)
+#   START               issue number to move to In Progress               (workflow_dispatch)
 #   BACKFILL            true recomputes every board item from git facts   (workflow_dispatch)
 #   INTEGRATION_BRANCH  merging into it closes the linked issues; default dev
 #   RELEASE_BRANCH      pushing to it moves Done to Complete; default main
@@ -26,6 +27,9 @@
 #   issue assigned                       -> Next Up      from Todo or no Status
 #   issue unassigned, nobody left        -> Todo         from Next Up, In Progress, Review
 #   branch <type>/<n>-<slug> created     -> In Progress  from Todo, Next Up or no Status
+#   start (EVENT=start, or a dispatch with start=<n>)  -> In Progress  from Todo, Next Up or no Status;
+#                                           the line an agent runs when it begins a ticket with no numbered branch
+#   PR opened as a draft                 -> In Progress  for its linked issues, from Todo, Next Up or no Status
 #   PR opened (not draft) or ready       -> Review       for its linked issues, skipping wayfinder:research
 #   PR to draft, or changes requested    -> In Progress  from Review
 #   PR merged into INTEGRATION_BRANCH    -> the linked issues are closed (needs-changes removed), then Done
@@ -35,6 +39,7 @@
 #                                           open and unassigned with no Status: Todo; everything else kept
 # A PR's linked issues are its closing references plus the issue its branch is named after.
 # Closed issues are never moved except to Done or Complete; wayfinder maps and phases are never moved.
+# Milestones are never touched: a task joins a phase by taking the phase's Milestone (oneezy/tools#77).
 # Needs: gh with a token that can write the project (PROJECT_PAT in CI). No jq: gh's --jq does the parsing.
 set -euo pipefail
 
@@ -157,6 +162,10 @@ to_review() { # to_review <n>: Review, unless the ticket is research
   move "$1" Review "-" Todo "Next Up" "In Progress"
 }
 
+start_work() { # start_work <n>: In Progress, the same step a numbered branch takes
+  move "$1" "In Progress" "-" Todo "Next Up"
+}
+
 close_merged() { # close_merged <n> <pr>
   local state
   state=$(issue_info "$1" | cut -f3)
@@ -235,8 +244,11 @@ case "${EVENT:-}/${ACTION:-}" in
     n=$(branch_issue "${REF:-}")
     if [ -n "$n" ]; then move "$n" "In Progress" "-" Todo "Next Up"; else say "kept: branch ${REF:-} names no issue"; fi ;;
   pull_request/opened|pull_request/ready_for_review)
-    [ "${PR_DRAFT:-false}" != "true" ] || { say "kept: #$PR is a draft"; exit 0; }
-    for n in $(linked_issues "$PR"); do to_review "$n"; done ;;
+    if [ "${PR_DRAFT:-false}" = "true" ]; then for n in $(linked_issues "$PR"); do start_work "$n"; done
+    else for n in $(linked_issues "$PR"); do to_review "$n"; done; fi ;;
+  start/*)
+    [ -n "${ISSUE:-}" ] || die "start needs ISSUE=<n>"
+    start_work "$ISSUE" ;;
   pull_request/converted_to_draft)
     for n in $(linked_issues "$PR"); do move "$n" "In Progress" Review; done ;;
   pull_request_review/submitted)
@@ -250,8 +262,9 @@ case "${EVENT:-}/${ACTION:-}" in
     [ "${PUSH_REF:-}" = "refs/heads/$RELEASE_BRANCH" ] || { say "kept: push to ${PUSH_REF:-} is not $RELEASE_BRANCH"; exit 0; }
     promote ;;
   workflow_dispatch/*)
-    [ "${BACKFILL:-false}" = "true" ] || { say "kept: dispatch without backfill"; exit 0; }
-    backfill ;;
+    if [ -n "${START:-}" ]; then start_work "$START"
+    elif [ "${BACKFILL:-false}" = "true" ]; then backfill
+    else say "kept: dispatch without backfill or start"; fi ;;
   *)
     say "kept: no rule for ${EVENT:-}/${ACTION:-}" ;;
 esac
