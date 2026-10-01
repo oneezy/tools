@@ -3,11 +3,11 @@
 #
 # This one file is both the workflow oneezy/tools runs on its own events and the reusable workflow
 # every other bootstrapped repo calls (`uses: oneezy/tools/.github/workflows/task-manager.yml@main`)
-# from the thin caller that clis/task-manager-cli writes (clis/task-manager-cli/caller.yml). When
+# from the thin caller that packages/task-manager writes (packages/task-manager/caller.yml). When
 # called, the `github` context is the caller's, so github.event is the caller's event.
 #
 # Two jobs, chosen by the event:
-#   status    every event but "issue opened": clis/task-manager-cli/scripts/status.sh moves the
+#   status    every event but "issue opened": packages/task-manager/scripts/status.sh moves the
 #             issue's Status (assigned -> Next Up, branch -> In Progress, PR ready -> Review, merged
 #             into dev -> closed and Done, push to main -> Complete, ...). A dispatch with
 #             backfill=true recomputes the whole board from git facts.
@@ -85,10 +85,10 @@ jobs:
         with:
           repository: oneezy/tools
           ref: ${{ github.repository == 'oneezy/tools' && github.sha || 'main' }}
-          sparse-checkout: clis/task-manager-cli/scripts
+          sparse-checkout: packages/task-manager/scripts
           persist-credentials: false
       - name: Move Status
-        run: bash clis/task-manager-cli/scripts/status.sh
+        run: bash packages/task-manager/scripts/status.sh
         env:
           GH_TOKEN: ${{ secrets.PROJECT_PAT }}
           REPO: ${{ github.repository }}
