@@ -323,7 +323,7 @@ test("build --check computes every output in memory, prints each drifted path an
   assert.equal(cli("build", "--check", "--plugins").status, 1, "the package is not");
 });
 
-test("generate.plugins: false builds nothing and --check ignores the plugin form; --artifacts only says it is the next stage; a library without git gets version 0.0.0+nogit", () => {
+test("generate.plugins: false builds nothing and --check ignores the plugin form; a build with no output named writes packages and catalogs and no archive; a library without git gets version 0.0.0+nogit, its archives too", () => {
   config({ ...CONFIG(), generate: { skills: true, plugins: false } });
   const off = cli("build", "--plugins", "--catalogs");
   assert.equal(off.status, 0, off.stderr);
@@ -337,12 +337,9 @@ test("generate.plugins: false builds nothing and --check ignores the plugin form
   assert.ok(fs.existsSync(path.join(root, "plugins", "stale", "plugin.json")), "and nothing is touched");
 
   config();
-  const artifacts = cli("build", "--artifacts");
-  assert.equal(artifacts.status, 0, artifacts.stderr);
-  assert.match(artifacts.stderr, /artifacts: next stage/);
-  assert.ok(!fs.existsSync(path.join(root, "artifacts")));
-  assert.ok(!fs.existsSync(path.join(root, "plugins", "oneezy")), "--artifacts alone builds no package");
-  assert.doesNotMatch(cli("build", "--check").stderr, /artifacts/, "--check does not mention artifacts");
+  assert.equal(cli("build", "--quiet").status, 0);
+  assert.ok(fs.existsSync(path.join(root, "plugins", "oneezy", "plugin.json")) && fs.existsSync(path.join(root, ".claude-plugin", "marketplace.json")));
+  assert.ok(!fs.existsSync(path.join(root, "artifacts")), "a build with no output named writes the committed form only: no archive");
 
   fs.rmSync(path.join(root, ".git"), { recursive: true, force: true });
   assert.equal(cli("build", "--quiet").status, 0);
@@ -350,6 +347,12 @@ test("generate.plugins: false builds nothing and --check ignores the plugin form
   assert.equal(json(path.join(root, "plugins", "up", ".codex-plugin", "plugin.json")).version, "0.0.0+nogit");
   assert.ok(read("plugins/oneezy/NOTICE.md").includes("not a git checkout"));
   assert.deepEqual(changes(cli("build", "--json")), [], "settled without git too");
+  // the archives carry the same version; an own plugin has no commit to record, a source plugin still has upstream's
+  assert.equal(cli("build", "--artifacts", "--quiet").status, 0);
+  assert.deepEqual(fs.readdirSync(path.join(root, "artifacts")).sort(), ["oneezy-0.0.0+nogit.zip", "releases.json", "up-0.0.0+nogit.zip"]);
+  const record = json(path.join(root, "artifacts", "releases.json")).plugins;
+  assert.equal(record.oneezy.commit, null);
+  assert.equal(record.up.commit, up.head());
 });
 
 test("the config schema admits a releases section (the ChatGPT upload record per plugin: plugin_id, release_id, sha256, scope, date, optional files) and nothing else inside it", async () => {

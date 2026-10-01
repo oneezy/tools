@@ -1,10 +1,12 @@
 // build: the plugin form, written into the library from skills-sync.json. One package per plugin under plugins/<id>/
 // (an own group's skills, or a source's working-set copies), with the three host manifests, LICENSE and NOTICE.md; and
-// the two root catalogs that point at ./plugins/<id>. Every output is computed in memory first and compared with disk,
-// so a build with nothing new is silent and --check is the same computation that writes nothing.
+// the two root catalogs that point at ./plugins/<id>; and, on request, the upload archives under artifacts/. Every output
+// is computed in memory first and compared with disk, so a build with nothing new is silent and --check is the same
+// computation that writes nothing.
 import { spawnSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
+import { archives, type Built } from "./artifacts.js";
 import { isDir, isLink, isSkillDir } from "./fs.js";
 import { Library } from "./library.js";
 import { apply, Report } from "./plan.js";
@@ -87,8 +89,11 @@ export function build(lib: Library, opts: BuildOptions): BuildResult {
   const result: BuildResult = { report, version: head.version, drift: [], off: !config.generate.plugins };
   if (result.off) return result;
   const changes = new Report(); // what differs from disk, applied unless checking
-  if (opts.plugins) {
-    const ids = Object.keys(config.plugins);
+  // a check never looks at artifacts/: the archives are upload material, generated and ignored by git
+  const artifacts = opts.artifacts && !opts.check;
+  const built: Built[] = [];
+  const ids = Object.keys(config.plugins);
+  if (opts.plugins || artifacts) {
     for (const id of ids) {
       const dir = path.join(lib.plugins, id);
       const pkg = resolvePackage(lib, config, id, changes);
@@ -102,9 +107,16 @@ export function build(lib: Library, opts: BuildOptions): BuildResult {
       // a package whose files are unchanged keeps the version and commit it was built with: the HEAD moves with every
       // commit of the library, and a rebuild after one must not rewrite packages whose inputs did not change
       const prior = priorHead(lib.root, disk.files, head, pkg.origin.kind === "own");
-      const unchanged = sameFiles(disk.files, render(pkg, config, prior));
-      reconcile(changes, dir, disk.files, unchanged ? render(pkg, config, prior) : render(pkg, config, head), opts.check);
+      const atPrior = render(pkg, config, prior);
+      const unchanged = sameFiles(disk.files, atPrior);
+      const at = unchanged ? prior : head;
+      const files = unchanged ? atPrior : render(pkg, config, head);
+      if (opts.plugins) reconcile(changes, dir, disk.files, files, opts.check);
+      // the archive is made from the same files, so it is the package build writes, at the version its manifests carry
+      built.push({ id, version: at.version, commit: pkg.origin.kind === "source" ? pkg.origin.commit : at.commit, files });
     }
+  }
+  if (opts.plugins) {
     // packages for ids no longer in the config; a link there was not built here and is left alone
     if (isDir(lib.plugins)) {
       for (const n of fs.readdirSync(lib.plugins).sort(cmp)) {
@@ -123,6 +135,7 @@ export function build(lib: Library, opts: BuildOptions): BuildResult {
       else changes.add({ kind: "write", path: file, payload: bytes, note: have ? (opts.check ? "differs" : "changed") : opts.check ? "missing" : "new" });
     }
   }
+  if (artifacts) archives(lib, config, built, changes);
   report.merge(changes);
   // --check: every write and delete is drift, and so is every package that cannot be built (a conflict)
   if (opts.check) result.drift = changes.actions.filter((a) => a.kind !== "skip" && a.kind !== "note").map((a) => path.relative(lib.root, a.path).split("\\").join("/"));

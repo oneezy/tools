@@ -39,6 +39,10 @@ export class Library {
   get plugins(): string {
     return path.join(this.root, "plugins");
   }
+  /** Upload archives: artifacts/<id>-<version>.zip and their record, written by build --artifacts, never committed. */
+  get artifacts(): string {
+    return path.join(this.root, "artifacts");
+  }
   /** The Claude Code marketplace catalog, written by build and committed. */
   get claudeCatalog(): string {
     return path.join(this.root, ".claude-plugin", "marketplace.json");

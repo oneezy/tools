@@ -36,8 +36,9 @@ Commands
   refresh          resolve every source in skills-sync.json at the tip of its ref (a pinned skill at its pin): snapshot
                    under upstream/, rebuild the third-party working set, write skills-lock.json
   add <source>     declare a source (owner/repo[#ref], a git URL or a path) in skills-sync.json, then refresh
-  build            write the plugin form into the library when skills-sync.json has generate.plugins on: --plugins,
-                   --catalogs, --artifacts pick the outputs (all when none is named); --check diffs instead of writing
+  build            write the plugin form into the library when skills-sync.json has generate.plugins on: --plugins and
+                   --catalogs pick the committed outputs (both when neither is named), --artifacts writes the upload
+                   archives; --check diffs instead of writing
   check            is what is committed consistent? every own skill's frontmatter (name is its folder's name and a
                    valid id, description present), every flow.yaml beside one (schemas/flow.schema.json, unique step
                    ids, after/parallel/join naming steps that exist), and generated-file drift (what build --check
@@ -48,9 +49,12 @@ Build
   --plugins              plugins/<id>/ for every plugin in the config: the skill copies (marked metadata.internal: true),
                          plugin.json, .codex-plugin/plugin.json, .claude-plugin/plugin.json, LICENSE, NOTICE.md
   --catalogs             .claude-plugin/marketplace.json and .agents/plugins/marketplace.json, listing ./plugins/<id>
-  --artifacts            archives under artifacts/ (next stage; prints a line for now)
+  --artifacts            artifacts/<id>-<version>.zip per plugin for the ChatGPT upload (stored, fixed timestamps, sorted:
+                         the same input gives the same bytes), artifacts/releases.json (archive, sha256, version, source
+                         commit, files, the release the config records), and artifacts/<id>.changes.md when that
+                         release holds a file the archive lacks (upload as a new plugin, not an update)
   --check                compute every output in memory, print each path that differs from disk, write nothing;
-                         exit 1 on drift or a package that cannot be built, 0 when clean (CI)
+                         exit 1 on drift or a package that cannot be built, 0 when clean (CI); never looks at artifacts/
 
 Refresh and add
   --frozen               every skill at the commit skills-lock.json records; nothing moves, the lock is not written (CI)
@@ -377,13 +381,14 @@ function runAdd(lib: Library, args: Args, log: (m: string) => void, report: Repo
  * build: the plugin form from skills-sync.json, every output computed in memory and written only where disk differs.
  * --check reports the differences instead and exits 1 when there are any; CI runs it on every push. A package that
  * cannot be built (a group without skills, a source not in the config or without a snapshot, a link inside the
- * package) is a conflict: left alone, exit 1 in both modes, listed as drift by --check.
+ * package) is a conflict: left alone, exit 1 in both modes, listed as drift by --check. The committed form (packages
+ * and catalogs) is what a build with no output named writes and what --check looks at; the archives under artifacts/
+ * are written only when --artifacts asks, and never checked.
  */
 function runBuild(lib: Library, args: Args, log: (m: string) => void, report: Report): void {
   if (!lib.hasConfig()) bail(`no ${path.basename(lib.configFile)} in ${lib.root}; add <source> writes one`);
-  const none = !args.plugins && !args.catalogs && !args.artifacts;
-  if (args.artifacts) log("artifacts: next stage");
-  const r = build(lib, { plugins: args.plugins || none, catalogs: args.catalogs || none, artifacts: false, check: args.check, plan: args.plan, log });
+  const none = !args.plugins && !args.catalogs && (args.check || !args.artifacts);
+  const r = build(lib, { plugins: args.plugins || none, catalogs: args.catalogs || none, artifacts: args.artifacts, check: args.check, plan: args.plan, log });
   report.merge(r.report);
   if (r.off && !args.quiet) log(`generate.plugins is false in ${path.basename(lib.configFile)}: nothing built, nothing checked`);
   const conflicts = r.report.conflicts().length;
