@@ -35,6 +35,18 @@ export class Library {
   get upstream(): string {
     return path.join(this.root, "upstream");
   }
+  /** Built packages: plugins/<id>/, written by build and committed. */
+  get plugins(): string {
+    return path.join(this.root, "plugins");
+  }
+  /** The Claude Code marketplace catalog, written by build and committed. */
+  get claudeCatalog(): string {
+    return path.join(this.root, ".claude-plugin", "marketplace.json");
+  }
+  /** The Codex marketplace catalog, written by build and committed. */
+  get codexCatalog(): string {
+    return path.join(this.root, ".agents", "plugins", "marketplace.json");
+  }
   /** A config library: refresh owns the third-party working set and the lock. A legacy answers-only skills-sync.json does not count. */
   hasConfig(): boolean {
     return configKind(this.root) === "config";

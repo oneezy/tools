@@ -5,6 +5,7 @@ import os from "node:os";
 import path from "node:path";
 import * as p from "@clack/prompts";
 import { addSource } from "./add.js";
+import { build } from "./build.js";
 import { LOCAL_NAME, migrateAnswers, readLocal, writeLocal, type LinkMode, type Local } from "./config.js";
 import { gitExclude, isDir, isLink, lexists, linkMode, linkTarget, real, samePath, setLinkMode } from "./fs.js";
 import { detected, harnessTable, type Harness } from "./harnesses.js";
@@ -34,6 +35,16 @@ Commands
   refresh          resolve every source in skills-sync.json at the tip of its ref (a pinned skill at its pin): snapshot
                    under upstream/, rebuild the third-party working set, write skills-lock.json
   add <source>     declare a source (owner/repo[#ref], a git URL or a path) in skills-sync.json, then refresh
+  build            write the plugin form into the library when skills-sync.json has generate.plugins on: --plugins,
+                   --catalogs, --artifacts pick the outputs (all when none is named); --check diffs instead of writing
+
+Build
+  --plugins              plugins/<id>/ for every plugin in the config: the skill copies (marked metadata.internal: true),
+                         plugin.json, .codex-plugin/plugin.json, .claude-plugin/plugin.json, LICENSE, NOTICE.md
+  --catalogs             .claude-plugin/marketplace.json and .agents/plugins/marketplace.json, listing ./plugins/<id>
+  --artifacts            archives under artifacts/ (next stage; prints a line for now)
+  --check                compute every output in memory, print each path that differs from disk, write nothing;
+                         exit 1 on drift, 0 when clean (CI)
 
 Refresh and add
   --frozen               every skill at the commit skills-lock.json records; nothing moves, the lock is not written (CI)
@@ -78,6 +89,12 @@ interface Args {
   root?: string;
   skills?: string[] | "*";
   as: Record<string, string>;
+  /** build: which outputs; all when none is set */
+  plugins: boolean;
+  catalogs: boolean;
+  artifacts: boolean;
+  /** build: diff in memory, write nothing, exit 1 on drift */
+  check: boolean;
   repo?: string;
   library?: string;
   agents?: string[];
@@ -102,7 +119,7 @@ interface Args {
 }
 
 function parseArgs(argv: string[]): Args {
-  const a: Args = { command: "sync", positional: [], frozen: false, as: {}, pull: true, restore: true, retry: false, sidecars: false, layers: true, watch: false, plan: false, quiet: false, json: false, yes: false, ask: false };
+  const a: Args = { command: "sync", positional: [], frozen: false, as: {}, plugins: false, catalogs: false, artifacts: false, check: false, pull: true, restore: true, retry: false, sidecars: false, layers: true, watch: false, plan: false, quiet: false, json: false, yes: false, ask: false };
   const list = (v: string) => v.split(",").map((s) => s.trim()).filter(Boolean);
   let command: string | null = null;
   for (let i = 0; i < argv.length; i++) {
@@ -123,7 +140,11 @@ function parseArgs(argv: string[]): Args {
         if (!from || !to) bail(`--as takes old=new pairs, not ${pair}`);
         a.as[from] = to;
       }
-    } else if (x === "--repo") a.repo = next();
+    } else if (x === "--plugins") a.plugins = true;
+    else if (x === "--catalogs") a.catalogs = true;
+    else if (x === "--artifacts") a.artifacts = true;
+    else if (x === "--check") a.check = true;
+    else if (x === "--repo") a.repo = next();
     else if (x === "--library") a.library = next();
     else if (x === "--agents") a.agents = list(next());
     else if (x === "--global") a.global = true;
@@ -214,9 +235,10 @@ async function main(): Promise<void> {
   const local = readLocal(lib.root);
   setLinkMode(args.links ?? local.links ?? "auto");
 
-  // refresh and add edit the library they are pointed at and nothing else: no pull, no ~/.skills-sync, no harness
+  // refresh, add and build edit the library they are pointed at and nothing else: no pull, no ~/.skills-sync, no harness
   if (args.command === "refresh") return runRefresh(lib, args, log, setup);
   if (args.command === "add") return runAdd(lib, args, log, setup);
+  if (args.command === "build") return runBuild(lib, args, log, setup);
 
   // ~/.skills-sync points at the library from now on, so every later run finds it from anywhere
   const hl = homeLibrary(userHome);
@@ -341,6 +363,25 @@ function runAdd(lib: Library, args: Args, log: (m: string) => void, report: Repo
   report.merge(res.report);
   printReport(report, args, { sources: res.sources, gone: res.gone, unlocked: res.unlocked, problems: res.problems });
   if (res.problems.length) process.exitCode = 1;
+}
+
+/**
+ * build: the plugin form from skills-sync.json, every output computed in memory and written only where disk differs.
+ * --check reports the differences instead and exits 1 when there are any; CI runs it on every push.
+ */
+function runBuild(lib: Library, args: Args, log: (m: string) => void, report: Report): void {
+  if (!lib.hasConfig()) bail(`no ${path.basename(lib.configFile)} in ${lib.root}; add <source> writes one`);
+  const none = !args.plugins && !args.catalogs && !args.artifacts;
+  if (args.artifacts) log("artifacts: next stage");
+  const r = build(lib, { plugins: args.plugins || none, catalogs: args.catalogs || none, check: args.check, plan: args.plan, log });
+  report.merge(r.report);
+  if (r.off && !args.quiet) log(`generate.plugins is false in ${path.basename(lib.configFile)}: nothing built, nothing checked`);
+  if (!args.check) return printReport(report, args, { version: r.version });
+  if (r.drift.length) process.exitCode = 1;
+  if (args.json) return printReport(report, args, { check: true, drift: r.drift, version: r.version });
+  for (const a of report.actions) if (a.kind === "note" || a.kind === "conflict") process.stdout.write(line(a) + "\n");
+  for (const d of r.drift) process.stdout.write(`drift        ${d}\n`);
+  process.stdout.write(r.drift.length ? `build --check: ${r.drift.length} path(s) differ from what build would write; run build --plugins --catalogs\n` : `build --check: clean, ${report.skips()} files as built\n`);
 }
 
 function saveLocal(root: string, c: Choices): void {

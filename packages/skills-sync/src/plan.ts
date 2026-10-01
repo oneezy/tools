@@ -4,10 +4,11 @@ import path from "node:path";
 import { copyDir, isLink, lexists, linkTarget, makeLink, removeLink, samePath, under, type LinkKind } from "./fs.js";
 
 /**
- * remove drops a link; delete drops a real folder or file (only ever a generated one: a snapshot or a working-set copy);
- * move renames a file this tool wrote (path -> target).
+ * remove drops a link; delete drops a real folder or file (only ever a generated one: a snapshot, a working-set copy or
+ * a built package); move renames a file this tool wrote (path -> target). note says something about a path without
+ * touching it (a package built without a LICENSE): printed, and neither a change nor a conflict.
  */
-export type Kind = "link" | "relink" | "remove" | "delete" | "replace-copy" | "copy" | "write" | "move" | "exclude" | "skip" | "conflict";
+export type Kind = "link" | "relink" | "remove" | "delete" | "replace-copy" | "copy" | "write" | "move" | "exclude" | "skip" | "conflict" | "note";
 
 export interface Action {
   kind: Kind;
@@ -27,7 +28,7 @@ export class Report {
     return a;
   }
   changes(): Action[] {
-    return this.actions.filter((a) => a.kind !== "skip" && a.kind !== "conflict");
+    return this.actions.filter((a) => a.kind !== "skip" && a.kind !== "conflict" && a.kind !== "note");
   }
   conflicts(): Action[] {
     return this.actions.filter((a) => a.kind === "conflict");
@@ -42,7 +43,7 @@ export class Report {
   }
 }
 
-const MARK: Record<Kind, string> = { link: "+", relink: "~", remove: "-", delete: "-", "replace-copy": "~", copy: "+", write: "+", move: "~", exclude: "+", skip: "=", conflict: "!" };
+const MARK: Record<Kind, string> = { link: "+", relink: "~", remove: "-", delete: "-", "replace-copy": "~", copy: "+", write: "+", move: "~", exclude: "+", skip: "=", conflict: "!", note: "." };
 
 export function line(a: Action): string {
   const tail = a.target ? ` -> ${a.target}` : "";
