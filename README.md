@@ -12,7 +12,7 @@ pnpm dev       # the dev servers of the packages that have one
 
 | package | language | what it is |
 |---|---|---|
-| `clis/skills-sync` (moves to `packages/skills-sync` in #75 step 2) | TypeScript | `npx @oneezy/skills-sync`: one skills library linked into every harness |
+| `packages/skills-sync` | TypeScript | `npx @oneezy/skills-sync`: one skills library linked into every harness |
 | `packages/skills-viewer` | TypeScript | static map of a skills library (graph.json, graph.mmd, graph.html) |
 | `packages/remote-sessions` | Python | Claude session picker, Remote Control launcher, the shared `workspace` worktree command |
 | `packages/task-manager` | PowerShell + bash | one GitHub project per repo, and the `status.sh` behind `.github/workflows/task-manager.yml` |

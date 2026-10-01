@@ -2,7 +2,7 @@
 
 ## Workspace
 
-`oneezy/tools` is one pnpm workspace (`pnpm-workspace.yaml`: `packages/*`, `apps/*`, and `clis/skills-sync` until it moves). Three tools, one job each; no duplicate orchestration:
+`oneezy/tools` is one pnpm workspace (`pnpm-workspace.yaml`: `packages/*` and `apps/*`). Three tools, one job each; no duplicate orchestration:
 
 - **pnpm** (`packageManager` in the root `package.json`) installs dependencies. `pnpm install` once at the root.
 - **Turborepo** (`turbo.json`) runs tasks across packages: `pnpm build`, `pnpm test`, `pnpm check` and `pnpm dev` at the root run every package's script of that name, in dependency order, cached.
@@ -10,11 +10,11 @@
 
 Windows 11 with PowerShell 7 is the primary host: every script is run there first. Linux is a future target, so nothing in a `package.json` may be Windows-only: `scripts/python.mjs` runs Python (`py -3` on Windows, `python3` elsewhere) and `scripts/syntax-check.ps1` runs under pwsh on either.
 
-Each package keeps its language. `clis/skills-sync` (TypeScript, published as `@oneezy/skills-sync`; moves to `packages/skills-sync` in #75 step 2), `packages/skills-viewer` (TypeScript), `packages/remote-sessions` (Python), `packages/task-manager` (PowerShell + bash), `packages/apps-sync` (PowerShell + Python). A Python or PowerShell package has a minimal `package.json` whose `test` and `check` scripts run what the package already had, so Turborepo can run them. `clis/<old-name>/` holds compatibility shims only: every launcher and old path there delegates to its package, so saved shortcuts and documented paths keep working. Do not add code under `clis/`.
+Each package keeps its language. `packages/skills-sync` (TypeScript, published as `@oneezy/skills-sync`), `packages/skills-viewer` (TypeScript), `packages/remote-sessions` (Python), `packages/task-manager` (PowerShell + bash), `packages/apps-sync` (PowerShell + Python). A Python or PowerShell package has a minimal `package.json` whose `test` and `check` scripts run what the package already had, so Turborepo can run them. `clis/<old-name>/` holds compatibility shims only: every launcher and old path there delegates to its package, so saved shortcuts and documented paths keep working. Do not add code under `clis/`.
 
 ## Agent skills
 
-Skills are not committed here. They come from the skills library `oneezy/skills`, linked into the harness user folders by `npx @oneezy/skills-sync` (source: `clis/skills-sync`). If a `/oneezy-*` skill you need is missing in this session, run that command (or the `oneezy-skills` skill) and continue.
+Skills are not committed here. They come from the skills library `oneezy/skills`, linked into the harness user folders by `npx @oneezy/skills-sync` (source: `packages/skills-sync`). If a `/oneezy-*` skill you need is missing in this session, run that command (or the `oneezy-skills` skill) and continue.
 
 ### Issue tracker
 
