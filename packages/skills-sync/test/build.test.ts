@@ -6,6 +6,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { after, before, beforeEach, test } from "node:test";
+import { pathToFileURL } from "node:url";
 
 let base: string;
 let root: string;
@@ -61,6 +62,11 @@ function repo(dir: string): Upstream {
   const u = new Upstream(dir);
   u.git("init", "-q", "-b", "main");
   return u;
+}
+
+/** The repository holds that commit object: false in a clone that never fetched it. */
+function holds(dir: string, commit: string): boolean {
+  return spawnSync("git", ["-C", dir, "cat-file", "-e", `${commit}^{commit}`], { encoding: "utf8" }).status === 0;
 }
 
 function json(file: string): any {
@@ -373,11 +379,11 @@ test("the config schema admits a releases section (the ChatGPT upload record per
   assert.match(r.stderr, /releases\.oneezy\.extra/);
 });
 
-test("a prior version is believed only when the library's history verifies it: a hand-set version and NOTICE commit, a real commit with the wrong count, a NOTICE naming another real commit or the wrong date are all drift, and build rebuilds that package with HEAD's version while the untouched source package keeps its own", () => {
+test("a prior version is believed only when the package agrees with itself and with every commit the repository holds: a version and a NOTICE naming different commits, a real commit with the wrong count, a NOTICE naming another real commit or the wrong date are all drift, and build rebuilds that package with HEAD's version while the untouched source package keeps its own", () => {
   assert.equal(cli("build", "--quiet").status, 0);
   const c1 = library.head();
   const c2 = library.commit("built");
-  assert.equal(cli("build", "--check").status, 0, "verified: c1 is an ancestor with count 1 and the NOTICE names it");
+  assert.equal(cli("build", "--check").status, 0, "verified: the repository holds c1, its count is 1 and the NOTICE names it with its date");
   const short = (c: string) => library.git("rev-parse", "--short=12", c);
   const date = (c: string) => library.git("log", "-1", "--format=%cI", c);
   const manifests = ["plugins/oneezy/.codex-plugin/plugin.json", "plugins/oneezy/NOTICE.md", "plugins/oneezy/plugin.json"];
@@ -386,12 +392,12 @@ test("a prior version is believed only when the library's history verifies it: a
     for (const f of ["plugin.json", ".codex-plugin/plugin.json"]) write(`plugins/oneezy/${f}`, built[f].replace(/"version": "[^"]+"/, `"version": "${version}"`));
     write("plugins/oneezy/NOTICE.md", built["NOTICE.md"].replace(/^- Commit: .*$/m, `- Commit: ${commit} (${when})`));
   };
-  // well-formed, nobody's commit
+  // well-formed, the version naming one commit and the NOTICE another
   tamper("0.999.0+abcdefabcdef", "0".repeat(40), "1999-01-01T00:00:00+00:00");
   let r = cli("build", "--check", "--json");
   assert.equal(r.status, 1);
   assert.deepEqual(drift(r), manifests);
-  // a real ancestor with the wrong count
+  // a commit the repository holds, with the wrong count
   tamper(`0.2.0+${short(c1)}`, c1, date(c1));
   r = cli("build", "--check", "--json");
   assert.equal(r.status, 1);
@@ -416,6 +422,103 @@ test("a prior version is believed only when the library's history verifies it: a
   assert.ok(read("plugins/oneezy/NOTICE.md").includes(`- Commit: ${c2} (${date(c2)})`));
   assert.match(json(path.join(root, "plugins", "up", "plugin.json")).version, /^0\.1\.0\+/);
   assert.equal(cli("build", "--check").status, 0);
+});
+
+test("a package built on a branch is as built after the branch is squash-merged: the commit its version names is in nobody's history on the target branch, and build --check, check and build agree there, in the repository that still holds the branch and in a fresh clone that never had its commits", () => {
+  assert.equal(cli("build", "--quiet").status, 0);
+  library.commit("built");
+  library.git("checkout", "-q", "-b", "feature/x");
+  write("skills/oneezy/own-one/SKILL.md", "---\nname: own-one\ndescription: mine\n---\nmine, edited on a branch\n");
+  const onBranch = library.commit("edit own-one");
+  assert.equal(cli("build", "--quiet").status, 0);
+  const version = `0.3.0+${library.git("rev-parse", "--short=12", onBranch)}`;
+  assert.equal(json(path.join(root, "plugins", "oneezy", "plugin.json")).version, version);
+  library.commit("built on the branch");
+  assert.equal(cli("build", "--check").status, 0, "clean on the branch");
+  const built = tree(path.join(root, "plugins"));
+
+  library.git("checkout", "-q", "main");
+  library.git("merge", "-q", "--squash", "feature/x");
+  library.commit("edit own-one (#1)");
+  assert.equal(library.git("rev-list", "--count", "HEAD"), "3", "library, built, the squash");
+  assert.equal(spawnSync("git", ["-C", root, "merge-base", "--is-ancestor", onBranch, "HEAD"]).status, 1, "the commit the package was built at is not in main's history");
+  assert.deepEqual(tree(path.join(root, "plugins")), built, "the squash landed the packages as the branch built them");
+  const check = cli("build", "--check");
+  assert.equal(check.status, 0, check.stdout);
+  assert.match(check.stdout, /build --check: clean/);
+  const whole = cli("check");
+  assert.equal(whole.status, 0, whole.stdout);
+  assert.deepEqual(changes(cli("build", "--json")), [], "nothing rewritten");
+  assert.equal(json(path.join(root, "plugins", "oneezy", "plugin.json")).version, version, "the version it was built with, the branch's commit");
+  assert.ok(read("plugins/oneezy/NOTICE.md").includes(`- Commit: ${onBranch} (`));
+
+  // what CI checks out: main alone, over the transport, so the branch's commits are not there at all
+  const clone = path.join(base, "clone");
+  library.git("clone", "-q", "--single-branch", "--branch", "main", pathToFileURL(root).href, clone);
+  assert.ok(!holds(clone, onBranch), "the clone never had the branch's commits");
+  assert.equal(cliIn(clone, "refresh", "--frozen", "--quiet").status, 0, "the snapshot and working set from the lock");
+  const cloned = cliIn(clone, "build", "--check");
+  assert.equal(cloned.status, 0, cloned.stdout);
+  assert.match(cloned.stdout, /build --check: clean/);
+  const clonedWhole = cliIn(clone, "check");
+  assert.equal(clonedWhole.status, 0, clonedWhole.stdout);
+  assert.deepEqual(changes(cliIn(clone, "build", "--json")), [], "nothing rewritten there either");
+  assert.equal(new Upstream(clone).git("status", "--porcelain"), "");
+});
+
+test("a shallow clone is as built: at depth 1 (what actions/checkout fetches) it holds neither the commits the versions name nor the library's commit count, at depth 2 it holds one of those commits with a count of its own, and build --check, check and build are clean in both; a package that changed there cannot take its version from a shallow count: build --check lists the drift, build leaves the package alone and exits 1 saying to fetch the history, and builds once it is fetched", () => {
+  assert.equal(cli("build", "--quiet").status, 0);
+  const c1 = library.head();
+  library.commit("built");
+  write("skills/oneezy/own-one/SKILL.md", "---\nname: own-one\ndescription: mine\n---\nmine, edited\n");
+  const c3 = library.commit("edit own-one");
+  assert.equal(cli("build", "--quiet").status, 0);
+  library.commit("rebuilt");
+  assert.equal(json(path.join(root, "plugins", "oneezy", "plugin.json")).version, `0.3.0+${library.git("rev-parse", "--short=12", c3)}`);
+  assert.equal(json(path.join(root, "plugins", "up", "plugin.json")).version, `0.1.0+${library.git("rev-parse", "--short=12", c1)}`);
+
+  for (const depth of [1, 2]) {
+    const clone = path.join(base, `shallow-${depth}`);
+    library.git("clone", "-q", "--depth", String(depth), pathToFileURL(root).href, clone);
+    const at = new Upstream(clone);
+    assert.equal(at.git("rev-parse", "--is-shallow-repository"), "true");
+    assert.equal(at.git("rev-list", "--count", "HEAD"), String(depth), "the count a shallow clone gives is its depth, not the library's 4");
+    assert.ok(!holds(clone, c1), "the commit the source package was built at is not there");
+    assert.equal(holds(clone, c3), depth === 2, "the commit the own package was built at is there at depth 2 only, counting 1 instead of 3");
+    assert.equal(cliIn(clone, "refresh", "--frozen", "--quiet").status, 0, "the snapshot and working set from the lock");
+    const check = cliIn(clone, "build", "--check");
+    assert.equal(check.status, 0, `depth ${depth}: ${check.stdout}`);
+    assert.match(check.stdout, /build --check: clean/);
+    const whole = cliIn(clone, "check");
+    assert.equal(whole.status, 0, `depth ${depth}: ${whole.stdout}`);
+    assert.deepEqual(changes(cliIn(clone, "build", "--json")), [], `depth ${depth}: nothing rewritten`);
+    assert.equal(at.git("status", "--porcelain"), "");
+  }
+
+  // a package whose inputs changed takes HEAD's version, and a shallow clone cannot count HEAD's commits
+  const clone = path.join(base, "shallow-1");
+  const at = new Upstream(clone);
+  fs.writeFileSync(path.join(clone, "skills", "oneezy", "own-two", "SKILL.md"), "---\nname: own-two\ndescription: two\n---\ntwo, edited in the shallow clone\n");
+  const drifted = cliIn(clone, "build", "--check", "--json");
+  assert.equal(drifted.status, 1);
+  assert.deepEqual(drift(drifted), ["plugins/oneezy/.codex-plugin/plugin.json", "plugins/oneezy/NOTICE.md", "plugins/oneezy/plugin.json", "plugins/oneezy/skills/own-two/SKILL.md"]);
+  const before = tree(path.join(clone, "plugins"));
+  const refused = cliIn(clone, "build", "--json");
+  assert.equal(refused.status, 1, "a version from a shallow count is never written");
+  const conflicts = actions(refused).filter((a) => a.kind === "conflict");
+  assert.equal(conflicts.length, 1);
+  assert.ok(conflicts[0].path.endsWith("oneezy"), conflicts[0].path);
+  assert.match(conflicts[0].note ?? "", /shallow/);
+  assert.match(conflicts[0].note ?? "", /git fetch --unshallow/);
+  assert.match(conflicts[0].note ?? "", /fetch-depth: 0/);
+  assert.deepEqual(tree(path.join(clone, "plugins")), before, "the package is left alone");
+  at.git("fetch", "-q", "--unshallow");
+  assert.equal(at.git("rev-parse", "--is-shallow-repository"), "false");
+  const full = cliIn(clone, "build", "--json");
+  assert.equal(full.status, 0, full.stderr + full.stdout);
+  assert.equal(json(path.join(clone, "plugins", "oneezy", "plugin.json")).version, `0.4.0+${at.git("rev-parse", "--short=12", "HEAD")}`, "the library's count once the history is there");
+  assert.match(json(path.join(clone, "plugins", "up", "plugin.json")).version, /^0\.1\.0\+/, "the untouched package keeps its own");
+  assert.equal(cliIn(clone, "build", "--check").status, 0);
 });
 
 test("a checkout without a commit yet builds 0.0.0+nogit and its NOTICE says so; after the first commit that prior is not believed: build gives the package the real version and --check agrees", () => {

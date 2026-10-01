@@ -50,14 +50,16 @@ Build
                          .codex-plugin/plugin.json, .claude-plugin/plugin.json, LICENSE, NOTICE.md. Every copied SKILL.md
                          is marked metadata.internal: true, so npx skills installs each own skill once, from skills/
                          (INSTALL_INTERNAL_SKILLS=1 re-exposes the copies). A package is versioned
-                         0.<commit count>.0+<sha12> of the library's HEAD, and keeps its version while its files do
+                         0.<commit count>.0+<sha12> of the library's HEAD, and keeps its version while its files do;
+                         a new or changed package needs the library's history for that count: not a shallow clone
   --catalogs             .claude-plugin/marketplace.json and .agents/plugins/marketplace.json, listing ./plugins/<id>
   --artifacts            artifacts/<id>-<version>.zip per plugin for the ChatGPT upload (stored, fixed timestamps, sorted:
                          the same input gives the same bytes), artifacts/releases.json (archive, sha256, version, source
                          commit, files, the release the config records), and artifacts/<id>.changes.md when that
                          release holds a file the archive lacks (upload as a new plugin, not an update)
   --check                compute every output in memory, print each path that differs from disk, write nothing;
-                         exit 1 on drift or a package that cannot be built, 0 when clean (CI); never looks at artifacts/
+                         exit 1 on drift or a package that cannot be built, 0 when clean (CI); never looks at artifacts/.
+                         Needs no history: clean in a shallow clone, and after a squash merge left the build's commit behind
 
 Refresh and add
   --frozen               every skill at the commit skills-lock.json records; nothing moves, the lock is not written (CI)
@@ -384,7 +386,8 @@ function runAdd(lib: Library, args: Args, log: (m: string) => void, report: Repo
  * build: the plugin form from skills-sync.json, every output computed in memory and written only where disk differs.
  * --check reports the differences instead and exits 1 when there are any; CI runs it on every push. A package that
  * cannot be built (a group without skills, a source not in the config or without a snapshot, a link inside the
- * package) is a conflict: left alone, exit 1 in both modes, listed as drift by --check. The committed form (packages
+ * package) is a conflict: left alone, exit 1 in both modes, listed as drift by --check. So is a new or changed package
+ * in a shallow clone, for build alone: --check lists the paths that differ there. The committed form (packages
  * and catalogs) is what a build with no output named writes and what --check looks at; the archives under artifacts/
  * are written only when --artifacts asks, and never checked.
  */

@@ -42,6 +42,8 @@ export interface Head {
   date: string | null;
   /** the library is a git checkout, with or without a commit yet */
   checkout: boolean;
+  /** a shallow clone: its commit counts are of the commits it fetched, not the library's */
+  shallow: boolean;
 }
 
 /** The Agent Plugins 1.0 schema the portable manifest declares. */
@@ -53,9 +55,12 @@ const CAPABILITIES = ["Interactive"];
 const VERSION_RE = /^0\.(\d+)\.0\+([0-9a-f]{12,40})$/;
 const NOGIT = "0.0.0+nogit";
 
-/** The trimmed stdout of a git command run in the library; null when it fails. */
+/**
+ * The trimmed stdout of a git command run in the library; null when it fails. Never a fetch: asking a partial clone
+ * for a commit it does not hold would otherwise go to its remote for it.
+ */
 function git(root: string, ...args: string[]): string | null {
-  const r = spawnSync("git", ["-C", root, ...args], { encoding: "utf8" });
+  const r = spawnSync("git", ["-C", root, ...args], { encoding: "utf8", env: { ...process.env, GIT_NO_LAZY_FETCH: "1" } });
   return r.status === 0 ? r.stdout.trim() : null;
 }
 
@@ -64,8 +69,9 @@ export function libraryHead(root: string): Head {
   const checkout = git(root, "rev-parse", "--git-dir") !== null;
   const count = checkout ? git(root, "rev-list", "--count", "HEAD") : null;
   const short = checkout ? git(root, "rev-parse", "--short=12", "HEAD") : null;
-  if (!count || !short) return { version: NOGIT, commit: null, date: null, checkout };
-  return { version: `0.${count}.0+${short}`, commit: git(root, "rev-parse", "HEAD"), date: git(root, "log", "-1", "--format=%cI"), checkout };
+  const shallow = checkout && git(root, "rev-parse", "--is-shallow-repository") === "true";
+  if (!count || !short) return { version: NOGIT, commit: null, date: null, checkout, shallow };
+  return { version: `0.${count}.0+${short}`, commit: git(root, "rev-parse", "HEAD"), date: git(root, "log", "-1", "--format=%cI"), checkout, shallow };
 }
 
 /** Where a package's skills came from, for its NOTICE. */
@@ -109,6 +115,12 @@ export function build(lib: Library, opts: BuildOptions): BuildResult {
       const prior = priorHead(lib.root, disk.files, head, pkg.origin.kind === "own");
       const atPrior = render(pkg, config, prior);
       const unchanged = sameFiles(disk.files, atPrior);
+      if (!unchanged && head.shallow && !opts.check) {
+        // HEAD's version counts the library's commits, and a shallow clone holds only the ones it fetched: a version
+        // written here would be 0.<depth>.0. A check still lists what differs; it writes no version.
+        changes.add({ kind: "conflict", path: dir, note: "a new or changed package in a shallow clone, which cannot count the library's commits for its version; fetch the history (git fetch --unshallow, or fetch-depth: 0 in actions/checkout) and build again; package left alone" });
+        continue;
+      }
       const at = unchanged ? prior : head;
       const files = unchanged ? atPrior : render(pkg, config, head);
       if (opts.plugins) reconcile(changes, dir, disk.files, files, opts.check);
@@ -357,10 +369,15 @@ export function spdx(text: string): string | null {
 }
 
 /**
- * The version and commit a package on disk was built with, when the library's history verifies them: the version's
- * commit is an ancestor of HEAD with that commit count, and an own package's NOTICE names the same commit with its
- * date. Anything else (a hand-set version, 0.0.0+nogit once there is a commit, a commit rebased away) and the package
- * is treated as changed: the current HEAD. Without a commit to verify against there is no prior, only 0.0.0+nogit.
+ * The version and commit a package on disk was built with. The package is the record of that: its commit need not be
+ * in HEAD's history, or in the repository at all. A squash merge lands the package and leaves the branch commit it
+ * was built at behind, and a shallow clone holds no commit but the newest, so on the branch a pull request merges
+ * into, and in CI, the commit a version names is routinely one git cannot show. What is checked is what can be:
+ * the version has the form of the rule; an own package's NOTICE names, in full and with a date, the commit the
+ * version abbreviates; and when the repository does hold that commit, its commit count (not in a shallow clone,
+ * which counts only what it fetched) and its date are the ones recorded. A package that fails any of these (a hand-set
+ * version, 0.0.0+nogit once there is a commit, a NOTICE naming another commit) is treated as changed: the current
+ * HEAD. Without a commit there is no prior, only 0.0.0+nogit.
  */
 function priorHead(root: string, disk: Map<string, Buffer>, head: Head, own: boolean): Head {
   if (!head.commit) return head;
@@ -372,12 +389,14 @@ function priorHead(root: string, disk: Map<string, Buffer>, head: Head, own: boo
   }
   const v = typeof version === "string" ? VERSION_RE.exec(version) : null;
   if (!v) return head;
-  const commit = git(root, "rev-parse", "--verify", "--quiet", `${v[2]}^{commit}`);
-  if (!commit || git(root, "merge-base", "--is-ancestor", commit, "HEAD") === null || git(root, "rev-list", "--count", commit) !== v[1]) return head;
-  if (!own) return { ...head, version: v[0] };
-  const n = /^- Commit: ([0-9a-f]{40}) \(([^)]+)\)$/m.exec(disk.get("NOTICE.md")?.toString("utf8") ?? "");
-  if (!n || n[1] !== commit || git(root, "log", "-1", "--format=%cI", commit) !== n[2]) return head;
-  return { ...head, version: v[0], commit, date: n[2] };
+  const n = own ? /^- Commit: ([0-9a-f]{40}) \(([^)]+)\)$/m.exec(disk.get("NOTICE.md")?.toString("utf8") ?? "") : null;
+  if (own && (!n || !n[1].startsWith(v[2]))) return head;
+  const held = git(root, "rev-parse", "--verify", "--quiet", `${n ? n[1] : v[2]}^{commit}`);
+  if (held) {
+    if (!head.shallow && git(root, "rev-list", "--count", held) !== v[1]) return head;
+    if (n && git(root, "log", "-1", "--format=%cI", held) !== n[2]) return head;
+  }
+  return n ? { ...head, version: v[0], commit: n[1], date: n[2] } : { ...head, version: v[0] };
 }
 
 /** Writes for files that differ or are missing, deletes for files no longer part of the package (a whole skill folder as one), skips for the rest. */

@@ -43,6 +43,9 @@ test("--help lists every command and every flag of build, check, refresh and add
   assert.match(help, /INSTALL_INTERNAL_SKILLS=1/);
   assert.match(help, /0\.<commit count>\.0\+<sha12>/);
   assert.match(help, /exit 1 on any, 0 when clean/);
+  // what a library's CI has to know about its checkout: a check needs no history, a build of a changed package does
+  assert.match(help, /Needs no history: clean in a shallow clone/);
+  assert.match(help, /needs the library's history for that count: not a shallow clone/);
 
   const bad = cli("--nope");
   assert.equal(bad.status, 2);
