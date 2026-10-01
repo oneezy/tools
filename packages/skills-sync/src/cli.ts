@@ -44,7 +44,7 @@ Build
   --catalogs             .claude-plugin/marketplace.json and .agents/plugins/marketplace.json, listing ./plugins/<id>
   --artifacts            archives under artifacts/ (next stage; prints a line for now)
   --check                compute every output in memory, print each path that differs from disk, write nothing;
-                         exit 1 on drift, 0 when clean (CI)
+                         exit 1 on drift or a package that cannot be built, 0 when clean (CI)
 
 Refresh and add
   --frozen               every skill at the commit skills-lock.json records; nothing moves, the lock is not written (CI)
@@ -367,7 +367,9 @@ function runAdd(lib: Library, args: Args, log: (m: string) => void, report: Repo
 
 /**
  * build: the plugin form from skills-sync.json, every output computed in memory and written only where disk differs.
- * --check reports the differences instead and exits 1 when there are any; CI runs it on every push.
+ * --check reports the differences instead and exits 1 when there are any; CI runs it on every push. A package that
+ * cannot be built (a group without skills, a source not in the config or without a snapshot, a link inside the
+ * package) is a conflict: left alone, exit 1 in both modes, listed as drift by --check.
  */
 function runBuild(lib: Library, args: Args, log: (m: string) => void, report: Report): void {
   if (!lib.hasConfig()) bail(`no ${path.basename(lib.configFile)} in ${lib.root}; add <source> writes one`);
@@ -376,12 +378,18 @@ function runBuild(lib: Library, args: Args, log: (m: string) => void, report: Re
   const r = build(lib, { plugins: args.plugins || none, catalogs: args.catalogs || none, check: args.check, plan: args.plan, log });
   report.merge(r.report);
   if (r.off && !args.quiet) log(`generate.plugins is false in ${path.basename(lib.configFile)}: nothing built, nothing checked`);
-  if (!args.check) return printReport(report, args, { version: r.version });
+  const conflicts = r.report.conflicts().length;
+  if (!args.check) {
+    printReport(report, args, { version: r.version });
+    if (conflicts) process.exitCode = 1;
+    return;
+  }
   if (r.drift.length) process.exitCode = 1;
   if (args.json) return printReport(report, args, { check: true, drift: r.drift, version: r.version });
   for (const a of report.actions) if (a.kind === "note" || a.kind === "conflict") process.stdout.write(line(a) + "\n");
   for (const d of r.drift) process.stdout.write(`drift        ${d}\n`);
-  process.stdout.write(r.drift.length ? `build --check: ${r.drift.length} path(s) differ from what build would write; run build --plugins --catalogs\n` : `build --check: clean, ${report.skips()} files as built\n`);
+  const fix = conflicts ? `${conflicts} conflict(s) above to fix first, then build --plugins --catalogs` : "run build --plugins --catalogs";
+  process.stdout.write(r.drift.length ? `build --check: ${r.drift.length} path(s) differ from what build would write; ${fix}\n` : `build --check: clean, ${report.skips()} files as built\n`);
 }
 
 function saveLocal(root: string, c: Choices): void {

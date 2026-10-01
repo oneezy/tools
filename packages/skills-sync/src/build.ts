@@ -25,7 +25,7 @@ export interface BuildResult {
   report: Report;
   /** 0.<commit count>.0+<sha12> of the library's HEAD, what every package built this run carries */
   version: string;
-  /** --check: every path that differs from what the build would write, relative to the library, / separators */
+  /** --check: every path that differs from what the build would write, and every package that cannot be built, relative to the library, / separators */
   drift: string[];
   /** generate.plugins is false: nothing built, nothing checked */
   off: boolean;
@@ -36,6 +36,8 @@ export interface Head {
   version: string;
   commit: string | null;
   date: string | null;
+  /** the library is a git checkout, with or without a commit yet */
+  checkout: boolean;
 }
 
 /** The Agent Plugins 1.0 schema the portable manifest declares. */
@@ -43,18 +45,23 @@ export const PLUGIN_SCHEMA = "https://agent-plugins.org/schemas/1.0.0/plugin.sch
 /** What the ChatGPT interface and the Codex catalog say every package is; the hosts enumerate neither value in their docs. */
 const CATEGORY = "Developer Tools";
 const CAPABILITIES = ["Interactive"];
-const VERSION_RE = /^0\.\d+\.0\+(?:[0-9a-f]{12,}|nogit)$/;
+/** 0.<commit count>.0+<sha12>: what a package built in a checkout with a commit carries. */
+const VERSION_RE = /^0\.(\d+)\.0\+([0-9a-f]{12,40})$/;
+const NOGIT = "0.0.0+nogit";
 
-/** A library without git gets 0.0.0+nogit and no commit. */
+/** The trimmed stdout of a git command run in the library; null when it fails. */
+function git(root: string, ...args: string[]): string | null {
+  const r = spawnSync("git", ["-C", root, ...args], { encoding: "utf8" });
+  return r.status === 0 ? r.stdout.trim() : null;
+}
+
+/** A library without git, or a checkout without a commit yet, gets 0.0.0+nogit and no commit. */
 export function libraryHead(root: string): Head {
-  const git = (...args: string[]): string | null => {
-    const r = spawnSync("git", ["-C", root, ...args], { encoding: "utf8" });
-    return r.status === 0 ? r.stdout.trim() : null;
-  };
-  const count = git("rev-list", "--count", "HEAD");
-  const short = git("rev-parse", "--short=12", "HEAD");
-  if (!count || !short) return { version: "0.0.0+nogit", commit: null, date: null };
-  return { version: `0.${count}.0+${short}`, commit: git("rev-parse", "HEAD"), date: git("log", "-1", "--format=%cI") };
+  const checkout = git(root, "rev-parse", "--git-dir") !== null;
+  const count = checkout ? git(root, "rev-list", "--count", "HEAD") : null;
+  const short = checkout ? git(root, "rev-parse", "--short=12", "HEAD") : null;
+  if (!count || !short) return { version: NOGIT, commit: null, date: null, checkout };
+  return { version: `0.${count}.0+${short}`, commit: git(root, "rev-parse", "HEAD"), date: git(root, "log", "-1", "--format=%cI"), checkout };
 }
 
 /** Where a package's skills came from, for its NOTICE. */
@@ -81,31 +88,42 @@ export function build(lib: Library, opts: BuildOptions): BuildResult {
   if (opts.plugins) {
     const ids = Object.keys(config.plugins);
     for (const id of ids) {
-      const pkg = resolvePackage(lib, config, id, report);
-      if (!pkg) continue;
       const dir = path.join(lib.plugins, id);
+      const pkg = resolvePackage(lib, config, id, changes);
+      if (!pkg) continue;
       const disk = diskFiles(dir);
+      if (disk.links.length) {
+        // never followed, never written through: a link inside the package is a conflict and the package is left alone
+        for (const l of disk.links) changes.add({ kind: "conflict", path: path.join(dir, l), note: `a link inside plugins/${id}; build never follows or writes through one; package left alone` });
+        continue;
+      }
       // a package whose files are unchanged keeps the version and commit it was built with: the HEAD moves with every
       // commit of the library, and a rebuild after one must not rewrite packages whose inputs did not change
-      const prior = priorHead(disk, head);
-      const unchanged = sameFiles(disk, render(pkg, config, prior));
-      reconcile(changes, dir, disk, unchanged ? render(pkg, config, prior) : render(pkg, config, head), opts.check);
+      const prior = priorHead(lib.root, disk.files, head, pkg.origin.kind === "own");
+      const unchanged = sameFiles(disk.files, render(pkg, config, prior));
+      reconcile(changes, dir, disk.files, unchanged ? render(pkg, config, prior) : render(pkg, config, head), opts.check);
     }
-    // packages for ids no longer in the config
+    // packages for ids no longer in the config; a link there was not built here and is left alone
     if (isDir(lib.plugins)) {
-      for (const n of fs.readdirSync(lib.plugins).sort(cmp)) if (!n.startsWith(".") && !ids.includes(n) && isDir(path.join(lib.plugins, n))) changes.add({ kind: "delete", path: path.join(lib.plugins, n), note: "no longer in skills-sync.json" });
+      for (const n of fs.readdirSync(lib.plugins).sort(cmp)) {
+        const p = path.join(lib.plugins, n);
+        if (n.startsWith(".") || ids.includes(n) || !isDir(p)) continue;
+        if (isLink(p)) changes.add({ kind: "conflict", path: p, note: "a link, not a package built here; left alone" });
+        else changes.add({ kind: "delete", path: p, note: "no longer in skills-sync.json" });
+      }
     }
   }
   if (opts.catalogs) {
     const files = catalogs(config, lib);
     for (const [file, bytes] of files) {
       const have = fs.existsSync(file) ? fs.readFileSync(file) : null;
-      if (have && have.equals(bytes)) changes.add({ kind: "skip", path: file, note: "ok" });
+      if (have && asBuilt(have, bytes)) changes.add({ kind: "skip", path: file, note: "ok" });
       else changes.add({ kind: "write", path: file, payload: bytes, note: have ? "changed" : "new" });
     }
   }
   report.merge(changes);
-  if (opts.check) result.drift = changes.changes().map((a) => path.relative(lib.root, a.path).split("\\").join("/"));
+  // --check: every write and delete is drift, and so is every package that cannot be built (a conflict)
+  if (opts.check) result.drift = changes.actions.filter((a) => a.kind !== "skip" && a.kind !== "note").map((a) => path.relative(lib.root, a.path).split("\\").join("/"));
   else apply(changes, opts.plan);
   return result;
 }
@@ -121,7 +139,7 @@ function resolvePackage(lib: Library, config: Config, id: string, report: Report
       return null;
     }
     const skills = new Map<string, Map<string, Buffer>>();
-    for (const s of own) skills.set(s.name, internalCopy(folderFiles(s.dir)));
+    for (const s of own) skills.set(s.name, skillCopy(s.dir, report));
     const licenseFile = ["LICENSE", "LICENSE.md", "LICENSE.txt"].map((n) => path.join(lib.root, n)).find((f) => fs.existsSync(f));
     if (!licenseFile) report.add({ kind: "note", path: where, note: "no LICENSE in the library; the package carries none" });
     const license = licenseFile ? fs.readFileSync(licenseFile) : null;
@@ -149,7 +167,7 @@ function resolvePackage(lib: Library, config: Config, id: string, report: Report
       report.add({ kind: "note", path: path.join(where, "skills", s.name), note: `${s.name} is not in the working set from ${plugin.source}; run refresh; left out` });
       continue;
     }
-    skills.set(s.name, internalCopy(folderFiles(copy)));
+    skills.set(s.name, skillCopy(copy, report));
     if (entry.commit && entry.commit !== meta.commit) perSkill[s.name] = entry.commit;
   }
   if (!skills.size) {
@@ -212,7 +230,7 @@ function notice(pkg: Package, config: Config, head: Head): string {
   const lib = config.library ?? {};
   const o = pkg.origin;
   const libraryName = lib.owner && lib.name ? `${lib.owner}/${lib.name}` : lib.name ?? "the skills library";
-  const commitLine = o.kind === "source" ? `${o.commit} (${o.date})` : head.commit ? `${head.commit} (${head.date})` : "not a git checkout";
+  const commitLine = o.kind === "source" ? `${o.commit} (${o.date})` : head.commit ? `${head.commit} (${head.date})` : head.checkout ? "a git checkout without a commit yet" : "not a git checkout";
   const source = o.kind === "own" ? `\`skills/${o.group}\` of ${libraryName}${lib.homepage ? ` (${lib.homepage})` : ""}` : `${o.src.repo} (ref \`${o.src.ref}\`${o.src.root ? `, skills under \`${o.src.root}\`` : ""})`;
   const license = pkg.license ? `${pkg.spdx ?? "see LICENSE"}${pkg.spdx ? ", see LICENSE" : ""}` : o.kind === "own" ? "no LICENSE file in the library" : "no LICENSE among the source's attribution files";
   const renamed = o.kind === "source" ? new Map(selection(o.src).filter((s) => s.upstream !== s.name).map((s) => [s.name, s.upstream])) : new Map<string, string>();
@@ -292,7 +310,13 @@ export function withInternal(md: string): string {
   return `---${open}${next.join(open)}${close}---` + md.slice(whole.length);
 }
 
-/** The copy of a skill folder that goes into a package: its root SKILL.md transformed, everything else as it is. */
+/** The copy of a skill folder that goes into a package: its root SKILL.md transformed, everything else as it is; a link inside is not copied, with a note. */
+function skillCopy(dir: string, report: Report): Map<string, Buffer> {
+  const { files, links } = folderFiles(dir);
+  for (const l of links) report.add({ kind: "note", path: path.join(dir, l), note: "a link; not copied into the package" });
+  return internalCopy(files);
+}
+
 function internalCopy(files: Map<string, Buffer>): Map<string, Buffer> {
   const out = new Map(files);
   const md = out.get("SKILL.md");
@@ -318,18 +342,28 @@ export function spdx(text: string): string | null {
   return null;
 }
 
-/** The version and commit a package on disk was built with, when its files hold well-formed ones; else the current HEAD. */
-function priorHead(disk: Map<string, Buffer>, head: Head): Head {
-  let version = head.version;
+/**
+ * The version and commit a package on disk was built with, when the library's history verifies them: the version's
+ * commit is an ancestor of HEAD with that commit count, and an own package's NOTICE names the same commit with its
+ * date. Anything else (a hand-set version, 0.0.0+nogit once there is a commit, a commit rebased away) and the package
+ * is treated as changed: the current HEAD. Without a commit to verify against there is no prior, only 0.0.0+nogit.
+ */
+function priorHead(root: string, disk: Map<string, Buffer>, head: Head, own: boolean): Head {
+  if (!head.commit) return head;
+  let version: unknown;
   try {
-    const v = (JSON.parse(disk.get("plugin.json")?.toString("utf8") ?? "{}") as { version?: unknown }).version;
-    if (typeof v === "string" && VERSION_RE.test(v)) version = v;
+    version = (JSON.parse(disk.get("plugin.json")?.toString("utf8") ?? "{}") as { version?: unknown }).version;
   } catch {
-    /* not a manifest: the current version */
+    return head;
   }
-  const m = /^- Commit: (?:([0-9a-f]{40}) \(([^)]+)\)|(not a git checkout))$/m.exec(disk.get("NOTICE.md")?.toString("utf8") ?? "");
-  if (!m) return { ...head, version };
-  return m[3] ? { version, commit: null, date: null } : { version, commit: m[1], date: m[2] };
+  const v = typeof version === "string" ? VERSION_RE.exec(version) : null;
+  if (!v) return head;
+  const commit = git(root, "rev-parse", "--verify", "--quiet", `${v[2]}^{commit}`);
+  if (!commit || git(root, "merge-base", "--is-ancestor", commit, "HEAD") === null || git(root, "rev-list", "--count", commit) !== v[1]) return head;
+  if (!own) return { ...head, version: v[0] };
+  const n = /^- Commit: ([0-9a-f]{40}) \(([^)]+)\)$/m.exec(disk.get("NOTICE.md")?.toString("utf8") ?? "");
+  if (!n || n[1] !== commit || git(root, "log", "-1", "--format=%cI", commit) !== n[2]) return head;
+  return { ...head, version: v[0], commit, date: n[2] };
 }
 
 /** Writes for files that differ or are missing, deletes for files no longer part of the package (a whole skill folder as one), skips for the rest. */
@@ -337,7 +371,7 @@ function reconcile(report: Report, dir: string, disk: Map<string, Buffer>, expec
   for (const rel of [...expected.keys()].sort(cmp)) {
     const file = path.join(dir, rel);
     const have = disk.get(rel);
-    if (have && have.equals(expected.get(rel)!)) report.add({ kind: "skip", path: file, note: "ok" });
+    if (have && asBuilt(have, expected.get(rel)!)) report.add({ kind: "skip", path: file, note: "ok" });
     else report.add({ kind: "write", path: file, payload: expected.get(rel), note: have ? (check ? "differs" : "changed") : check ? "missing" : "new" });
   }
   const gone = new Set<string>();
@@ -365,33 +399,51 @@ function readSnapshot(snapDir: string): Snapshot | null {
   }
 }
 
-/** Every file under a folder (links followed), relative path with / separators -> bytes. */
-function folderFiles(dir: string): Map<string, Buffer> {
-  const out = new Map<string, Buffer>();
+/** The files under a folder, relative path with / separators -> bytes, and the links at any depth: listed, never followed. */
+function folderFiles(dir: string): { files: Map<string, Buffer>; links: string[] } {
+  const files = new Map<string, Buffer>();
+  const links: string[] = [];
+  const rel = (p: string) => path.relative(dir, p).split("\\").join("/");
   const walk = (d: string) => {
     for (const e of fs.readdirSync(d, { withFileTypes: true })) {
       const full = path.join(d, e.name);
-      const st = fs.statSync(full);
-      if (st.isDirectory()) walk(full);
-      else if (st.isFile()) out.set(path.relative(dir, full).split("\\").join("/"), fs.readFileSync(full));
+      if (isLink(full)) links.push(rel(full));
+      else if (e.isDirectory()) walk(full);
+      else if (e.isFile()) files.set(rel(full), fs.readFileSync(full));
     }
   };
   walk(dir);
-  return out;
+  return { files, links };
 }
 
-/** The package as it is on disk; empty when there is none. */
-function diskFiles(dir: string): Map<string, Buffer> {
-  return isDir(dir) ? folderFiles(dir) : new Map();
+/** The package as it is on disk; empty when there is none; the folder itself as the one link when it is a link. */
+function diskFiles(dir: string): { files: Map<string, Buffer>; links: string[] } {
+  if (isLink(dir)) return { files: new Map(), links: [""] };
+  return isDir(dir) ? folderFiles(dir) : { files: new Map(), links: [] };
 }
 
-function sameFiles(a: Map<string, Buffer>, b: Map<string, Buffer>): boolean {
-  if (a.size !== b.size) return false;
-  for (const [k, v] of a) {
-    const w = b.get(k);
-    if (!w || !v.equals(w)) return false;
+/** Disk holds every expected file as built, and nothing else. */
+function sameFiles(disk: Map<string, Buffer>, expected: Map<string, Buffer>): boolean {
+  if (disk.size !== expected.size) return false;
+  for (const [k, have] of disk) {
+    const want = expected.get(k);
+    if (!want || !asBuilt(have, want)) return false;
   }
   return true;
+}
+
+/**
+ * Disk holds the expected bytes, or their CRLF form: what a checkout with core.autocrlf=true makes of a committed LF
+ * file. build writes LF; a clone that git converts on checkout is as built, and git itself sees nothing to commit there.
+ */
+function asBuilt(have: Buffer, expected: Buffer): boolean {
+  return have.equals(expected) || (have.length > expected.length && have.equals(crlf(expected)));
+}
+
+/** The bytes as such a checkout holds them: git converts only a text file whose line endings are all bare LF. */
+function crlf(b: Buffer): Buffer {
+  if (b.includes(0) || b.includes(0x0d)) return b;
+  return Buffer.from(b.toString("latin1").replace(/\n/g, "\r\n"), "latin1");
 }
 
 /**

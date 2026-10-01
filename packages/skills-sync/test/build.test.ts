@@ -18,9 +18,19 @@ const GIT = ["-c", "user.name=t", "-c", "user.email=t@example.com", "-c", "commi
 
 /** Run the CLI against the temp library, home redirected into the temp folder, every harness override dropped. */
 function cli(...args: string[]): { status: number | null; stdout: string; stderr: string } {
+  return cliIn(root, ...args);
+}
+
+/** The same against another library folder: a fresh repo, a clone. */
+function cliIn(repo: string, ...args: string[]): { status: number | null; stdout: string; stderr: string } {
   const env: NodeJS.ProcessEnv = { ...process.env, HOME: homeDir, USERPROFILE: homeDir };
   for (const k of HARNESS_ENV) delete env[k];
-  return spawnSync(process.execPath, [CLI, ...args, "--repo", root], { encoding: "utf8", cwd: root, env });
+  return spawnSync(process.execPath, [CLI, ...args, "--repo", repo], { encoding: "utf8", cwd: repo, env });
+}
+
+/** The drift list of a --check --json run, sorted. */
+function drift(r: { stdout: string }): string[] {
+  return (JSON.parse(r.stdout).drift as string[]).sort();
 }
 
 /** A temp git repository: the library itself, or a source standing in for upstream. */
@@ -358,6 +368,164 @@ test("the config schema admits a releases section (the ChatGPT upload record per
   const r = cli("build", "--plugins", "--quiet");
   assert.equal(r.status, 1);
   assert.match(r.stderr, /releases\.oneezy\.extra/);
+});
+
+test("a prior version is believed only when the library's history verifies it: a hand-set version and NOTICE commit, a real commit with the wrong count, a NOTICE naming another real commit or the wrong date are all drift, and build rebuilds that package with HEAD's version while the untouched source package keeps its own", () => {
+  assert.equal(cli("build", "--quiet").status, 0);
+  const c1 = library.head();
+  const c2 = library.commit("built");
+  assert.equal(cli("build", "--check").status, 0, "verified: c1 is an ancestor with count 1 and the NOTICE names it");
+  const short = (c: string) => library.git("rev-parse", "--short=12", c);
+  const date = (c: string) => library.git("log", "-1", "--format=%cI", c);
+  const manifests = ["plugins/oneezy/.codex-plugin/plugin.json", "plugins/oneezy/NOTICE.md", "plugins/oneezy/plugin.json"];
+  const built = tree(path.join(root, "plugins", "oneezy"));
+  const tamper = (version: string, commit: string, when: string) => {
+    for (const f of ["plugin.json", ".codex-plugin/plugin.json"]) write(`plugins/oneezy/${f}`, built[f].replace(/"version": "[^"]+"/, `"version": "${version}"`));
+    write("plugins/oneezy/NOTICE.md", built["NOTICE.md"].replace(/^- Commit: .*$/m, `- Commit: ${commit} (${when})`));
+  };
+  // well-formed, nobody's commit
+  tamper("0.999.0+abcdefabcdef", "0".repeat(40), "1999-01-01T00:00:00+00:00");
+  let r = cli("build", "--check", "--json");
+  assert.equal(r.status, 1);
+  assert.deepEqual(drift(r), manifests);
+  // a real ancestor with the wrong count
+  tamper(`0.2.0+${short(c1)}`, c1, date(c1));
+  r = cli("build", "--check", "--json");
+  assert.equal(r.status, 1);
+  assert.deepEqual(drift(r), manifests);
+  // the version it was built with, the NOTICE naming another real commit: the manifests differ from a build at HEAD (the NOTICE happens to match one)
+  tamper(`0.1.0+${short(c1)}`, c2, date(c2));
+  r = cli("build", "--check", "--json");
+  assert.equal(r.status, 1);
+  assert.deepEqual(drift(r), ["plugins/oneezy/.codex-plugin/plugin.json", "plugins/oneezy/plugin.json"]);
+  // the right version and commit, the wrong date
+  tamper(`0.1.0+${short(c1)}`, c1, "1999-01-01T00:00:00+00:00");
+  r = cli("build", "--check", "--json");
+  assert.equal(r.status, 1);
+  assert.deepEqual(drift(r), manifests);
+  // build treats the package as changed: HEAD's version; the source package stays at the version it was built with
+  const rebuilt = cli("build", "--json");
+  assert.equal(rebuilt.status, 0, rebuilt.stderr);
+  assert.deepEqual(changes(rebuilt).map((a) => path.relative(root, a.path).split("\\").join("/")).sort(), manifests);
+  const version = `0.2.0+${short(c2)}`;
+  assert.equal(json(path.join(root, "plugins", "oneezy", "plugin.json")).version, version);
+  assert.equal(json(path.join(root, "plugins", "oneezy", ".codex-plugin", "plugin.json")).version, version);
+  assert.ok(read("plugins/oneezy/NOTICE.md").includes(`- Commit: ${c2} (${date(c2)})`));
+  assert.match(json(path.join(root, "plugins", "up", "plugin.json")).version, /^0\.1\.0\+/);
+  assert.equal(cli("build", "--check").status, 0);
+});
+
+test("a checkout without a commit yet builds 0.0.0+nogit and its NOTICE says so; after the first commit that prior is not believed: build gives the package the real version and --check agrees", () => {
+  const fresh = repo(path.join(base, "fresh"));
+  fs.mkdirSync(path.join(fresh.dir, "skills", "grp", "one"), { recursive: true });
+  fs.writeFileSync(path.join(fresh.dir, "skills", "grp", "one", "SKILL.md"), "---\nname: one\ndescription: one\n---\none\n");
+  fs.writeFileSync(path.join(fresh.dir, "skills-sync.json"), JSON.stringify({ version: 1, library: { name: "fresh", owner: "t" }, sources: {}, plugins: { grp: { displayName: "Grp", group: "grp" } } }, null, 2) + "\n");
+  const manifest = path.join(fresh.dir, "plugins", "grp", "plugin.json");
+  const notice = () => fs.readFileSync(path.join(fresh.dir, "plugins", "grp", "NOTICE.md"), "utf8");
+  assert.equal(cliIn(fresh.dir, "build", "--quiet").status, 0);
+  assert.equal(json(manifest).version, "0.0.0+nogit");
+  assert.match(notice(), /^- Commit: a git checkout without a commit yet$/m);
+  assert.deepEqual(changes(cliIn(fresh.dir, "build", "--json")), [], "settled before the first commit");
+  fresh.commit("one");
+  const check = cliIn(fresh.dir, "build", "--check", "--json");
+  assert.equal(check.status, 1, "0.0.0+nogit is no longer what a build would write");
+  assert.deepEqual(drift(check), ["plugins/grp/.codex-plugin/plugin.json", "plugins/grp/NOTICE.md", "plugins/grp/plugin.json"]);
+  assert.equal(cliIn(fresh.dir, "build", "--quiet").status, 0);
+  const version = `0.1.0+${fresh.git("rev-parse", "--short=12", "HEAD")}`;
+  assert.equal(json(manifest).version, version);
+  assert.equal(json(path.join(fresh.dir, "plugins", "grp", ".codex-plugin", "plugin.json")).version, version);
+  assert.ok(notice().includes(`- Commit: ${fresh.head()} (`));
+  assert.equal(cliIn(fresh.dir, "build", "--check").status, 0);
+});
+
+test("a package that cannot be built is a conflict that fails the run: a group without skills, a source not in the config, a source without a snapshot (a clone before refresh); build leaves plugins/<id> alone and exits 1, build --check lists plugins/<id> as drift and exits 1", () => {
+  assert.equal(cli("build", "--quiet").status, 0);
+  config({ ...CONFIG(), plugins: { ...CONFIG().plugins, ghost: { displayName: "Ghost", group: "nope" }, src: { displayName: "Src", source: "nosrc" } } });
+  write("plugins/ghost/plugin.json", "{}\n");
+  const check = cli("build", "--check");
+  assert.equal(check.status, 1);
+  assert.match(check.stdout, /no own skills under skills\/nope/);
+  assert.match(check.stdout, /source nosrc is not in skills-sync\.json/);
+  assert.match(check.stdout, /2 conflict\(s\) above to fix first/);
+  const paths = check.stdout.split("\n").filter((l) => l.startsWith("drift")).map((l) => l.replace(/^drift\s+/, "").trim()).sort();
+  assert.deepEqual(paths, [".agents/plugins/marketplace.json", ".claude-plugin/marketplace.json", "plugins/ghost", "plugins/src"], "the catalogs gained two entries; the two packages cannot be built");
+  const r = cli("build", "--json");
+  assert.equal(r.status, 1, "a conflict fails build too");
+  assert.equal(actions(r).filter((a) => a.kind === "conflict").length, 2);
+  assert.equal(read("plugins/ghost/plugin.json"), "{}\n", "whatever plugins/ghost holds is left alone");
+  assert.ok(!fs.existsSync(path.join(root, "plugins", "src")));
+  assert.ok(fs.existsSync(path.join(root, "plugins", "up", "plugin.json")), "the other packages are built");
+  // the clone-before-refresh shape: the source is in the config, its snapshot is not there
+  config();
+  assert.equal(cli("build", "--quiet").status, 0, "back to the two plugins; plugins/ghost goes as a stale id");
+  assert.ok(!fs.existsSync(path.join(root, "plugins", "ghost")));
+  fs.rmSync(path.join(root, "upstream"), { recursive: true });
+  const noSnapshot = cli("build", "--check", "--json");
+  assert.equal(noSnapshot.status, 1);
+  assert.deepEqual(drift(noSnapshot), ["plugins/up"]);
+  assert.ok(actions(noSnapshot).some((a) => a.kind === "conflict" && /no snapshot under upstream\/up/.test(a.note ?? "")), noSnapshot.stdout);
+  const built = tree(path.join(root, "plugins", "up"));
+  assert.equal(cli("build").status, 1);
+  assert.deepEqual(tree(path.join(root, "plugins", "up")), built, "the committed package is never deleted for want of a snapshot");
+});
+
+test("a clone that git converts to CRLF on checkout (core.autocrlf=true) is as built: build --check is clean, build rewrites nothing and git sees nothing to commit; a real edit there still drifts", () => {
+  assert.equal(cli("build", "--quiet").status, 0);
+  library.commit("built");
+  const clone = path.join(base, "clone");
+  library.git("clone", "-q", "-c", "core.autocrlf=true", root, clone);
+  const at = new Upstream(clone);
+  const eol = at.git("ls-files", "--eol").split(/\r?\n/).filter((l) => /plugins\/|marketplace\.json/.test(l));
+  assert.ok(eol.length > 10 && eol.every((l) => /^i\/lf\s+w\/crlf/.test(l)), eol.join("\n"));
+  assert.equal(cliIn(clone, "refresh", "--frozen", "--quiet").status, 0, "the snapshot and working set from the lock");
+  const check = cliIn(clone, "build", "--check");
+  assert.equal(check.status, 0, check.stdout);
+  assert.match(check.stdout, /build --check: clean/);
+  assert.deepEqual(changes(cliIn(clone, "build", "--json")), [], "nothing rewritten");
+  assert.equal(at.git("status", "--porcelain"), "");
+  fs.writeFileSync(path.join(clone, "plugins", "up", "skills", "a", "SKILL.md"), "---\r\nname: a\r\ndescription: a skill\r\nmetadata:\r\n  internal: true\r\n---\r\nhand edited\r\n");
+  const edited = cliIn(clone, "build", "--check", "--json");
+  assert.equal(edited.status, 1);
+  assert.deepEqual(drift(edited), ["plugins/up/.codex-plugin/plugin.json", "plugins/up/plugin.json", "plugins/up/skills/a/SKILL.md"], "the edited package counts as changed, so it would take the clone's HEAD version too");
+});
+
+test("build never follows a link: a junction or symlink inside plugins/<id>, or plugins/<id> itself as one, is a conflict that fails the run, the package is left alone and the source is never written through; --check lists the link; a link inside a source skill folder is not copied, with a note", () => {
+  assert.equal(cli("build", "--quiet").status, 0);
+  const link = path.join(root, "plugins", "oneezy", "skills", "own-one");
+  fs.rmSync(link, { recursive: true });
+  fs.symlinkSync(path.join(root, "skills", "oneezy", "own-one"), link, "junction");
+  const source = tree(path.join(root, "skills"));
+  const check = cli("build", "--check", "--json");
+  assert.equal(check.status, 1);
+  assert.deepEqual(drift(check), ["plugins/oneezy/skills/own-one"]);
+  const r = cli("build", "--json");
+  assert.equal(r.status, 1);
+  assert.ok(actions(r).some((a) => a.kind === "conflict" && a.path === link && /never follows/.test(a.note ?? "")), r.stdout);
+  assert.deepEqual(tree(path.join(root, "skills")), source, "no source file was written through the link");
+  assert.ok(fs.lstatSync(link).isSymbolicLink(), "the link is still there");
+  fs.rmSync(link);
+  assert.equal(cli("build", "--quiet").status, 0, "with the link gone the package is rebuilt");
+  assert.equal(read("plugins/oneezy/skills/own-one/SKILL.md"), "---\nname: own-one\ndescription: mine\nmetadata:\n  internal: true\n---\nmine\n");
+  assert.equal(cli("build", "--check").status, 0);
+  // the package folder itself as a link
+  const pkg = path.join(root, "plugins", "up");
+  fs.rmSync(pkg, { recursive: true });
+  fs.symlinkSync(path.join(root, ".agents", "skills"), pkg, "junction");
+  const whole = cli("build", "--check", "--json");
+  assert.equal(whole.status, 1);
+  assert.deepEqual(drift(whole), ["plugins/up"]);
+  assert.equal(cli("build").status, 1);
+  assert.ok(fs.lstatSync(pkg).isSymbolicLink(), "left alone");
+  fs.rmSync(pkg);
+  // a link inside a source skill folder: not copied, one note, the package builds
+  const inside = path.join(root, "skills", "oneezy", "own-two", "linked");
+  fs.symlinkSync(path.join(root, "skills", "flat-one"), inside, "junction");
+  const noted = cli("build", "--json");
+  assert.equal(noted.status, 0, noted.stderr);
+  assert.ok(actions(noted).some((a) => a.kind === "note" && a.path === inside && /not copied/.test(a.note ?? "")), noted.stdout);
+  assert.ok(!fs.existsSync(path.join(root, "plugins", "oneezy", "skills", "own-two", "linked")));
+  assert.equal(cli("build", "--check").status, 0);
+  fs.rmSync(inside);
 });
 
 /** `claude` on PATH, or null: the validation test skips itself without it. */
