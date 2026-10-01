@@ -253,8 +253,13 @@ export function cloneLibrary(source: string, home = os.homedir(), log: (s: strin
   return { ok: true, root };
 }
 
-/** Fast-forward the library from its remote, at most once per `minutes`, only when the tree is clean. */
-export function pullLibrary(root: string, minutes: number, log: (s: string) => void): "pulled" | "skipped" | "dirty" | "failed" | "throttled" {
+/**
+ * Fast-forward the library from its remote, at most once per `minutes`, only when the tree is clean. `regenerated`
+ * names tracked files the tool itself writes on every machine (a config library's lock): a local change to one of
+ * them alone never counts as dirty. Each is put at HEAD so the pull can replace it, and put back as it was when
+ * the pull fails: the refresh that follows a pull writes it again, and a frozen one reads it.
+ */
+export function pullLibrary(root: string, minutes: number, log: (s: string) => void, regenerated: string[] = []): "pulled" | "skipped" | "dirty" | "failed" | "throttled" {
   const stamp = path.join(root, ".git", "skills-sync-pulled");
   try {
     const last = fs.statSync(stamp).mtimeMs;
@@ -265,7 +270,11 @@ export function pullLibrary(root: string, minutes: number, log: (s: string) => v
   if (!fs.existsSync(path.join(root, ".git"))) return "skipped";
   const status = spawnSync("git", ["-C", root, "status", "--porcelain", "--untracked-files=no"], { encoding: "utf8" });
   if (status.status !== 0) return "skipped";
-  if (status.stdout.trim()) return "dirty";
+  // porcelain v1: two status letters, a space, the path (relative to the repository root, which the library is)
+  const changed = status.stdout.split("\n").filter(Boolean).map((l) => l.slice(3).trim());
+  if (changed.some((f) => !regenerated.includes(f))) return "dirty";
+  const saved = changed.map((f) => [path.join(root, f), fs.existsSync(path.join(root, f)) ? fs.readFileSync(path.join(root, f)) : null] as const);
+  if (changed.length) spawnSync("git", ["-C", root, "checkout", "--", ...changed], { encoding: "utf8" });
   const r = spawnSync("git", ["-C", root, "pull", "--ff-only", "--quiet"], { encoding: "utf8", timeout: 20_000 });
   try {
     fs.writeFileSync(stamp, new Date().toISOString());
@@ -273,6 +282,10 @@ export function pullLibrary(root: string, minutes: number, log: (s: string) => v
     /* stamp is best-effort */
   }
   if (r.status !== 0) {
+    for (const [file, bytes] of saved) {
+      if (bytes) fs.writeFileSync(file, bytes);
+      else fs.rmSync(file, { force: true });
+    }
     log(`library pull skipped: ${(r.stderr ?? "").trim().split("\n").pop()}`);
     return "failed";
   }

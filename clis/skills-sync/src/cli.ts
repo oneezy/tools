@@ -230,7 +230,9 @@ async function main(): Promise<void> {
   setup.merge(remember);
 
   // 3. keep the library current: the pull, and with a config the refresh to latest, share one 30-minute window.
-  //    --pull forces both; --no-pull skips the pull and runs the refresh frozen; a throttled, dirty or failed pull does too
+  //    --pull forces both; --no-pull skips the pull and runs the refresh frozen; a throttled, dirty or failed pull does too.
+  //    A config library's lock is written by that refresh on every machine, so a clone's tree is "dirty" by the lock
+  //    alone from its first latest refresh on: that never blocks the pull (the pull replaces it, the refresh writes it again)
   let latest = false;
   if (args.pull && args.command !== "status" && !args.plan) {
     if (args.pull === "force") {
@@ -240,7 +242,7 @@ async function main(): Promise<void> {
         /* nothing to reset */
       }
     }
-    const r = pullLibrary(lib.root, 30, log);
+    const r = pullLibrary(lib.root, 30, log, lib.hasConfig() ? [path.basename(lib.lockFile)] : []);
     if (r === "pulled" && !args.quiet) log("library pulled");
     if (r === "dirty" && !args.quiet) log("library has local changes; pull skipped");
     latest = args.pull === "force" || r === "pulled" || r === "skipped";
