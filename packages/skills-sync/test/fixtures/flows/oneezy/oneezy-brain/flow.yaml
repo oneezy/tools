@@ -1,0 +1,98 @@
+skill: oneezy-brain
+purpose: Remember, find, update and close entries in Justin's GitHub-issues brain (oneezy/brain), and read back the agenda.
+runtime: [gh, python3]
+refs:
+  - token: /wayfinder
+    kind: skill
+    id: wayfinder
+    need: mention
+    when: named as a boundary only; the brain never edits wayfinder tickets and wayfinder never edits entries
+  - token: scripts/brain.py
+    kind: file
+    id: skills/oneezy/oneezy-brain/scripts/brain.py
+    need: required
+    when: every command
+unresolved: []
+agents:
+  max: 0
+steps:
+  - id: map-request
+    does: match Justin's words to one row of the request table (remember, agenda, find, done, trash, move, update)
+    outcome:
+      done: one command chosen
+  - id: tree
+    after: map-request
+    if: the request is remember and the category names are unsure; once per session
+    does: run tree
+    needs: [scripts/brain.py]
+    outcome:
+      done: the areas and their categories known; a category is never invented
+  - id: remember
+    after: [map-request, tree]
+    if: the request is remember, save to my brain, brain this, note to self
+    does: choose area, category, GTD list, priority and a one-line title from Justin's words without asking, then run remember with --via; several things in one breath become several entries; a thing already in the brain that changed is updated (update) or commented (comment) instead of duplicated
+    needs: [scripts/brain.py]
+    outcome:
+      done: the number, title, place and labels read back from the tool in one line
+  - id: comment
+    after: map-request
+    if: the request is remember and the thing is already in the brain; the change is history, not a correction
+    does: gh issue comment on the entry instead of creating a duplicate
+    needs: [gh]
+    outcome:
+      done: the entry number read back
+  - id: agenda
+    after: map-request
+    if: the request is agenda, what do I need to do, what's most important, what's in my brain
+    does: run agenda (with --area when Justin names one) and print its block as is, then at most two sentences
+    needs: [scripts/brain.py]
+    outcome:
+      done: the block on screen
+  - id: find
+    after: map-request
+    if: the request names a thing (about X, done X, trash X, an entry to update)
+    does: run find with Justin's words
+    needs: [scripts/brain.py]
+    outcome:
+      done: matching entries listed
+  - id: answer
+    after: find
+    if: the request was what's in my brain about X
+    does: answer from the hits
+    outcome:
+      done: answer given
+  - id: confirm
+    after: find
+    if: the request was done or trash
+    does: confirm the match with Justin
+    outcome:
+      input: Justin confirms which entry
+  - id: mark-done
+    after: confirm
+    if: the request was done
+    does: run done <number> with --note when Justin gave one
+    needs: [scripts/brain.py]
+    outcome:
+      done: number read back
+  - id: trash
+    after: confirm
+    if: the request was trash
+    does: run trash <number>
+    needs: [scripts/brain.py]
+    outcome:
+      done: number read back
+  - id: move
+    after: map-request
+    if: the request is that belongs under Y, move X to Y
+    does: run move <number> --area --category
+    needs: [scripts/brain.py]
+    outcome:
+      done: number read back
+  - id: update
+    after: find
+    if: an existing entry is now waiting, or its status text is stale
+    does: read the open issue, then run update <number> with --list, --title or --body-file and --expect-updated-at from the read
+    needs: [scripts/brain.py]
+    outcome:
+      done: the number and its verified state reported
+      fail: refused (closed issue, category, ambiguous list label, wayfinder issue, or changed meanwhile) → report the refusal

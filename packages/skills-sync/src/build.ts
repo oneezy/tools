@@ -15,6 +15,8 @@ export interface BuildOptions {
   plugins: boolean;
   /** write the two root marketplace catalogs */
   catalogs: boolean;
+  /** write the upload archives under artifacts/; never part of a check */
+  artifacts: boolean;
   /** compute every output, report what differs from disk, write nothing */
   check: boolean;
   plan: boolean;
@@ -118,7 +120,7 @@ export function build(lib: Library, opts: BuildOptions): BuildResult {
     for (const [file, bytes] of files) {
       const have = fs.existsSync(file) ? fs.readFileSync(file) : null;
       if (have && asBuilt(have, bytes)) changes.add({ kind: "skip", path: file, note: "ok" });
-      else changes.add({ kind: "write", path: file, payload: bytes, note: have ? "changed" : "new" });
+      else changes.add({ kind: "write", path: file, payload: bytes, note: have ? (opts.check ? "differs" : "changed") : opts.check ? "missing" : "new" });
     }
   }
   report.merge(changes);
@@ -436,7 +438,7 @@ function sameFiles(disk: Map<string, Buffer>, expected: Map<string, Buffer>): bo
  * Disk holds the expected bytes, or their CRLF form: what a checkout with core.autocrlf=true makes of a committed LF
  * file. build writes LF; a clone that git converts on checkout is as built, and git itself sees nothing to commit there.
  */
-function asBuilt(have: Buffer, expected: Buffer): boolean {
+export function asBuilt(have: Buffer, expected: Buffer): boolean {
   return have.equals(expected) || (have.length > expected.length && have.equals(crlf(expected)));
 }
 

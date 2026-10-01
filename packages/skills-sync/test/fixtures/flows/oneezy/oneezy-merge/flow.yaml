@@ -1,0 +1,66 @@
+skill: oneezy-merge
+purpose: Land the current branch and end with one status report.
+runtime: [git, gh, Vercel commit statuses]
+refs:
+  - token: /oneezy-status
+    kind: skill
+    id: oneezy-status
+    need: required
+    when: report
+unresolved: []
+agents:
+  max: 0
+steps:
+  - id: mode
+    does: read the arguments into open (no branch named), land (one branch named) or release (release, both, dev and main), and pick the PR base; a release from dev itself, or from a branch already landed, is promotion-only
+    outcome:
+      done: mode and base known
+  - id: commit-push
+    after: mode
+    if: not a promotion-only release (mode is release and the current branch is dev itself or already landed)
+    does: one shell call; stage the session's files, commit with a conventional subject carrying the ticket number and the attribution trailers, git push -u origin <branch>
+    needs: [git]
+    outcome:
+      done: push accepted
+      fail: push refused → one line, stop
+  - id: open-pr
+    after: commit-push
+    if: not a promotion-only release
+    does: one call against the base; the body holds Summary (Closes and at most five snapshot bullets), Evidence and Merge Danger
+    needs: [gh]
+    outcome:
+      done: PR number returned
+      fail: PR refused → one line, stop
+  - id: wait-builds
+    after: open-pr
+    if: not a promotion-only release
+    does: read the PR's combined status
+    loop:
+      until: every Vercel status is success or failure
+      every: 90s
+    outcome:
+      done: all green
+      fail: any failure → skip land and promote
+  - id: land
+    after: wait-builds
+    if: mode is land or release, not a promotion-only release, and all builds green
+    does: squash-merge with the expected head SHA, title = PR title plus (#<pr>); then one shell call; fetch, verify origin/<base> contains the squash, check out the base, fast-forward, delete the remote and local branch once; another session's worktree is never touched
+    needs: [gh, git]
+    outcome:
+      done: base fast-forwarded, branch deleted
+      fail: origin/<base> does not contain the squash → stop; a refused delete is left for the report, not retried
+  - id: promote
+    after: [mode, land]
+    if: mode is release
+    does: fast-forward main to dev on origin; when origin refuses, open a release PR dev → main, merge it with a merge commit, verify origin/main contains it; then fast-forward the local main ref
+    needs: [git, gh]
+    outcome:
+      done: origin/main equals origin/dev
+      fail: promotion refused → one line, stop
+  - id: report
+    after: [wait-builds, land, promote]
+    calls:
+      skill: oneezy-status
+    returns: the status report, the only message
+    outcome:
+      done: report on screen

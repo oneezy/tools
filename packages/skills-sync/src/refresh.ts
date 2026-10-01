@@ -231,6 +231,34 @@ export function refresh(lib: Library, opts: RefreshOptions): RefreshResult {
   return result;
 }
 
+/**
+ * The lock a refresh would write from the snapshots as they are, with no network: per source that has a snapshot, one
+ * entry per selected skill the snapshot holds, hashed from its folder there, at the commit the snapshot records; a
+ * source without a snapshot keeps the entries the lock has for it, as a refresh that cannot reach it does. One name
+ * from two sources goes to the first source by id, as in refresh. null when no source has a snapshot.
+ */
+export function snapshotLock(lib: Library): Record<string, LockEntry> | null {
+  const config = readConfig(lib.configFile);
+  const old = lib.lockEntries();
+  const next: Record<string, LockEntry> = {};
+  let snapshots = 0;
+  for (const id of Object.keys(config.sources).sort(cmp)) {
+    const src = config.sources[id];
+    const snapDir = path.join(lib.upstream, id);
+    const meta = readMeta(snapDir);
+    if (meta) snapshots++;
+    for (const s of selection(src)) {
+      if (next[s.name]) continue;
+      const snap = meta?.skills?.[s.upstream];
+      if (snap) {
+        const dir = path.join(snapDir, snap.path);
+        next[s.name] = lockEntry(src, snap.path, isSkillDir(dir) ? skillHash(dir) : snap.hash, snap.commit);
+      } else if (!meta && old[s.name]?.source === lockSource(src)) next[s.name] = old[s.name];
+    }
+  }
+  return snapshots ? next : null;
+}
+
 /** The working-set copy of one resolved skill; skipped when its files already equal the snapshot's with the rename applied. */
 function workingCopy(lib: Library, r: Resolved, own: Set<string>, report: Report): void {
   const dst = path.join(lib.agents, r.name);

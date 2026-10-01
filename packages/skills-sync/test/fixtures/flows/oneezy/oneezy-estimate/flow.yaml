@@ -1,0 +1,46 @@
+skill: oneezy-estimate
+purpose: Set Estimate, Priority and Type on every unsized issue of the repo's GitHub project, one comment each, with no human in the loop.
+runtime: [gh, bash, PROJECT_PAT in CI]
+refs:
+  - token: scripts/backlog.sh
+    kind: file
+    id: skills/oneezy/oneezy-estimate/scripts/backlog.sh
+    need: required
+    when: load-backlog
+  - token: scripts/set.sh
+    kind: file
+    id: skills/oneezy/oneezy-estimate/scripts/set.sh
+    need: required
+    when: write
+unresolved: []
+agents:
+  max: 0
+steps:
+  - id: load-backlog
+    does: run scripts/backlog.sh from the repo clone and read every line (the project and its field ids, then one issue per line, open or closed)
+    needs: [scripts/backlog.sh, gh]
+    outcome:
+      done: every line read
+  - id: list-work
+    after: load-backlog
+    does: write two lists in the reply, Unsized (no Estimate, minus wayfinder:map and phase issues) and Re-rank (Todo or Next Up whose Priority no longer fits)
+    outcome:
+      done: both lists on screen, even when one is empty
+  - id: decide
+    after: list-work
+    does: per issue, Estimate from Points, Priority from Priority, Type from Type, and one line of reasoning that becomes the comment
+    outcome:
+      done: one line per issue
+  - id: write
+    after: decide
+    does: one scripts/set.sh call per issue with --comment; Unsized get --estimate, --priority and --type when the issue has no type label; Re-rank get --priority only
+    needs: [scripts/set.sh, gh]
+    outcome:
+      done: set printed for every field decided and commented for every issue on either list
+      fail: a refusal (exit 2) writes nothing and names the rule → rerun without the refused flag
+  - id: report
+    after: write
+    does: one table, one row per issue written (number, title, Estimate, Priority, Type, the reasoning line); an empty list gets one line saying so
+    returns: the table
+    outcome:
+      done: every unsized issue outside maps and phases carries an Estimate and a Priority, every Priority change has its comment, the table is on screen
