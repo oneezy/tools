@@ -3,7 +3,8 @@ import fs from "node:fs";
 import path from "node:path";
 import { copyDir, isLink, lexists, linkTarget, makeLink, removeLink, samePath, under } from "./fs.js";
 
-export type Kind = "link" | "relink" | "remove" | "replace-copy" | "copy" | "write" | "exclude" | "skip" | "conflict";
+/** remove drops a link; delete drops a real folder or file (only ever a generated one: a snapshot or a working-set copy). */
+export type Kind = "link" | "relink" | "remove" | "delete" | "replace-copy" | "copy" | "write" | "exclude" | "skip" | "conflict";
 
 export interface Action {
   kind: Kind;
@@ -11,7 +12,7 @@ export interface Action {
   target?: string;
   note?: string;
   /** for write: the file body; for exclude: the entries */
-  payload?: string | string[];
+  payload?: string | Buffer | string[];
 }
 
 export class Report {
@@ -34,7 +35,7 @@ export class Report {
   }
 }
 
-const MARK: Record<Kind, string> = { link: "+", relink: "~", remove: "-", "replace-copy": "~", copy: "+", write: "+", exclude: "+", skip: "=", conflict: "!" };
+const MARK: Record<Kind, string> = { link: "+", relink: "~", remove: "-", delete: "-", "replace-copy": "~", copy: "+", write: "+", exclude: "+", skip: "=", conflict: "!" };
 
 export function line(a: Action): string {
   const tail = a.target ? ` -> ${a.target}` : "";
@@ -56,6 +57,9 @@ export function apply(report: Report, plan: boolean, exclude?: (repo: string, en
       case "remove":
         removeLink(a.path);
         break;
+      case "delete":
+        fs.rmSync(a.path, { recursive: true, force: true, maxRetries: 3 });
+        break;
       case "replace-copy":
         fs.rmSync(a.path, { recursive: true, force: true });
         makeLink(a.target!, a.path);
@@ -65,7 +69,7 @@ export function apply(report: Report, plan: boolean, exclude?: (repo: string, en
         break;
       case "write":
         fs.mkdirSync(path.dirname(a.path), { recursive: true });
-        fs.writeFileSync(a.path, a.payload as string);
+        fs.writeFileSync(a.path, a.payload as string | Buffer);
         break;
       case "exclude":
         exclude?.(a.path, a.payload as string[]);

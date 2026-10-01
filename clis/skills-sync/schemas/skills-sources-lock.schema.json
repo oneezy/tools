@@ -1,0 +1,85 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/oneezy/tools/blob/dev/clis/skills-sync/schemas/skills-sources-lock.schema.json",
+  "title": "skills-sources-lock.json",
+  "description": "What the last skills-sync refresh resolved from skills-sources.json: the commit and date per source, the upstream path and content hash per skill (the npx skills recipe: SHA-256 over relative path then bytes, localeCompare order), the transforms applied in the working set, per-skill pinned commits, and the releases build recorded. Written by the tool; never hand-edited.",
+  "type": "object",
+  "required": ["version", "generated", "sources"],
+  "additionalProperties": false,
+  "properties": {
+    "version": { "const": 1 },
+    "generated": {
+      "type": "object",
+      "required": ["manifest"],
+      "additionalProperties": false,
+      "properties": {
+        "manifest": { "description": "SHA-256 of the skills-sources.json bytes this lock was resolved from.", "$ref": "#/$defs/sha256" }
+      }
+    },
+    "sources": {
+      "type": "object",
+      "additionalProperties": false,
+      "patternProperties": { "^[a-z0-9][a-z0-9-]*$": { "$ref": "#/$defs/source" } }
+    },
+    "releases": {
+      "description": "One entry per plugin id: the last artifact uploaded from it.",
+      "type": "object",
+      "additionalProperties": false,
+      "patternProperties": { "^[a-z0-9][a-z0-9-]*$": { "$ref": "#/$defs/release" } }
+    }
+  },
+  "$defs": {
+    "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+    "commit": { "type": "string", "pattern": "^[0-9a-f]{40}$" },
+    "source": {
+      "type": "object",
+      "required": ["commit", "date", "skills"],
+      "additionalProperties": false,
+      "properties": {
+        "commit": { "$ref": "#/$defs/commit" },
+        "date": { "description": "The commit's date, ISO 8601.", "type": "string", "minLength": 1 },
+        "skills": {
+          "description": "Keyed by upstream folder name.",
+          "type": "object",
+          "additionalProperties": false,
+          "patternProperties": { "^[A-Za-z0-9][A-Za-z0-9._-]*$": { "$ref": "#/$defs/skill" } }
+        }
+      }
+    },
+    "skill": {
+      "type": "object",
+      "required": ["path", "hash"],
+      "additionalProperties": false,
+      "properties": {
+        "path": { "description": "The skill folder, relative to the repo root, with / separators.", "type": "string", "minLength": 1 },
+        "hash": { "$ref": "#/$defs/sha256" },
+        "pinnedCommit": { "description": "Present when the skill is held at its own commit by a manifest pin.", "$ref": "#/$defs/commit" },
+        "transforms": {
+          "description": "What the working-set copy changes from the snapshot, in order.",
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["kind", "to"],
+            "additionalProperties": false,
+            "properties": {
+              "kind": { "description": "rename: the folder is copied under `to` and the frontmatter name rewritten to it.", "const": "rename" },
+              "to": { "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*$" }
+            }
+          }
+        }
+      }
+    },
+    "release": {
+      "type": "object",
+      "required": ["plugin_id", "release_id", "sha256", "scope", "date"],
+      "additionalProperties": false,
+      "properties": {
+        "plugin_id": { "type": "string", "minLength": 1 },
+        "release_id": { "type": "string", "minLength": 1 },
+        "sha256": { "$ref": "#/$defs/sha256" },
+        "scope": { "type": "string", "minLength": 1 },
+        "date": { "type": "string", "minLength": 1 }
+      }
+    }
+  }
+}
