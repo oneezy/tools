@@ -170,7 +170,11 @@ importers:
         specifier: 2.11.5
         version: 2.11.5
 
-  clis/skills-sync:
+  packages/apps-sync: {}
+
+  packages/remote-sessions: {}
+
+  packages/skills-sync:
     dependencies:
       '@clack/prompts':
         specifier: ^1.8.1
@@ -185,10 +189,6 @@ importers:
       typescript:
         specifier: ^5.9.0
         version: 5.9.3
-
-  packages/apps-sync: {}
-
-  packages/remote-sessions: {}
 
   packages/skills-viewer:
     dependencies:

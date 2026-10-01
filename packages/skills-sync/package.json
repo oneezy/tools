@@ -7,7 +7,7 @@
   "type": "module",
   "bin": { "skills-sync": "dist/src/cli.js" },
   "files": ["dist/src", "schemas", "README.md"],
-  "repository": { "type": "git", "url": "https://github.com/oneezy/tools.git", "directory": "clis/skills-sync" },
+  "repository": { "type": "git", "url": "git+https://github.com/oneezy/tools.git", "directory": "packages/skills-sync" },
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "test": "tsc -p tsconfig.json && node --test \"dist/test/*.test.js\"",
