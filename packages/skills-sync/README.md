@@ -26,6 +26,8 @@ A skills library is a folder with `skills/` beside `skills-sync.json` or `skills
 | `skills/<group>/<name>/` | an own skill inside a group; the group's name is its plugin id | you |
 | `skills-sync.json` | the committed config: the library itself, the two generation switches, third-party sources with their selections, renames and pins, the plugins | you, and `add` |
 | `skills-lock.json` | what is installed: one entry per third-party skill in the `npx skills` format (source repo, upstream path, content hash) plus the commit it was taken at | `refresh`; or `npx skills add/update` in a library without a config |
+| `plugins/<id>/` | the plugin form, one package per plugin in the config: skill copies, `plugin.json`, `.codex-plugin/plugin.json`, `.claude-plugin/plugin.json`, `LICENSE`, `NOTICE.md`. Committed. | `build` |
+| `.claude-plugin/marketplace.json`, `.agents/plugins/marketplace.json` | the two marketplace catalogs, each listing `./plugins/<id>`. Committed. | `build` |
 | `skills-sync.local.json` | this machine's answers: harnesses, user folders, projects, WSL distros, skills found gone upstream, link mode. Gitignore it. | the tool, after every run |
 
 A library with a config gets its third-party skills through `refresh` (see [Third-party sources](#third-party-sources)). A library with only `skills-lock.json` keeps working exactly as before: `sync` restores from that lock and `npx skills update` owns the copies.
@@ -42,7 +44,7 @@ Everything else in it is generated and should be gitignored:
 | `.agents/skills/<name>` | the working set: one copy per third-party skill (from its snapshot, with its rename applied), plus one link per own skill (flat or grouped). Codex reads this folder directly. |
 | `.claude/skills/<name>`, `.goose/skills/<name>`, `.hermes/skills/<name>` | one link per working-set entry, for each harness that does not read `.agents/skills` |
 
-`oneezy/skills` is one such library; `npx skills add oneezy/skills` installs its own skills anywhere, and cloning it plus one `npx @oneezy/skills-sync` gives a new machine the whole set.
+`oneezy/skills` is one such library; `npx skills add oneezy/skills` installs its own skills anywhere, `/plugin marketplace add oneezy/skills` and `codex plugin marketplace add oneezy/skills` offer its plugins (see [Plugins and catalogs](#plugins-and-catalogs)), and cloning it plus one `npx @oneezy/skills-sync` gives a new machine the whole set.
 
 ## What a run does
 
@@ -91,7 +93,7 @@ Third-party skills come from **sources** declared in `skills-sync.json`. The con
 }
 ```
 
-**Latest is the default.** Every selected skill is taken at the tip of its source's `ref` on each `refresh`, and on each `sync` that is due for a pull. A **pin** is the exception: a skill listed in `pins` is taken at that commit while its siblings move; change the commit to move it, remove it to let it follow. A `ref` that is a full commit holds the whole source. The `generate` switches say which forms the library builds (the loose-skill layers, the plugin packages); this version parses and validates them, the build command reads them.
+**Latest is the default.** Every selected skill is taken at the tip of its source's `ref` on each `refresh`, and on each `sync` that is due for a pull. A **pin** is the exception: a skill listed in `pins` is taken at that commit while its siblings move; change the commit to move it, remove it to let it follow. A `ref` that is a full commit holds the whole source. The `generate` switches say which forms the library builds (the loose-skill layers, the plugin packages); `build` reads `generate.plugins`.
 
 **`refresh`** resolves every source and makes the library match:
 
@@ -105,9 +107,44 @@ The hash is the `npx skills` recipe (SHA-256 over every file's relative path the
 
 **`add <source>`** declares a source and brings its skills in: `add mattpocock/skills`, `add cursor/plugins#main --root pstack/skills --as tdd=pstack-tdd,teach=pstack-teach`, `add ../some/repo --skills a,b`. It stages the repo in a temp clone, lists the skills under `--root` (default `skills/` when the repo has one, else the root), writes the config entry (`--id`, default `owner-repo`; the default branch unless `#ref`; every skill unless `--skills`; a map when `--as` renames; the nearest `LICENSE` and `README.md` as attribution) and runs `refresh` with that clone. Nothing is installed anywhere: no agent folder, no `~/.skills-sync`, no `npx skills` run against the library. `add --plan` prints the entry it would write and stops. Add a pin or drop a skill by editing the config, then `refresh`.
 
+## Plugins and catalogs
+
+The same library is a plugin marketplace for Claude Code, Codex and ChatGPT. **`build`** writes the plugin form into the library, beside the source, and the result is committed like any other change; nothing is generated at install time and CI only checks. It runs when the config's `generate.plugins` is true (the default); with it false, `build` writes nothing and `build --check` ignores the plugin form.
+
+`build --plugins` writes one package per entry of `plugins` in the config:
+
+```
+plugins/<id>/
+  plugin.json                  Agent Plugins 1.0: $schema, name, version, description, author, homepage, repository, license,
+                               keywords, and the ChatGPT interface under extensions["com.openai"] (displayName, shortDescription,
+                               longDescription, developerName, category, capabilities)
+  .codex-plugin/plugin.json    the legacy flat form of the same, plus skills: "./skills/" and interface
+  .claude-plugin/plugin.json   name, displayName, description, author, license, homepage, repository, keywords; no version,
+                               so Claude Code tracks the library's commits
+  skills/<name>/               a copy of each skill: an own group's skills from skills/<group>/, a source's selected skills
+                               from the working set (renames applied)
+  LICENSE                      the source's LICENSE from its attribution files; for an own plugin the library's LICENSE
+                               when it has one, else none and one reported line
+  NOTICE.md                    the source repo, the commit and date the files were taken at, the license, the skills
+                               (renames and per-skill pins noted), and why the copies are marked internal
+```
+
+Every copied `SKILL.md` gains `metadata.internal: true` in its frontmatter (into an existing `metadata:` map, or a new one at the end; every other byte stays as it was). `npx skills` skips a skill so marked, so a consumer of the library installs and updates each own skill from `skills/` exactly once rather than finding it twice; `INSTALL_INTERNAL_SKILLS=1` re-exposes the copies. `build --check` compares after that transform.
+
+The version in `plugin.json` and `.codex-plugin/plugin.json` is `0.<commit count>.0+<sha12>` of the library's HEAD (`git rev-list --count HEAD`, `git rev-parse --short=12 HEAD`); a library without git gets `0.0.0+nogit`. A package whose files did not change keeps the version and commit it was built with: the HEAD moves with every commit, including the one that commits the build, so a rebuild rewrites a package only when its inputs changed, and then every file of it takes the new HEAD's version. Two builds of the same inputs are byte-identical; a build with nothing new is a no-op. A package for an id no longer in the config is removed with a report line, and a skill copy no longer in its package goes the same way.
+
+`build --catalogs` writes the two root catalogs, each listing every plugin with a `./plugins/<id>` source, in the config's order: `.claude-plugin/marketplace.json` (`name` is `<owner>-<name>` from `library`, `owner`, `description`, `plugins[]` with `name`, `source`, `description`) and `.agents/plugins/marketplace.json` (Codex: `name`, `interface.displayName`, `plugins[]` with `name`, `source`, `description`, `policy` `installation: AVAILABLE` and `authentication: ON_USE`, `category`). `build` with no output flag writes both forms. `--artifacts` (archives under `artifacts/` for the ChatGPT upload) is the next stage and prints a line saying so.
+
+**`build --check`** computes every output in memory, prints each path that differs from disk (a hand-edited copy, a source edited since the last build, a missing catalog, a stale package), writes nothing, and exits 1; a clean library exits 0. `--check --plugins` or `--check --catalogs` narrows it to one form. CI runs `build --check` on every push so a skipped local build cannot land drift. `build --plan` shows the writes without making them.
+
+Plugin skills run namespaced: `/oneezy:oneezy-status` in Claude Code, `$oneezy:oneezy-status` in Codex; their folder names do not change. Each package passes `claude plugin validate` (the only warning is the missing Claude version, by design) and the root passes it as a marketplace.
+
+The config's optional `releases` section is the ChatGPT upload record, one entry per plugin id written by hand after each upload: `plugin_id`, `release_id`, `sha256` of the archive, `scope` (`personal` or `workspace`), `date`, and optionally `files`, the archive's entries; the schema admits nothing else there. `build --artifacts` reads it to say whether an archive changed since its last upload.
+
 ## Rules it never breaks
 
 - A link is created, retargeted or removed only when its target is inside the library. A real folder in the way, or a link pointing elsewhere, is reported as a conflict and left alone.
+- `build` writes only `plugins/<id>/` and the two catalogs, inside the library; `build --check` writes nothing at all. A package is rewritten only when its inputs changed.
 - `synced/` (Claude's account skills) and `.system/` are never touched.
 - Third-party copies in `.agents/skills` are written only by `refresh` (config library) or by `npx skills` (legacy library); the link steps never edit them.
 - `refresh` and `add` touch nothing outside the library: no pull, no `~/.skills-sync`, no harness folder.
@@ -131,9 +168,10 @@ Every answer is also a flag, so scripts and agents never see a prompt:
 --watch  --plan  --quiet  --json  -y  --ask
 refresh: --frozen  --retry
 add <source>: --id <id>  --root <path>  --skills a,b | --skills '*'  --as old=new,...
+build: --plugins  --catalogs  --artifacts  --check
 ```
 
-Commands: `sync` (default), `status`, `unlink` (remove every link this tool made in the user folders), `projects` (only step 6), `refresh` and `add <source>` (see [Third-party sources](#third-party-sources)).
+Commands: `sync` (default), `status`, `unlink` (remove every link this tool made in the user folders), `projects` (only step 6), `refresh` and `add <source>` (see [Third-party sources](#third-party-sources)), `build` (see [Plugins and catalogs](#plugins-and-catalogs)).
 
 `--watch` keeps running and redoes layers and user folders when `skills/`, the config or the lock changes, so a skill you add is linked the moment its folder appears.
 
@@ -145,4 +183,4 @@ pnpm test          # node:test on temp folders and temp git repos standing in fo
 node dist/src/cli.js --repo <library> --plan
 ```
 
-The two JSON Schemas under `schemas/` ship with the package: `skills-sync.schema.json` for the config, which `refresh` and `add` validate before doing anything, and `skills-sync.local.schema.json` for this machine's answers, validated on every read. The validator is in the tool; there is no dependency for it.
+The two JSON Schemas under `schemas/` ship with the package: `skills-sync.schema.json` for the config (sources, plugins, the `generate` switches, the `releases` upload record), which `refresh`, `add` and `build` validate before doing anything, and `skills-sync.local.schema.json` for this machine's answers, validated on every read. The validator is in the tool; there is no dependency for it.
