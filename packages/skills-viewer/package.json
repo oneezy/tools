@@ -1,0 +1,35 @@
+{
+  "name": "skills-viewer",
+  "version": "0.1.0",
+  "description": "Statically analyze a folder of agent skills (SKILL.md) and generate a self-contained visual map: entry points, what each skill does, what it calls, and how.",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/oneezy/tools.git",
+    "directory": "packages/skills-viewer"
+  },
+  "type": "module",
+  "bin": {
+    "skills-viewer": "dist/src/cli.js"
+  },
+  "files": [
+    "dist",
+    "README.md"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "test": "tsc -p tsconfig.json && node --test \"dist/test/*.test.js\"",
+    "start": "node dist/src/cli.js",
+    "fixture": "node dist/src/cli.js fixtures/mattpocock-skills --out examples/mattpocock --no-open"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "dependencies": {
+    "yaml": "^2.8.0"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "typescript": "^5.9.0"
+  }
+}

@@ -1,0 +1,10 @@
+{
+  "name": "@oneezy/apps-sync",
+  "version": "0.1.0",
+  "private": true,
+  "description": "App Updater: a manually launched terminal manager for selected Windows applications and native Ubuntu CLI installations. PowerShell 7 launchers, Python engine.",
+  "scripts": {
+    "test": "node ../../scripts/python.mjs -m unittest discover -s tests -p test_software_manager.py -v",
+    "check": "pwsh -NoProfile -File ../../scripts/syntax-check.ps1 \"Apps Sync.ps1\" Run-Installer.ps1 Update-Tools.ps1 tests/Test-Updater.ps1 software_manager.py updater_inventory.py updater_ui.py tests/test_software_manager.py tests/test_launchers.py tests/offline_smoke.py tests/launcher_probe.py"
+  }
+}

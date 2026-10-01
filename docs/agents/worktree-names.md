@@ -8,7 +8,7 @@ repository and ticket number first. Avoid opaque bridge IDs and random names whe
 the creation API accepts a name. Add a numeric suffix only for a collision.
 
 Prefer the shared `workspace` command in the tools repository's
-`clis/remote-sessions-cli/remote_sessions.py`; preview with `--plan --json`, then
+`packages/remote-sessions/remote_sessions.py`; preview with `--plan --json`, then
 create after the normal Git proposal. Start Claude or Codex inside the returned
 `WorkingDirectory` without requesting another worktree. If the helper is not
 available on this host, use the same naming convention with the native creation

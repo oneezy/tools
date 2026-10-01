@@ -1,0 +1,2195 @@
+{
+  "meta": {
+    "generatedAt": "2026-09-28T00:36:41.150Z",
+    "roots": [
+      "V:\\dev\\tools\\.claude\\worktrees\\tools-skills-viewer\\clis\\skills-viewer\\fixtures\\mattpocock-skills"
+    ],
+    "skillCount": 38,
+    "edgeCount": 52,
+    "flowCount": 9,
+    "version": "0.1.0"
+  },
+  "nodes": [
+    {
+      "id": "ask-matt",
+      "name": "ask-matt",
+      "description": "Ask which skill or flow fits your situation. A router over the skills in this repo.",
+      "mode": "manual",
+      "invocation": {
+        "claude": "manual",
+        "codex": "manual"
+      },
+      "entry": true,
+      "subSkill": false,
+      "dir": "V:\\dev\\tools\\.claude\\worktrees\\tools-skills-viewer\\clis\\skills-viewer\\fixtures\\mattpocock-skills\\ask-matt",
+      "file": "V:\\dev\\tools\\.claude\\worktrees\\tools-skills-viewer\\clis\\skills-viewer\\fixtures\\mattpocock-skills\\ask-matt\\SKILL.md",
+      "bodyLines": 86,
+      "scripts": [],
+      "references": [],
+      "frontmatter": {
+        "name": "ask-matt",
+        "description": "Ask which skill or flow fits your situation. A router over the skills in this repo.",
+        "disable-model-invocation": true
+      }
+    },
+    {
+      "id": "claude-handoff",
+      "name": "claude-handoff",
+      "description": "Hand the current conversation off to a fresh background agent that picks up the work immediately.",
+      "mode": "manual",
+      "invocation": {
+        "claude": "manual",
+        "codex": "manual"
+      },
+      "entry": true,
+      "subSkill": false,
+      "dir": "V:\\dev\\tools\\.claude\\worktrees\\tools-skills-viewer\\clis\\skills-viewer\\fixtures\\mattpocock-skills\\claude-handoff",
+      "file": "V:\\dev\\tools\\.claude\\worktrees\\tools-skills-viewer\\clis\\skills-viewer\\fixtures\\mattpocock-skills\\claude-handoff\\SKILL.md",
+      "bodyLines": 13,
+      "scripts": [],
+      "references": [],
+      "frontmatter": {
+        "name": "claude-handoff",
+        "description": "Hand the current conversation off to a fresh background agent that picks up the work immediately.",
+        "argument-hint": "What will the next session be used for?",
+        "disable-model-invocation": true
+      },
+      "argumentHint": "What will the next session be used for?"
+    },
+    {
+      "id": "code-review",
+      "name": "code-review",
+      "description": "Review the changes since a fixed point (commit, branch, tag, or merge-base) along two axes: Standards (does the code follow this repo's documented coding standards?) and Spec (does the code match what the originating issue/spec asked for?). Runs both reviews in parallel sub-agents and reports them side by side. Use when the user wants to review a branch, a PR, work-in-progress changes, or asks to \"review since X\".",
+      "mode": "auto",
+      "invocation": {
+        "claude": "auto",
+        "codex": "auto"
+      },
+      "entry": false,
+      "subSkill": true,
+      "dir": "V:\\dev\\tools\\.claude\\worktrees\\tools-skills-viewer\\clis\\skills-viewer\\fixtures\\mattpocock-skills\\code-review",
+      "file": "V:\\dev\\tools\\.claude\\worktrees\\tools-skills-viewer\\clis\\skills-viewer\\fixtures\\mattpocock-skills\\code-review\\SKILL.md",
+      "bodyLines": 84,
+      "scripts": [],
+      "references": [],
+      "frontmatter": {
+        "name": "code-review",
+        "description": "Review the changes since a fixed point (commit, branch, tag, or merge-base) along two axes: Standards (does the code follow this repo's documented coding standards?) and Spec (does the code match what the originating issue/spec asked for?). Runs both reviews in parallel sub-agents and reports them side by side. Use when the user wants to review a branch, a PR, work-in-progress changes, or asks to \"review since X\"."
+      }
+    },
+    {
+      "id": "codebase-design",
+      "name": "codebase-design",
+      "description": "Shared vocabulary for designing deep modules. Use when the user wants to design or improve a module's interface, find deepening opportunities, decide where a seam goes, make code more testable or AI-navigable, or when another skill needs the deep-module vocabulary.",
+      "mode": "auto",
+      "invocation": {
+        "claude": "auto",
+        "codex": "auto"
+      },
+      "entry": false,
+      "subSkill": true,
+      "dir": "V:\\dev\\tools\\.claude\\worktrees\\tools-skills-viewer\\clis\\skills-viewer\\fixtures\\mattpocock-skills\\codebase-design",
+      "file": "V:\\dev\\tools\\.claude\\worktrees\\tools-skills-viewer\\clis\\skills-viewer\\fixtures\\mattpocock-skills\\codebase-design\\SKILL.md",
+      "bodyLines": 111,
+      "scripts": [],
+      "references": [],
+      "frontmatter": {
+        "name": "codebase-design",
+        "description": "Shared vocabulary for designing deep modules. Use when the user wants to design or improve a module's interface, find deepening opportunities, decide where a seam goes, make code more testable or AI-navigable, or when another skill needs the deep-module vocabulary."
+      }
+    },
+    {
+      "id": "diagnosing-bugs",
+      "name": "diagnosing-bugs",
+      "description": "Diagnosis loop for hard bugs and performance regressions. Use when the user says \"diagnose\"/\"debug this\", or reports something broken/throwing/failing/slow.",
+      "mode": "auto",
+      "invocation": {
+        "claude": "auto",
+        "codex": "auto"
+      },
+      "entry": false,
+      "subSkill": false,
+      "dir": "V:\\dev\\tools\\.claude\\worktrees\\tools-skills-viewer\\clis\\skills-viewer\\fixtures\\mattpocock-skills\\diagnosing-bugs",
+      "file": "V:\\dev\\tools\\.claude\\worktrees\\tools-skills-viewer\\clis\\skills-viewer\\fixtures\\mattpocock-skills\\diagnosing-bugs\\SKILL.md",
+      "bodyLines": 135,
+      "scripts": [
+        "hitl-loop.template.sh"
+      ],
+      "references": [],
+      "frontmatter": {
+        "name": "diagnosing-bugs",
+        "description": "Diagnosis loop for hard bugs and performance regressions. Use when the user says \"diagnose\"/\"debug this\", or reports something broken/throwing/failing/slow."
+      }
+    },
+    {
+      "id": "domain-modeling",
+      "name": "domain-modeling",
+      "description": "Build and sharpen a project's domain model. Use when discussing codebase terminology, writing or editing a CONTEXT.md, or recording or editing an ADR.",
+      "mode": "auto",
+      "invocation": {
+        "claude": "auto",
+        "codex": "auto"
+      },
+      "entry": false,
+      "subSkill": true,
+      "dir": "V:\\dev\\tools\\.claude\\worktrees\\tools-skills-viewer\\clis\\skills-viewer\\fixtures\\mattpocock-skills\\domain-modeling",
+      "file": "V:\\dev\\tools\\.claude\\worktrees\\tools-skills-viewer\\clis\\skills-viewer\\fixtures\\mattpocock-skills\\domain-modeling\\SKILL.md",
+      "bodyLines": 71,
+      "scripts": [],
+      "references": [],
+      "frontmatter": {
+        "name": "domain-modeling",
+        "description": "Build and sharpen a project's domain model. Use when discussing codebase terminology, writing or editing a CONTEXT.md, or recording or editing an ADR."
+      }
+    },
+    {
+      "id": "git-guardrails-claude-code",
+      "name": "git-guardrails-claude-code",
+      "description": "Set up Claude Code hooks to block dangerous git commands (push, reset --hard, clean, branch -D, etc.) before they execute. Use when user wants to prevent destructive git operations, add git safety hooks, or block git push/reset in Claude Code.",
+      "mode": "auto",
+      "invocation": {
+        "claude": "auto",
+        "codex": "auto"
+      },
+      "entry": false,
+      "subSkill": false,
+      "dir": "V:\\dev\\tools\\.claude\\worktrees\\tools-skills-viewer\\clis\\skills-viewer\\fixtures\\mattpocock-skills\\git-guardrails-claude-code",
+      "file": "V:\\dev\\tools\\.claude\\worktrees\\tools-skills-viewer\\clis\\skills-viewer\\fixtures\\mattpocock-skills\\git-guardrails-claude-code\\SKILL.md",
+      "bodyLines": 92,
+      "scripts": [
+        "block-dangerous-git.sh"
+      ],
+      "references": [],
+      "frontmatter": {
+        "name": "git-guardrails-claude-code",
+        "description": "Set up Claude Code hooks to block dangerous git commands (push, reset --hard, clean, branch -D, etc.) before they execute. Use when user wants to prevent destructive git operations, add git safety hooks, or block git push/reset in Claude Code."
+      }
+    },
+    {
+      "id": "grill-me",
+      "name": "grill-me",
+      "description": "A relentless interview to sharpen a plan or design.",
+      "mode": "manual",
+      "invocation": {
+        "claude": "manual",
+        "codex": "manual"
+      },
+      "entry": false,
+      "subSkill": false,
+      "dir": "V:\\dev\\tools\\.claude\\worktrees\\tools-skills-viewer\\clis\\skills-viewer\\fixtures\\mattpocock-skills\\grill-me",
+      "file": "V:\\dev\\tools\\.claude\\worktrees\\tools-skills-viewer\\clis\\skills-viewer\\fixtures\\mattpocock-skills\\grill-me\\SKILL.md",
+      "bodyLines": 3,
+      "scripts": [],
+      "references": [],
+      "frontmatter": {
+        "name": "grill-me",
+        "description": "A relentless interview to sharpen a plan or design.",
+        "disable-model-invocation": true
+      }
+    },
+    {
+      "id": "grill-with-docs",
+      "name": "grill-with-docs",
+      "description": "A relentless interview to sharpen a plan or design, which also creates docs (ADR's and glossary) as we go.",
+      "mode": "manual",
+      "invocation": {
+        "claude": "manual",
+        "codex": "manual"
+      },
+      "entry": false,
+      "subSkill": false,
+      "dir": "V:\\dev\\tools\\.claude\\worktrees\\tools-skills-viewer\\clis\\skills-viewer\\fixtures\\mattpocock-skills\\grill-with-docs",
+      "file": "V:\\dev\\tools\\.claude\\worktrees\\tools-skills-viewer\\clis\\skills-viewer\\fixtures\\mattpocock-skills\\grill-with-docs\\SKILL.md",
+      "bodyLines": 3,
+      "scripts": [],
+      "references": [],
+      "frontmatter": {
+        "name": "grill-with-docs",
+        "description": "A relentless interview to sharpen a plan or design, which also creates docs (ADR's and glossary) as we go.",
+        "disable-model-invocation": true
+      }
+    },
+    {
+      "id": "grilling",
+      "name": "grilling",
+      "description": "Grill the user relentlessly about a plan, decision, or idea. Use when the user wants to stress-test their thinking, or uses any 'grill' trigger phrases.",
+      "mode": "auto",
+      "invocation": {
+        "claude": "auto",
+        "codex": "auto"
+      },
+      "entry": false,
+      "subSkill": true,
+      "dir": "V:\\dev\\tools\\.claude\\worktrees\\tools-skills-viewer\\clis\\skills-viewer\\fixtures\\mattpocock-skills\\grilling",
+      "file": "V:\\dev\\tools\\.claude\\worktrees\\tools-skills-viewer\\clis\\skills-viewer\\fixtures\\mattpocock-skills\\grilling\\SKILL.md",
+      "bodyLines": 25,
+      "scripts": [],
+      "references": [],
+      "frontmatter": {
+        "name": "grilling",
+        "description": "Grill the user relentlessly about a plan, decision, or idea. Use when the user wants to stress-test their thinking, or uses any 'grill' trigger phrases."
+      }
+    },
+    {
+      "id": "handoff",
+      "name": "handoff",
+      "description": "Compact the current conversation into a handoff document for another agent to pick up.",
+      "mode": "manual",
+      "invocation": {
+        "claude": "manual",
+        "codex": "manual"
+      },
+      "entry": false,
+      "subSkill": false,
+      "dir": "V:\\dev\\tools\\.claude\\worktrees\\tools-skills-viewer\\clis\\skills-viewer\\fixtures\\mattpocock-skills\\handoff",
+      "file": "V:\\dev\\tools\\.claude\\worktrees\\tools-skills-viewer\\clis\\skills-viewer\\fixtures\\mattpocock-skills\\handoff\\SKILL.md",
+      "bodyLines": 11,
+      "scripts": [],
+      "references": [],
+      "frontmatter": {
+        "name": "handoff",
+        "description": "Compact the current conversation into a handoff document for another agent to pick up.",
+        "argument-hint": "What will the next session be used for?",
+        "disable-model-invocation": true
+      },
+      "argumentHint": "What will the next session be used for?"
+    },
+    {
+      "id": "implement",
+      "name": "implement",
+      "description": "Implement a piece of work based on a spec or set of tickets.",
+      "mode": "manual",
+      "invocation": {
+        "claude": "manual",
+        "codex": "manual"
+      },
+      "entry": false,
+      "subSkill": false,
+      "dir": "V:\\dev\\tools\\.claude\\worktrees\\tools-skills-viewer\\clis\\skills-viewer\\fixtures\\mattpocock-skills\\implement",
+      "file": "V:\\dev\\tools\\.claude\\worktrees\\tools-skills-viewer\\clis\\skills-viewer\\fixtures\\mattpocock-skills\\implement\\SKILL.md",
+      "bodyLines": 11,
+      "scripts": [],
+      "references": [],
+      "frontmatter": {
+        "name": "implement",
+        "description": "Implement a piece of work based on a spec or set of tickets.",
+        "disable-model-invocation": true
+      }
+    },
+    {
+      "id": "implement-spec",
+      "name": "implement-spec",
+      "description": "Implement a specification in code.",
+      "mode": "manual",
+      "invocation": {
+        "claude": "manual",
+        "codex": "manual"
+      },
+      "entry": true,
+      "subSkill": false,
+      "dir": "V:\\dev\\tools\\.claude\\worktrees\\tools-skills-viewer\\clis\\skills-viewer\\fixtures\\mattpocock-skills\\implement-spec",
+      "file": "V:\\dev\\tools\\.claude\\worktrees\\tools-skills-viewer\\clis\\skills-viewer\\fixtures\\mattpocock-skills\\implement-spec\\SKILL.md",
+      "bodyLines": 31,
+      "scripts": [],
+      "references": [],
+      "frontmatter": {
+        "name": "implement-spec",
+        "description": "Implement a specification in code.",
+        "disable-model-invocation": true
+      }
+    },
+    {
+      "id": "improve-codebase-architecture",
+      "name": "improve-codebase-architecture",
+      "description": "Scan a codebase for deepening opportunities, present them as a visual HTML report, then grill through whichever one you pick.",
+      "mode": "manual",
+      "invocation": {
+        "claude": "manual",
+        "codex": "manual"
+      },
+      "entry": false,
+      "subSkill": false,
+      "dir": "V:\\dev\\tools\\.claude\\worktrees\\tools-skills-viewer\\clis\\skills-viewer\\fixtures\\mattpocock-skills\\improve-codebase-architecture",
+      "file": "V:\\dev\\tools\\.claude\\worktrees\\tools-skills-viewer\\clis\\skills-viewer\\fixtures\\mattpocock-skills\\improve-codebase-architecture\\SKILL.md",
+      "bodyLines": 67,
+      "scripts": [],
+      "references": [],
+      "frontmatter": {
+        "name": "improve-codebase-architecture",
+        "description": "Scan a codebase for deepening opportunities, present them as a visual HTML report, then grill through whichever one you pick.",
+        "disable-model-invocation": true
+      }
+    },
+    {
+      "id": "loop-me",
+      "name": "loop-me",
+      "description": "Grill me about specs for the workflows I want to build, within this workspace.",
+      "mode": "manual",
+      "invocation": {
+        "claude": "manual",
+        "codex": "manual"
+      },
+      "entry": true,
+      "subSkill": false,
+      "dir": "V:\\dev\\tools\\.claude\\worktrees\\tools-skills-viewer\\clis\\skills-viewer\\fixtures\\mattpocock-skills\\loop-me",
+      "file": "V:\\dev\\tools\\.claude\\worktrees\\tools-skills-viewer\\clis\\skills-viewer\\fixtures\\mattpocock-skills\\loop-me\\SKILL.md",
+      "bodyLines": 27,
+      "scripts": [],
+      "references": [],
+      "frontmatter": {
+        "name": "loop-me",
+        "description": "Grill me about specs for the workflows I want to build, within this workspace.",
+        "disable-model-invocation": true,
+        "argument-hint": "A workflow to design, or nothing to go find one"
+      },
+      "argumentHint": "A workflow to design, or nothing to go find one"
+    },
+    {
+      "id": "migrate-to-shoehorn",
+      "name": "migrate-to-shoehorn",
+      "description": "Migrate test files from `as` type assertions to @total-typescript/shoehorn. Use when user mentions shoehorn, wants to replace `as` in tests, or needs partial test data.",
+      "mode": "auto",
+      "invocation": {
+        "claude": "auto",
+        "codex": "auto"
+      },
+      "entry": false,
+      "subSkill": false,
+      "dir": "V:\\dev\\tools\\.claude\\worktrees\\tools-skills-viewer\\clis\\skills-viewer\\fixtures\\mattpocock-skills\\migrate-to-shoehorn",
+      "file": "V:\\dev\\tools\\.claude\\worktrees\\tools-skills-viewer\\clis\\skills-viewer\\fixtures\\mattpocock-skills\\migrate-to-shoehorn\\SKILL.md",
+      "bodyLines": 115,
+      "scripts": [],
+      "references": [],
+      "frontmatter": {
+        "name": "migrate-to-shoehorn",
+        "description": "Migrate test files from `as` type assertions to @total-typescript/shoehorn. Use when user mentions shoehorn, wants to replace `as` in tests, or needs partial test data."
+      }
+    },
+    {
+      "id": "pr",
+      "name": "pr",
+      "description": "Use when writing a PR body.",
+      "mode": "auto",
+      "invocation": {
+        "claude": "auto",
+        "codex": "auto"
+      },
+      "entry": false,
+      "subSkill": false,
+      "dir": "V:\\dev\\tools\\.claude\\worktrees\\tools-skills-viewer\\clis\\skills-viewer\\fixtures\\mattpocock-skills\\pr",
+      "file": "V:\\dev\\tools\\.claude\\worktrees\\tools-skills-viewer\\clis\\skills-viewer\\fixtures\\mattpocock-skills\\pr\\SKILL.md",
+      "bodyLines": 159,
+      "scripts": [],
+      "references": [],
+      "frontmatter": {
+        "name": "pr",
+        "description": "Use when writing a PR body.",
+        "metadata": {
+          "credits": {
+            "skill": "show-me",
+            "author": "Dex Horthy",
+            "organisation": "Humanlayer",
+            "url": "https://github.com/humanlayer/skills/blob/main/plugins/show-me/skills/show-me/SKILL.md"
+          }
+        }
+      }
+    },
+    {
+      "id": "prototype",
+      "name": "prototype",
+      "description": "Build a throwaway prototype to answer a design question. Use when the user wants to sanity-check whether a state model or logic feels right, or explore what a UI should look like.",
+      "mode": "auto",
+      "invocation": {
+        "claude": "auto",
+        "codex": "auto"
+      },
+      "entry": false,
+      "subSkill": true,
+      "dir": "V:\\dev\\tools\\.claude\\worktrees\\tools-skills-viewer\\clis\\skills-viewer\\fixtures\\mattpocock-skills\\prototype",
+      "file": "V:\\dev\\tools\\.claude\\worktrees\\tools-skills-viewer\\clis\\skills-viewer\\fixtures\\mattpocock-skills\\prototype\\SKILL.md",
+      "bodyLines": 23,
+      "scripts": [],
+      "references": [],
+      "frontmatter": {
+        "name": "prototype",
+        "description": "Build a throwaway prototype to answer a design question. Use when the user wants to sanity-check whether a state model or logic feels right, or explore what a UI should look like."
+      }
+    },
+    {
+      "id": "research",
+      "name": "research",
+      "description": "Investigate a question against high-trust primary sources and capture the findings as a Markdown file in the repo. Use when the user wants a topic researched, docs or API facts gathered, or reading legwork delegated to a background agent.",
+      "mode": "auto",
+      "invocation": {
+        "claude": "auto",
+        "codex": "auto"
+      },
+      "entry": false,
+      "subSkill": true,
+      "dir": "V:\\dev\\tools\\.claude\\worktrees\\tools-skills-viewer\\clis\\skills-viewer\\fixtures\\mattpocock-skills\\research",
+      "file": "V:\\dev\\tools\\.claude\\worktrees\\tools-skills-viewer\\clis\\skills-viewer\\fixtures\\mattpocock-skills\\research\\SKILL.md",
+      "bodyLines": 9,
+      "scripts": [],
+      "references": [],
+      "frontmatter": {
+        "name": "research",
+        "description": "Investigate a question against high-trust primary sources and capture the findings as a Markdown file in the repo. Use when the user wants a topic researched, docs or API facts gathered, or reading legwork delegated to a background agent."
+      }
+    },
+    {
+      "id": "resolving-merge-conflicts",
+      "name": "resolving-merge-conflicts",
+      "description": "Use when you need to resolve an in-progress git merge/rebase conflict.",
+      "mode": "auto",
+      "invocation": {
+        "claude": "auto",
+        "codex": "auto"
+      },
+      "entry": false,
+      "subSkill": false,
+      "dir": "V:\\dev\\tools\\.claude\\worktrees\\tools-skills-viewer\\clis\\skills-viewer\\fixtures\\mattpocock-skills\\resolving-merge-conflicts",
+      "file": "V:\\dev\\tools\\.claude\\worktrees\\tools-skills-viewer\\clis\\skills-viewer\\fixtures\\mattpocock-skills\\resolving-merge-conflicts\\SKILL.md",
+      "bodyLines": 11,
+      "scripts": [],
+      "references": [],
+      "frontmatter": {
+        "name": "resolving-merge-conflicts",
+        "description": "Use when you need to resolve an in-progress git merge/rebase conflict."
+      }
+    },
+    {
+      "id": "retro",
+      "name": "retro",
+      "description": "Conduct a retrospective on a coding session.",
+      "mode": "manual",
+      "invocation": {
+        "claude": "manual",
+        "codex": "manual"
+      },
+      "entry": true,
+      "subSkill": false,
+      "dir": "V:\\dev\\tools\\.claude\\worktrees\\tools-skills-viewer\\clis\\skills-viewer\\fixtures\\mattpocock-skills\\retro",
+      "file": "V:\\dev\\tools\\.claude\\worktrees\\tools-skills-viewer\\clis\\skills-viewer\\fixtures\\mattpocock-skills\\retro\\SKILL.md",
+      "bodyLines": 40,
+      "scripts": [],
+      "references": [],
+      "frontmatter": {
+        "name": "retro",
+        "description": "Conduct a retrospective on a coding session.",
+        "disable-model-invocation": true
+      }
+    },
+    {
+      "id": "scaffold-exercises",
+      "name": "scaffold-exercises",
+      "description": "Create exercise directory structures with sections, problems, solutions, and explainers that pass linting. Use when user wants to scaffold exercises, create exercise stubs, or set up a new course section.",
+      "mode": "auto",
+      "invocation": {
+        "claude": "auto",
+        "codex": "auto"
+      },
+      "entry": false,
+      "subSkill": false,
+      "dir": "V:\\dev\\tools\\.claude\\worktrees\\tools-skills-viewer\\clis\\skills-viewer\\fixtures\\mattpocock-skills\\scaffold-exercises",
+      "file": "V:\\dev\\tools\\.claude\\worktrees\\tools-skills-viewer\\clis\\skills-viewer\\fixtures\\mattpocock-skills\\scaffold-exercises\\SKILL.md",
+      "bodyLines": 103,
+      "scripts": [],
+      "references": [],
+      "frontmatter": {
+        "name": "scaffold-exercises",
+        "description": "Create exercise directory structures with sections, problems, solutions, and explainers that pass linting. Use when user wants to scaffold exercises, create exercise stubs, or set up a new course section."
+      }
+    },
+    {
+      "id": "setup-matt-pocock-skills",
+      "name": "setup-matt-pocock-skills",
+      "description": "Configure this repo for the engineering skills: set up its issue tracker, triage label vocabulary, and domain doc layout. Run once before first use of the other engineering skills.",
+      "mode": "manual",
+      "invocation": {
+        "claude": "manual",
+        "codex": "manual"
+      },
+      "entry": true,
+      "subSkill": false,
+      "dir": "V:\\dev\\tools\\.claude\\worktrees\\tools-skills-viewer\\clis\\skills-viewer\\fixtures\\mattpocock-skills\\setup-matt-pocock-skills",
+      "file": "V:\\dev\\tools\\.claude\\worktrees\\tools-skills-viewer\\clis\\skills-viewer\\fixtures\\mattpocock-skills\\setup-matt-pocock-skills\\SKILL.md",
+      "bodyLines": 112,
+      "scripts": [],
+      "references": [],
+      "frontmatter": {
+        "name": "setup-matt-pocock-skills",
+        "description": "Configure this repo for the engineering skills: set up its issue tracker, triage label vocabulary, and domain doc layout. Run once before first use of the other engineering skills.",
+        "disable-model-invocation": true
+      }
+    },
+    {
+      "id": "setup-pre-commit",
+      "name": "setup-pre-commit",
+      "description": "Set up Husky pre-commit hooks with lint-staged (Prettier), type checking, and tests in the current repo. Use when user wants to add pre-commit hooks, set up Husky, configure lint-staged, or add commit-time formatting/typechecking/testing.",
+      "mode": "auto",
+      "invocation": {
+        "claude": "auto",
+        "codex": "auto"
+      },
+      "entry": false,
+      "subSkill": false,
+      "dir": "V:\\dev\\tools\\.claude\\worktrees\\tools-skills-viewer\\clis\\skills-viewer\\fixtures\\mattpocock-skills\\setup-pre-commit",
+      "file": "V:\\dev\\tools\\.claude\\worktrees\\tools-skills-viewer\\clis\\skills-viewer\\fixtures\\mattpocock-skills\\setup-pre-commit\\SKILL.md",
+      "bodyLines": 88,
+      "scripts": [],
+      "references": [],
+      "frontmatter": {
+        "name": "setup-pre-commit",
+        "description": "Set up Husky pre-commit hooks with lint-staged (Prettier), type checking, and tests in the current repo. Use when user wants to add pre-commit hooks, set up Husky, configure lint-staged, or add commit-time formatting/typechecking/testing."
+      }
+    },
+    {
+      "id": "setup-ts-deep-modules",
+      "name": "setup-ts-deep-modules",
+      "description": "Wire dependency-cruiser into a TypeScript repo so each package is a deep module, with implementation hidden in subfolders and reachable only through its entry-point files. User-invoked.",
+      "mode": "manual",
+      "invocation": {
+        "claude": "manual",
+        "codex": "manual"
+      },
+      "entry": true,
+      "subSkill": false,
+      "dir": "V:\\dev\\tools\\.claude\\worktrees\\tools-skills-viewer\\clis\\skills-viewer\\fixtures\\mattpocock-skills\\setup-ts-deep-modules",
+      "file": "V:\\dev\\tools\\.claude\\worktrees\\tools-skills-viewer\\clis\\skills-viewer\\fixtures\\mattpocock-skills\\setup-ts-deep-modules\\SKILL.md",
+      "bodyLines": 98,
+      "scripts": [],
+      "references": [],
+      "frontmatter": {
+        "name": "setup-ts-deep-modules",
+        "description": "Wire dependency-cruiser into a TypeScript repo so each package is a deep module, with implementation hidden in subfolders and reachable only through its entry-point files. User-invoked.",
+        "disable-model-invocation": true
+      }
+    },
+    {
+      "id": "tdd",
+      "name": "tdd",
+      "description": "Test-driven development. Use when the user wants to build features or fix bugs test-first, mentions \"red-green-refactor\", or wants integration tests.",
+      "mode": "auto",
+      "invocation": {
+        "claude": "auto",
+        "codex": "auto"
+      },
+      "entry": false,
+      "subSkill": true,
+      "dir": "V:\\dev\\tools\\.claude\\worktrees\\tools-skills-viewer\\clis\\skills-viewer\\fixtures\\mattpocock-skills\\tdd",
+      "file": "V:\\dev\\tools\\.claude\\worktrees\\tools-skills-viewer\\clis\\skills-viewer\\fixtures\\mattpocock-skills\\tdd\\SKILL.md",
+      "bodyLines": 35,
+      "scripts": [],
+      "references": [],
+      "frontmatter": {
+        "name": "tdd",
+        "description": "Test-driven development. Use when the user wants to build features or fix bugs test-first, mentions \"red-green-refactor\", or wants integration tests."
+      }
+    },
+    {
+      "id": "teach",
+      "name": "teach",
+      "description": "Teach the user a new skill or concept, within this workspace.",
+      "mode": "manual",
+      "invocation": {
+        "claude": "manual",
+        "codex": "manual"
+      },
+      "entry": false,
+      "subSkill": false,
+      "dir": "V:\\dev\\tools\\.claude\\worktrees\\tools-skills-viewer\\clis\\skills-viewer\\fixtures\\mattpocock-skills\\teach",
+      "file": "V:\\dev\\tools\\.claude\\worktrees\\tools-skills-viewer\\clis\\skills-viewer\\fixtures\\mattpocock-skills\\teach\\SKILL.md",
+      "bodyLines": 135,
+      "scripts": [],
+      "references": [],
+      "frontmatter": {
+        "name": "teach",
+        "description": "Teach the user a new skill or concept, within this workspace.",
+        "disable-model-invocation": true,
+        "argument-hint": "What would you like to learn about?"
+      },
+      "argumentHint": "What would you like to learn about?"
+    },
+    {
+      "id": "to-questionnaire",
+      "name": "to-questionnaire",
+      "description": "Turn a decision you can't fully answer into a questionnaire for someone else to fill in.",
+      "mode": "manual",
+      "invocation": {
+        "claude": "manual",
+        "codex": "manual"
+      },
+      "entry": false,
+      "subSkill": false,
+      "dir": "V:\\dev\\tools\\.claude\\worktrees\\tools-skills-viewer\\clis\\skills-viewer\\fixtures\\mattpocock-skills\\to-questionnaire",
+      "file": "V:\\dev\\tools\\.claude\\worktrees\\tools-skills-viewer\\clis\\skills-viewer\\fixtures\\mattpocock-skills\\to-questionnaire\\SKILL.md",
+      "bodyLines": 50,
+      "scripts": [],
+      "references": [],
+      "frontmatter": {
+        "name": "to-questionnaire",
+        "description": "Turn a decision you can't fully answer into a questionnaire for someone else to fill in.",
+        "disable-model-invocation": true
+      }
+    },
+    {
+      "id": "to-spec",
+      "name": "to-spec",
+      "description": "Turn the current conversation into a spec and publish it to the project issue tracker: no interview, just synthesis of what you've already discussed.",
+      "mode": "manual",
+      "invocation": {
+        "claude": "manual",
+        "codex": "manual"
+      },
+      "entry": false,
+      "subSkill": false,
+      "dir": "V:\\dev\\tools\\.claude\\worktrees\\tools-skills-viewer\\clis\\skills-viewer\\fixtures\\mattpocock-skills\\to-spec",
+      "file": "V:\\dev\\tools\\.claude\\worktrees\\tools-skills-viewer\\clis\\skills-viewer\\fixtures\\mattpocock-skills\\to-spec\\SKILL.md",
+      "bodyLines": 71,
+      "scripts": [],
+      "references": [],
+      "frontmatter": {
+        "name": "to-spec",
+        "description": "Turn the current conversation into a spec and publish it to the project issue tracker: no interview, just synthesis of what you've already discussed.",
+        "disable-model-invocation": true
+      }
+    },
+    {
+      "id": "to-tickets",
+      "name": "to-tickets",
+      "description": "Break a plan, spec, or the current conversation into a set of tracer-bullet tickets, each declaring its blocking edges, published to the configured tracker (edges as text in one file per ticket locally, or native blocking links on a real tracker).",
+      "mode": "manual",
+      "invocation": {
+        "claude": "manual",
+        "codex": "manual"
+      },
+      "entry": false,
+      "subSkill": false,
+      "dir": "V:\\dev\\tools\\.claude\\worktrees\\tools-skills-viewer\\clis\\skills-viewer\\fixtures\\mattpocock-skills\\to-tickets",
+      "file": "V:\\dev\\tools\\.claude\\worktrees\\tools-skills-viewer\\clis\\skills-viewer\\fixtures\\mattpocock-skills\\to-tickets\\SKILL.md",
+      "bodyLines": 101,
+      "scripts": [],
+      "references": [],
+      "frontmatter": {
+        "name": "to-tickets",
+        "description": "Break a plan, spec, or the current conversation into a set of tracer-bullet tickets, each declaring its blocking edges, published to the configured tracker (edges as text in one file per ticket locally, or native blocking links on a real tracker).",
+        "disable-model-invocation": true
+      }
+    },
+    {
+      "id": "triage",
+      "name": "triage",
+      "description": "Move issues and external PRs through a state machine of triage roles, categorise, verify, grill if needed, and write agent-ready briefs.",
+      "mode": "manual",
+      "invocation": {
+        "claude": "manual",
+        "codex": "manual"
+      },
+      "entry": false,
+      "subSkill": false,
+      "dir": "V:\\dev\\tools\\.claude\\worktrees\\tools-skills-viewer\\clis\\skills-viewer\\fixtures\\mattpocock-skills\\triage",
+      "file": "V:\\dev\\tools\\.claude\\worktrees\\tools-skills-viewer\\clis\\skills-viewer\\fixtures\\mattpocock-skills\\triage\\SKILL.md",
+      "bodyLines": 108,
+      "scripts": [],
+      "references": [],
+      "frontmatter": {
+        "name": "triage",
+        "description": "Move issues and external PRs through a state machine of triage roles, categorise, verify, grill if needed, and write agent-ready briefs.",
+        "disable-model-invocation": true
+      }
+    },
+    {
+      "id": "wait-what",
+      "name": "wait-what",
+      "description": "Stop. That last message did not land: re-pitch it.",
+      "mode": "manual",
+      "invocation": {
+        "claude": "manual",
+        "codex": "manual"
+      },
+      "entry": false,
+      "subSkill": false,
+      "dir": "V:\\dev\\tools\\.claude\\worktrees\\tools-skills-viewer\\clis\\skills-viewer\\fixtures\\mattpocock-skills\\wait-what",
+      "file": "V:\\dev\\tools\\.claude\\worktrees\\tools-skills-viewer\\clis\\skills-viewer\\fixtures\\mattpocock-skills\\wait-what\\SKILL.md",
+      "bodyLines": 3,
+      "scripts": [],
+      "references": [],
+      "frontmatter": {
+        "name": "wait-what",
+        "description": "Stop. That last message did not land: re-pitch it.",
+        "disable-model-invocation": true
+      }
+    },
+    {
+      "id": "wayfinder",
+      "name": "wayfinder",
+      "description": "Plan a huge chunk of work (more than one agent session can hold) as a shared map of decision tickets on your issue tracker, and resolve them one at a time until the way to the destination is clear.",
+      "mode": "manual",
+      "invocation": {
+        "claude": "manual",
+        "codex": "manual"
+      },
+      "entry": false,
+      "subSkill": false,
+      "dir": "V:\\dev\\tools\\.claude\\worktrees\\tools-skills-viewer\\clis\\skills-viewer\\fixtures\\mattpocock-skills\\wayfinder",
+      "file": "V:\\dev\\tools\\.claude\\worktrees\\tools-skills-viewer\\clis\\skills-viewer\\fixtures\\mattpocock-skills\\wayfinder\\SKILL.md",
+      "bodyLines": 124,
+      "scripts": [],
+      "references": [],
+      "frontmatter": {
+        "name": "wayfinder",
+        "description": "Plan a huge chunk of work (more than one agent session can hold) as a shared map of decision tickets on your issue tracker, and resolve them one at a time until the way to the destination is clear.",
+        "disable-model-invocation": true
+      }
+    },
+    {
+      "id": "wizard",
+      "name": "wizard",
+      "description": "Generate an interactive bash wizard that walks a human through steps only they can perform. Use when provisioning infrastructure, setting up credentials or CI secrets, walking an unfamiliar third-party dashboard, or running a one-off migration or cutover. Don't invoke this for steps the agent can perform itself.",
+      "mode": "auto",
+      "invocation": {
+        "claude": "auto",
+        "codex": "auto"
+      },
+      "entry": false,
+      "subSkill": false,
+      "dir": "V:\\dev\\tools\\.claude\\worktrees\\tools-skills-viewer\\clis\\skills-viewer\\fixtures\\mattpocock-skills\\wizard",
+      "file": "V:\\dev\\tools\\.claude\\worktrees\\tools-skills-viewer\\clis\\skills-viewer\\fixtures\\mattpocock-skills\\wizard\\SKILL.md",
+      "bodyLines": 41,
+      "scripts": [],
+      "references": [],
+      "frontmatter": {
+        "name": "wizard",
+        "description": "Generate an interactive bash wizard that walks a human through steps only they can perform. Use when provisioning infrastructure, setting up credentials or CI secrets, walking an unfamiliar third-party dashboard, or running a one-off migration or cutover. Don't invoke this for steps the agent can perform itself."
+      }
+    },
+    {
+      "id": "writing-beats",
+      "name": "writing-beats",
+      "description": "Writing, exploit; assemble raw material into a journey of beats, grounding each term before a beat leans on it.",
+      "mode": "manual",
+      "invocation": {
+        "claude": "manual",
+        "codex": "manual"
+      },
+      "entry": true,
+      "subSkill": false,
+      "dir": "V:\\dev\\tools\\.claude\\worktrees\\tools-skills-viewer\\clis\\skills-viewer\\fixtures\\mattpocock-skills\\writing-beats",
+      "file": "V:\\dev\\tools\\.claude\\worktrees\\tools-skills-viewer\\clis\\skills-viewer\\fixtures\\mattpocock-skills\\writing-beats\\SKILL.md",
+      "bodyLines": 63,
+      "scripts": [],
+      "references": [],
+      "frontmatter": {
+        "name": "writing-beats",
+        "description": "Writing, exploit; assemble raw material into a journey of beats, grounding each term before a beat leans on it.",
+        "disable-model-invocation": true
+      }
+    },
+    {
+      "id": "writing-for-agents",
+      "name": "writing-for-agents",
+      "description": "Writing documents for agents. Use when creating or editing skills, or modifying AGENTS.md or CLAUDE.md.",
+      "mode": "auto",
+      "invocation": {
+        "claude": "auto",
+        "codex": "auto"
+      },
+      "entry": false,
+      "subSkill": true,
+      "dir": "V:\\dev\\tools\\.claude\\worktrees\\tools-skills-viewer\\clis\\skills-viewer\\fixtures\\mattpocock-skills\\writing-for-agents",
+      "file": "V:\\dev\\tools\\.claude\\worktrees\\tools-skills-viewer\\clis\\skills-viewer\\fixtures\\mattpocock-skills\\writing-for-agents\\SKILL.md",
+      "bodyLines": 78,
+      "scripts": [],
+      "references": [],
+      "frontmatter": {
+        "name": "writing-for-agents",
+        "description": "Writing documents for agents. Use when creating or editing skills, or modifying AGENTS.md or CLAUDE.md."
+      }
+    },
+    {
+      "id": "writing-fragments",
+      "name": "writing-fragments",
+      "description": "Writing, explore: mine raw fragments, no structure yet.",
+      "mode": "manual",
+      "invocation": {
+        "claude": "manual",
+        "codex": "manual"
+      },
+      "entry": true,
+      "subSkill": false,
+      "dir": "V:\\dev\\tools\\.claude\\worktrees\\tools-skills-viewer\\clis\\skills-viewer\\fixtures\\mattpocock-skills\\writing-fragments",
+      "file": "V:\\dev\\tools\\.claude\\worktrees\\tools-skills-viewer\\clis\\skills-viewer\\fixtures\\mattpocock-skills\\writing-fragments\\SKILL.md",
+      "bodyLines": 75,
+      "scripts": [],
+      "references": [],
+      "frontmatter": {
+        "name": "writing-fragments",
+        "description": "Writing, explore: mine raw fragments, no structure yet.",
+        "disable-model-invocation": true
+      }
+    },
+    {
+      "id": "writing-shape",
+      "name": "writing-shape",
+      "description": "Writing, exploit: shape raw material into an article, paragraph by paragraph.",
+      "mode": "manual",
+      "invocation": {
+        "claude": "manual",
+        "codex": "manual"
+      },
+      "entry": true,
+      "subSkill": false,
+      "dir": "V:\\dev\\tools\\.claude\\worktrees\\tools-skills-viewer\\clis\\skills-viewer\\fixtures\\mattpocock-skills\\writing-shape",
+      "file": "V:\\dev\\tools\\.claude\\worktrees\\tools-skills-viewer\\clis\\skills-viewer\\fixtures\\mattpocock-skills\\writing-shape\\SKILL.md",
+      "bodyLines": 75,
+      "scripts": [],
+      "references": [],
+      "frontmatter": {
+        "name": "writing-shape",
+        "description": "Writing, exploit: shape raw material into an article, paragraph by paragraph.",
+        "disable-model-invocation": true
+      }
+    }
+  ],
+  "edges": [
+    {
+      "source": "ask-matt",
+      "target": "code-review",
+      "type": "suggests",
+      "evidence": [
+        {
+          "line": 26,
+          "snippet": "Either way, **`/implement`** builds each issue by driving **`/tdd`** internally (one red-green slice at a time), then closes out by running **`/code-review`**, a two-axis review (Standards + Spec) of the diff, before ...",
+          "pattern": "slash",
+          "type": "suggests"
+        },
+        {
+          "line": 26,
+          "snippet": "Either way, **`/implement`** builds each issue by driving **`/tdd`** internally (one red-green slice at a time), then closes out by running **`/code-review`**, a two-axis review (Standards + Spec) of the diff, before ...",
+          "pattern": "slash",
+          "type": "reference"
+        }
+      ]
+    },
+    {
+      "source": "ask-matt",
+      "target": "codebase-design",
+      "type": "suggests",
+      "evidence": [
+        {
+          "line": 59,
+          "snippet": "- **`/codebase-design`** is the deep-module vocabulary (module, interface, depth, seam, adapter, leverage, locality) for designing a module's *shape*: a lot of behaviour behind a small interface at a clean seam. `/tdd...",
+          "pattern": "slash",
+          "type": "suggests"
+        },
+        {
+          "line": 52,
+          "snippet": "- **`/improve-codebase-architecture`** runs whenever you have a spare moment to keep the codebase good for agents to operate in. It surfaces **deepening opportunities**; picking one _generates an idea_ you can take in...",
+          "pattern": "slash",
+          "type": "reference"
+        }
+      ]
+    },
+    {
+      "source": "ask-matt",
+      "target": "diagnosing-bugs",
+      "type": "suggests",
+      "evidence": [
+        {
+          "line": 42,
+          "snippet": "- **Something's broken** → **`/diagnosing-bugs`**. For the hard ones: the bug that resists a first glance, the intermittent flake, the regression that crept in between two known-good states. It refuses to theorise unt...",
+          "pattern": "slash",
+          "type": "suggests"
+        }
+      ]
+    },
+    {
+      "source": "ask-matt",
+      "target": "domain-modeling",
+      "type": "suggests",
+      "evidence": [
+        {
+          "line": 58,
+          "snippet": "- **`/domain-modeling`**: sharpen the project's *domain* language: challenge a fuzzy term, resolve an overloaded word (\"account\" doing three jobs), record a hard-to-reverse decision as an ADR. It's the active discipli...",
+          "pattern": "slash",
+          "type": "suggests"
+        }
+      ]
+    },
+    {
+      "source": "ask-matt",
+      "target": "grill-me",
+      "type": "suggests",
+      "evidence": [
+        {
+          "line": 17,
+          "snippet": "1. **`/grill-with-docs`** sharpens the idea by interview. Start here whenever you are **working in a working directory**: it's stateful, retaining what it learns in `CONTEXT.md` and ADRs. (No working directory? Use `/...",
+          "pattern": "slash",
+          "type": "suggests"
+        },
+        {
+          "line": 77,
+          "snippet": "- **`/grill-me`**: the same relentless interview as `/grill-with-docs`, but **stateless**: it saves nothing locally and builds no `CONTEXT.md`. Reach for it when you are **not working in a working directory** (sharpen...",
+          "pattern": "slash",
+          "type": "suggests"
+        },
+        {
+          "line": 82,
+          "snippet": "- **`/to-questionnaire`** comes in when the thing blocking you isn't in your head or the codebase but in **someone else's**, and it writes them a questionnaire to fill in. It's the inverse of `/grill-me`: instead of i...",
+          "pattern": "slash",
+          "type": "suggests"
+        },
+        {
+          "line": 78,
+          "snippet": "- **`/grilling`** is the interview primitive itself: rounds, the frontier, facts are the agent's job and decisions are yours. `/grill-me` and `/grill-with-docs` are the two named ways in, and `/triage`, `/wayfinder` a...",
+          "pattern": "slash",
+          "type": "reference"
+        }
+      ]
+    },
+    {
+      "source": "ask-matt",
+      "target": "grill-with-docs",
+      "type": "suggests",
+      "evidence": [
+        {
+          "line": 84,
+          "snippet": "- **`/wait-what`** is the corrective for a message that didn't land. Use it mid-conversation, inside any other skill, and the agent re-pitches what it just said with the context you were missing, in plain English, usi...",
+          "pattern": "slash",
+          "type": "prerequisite"
+        },
+        {
+          "line": 17,
+          "snippet": "1. **`/grill-with-docs`** sharpens the idea by interview. Start here whenever you are **working in a working directory**: it's stateful, retaining what it learns in `CONTEXT.md` and ADRs. (No working directory? Use `/...",
+          "pattern": "slash",
+          "type": "suggests"
+        },
+        {
+          "line": 44,
+          "snippet": "- **A huge, foggy effort: a greenfield project or a huge feature build, too big for one session** → **`/wayfinder`**, the most cognitively demanding flow here. When the way from here to the destination isn't visible y...",
+          "pattern": "slash",
+          "type": "suggests"
+        },
+        {
+          "line": 58,
+          "snippet": "- **`/domain-modeling`**: sharpen the project's *domain* language: challenge a fuzzy term, resolve an overloaded word (\"account\" doing three jobs), record a hard-to-reverse decision as an ADR. It's the active discipli...",
+          "pattern": "slash",
+          "type": "suggests"
+        },
+        {
+          "line": 77,
+          "snippet": "- **`/grill-me`**: the same relentless interview as `/grill-with-docs`, but **stateless**: it saves nothing locally and builds no `CONTEXT.md`. Reach for it when you are **not working in a working directory** (sharpen...",
+          "pattern": "slash",
+          "type": "suggests"
+        },
+        {
+          "line": 78,
+          "snippet": "- **`/grilling`** is the interview primitive itself: rounds, the frontier, facts are the agent's job and decisions are yours. `/grill-me` and `/grill-with-docs` are the two named ways in, and `/triage`, `/wayfinder` a...",
+          "pattern": "slash",
+          "type": "suggests"
+        },
+        {
+          "line": 17,
+          "snippet": "1. **`/grill-with-docs`** sharpens the idea by interview. Start here whenever you are **working in a working directory**: it's stateful, retaining what it learns in `CONTEXT.md` and ADRs. (No working directory? Use `/...",
+          "pattern": "backtick",
+          "type": "reference"
+        },
+        {
+          "line": 52,
+          "snippet": "- **`/improve-codebase-architecture`** runs whenever you have a spare moment to keep the codebase good for agents to operate in. It surfaces **deepening opportunities**; picking one _generates an idea_ you can take in...",
+          "pattern": "slash",
+          "type": "reference"
+        },
+        {
+          "line": 77,
+          "snippet": "- **`/grill-me`**: the same relentless interview as `/grill-with-docs`, but **stateless**: it saves nothing locally and builds no `CONTEXT.md`. Reach for it when you are **not working in a working directory** (sharpen...",
+          "pattern": "slash",
+          "type": "reference"
+        },
+        {
+          "line": 81,
+          "snippet": "- **`/research`**: delegate reading legwork to a **background agent**: it investigates a question against **primary sources**, then leaves a cited Markdown file in the repo. Keep working while it reads. The file it pr...",
+          "pattern": "slash",
+          "type": "reference"
+        },
+        {
+          "line": 82,
+          "snippet": "- **`/to-questionnaire`** comes in when the thing blocking you isn't in your head or the codebase but in **someone else's**, and it writes them a questionnaire to fill in. It's the inverse of `/grill-me`: instead of i...",
+          "pattern": "slash",
+          "type": "reference"
+        }
+      ]
+    },
+    {
+      "source": "ask-matt",
+      "target": "grilling",
+      "type": "suggests",
+      "evidence": [
+        {
+          "line": 78,
+          "snippet": "- **`/grilling`** is the interview primitive itself: rounds, the frontier, facts are the agent's job and decisions are yours. `/grill-me` and `/grill-with-docs` are the two named ways in, and `/triage`, `/wayfinder` a...",
+          "pattern": "slash",
+          "type": "suggests"
+        },
+        {
+          "line": 17,
+          "snippet": "1. **`/grill-with-docs`** sharpens the idea by interview. Start here whenever you are **working in a working directory**: it's stateful, retaining what it learns in `CONTEXT.md` and ADRs. (No working directory? Use `/...",
+          "pattern": "slash",
+          "type": "reference"
+        }
+      ]
+    },
+    {
+      "source": "ask-matt",
+      "target": "handoff",
+      "type": "suggests",
+      "evidence": [
+        {
+          "line": 18,
+          "snippet": "2. **Branch: can you settle every question in conversation?** If a question needs a runnable answer (state, business logic, a UI you have to see), detour through a prototype, bridged by **`/handoff`** in both directio...",
+          "pattern": "slash",
+          "type": "suggests"
+        },
+        {
+          "line": 19,
+          "snippet": "- **`/handoff`** out, then open a fresh session against that file,",
+          "pattern": "slash",
+          "type": "suggests"
+        },
+        {
+          "line": 21,
+          "snippet": "- **`/handoff`** back what you learned, and reference it from the original idea thread.",
+          "pattern": "slash",
+          "type": "suggests"
+        },
+        {
+          "line": 67,
+          "snippet": "- **`/handoff`** writes a portable markdown file. Narrow: only for a **new harness**, a **new directory**, a **colleague**, or forking a side task **mid-phase**. What it buys is portability.",
+          "pattern": "slash",
+          "type": "suggests"
+        },
+        {
+          "line": 18,
+          "snippet": "2. **Branch: can you settle every question in conversation?** If a question needs a runnable answer (state, business logic, a UI you have to see), detour through a prototype, bridged by **`/handoff`** in both directio...",
+          "pattern": "slash",
+          "type": "reference"
+        }
+      ]
+    },
+    {
+      "source": "ask-matt",
+      "target": "implement",
+      "type": "suggests",
+      "evidence": [
+        {
+          "line": 24,
+          "snippet": "- **No** → **`/implement`** right here, in the same context window.",
+          "pattern": "slash",
+          "type": "suggests"
+        },
+        {
+          "line": 26,
+          "snippet": "Either way, **`/implement`** builds each issue by driving **`/tdd`** internally (one red-green slice at a time), then closes out by running **`/code-review`**, a two-axis review (Standards + Spec) of the diff, before ...",
+          "pattern": "slash",
+          "type": "suggests"
+        },
+        {
+          "line": 23,
+          "snippet": "- **Yes** → **`/to-spec`** (turn the thread into a spec), then **`/to-tickets`** to split it into tracer-bullet tickets, each declaring its **blocking edges**. On a local tracker that's one file per ticket under `.scr...",
+          "pattern": "slash",
+          "type": "reference"
+        },
+        {
+          "line": 30,
+          "snippet": "Keep steps 1–3 in **one unbroken context window** (don't compact or clear until after `/to-tickets`) so the grilling, spec, and tickets all build on the same thinking. Each `/implement` then starts fresh, working from...",
+          "pattern": "slash",
+          "type": "reference"
+        },
+        {
+          "line": 38,
+          "snippet": "- **Bugs and requests piling up** → **`/triage`**. It moves issues through triage roles and produces agent-ready issues, which **`/implement`** later picks up.",
+          "pattern": "slash",
+          "type": "reference"
+        },
+        {
+          "line": 46,
+          "snippet": "When the map clears, **it hands off, it doesn't build**: merge onto the main flow at **`/to-spec`**, which collapses the map's linked decisions into a buildable plan, then `/to-tickets` and `/implement` as usual. Loop...",
+          "pattern": "slash",
+          "type": "reference"
+        }
+      ]
+    },
+    {
+      "source": "ask-matt",
+      "target": "improve-codebase-architecture",
+      "type": "suggests",
+      "evidence": [
+        {
+          "line": 42,
+          "snippet": "- **Something's broken** → **`/diagnosing-bugs`**. For the hard ones: the bug that resists a first glance, the intermittent flake, the regression that crept in between two known-good states. It refuses to theorise unt...",
+          "pattern": "slash",
+          "type": "suggests"
+        },
+        {
+          "line": 52,
+          "snippet": "- **`/improve-codebase-architecture`** runs whenever you have a spare moment to keep the codebase good for agents to operate in. It surfaces **deepening opportunities**; picking one _generates an idea_ you can take in...",
+          "pattern": "slash",
+          "type": "suggests"
+        },
+        {
+          "line": 59,
+          "snippet": "- **`/codebase-design`** is the deep-module vocabulary (module, interface, depth, seam, adapter, leverage, locality) for designing a module's *shape*: a lot of behaviour behind a small interface at a clean seam. `/tdd...",
+          "pattern": "slash",
+          "type": "reference"
+        },
+        {
+          "line": 78,
+          "snippet": "- **`/grilling`** is the interview primitive itself: rounds, the frontier, facts are the agent's job and decisions are yours. `/grill-me` and `/grill-with-docs` are the two named ways in, and `/triage`, `/wayfinder` a...",
+          "pattern": "slash",
+          "type": "reference"
+        }
+      ]
+    },
+    {
+      "source": "ask-matt",
+      "target": "prototype",
+      "type": "suggests",
+      "evidence": [
+        {
+          "line": 20,
+          "snippet": "- **`/prototype`** to answer the question with throwaway code,",
+          "pattern": "slash",
+          "type": "suggests"
+        },
+        {
+          "line": 80,
+          "snippet": "- **`/prototype`** is a small, throwaway program that answers one design question: does this state model feel right, or what should this UI look like. Throwaway is a constraint on how the code is written, not a promis...",
+          "pattern": "slash",
+          "type": "suggests"
+        }
+      ]
+    },
+    {
+      "source": "ask-matt",
+      "target": "research",
+      "type": "suggests",
+      "evidence": [
+        {
+          "line": 81,
+          "snippet": "- **`/research`**: delegate reading legwork to a **background agent**: it investigates a question against **primary sources**, then leaves a cited Markdown file in the repo. Keep working while it reads. The file it pr...",
+          "pattern": "slash",
+          "type": "suggests"
+        }
+      ]
+    },
+    {
+      "source": "ask-matt",
+      "target": "resolving-merge-conflicts",
+      "type": "suggests",
+      "evidence": [
+        {
+          "line": 79,
+          "snippet": "- **`/resolving-merge-conflicts`** works an in-progress merge or rebase conflict hunk by hunk, resolving by **intent** traced to each side's primary source rather than by picking lines, then finishes the operation. It...",
+          "pattern": "slash",
+          "type": "suggests"
+        }
+      ]
+    },
+    {
+      "source": "ask-matt",
+      "target": "setup-matt-pocock-skills",
+      "type": "prerequisite",
+      "evidence": [
+        {
+          "line": 90,
+          "snippet": "**`/setup-matt-pocock-skills`**: run before your first engineering flow to configure the issue tracker, triage labels, and doc layout the other skills assume. Custom issue trackers also work.",
+          "pattern": "slash",
+          "type": "prerequisite"
+        }
+      ]
+    },
+    {
+      "source": "ask-matt",
+      "target": "tdd",
+      "type": "reference",
+      "evidence": [
+        {
+          "line": 26,
+          "snippet": "Either way, **`/implement`** builds each issue by driving **`/tdd`** internally (one red-green slice at a time), then closes out by running **`/code-review`**, a two-axis review (Standards + Spec) of the diff, before ...",
+          "pattern": "slash",
+          "type": "suggests"
+        },
+        {
+          "line": 26,
+          "snippet": "Either way, **`/implement`** builds each issue by driving **`/tdd`** internally (one red-green slice at a time), then closes out by running **`/code-review`**, a two-axis review (Standards + Spec) of the diff, before ...",
+          "pattern": "slash",
+          "type": "reference"
+        },
+        {
+          "line": 59,
+          "snippet": "- **`/codebase-design`** is the deep-module vocabulary (module, interface, depth, seam, adapter, leverage, locality) for designing a module's *shape*: a lot of behaviour behind a small interface at a clean seam. `/tdd...",
+          "pattern": "slash",
+          "type": "reference"
+        }
+      ]
+    },
+    {
+      "source": "ask-matt",
+      "target": "teach",
+      "type": "suggests",
+      "evidence": [
+        {
+          "line": 85,
+          "snippet": "- **`/teach`**: learn a concept over multiple sessions, using the current directory as a stateful workspace.",
+          "pattern": "slash",
+          "type": "suggests"
+        }
+      ]
+    },
+    {
+      "source": "ask-matt",
+      "target": "to-questionnaire",
+      "type": "suggests",
+      "evidence": [
+        {
+          "line": 82,
+          "snippet": "- **`/to-questionnaire`** comes in when the thing blocking you isn't in your head or the codebase but in **someone else's**, and it writes them a questionnaire to fill in. It's the inverse of `/grill-me`: instead of i...",
+          "pattern": "slash",
+          "type": "suggests"
+        }
+      ]
+    },
+    {
+      "source": "ask-matt",
+      "target": "to-spec",
+      "type": "reference",
+      "evidence": [
+        {
+          "line": 23,
+          "snippet": "- **Yes** → **`/to-spec`** (turn the thread into a spec), then **`/to-tickets`** to split it into tracer-bullet tickets, each declaring its **blocking edges**. On a local tracker that's one file per ticket under `.scr...",
+          "pattern": "slash",
+          "type": "suggests"
+        },
+        {
+          "line": 46,
+          "snippet": "When the map clears, **it hands off, it doesn't build**: merge onto the main flow at **`/to-spec`**, which collapses the map's linked decisions into a buildable plan, then `/to-tickets` and `/implement` as usual. Loop...",
+          "pattern": "slash",
+          "type": "reference"
+        },
+        {
+          "line": 82,
+          "snippet": "- **`/to-questionnaire`** comes in when the thing blocking you isn't in your head or the codebase but in **someone else's**, and it writes them a questionnaire to fill in. It's the inverse of `/grill-me`: instead of i...",
+          "pattern": "slash",
+          "type": "reference"
+        }
+      ]
+    },
+    {
+      "source": "ask-matt",
+      "target": "to-tickets",
+      "type": "reference",
+      "evidence": [
+        {
+          "line": 23,
+          "snippet": "- **Yes** → **`/to-spec`** (turn the thread into a spec), then **`/to-tickets`** to split it into tracer-bullet tickets, each declaring its **blocking edges**. On a local tracker that's one file per ticket under `.scr...",
+          "pattern": "slash",
+          "type": "suggests"
+        },
+        {
+          "line": 30,
+          "snippet": "Keep steps 1–3 in **one unbroken context window** (don't compact or clear until after `/to-tickets`) so the grilling, spec, and tickets all build on the same thinking. Each `/implement` then starts fresh, working from...",
+          "pattern": "slash",
+          "type": "reference"
+        },
+        {
+          "line": 32,
+          "snippet": "The limit on this is the **[smart zone](https://www.aihero.dev/ai-coding-dictionary/smart-zone)**: the window (~150k tokens on state-of-the-art models) within which the model still reasons sharply. If a session approa...",
+          "pattern": "slash",
+          "type": "reference"
+        },
+        {
+          "line": 40,
+          "snippet": "Triage is only for issues **you didn't create**: bug reports, incoming feature requests, anything that arrives raw. Tickets that `/to-tickets` produced are already agent-ready, so **don't triage them**.",
+          "pattern": "slash",
+          "type": "reference"
+        },
+        {
+          "line": 46,
+          "snippet": "When the map clears, **it hands off, it doesn't build**: merge onto the main flow at **`/to-spec`**, which collapses the map's linked decisions into a buildable plan, then `/to-tickets` and `/implement` as usual. Loop...",
+          "pattern": "slash",
+          "type": "reference"
+        }
+      ]
+    },
+    {
+      "source": "ask-matt",
+      "target": "triage",
+      "type": "suggests",
+      "evidence": [
+        {
+          "line": 38,
+          "snippet": "- **Bugs and requests piling up** → **`/triage`**. It moves issues through triage roles and produces agent-ready issues, which **`/implement`** later picks up.",
+          "pattern": "slash",
+          "type": "suggests"
+        },
+        {
+          "line": 78,
+          "snippet": "- **`/grilling`** is the interview primitive itself: rounds, the frontier, facts are the agent's job and decisions are yours. `/grill-me` and `/grill-with-docs` are the two named ways in, and `/triage`, `/wayfinder` a...",
+          "pattern": "slash",
+          "type": "reference"
+        }
+      ]
+    },
+    {
+      "source": "ask-matt",
+      "target": "wait-what",
+      "type": "suggests",
+      "evidence": [
+        {
+          "line": 84,
+          "snippet": "- **`/wait-what`** is the corrective for a message that didn't land. Use it mid-conversation, inside any other skill, and the agent re-pitches what it just said with the context you were missing, in plain English, usi...",
+          "pattern": "slash",
+          "type": "suggests"
+        }
+      ]
+    },
+    {
+      "source": "ask-matt",
+      "target": "wayfinder",
+      "type": "suggests",
+      "evidence": [
+        {
+          "line": 44,
+          "snippet": "- **A huge, foggy effort: a greenfield project or a huge feature build, too big for one session** → **`/wayfinder`**, the most cognitively demanding flow here. When the way from here to the destination isn't visible y...",
+          "pattern": "slash",
+          "type": "suggests"
+        },
+        {
+          "line": 78,
+          "snippet": "- **`/grilling`** is the interview primitive itself: rounds, the frontier, facts are the agent's job and decisions are yours. `/grill-me` and `/grill-with-docs` are the two named ways in, and `/triage`, `/wayfinder` a...",
+          "pattern": "slash",
+          "type": "reference"
+        }
+      ]
+    },
+    {
+      "source": "ask-matt",
+      "target": "wizard",
+      "type": "suggests",
+      "evidence": [
+        {
+          "line": 83,
+          "snippet": "- **`/wizard`** is for the steps only a **human** can take: provisioning infrastructure, setting up credentials or CI secrets, clicking through an unfamiliar third-party dashboard, running a one-off migration or cutov...",
+          "pattern": "slash",
+          "type": "suggests"
+        }
+      ]
+    },
+    {
+      "source": "ask-matt",
+      "target": "writing-for-agents",
+      "type": "suggests",
+      "evidence": [
+        {
+          "line": 86,
+          "snippet": "- **`/writing-for-agents`** is the reference for writing documents agents consume: skills, AGENTS.md, pointed-at docs.",
+          "pattern": "slash",
+          "type": "suggests"
+        }
+      ]
+    },
+    {
+      "source": "code-review",
+      "target": "setup-matt-pocock-skills",
+      "type": "prerequisite",
+      "evidence": [
+        {
+          "line": 13,
+          "snippet": "The issue tracker should have been provided to you. If `docs/agents/issue-tracker.md` is missing, tell the user to run `/setup-matt-pocock-skills`.",
+          "pattern": "slash",
+          "type": "prerequisite"
+        }
+      ]
+    },
+    {
+      "source": "grill-me",
+      "target": "grilling",
+      "type": "calls",
+      "evidence": [
+        {
+          "line": 7,
+          "snippet": "Call the Skill tool with \"grilling\".",
+          "pattern": "skill-tool",
+          "type": "calls"
+        }
+      ]
+    },
+    {
+      "source": "grill-with-docs",
+      "target": "domain-modeling",
+      "type": "calls",
+      "evidence": [
+        {
+          "line": 7,
+          "snippet": "Call the Skill tool twice, for \"grilling\" and \"domain-modeling\".",
+          "pattern": "skill-tool",
+          "type": "calls"
+        }
+      ]
+    },
+    {
+      "source": "grill-with-docs",
+      "target": "grilling",
+      "type": "calls",
+      "evidence": [
+        {
+          "line": 7,
+          "snippet": "Call the Skill tool twice, for \"grilling\" and \"domain-modeling\".",
+          "pattern": "skill-tool",
+          "type": "calls"
+        }
+      ]
+    },
+    {
+      "source": "implement",
+      "target": "code-review",
+      "type": "suggests",
+      "evidence": [
+        {
+          "line": 13,
+          "snippet": "Once done, use /code-review to review the work.",
+          "pattern": "slash",
+          "type": "suggests"
+        }
+      ]
+    },
+    {
+      "source": "implement",
+      "target": "tdd",
+      "type": "calls",
+      "evidence": [
+        {
+          "line": 9,
+          "snippet": "Use /tdd where possible, at pre-agreed seams.",
+          "pattern": "slash",
+          "type": "calls"
+        }
+      ]
+    },
+    {
+      "source": "implement-spec",
+      "target": "code-review",
+      "type": "calls",
+      "evidence": [
+        {
+          "line": 31,
+          "snippet": "7. Once all tickets are complete, run /code-review on the PR branch. Fix all issues raised by the code review in a single **implementer subagent**.",
+          "pattern": "slash",
+          "type": "calls"
+        }
+      ]
+    },
+    {
+      "source": "improve-codebase-architecture",
+      "target": "codebase-design",
+      "type": "calls",
+      "evidence": [
+        {
+          "line": 13,
+          "snippet": "- Call the Skill tool with \"codebase-design\" for the architecture vocabulary (**module**, **interface**, **depth**, **seam**, **adapter**, **leverage**, **locality**) and its principles (the deletion test, \"the interf...",
+          "pattern": "skill-tool",
+          "type": "calls"
+        },
+        {
+          "line": 71,
+          "snippet": "- **Want to explore alternative interfaces for the deepened module?** Call the Skill tool with \"codebase-design\" and use its design-it-twice parallel sub-agent pattern.",
+          "pattern": "skill-tool",
+          "type": "calls"
+        },
+        {
+          "line": 54,
+          "snippet": "**Use CONTEXT.md vocabulary for the domain, and the `/codebase-design` vocabulary for the architecture.** If `CONTEXT.md` defines \"Order,\" talk about \"the Order intake module,\" not \"the FooBarHandler,\" and not \"the Or...",
+          "pattern": "slash",
+          "type": "reference"
+        }
+      ]
+    },
+    {
+      "source": "improve-codebase-architecture",
+      "target": "domain-modeling",
+      "type": "calls",
+      "evidence": [
+        {
+          "line": 66,
+          "snippet": "Side effects happen inline as decisions crystallize; call the Skill tool with \"domain-modeling\" to keep the domain model current as you go:",
+          "pattern": "skill-tool",
+          "type": "calls"
+        }
+      ]
+    },
+    {
+      "source": "improve-codebase-architecture",
+      "target": "grilling",
+      "type": "calls",
+      "evidence": [
+        {
+          "line": 64,
+          "snippet": "Once the user picks a candidate, call the Skill tool with \"grilling\" to walk the decision tree with them: constraints, dependencies, the shape of the deepened module, what sits behind the seam, what tests survive.",
+          "pattern": "skill-tool",
+          "type": "calls"
+        }
+      ]
+    },
+    {
+      "source": "loop-me",
+      "target": "grilling",
+      "type": "reference",
+      "evidence": [
+        {
+          "line": 8,
+          "snippet": "Run a stateful `/grilling` session whose only output is **workflow** specs. Use the grilling discipline (relentless, a round of questions at a time, a recommended answer attached to each) aimed at the vocabulary and g...",
+          "pattern": "slash",
+          "type": "reference"
+        }
+      ]
+    },
+    {
+      "source": "retro",
+      "target": "writing-for-agents",
+      "type": "calls",
+      "evidence": [
+        {
+          "line": 11,
+          "snippet": "1. Call the Skill tool with `writing-for-agents` for the writing style guide.",
+          "pattern": "skill-tool",
+          "type": "calls"
+        },
+        {
+          "line": 44,
+          "snippet": "- Skills: use skills for docs (since their description goes into the agent's context window), or for user-invoked commands. Follow the advice in the `writing-for-agents` skill.",
+          "pattern": "prose",
+          "type": "reference"
+        }
+      ]
+    },
+    {
+      "source": "setup-matt-pocock-skills",
+      "target": "to-spec",
+      "type": "reference",
+      "evidence": [
+        {
+          "line": 40,
+          "snippet": "> Explainer: The \"issue tracker\" is where issues live for this repo. Skills like `to-tickets`, `triage`, and `to-spec` read from and write to it. They need to know whether to call `gh issue create`, write a markdown f...",
+          "pattern": "backtick",
+          "type": "reference"
+        }
+      ]
+    },
+    {
+      "source": "setup-matt-pocock-skills",
+      "target": "to-tickets",
+      "type": "reference",
+      "evidence": [
+        {
+          "line": 40,
+          "snippet": "> Explainer: The \"issue tracker\" is where issues live for this repo. Skills like `to-tickets`, `triage`, and `to-spec` read from and write to it. They need to know whether to call `gh issue create`, write a markdown f...",
+          "pattern": "backtick",
+          "type": "reference"
+        }
+      ]
+    },
+    {
+      "source": "setup-matt-pocock-skills",
+      "target": "triage",
+      "type": "reference",
+      "evidence": [
+        {
+          "line": 29,
+          "snippet": "- Is the `triage` skill installed? (a `triage` skill folder alongside this one, or `triage` in your available skills.) This decides whether Section B runs at all.",
+          "pattern": "prose",
+          "type": "reference"
+        },
+        {
+          "line": 36,
+          "snippet": "Lead each section with the recommended answer so the user can accept it in a word. Give a one-line explainer only when the choice genuinely branches; skip the section entirely when exploration already settled it (Sect...",
+          "pattern": "backtick",
+          "type": "reference"
+        },
+        {
+          "line": 40,
+          "snippet": "> Explainer: The \"issue tracker\" is where issues live for this repo. Skills like `to-tickets`, `triage`, and `to-spec` read from and write to it. They need to know whether to call `gh issue create`, write a markdown f...",
+          "pattern": "backtick",
+          "type": "reference"
+        },
+        {
+          "line": 51,
+          "snippet": "**Section B: Triage label vocabulary.** Skip this section entirely if the `triage` skill isn't installed (exploration told you), since an uninstalled skill needs no labels.",
+          "pattern": "prose",
+          "type": "reference"
+        },
+        {
+          "line": 57,
+          "snippet": "The defaults are the five canonical roles, each label string equal to its name: `needs-triage`, `needs-info`, `ready-for-agent`, `ready-for-human`, `wontfix`. On **yes**, write them as-is. Only if the user says no, us...",
+          "pattern": "backtick",
+          "type": "reference"
+        },
+        {
+          "line": 68,
+          "snippet": "- The contents of `docs/agents/issue-tracker.md`, `docs/agents/domain.md`, and `docs/agents/triage-labels.md` (the last only when `triage` is installed)",
+          "pattern": "backtick",
+          "type": "reference"
+        },
+        {
+          "line": 102,
+          "snippet": "Include the `### Triage labels` sub-block, and write `docs/agents/triage-labels.md`, only when `triage` is installed and Section B ran. When it isn't, both are omitted.",
+          "pattern": "backtick",
+          "type": "reference"
+        },
+        {
+          "line": 109,
+          "snippet": "- [triage-labels.md](./triage-labels.md): label mapping (only if `triage` is installed)",
+          "pattern": "backtick",
+          "type": "reference"
+        }
+      ]
+    },
+    {
+      "source": "setup-ts-deep-modules",
+      "target": "codebase-design",
+      "type": "calls",
+      "evidence": [
+        {
+          "line": 11,
+          "snippet": "For the vocabulary (deep module, interface, seam, depth), call the Skill tool with \"codebase-design\" and use its language throughout.",
+          "pattern": "skill-tool",
+          "type": "calls"
+        }
+      ]
+    },
+    {
+      "source": "tdd",
+      "target": "code-review",
+      "type": "reference",
+      "evidence": [
+        {
+          "line": 38,
+          "snippet": "- **Refactoring is not part of the loop.** It belongs to the review stage (see the `code-review` skill), not the red → green implementation cycle.",
+          "pattern": "prose",
+          "type": "reference"
+        }
+      ]
+    },
+    {
+      "source": "tdd",
+      "target": "codebase-design",
+      "type": "calls",
+      "evidence": [
+        {
+          "line": 26,
+          "snippet": "When the shape of that interface is itself in question (how deep the module is, where the seam belongs, what the interface should expose), call the Skill tool with \"codebase-design\" for the vocabulary. It is the share...",
+          "pattern": "skill-tool",
+          "type": "calls"
+        }
+      ]
+    },
+    {
+      "source": "to-spec",
+      "target": "setup-matt-pocock-skills",
+      "type": "prerequisite",
+      "evidence": [
+        {
+          "line": 9,
+          "snippet": "The issue tracker and triage label vocabulary should have been provided to you. If not, tell the user to run `/setup-matt-pocock-skills`.",
+          "pattern": "slash",
+          "type": "prerequisite"
+        }
+      ]
+    },
+    {
+      "source": "to-tickets",
+      "target": "setup-matt-pocock-skills",
+      "type": "prerequisite",
+      "evidence": [
+        {
+          "line": 11,
+          "snippet": "The issue tracker and triage label vocabulary should have been provided to you. If not, tell the user to run `/setup-matt-pocock-skills`.",
+          "pattern": "slash",
+          "type": "prerequisite"
+        },
+        {
+          "line": 60,
+          "snippet": "Publish the approved tickets. **How** depends on the tracker `/setup-matt-pocock-skills` configured; the tickets are the same either way, only the shape of the blocking edges changes:",
+          "pattern": "slash",
+          "type": "reference"
+        }
+      ]
+    },
+    {
+      "source": "triage",
+      "target": "domain-modeling",
+      "type": "calls",
+      "evidence": [
+        {
+          "line": 76,
+          "snippet": "4. **Grill (if needed).** If the request needs fleshing out, call the Skill tool twice, for \"grilling\" and \"domain-modeling\", and grill it into shape a round of questions at a time, sharpening domain terms and updatin...",
+          "pattern": "skill-tool",
+          "type": "calls"
+        }
+      ]
+    },
+    {
+      "source": "triage",
+      "target": "grilling",
+      "type": "calls",
+      "evidence": [
+        {
+          "line": 76,
+          "snippet": "4. **Grill (if needed).** If the request needs fleshing out, call the Skill tool twice, for \"grilling\" and \"domain-modeling\", and grill it into shape a round of questions at a time, sharpening domain terms and updatin...",
+          "pattern": "skill-tool",
+          "type": "calls"
+        }
+      ]
+    },
+    {
+      "source": "triage",
+      "target": "setup-matt-pocock-skills",
+      "type": "prerequisite",
+      "evidence": [
+        {
+          "line": 43,
+          "snippet": "These are canonical role names. The actual label strings used in the issue tracker may differ. The mapping should have been provided to you. If not, tell the user to run `/setup-matt-pocock-skills`.",
+          "pattern": "slash",
+          "type": "prerequisite"
+        }
+      ]
+    },
+    {
+      "source": "wayfinder",
+      "target": "domain-modeling",
+      "type": "calls",
+      "evidence": [
+        {
+          "line": 79,
+          "snippet": "- **Grilling** (HITL): Conversation. The default case. Always call the Skill tool twice, for \"grilling\" and \"domain-modeling\".",
+          "pattern": "skill-tool",
+          "type": "calls"
+        },
+        {
+          "line": 111,
+          "snippet": "1. **Name the destination.** Call the Skill tool twice, for \"grilling\" and \"domain-modeling\", to pin down what this map is finding its way to: the spec, decision, or change. The destination fixes the scope, so it's se...",
+          "pattern": "skill-tool",
+          "type": "calls"
+        },
+        {
+          "line": 124,
+          "snippet": "3. Resolve it. **Zoom as needed**: fetch the full body of any related or closed ticket on demand; call the Skill tool for whichever skills the `## Notes` block names. If in doubt, call the Skill tool twice, for \"grill...",
+          "pattern": "skill-tool",
+          "type": "calls"
+        }
+      ]
+    },
+    {
+      "source": "wayfinder",
+      "target": "grilling",
+      "type": "calls",
+      "evidence": [
+        {
+          "line": 79,
+          "snippet": "- **Grilling** (HITL): Conversation. The default case. Always call the Skill tool twice, for \"grilling\" and \"domain-modeling\".",
+          "pattern": "skill-tool",
+          "type": "calls"
+        },
+        {
+          "line": 111,
+          "snippet": "1. **Name the destination.** Call the Skill tool twice, for \"grilling\" and \"domain-modeling\", to pin down what this map is finding its way to: the spec, decision, or change. The destination fixes the scope, so it's se...",
+          "pattern": "skill-tool",
+          "type": "calls"
+        },
+        {
+          "line": 124,
+          "snippet": "3. Resolve it. **Zoom as needed**: fetch the full body of any related or closed ticket on demand; call the Skill tool for whichever skills the `## Notes` block names. If in doubt, call the Skill tool twice, for \"grill...",
+          "pattern": "skill-tool",
+          "type": "calls"
+        },
+        {
+          "line": 65,
+          "snippet": "Each ticket carries a `wayfinder:<type>` label, one of `research`, `prototype`, `grilling`, `task` (see [Ticket Types](#ticket-types)).",
+          "pattern": "backtick",
+          "type": "reference"
+        }
+      ]
+    },
+    {
+      "source": "wayfinder",
+      "target": "prototype",
+      "type": "calls",
+      "evidence": [
+        {
+          "line": 78,
+          "snippet": "- **Prototype** (HITL): Raise the fidelity of the discussion by making a cheap, rough, concrete artifact to react to (an outline, a rough take, a stub, or UI/logic code) by calling the Skill tool with \"prototype\". Lin...",
+          "pattern": "skill-tool",
+          "type": "calls"
+        },
+        {
+          "line": 65,
+          "snippet": "Each ticket carries a `wayfinder:<type>` label, one of `research`, `prototype`, `grilling`, `task` (see [Ticket Types](#ticket-types)).",
+          "pattern": "backtick",
+          "type": "reference"
+        }
+      ]
+    },
+    {
+      "source": "wayfinder",
+      "target": "research",
+      "type": "calls",
+      "evidence": [
+        {
+          "line": 77,
+          "snippet": "- **Research** (AFK): Reading documentation, third-party APIs, or local resources like knowledge bases to surface a fact a decision waits on. Resolved by a subagent that calls the Skill tool with \"research\". Use when ...",
+          "pattern": "skill-tool",
+          "type": "calls"
+        },
+        {
+          "line": 115,
+          "snippet": "5. **Fire the research subagents.** For each `research` ticket you just created, spin up a subagent that calls the Skill tool with \"research\" to resolve it in parallel, capturing its findings on a throwaway `research/...",
+          "pattern": "skill-tool",
+          "type": "calls"
+        },
+        {
+          "line": 65,
+          "snippet": "Each ticket carries a `wayfinder:<type>` label, one of `research`, `prototype`, `grilling`, `task` (see [Ticket Types](#ticket-types)).",
+          "pattern": "backtick",
+          "type": "reference"
+        },
+        {
+          "line": 115,
+          "snippet": "5. **Fire the research subagents.** For each `research` ticket you just created, spin up a subagent that calls the Skill tool with \"research\" to resolve it in parallel, capturing its findings on a throwaway `research/...",
+          "pattern": "backtick",
+          "type": "reference"
+        }
+      ]
+    },
+    {
+      "source": "wayfinder",
+      "target": "setup-matt-pocock-skills",
+      "type": "prerequisite",
+      "evidence": [
+        {
+          "line": 25,
+          "snippet": "**Where the map, its child tickets, blocking, and frontier queries physically live is tracker-specific.** The issue tracker should have been provided to you. If not, tell the user to run `/setup-matt-pocock-skills`. C...",
+          "pattern": "slash",
+          "type": "prerequisite"
+        }
+      ]
+    }
+  ],
+  "flows": [
+    {
+      "id": "ask-matt:sequential:1",
+      "kind": "sequential",
+      "owner": "ask-matt",
+      "steps": [
+        "grill-with-docs",
+        "grill-me",
+        "handoff",
+        "prototype",
+        "to-spec",
+        "to-tickets",
+        "implement",
+        "tdd",
+        "code-review"
+      ],
+      "label": "ask-matt: steps in order",
+      "evidence": [
+        {
+          "line": 17,
+          "snippet": "1. **`/grill-with-docs`** sharpens the idea by interview. Start here whenever you are **working in a working directory**: it's stateful, retaining what it learns in `CONTEXT.md` and ADRs. (No working directory? Use `/...",
+          "pattern": "flow"
+        },
+        {
+          "line": 18,
+          "snippet": "2. **Branch: can you settle every question in conversation?** If a question needs a runnable answer (state, business logic, a UI you have to see), detour through a prototype, bridged by **`/handoff`** in both directio...",
+          "pattern": "flow"
+        },
+        {
+          "line": 19,
+          "snippet": "- **`/handoff`** out, then open a fresh session against that file,",
+          "pattern": "slash"
+        },
+        {
+          "line": 20,
+          "snippet": "- **`/prototype`** to answer the question with throwaway code,",
+          "pattern": "slash"
+        },
+        {
+          "line": 21,
+          "snippet": "- **`/handoff`** back what you learned, and reference it from the original idea thread.",
+          "pattern": "slash"
+        },
+        {
+          "line": 22,
+          "snippet": "3. **Branch: is this a multi-session build?**",
+          "pattern": "flow"
+        },
+        {
+          "line": 23,
+          "snippet": "- **Yes** → **`/to-spec`** (turn the thread into a spec), then **`/to-tickets`** to split it into tracer-bullet tickets, each declaring its **blocking edges**. On a local tracker that's one file per ticket under `.scr...",
+          "pattern": "slash"
+        },
+        {
+          "line": 24,
+          "snippet": "- **No** → **`/implement`** right here, in the same context window.",
+          "pattern": "slash"
+        },
+        {
+          "line": 26,
+          "snippet": "Either way, **`/implement`** builds each issue by driving **`/tdd`** internally (one red-green slice at a time), then closes out by running **`/code-review`**, a two-axis review (Standards + Spec) of the diff, before ...",
+          "pattern": "slash"
+        }
+      ]
+    },
+    {
+      "id": "ask-matt:sequential:2",
+      "kind": "sequential",
+      "owner": "ask-matt",
+      "steps": [
+        "diagnosing-bugs",
+        "improve-codebase-architecture"
+      ],
+      "label": "ask-matt: then",
+      "evidence": [
+        {
+          "line": 42,
+          "snippet": "- **Something's broken** → **`/diagnosing-bugs`**. For the hard ones: the bug that resists a first glance, the intermittent flake, the regression that crept in between two known-good states. It refuses to theorise unt...",
+          "pattern": "flow"
+        }
+      ]
+    },
+    {
+      "id": "ask-matt:loop:3",
+      "kind": "loop",
+      "owner": "ask-matt",
+      "steps": [
+        "diagnosing-bugs"
+      ],
+      "label": "loop until it has a **tight feedback loop** (one command that already goes red on *this* bug), then f",
+      "evidence": [
+        {
+          "line": 42,
+          "snippet": "- **Something's broken** → **`/diagnosing-bugs`**. For the hard ones: the bug that resists a first glance, the intermittent flake, the regression that crept in between two known-good states. It refuses to theorise unt...",
+          "pattern": "flow"
+        }
+      ],
+      "until": "it has a **tight feedback loop** (one command that already goes red on *this* bug), then f"
+    },
+    {
+      "id": "ask-matt:loop:4",
+      "kind": "loop",
+      "owner": "ask-matt",
+      "steps": [
+        "wayfinder"
+      ],
+      "label": "loop until the fog is pushed back and the way is clear",
+      "evidence": [
+        {
+          "line": 44,
+          "snippet": "- **A huge, foggy effort: a greenfield project or a huge feature build, too big for one session** → **`/wayfinder`**, the most cognitively demanding flow here. When the way from here to the destination isn't visible y...",
+          "pattern": "flow"
+        }
+      ],
+      "until": "the fog is pushed back and the way is clear"
+    },
+    {
+      "id": "ask-matt:loop:5",
+      "kind": "loop",
+      "owner": "ask-matt",
+      "steps": [
+        "wizard"
+      ],
+      "label": "ask-matt: loop",
+      "evidence": [
+        {
+          "line": 83,
+          "snippet": "- **`/wizard`** is for the steps only a **human** can take: provisioning infrastructure, setting up credentials or CI secrets, clicking through an unfamiliar third-party dashboard, running a one-off migration or cutov...",
+          "pattern": "flow"
+        }
+      ]
+    },
+    {
+      "id": "improve-codebase-architecture:parallel:1",
+      "kind": "parallel",
+      "owner": "improve-codebase-architecture",
+      "steps": [
+        "codebase-design"
+      ],
+      "label": "improve-codebase-architecture: in parallel",
+      "evidence": [
+        {
+          "line": 71,
+          "snippet": "- **Want to explore alternative interfaces for the deepened module?** Call the Skill tool with \"codebase-design\" and use its design-it-twice parallel sub-agent pattern.",
+          "pattern": "flow"
+        }
+      ]
+    },
+    {
+      "id": "triage:sequential:1",
+      "kind": "sequential",
+      "owner": "triage",
+      "steps": [
+        "grilling",
+        "domain-modeling"
+      ],
+      "label": "triage: steps in order",
+      "evidence": [
+        {
+          "line": 76,
+          "snippet": "4. **Grill (if needed).** If the request needs fleshing out, call the Skill tool twice, for \"grilling\" and \"domain-modeling\", and grill it into shape a round of questions at a time, sharpening domain terms and updatin...",
+          "pattern": "flow"
+        }
+      ]
+    },
+    {
+      "id": "wayfinder:sequential:1",
+      "kind": "sequential",
+      "owner": "wayfinder",
+      "steps": [
+        "grilling",
+        "domain-modeling",
+        "research"
+      ],
+      "label": "wayfinder: steps in order",
+      "evidence": [
+        {
+          "line": 111,
+          "snippet": "1. **Name the destination.** Call the Skill tool twice, for \"grilling\" and \"domain-modeling\", to pin down what this map is finding its way to: the spec, decision, or change. The destination fixes the scope, so it's se...",
+          "pattern": "flow"
+        },
+        {
+          "line": 115,
+          "snippet": "5. **Fire the research subagents.** For each `research` ticket you just created, spin up a subagent that calls the Skill tool with \"research\" to resolve it in parallel, capturing its findings on a throwaway `research/...",
+          "pattern": "flow"
+        }
+      ]
+    },
+    {
+      "id": "wayfinder:parallel:2",
+      "kind": "parallel",
+      "owner": "wayfinder",
+      "steps": [
+        "research"
+      ],
+      "label": "wayfinder: in parallel",
+      "evidence": [
+        {
+          "line": 115,
+          "snippet": "5. **Fire the research subagents.** For each `research` ticket you just created, spin up a subagent that calls the Skill tool with \"research\" to resolve it in parallel, capturing its findings on a throwaway `research/...",
+          "pattern": "flow"
+        }
+      ]
+    }
+  ],
+  "unresolved": [
+    {
+      "name": "supporting-info",
+      "count": 3,
+      "sources": [
+        "writing-beats",
+        "writing-fragments",
+        "writing-shape"
+      ]
+    },
+    {
+      "name": "what-to-do",
+      "count": 3,
+      "sources": [
+        "writing-beats",
+        "writing-fragments",
+        "writing-shape"
+      ]
+    },
+    {
+      "name": "clear",
+      "count": 2,
+      "sources": [
+        "ask-matt"
+      ]
+    },
+    {
+      "name": "compact",
+      "count": 2,
+      "sources": [
+        "ask-matt"
+      ]
+    },
+    {
+      "name": "build-tool",
+      "count": 1,
+      "sources": [
+        "retro"
+      ]
+    },
+    {
+      "name": "issue-template",
+      "count": 1,
+      "sources": [
+        "to-tickets"
+      ]
+    },
+    {
+      "name": "local-ticket-template",
+      "count": 1,
+      "sources": [
+        "to-tickets"
+      ]
+    },
+    {
+      "name": "question-example",
+      "count": 1,
+      "sources": [
+        "to-questionnaire"
+      ]
+    },
+    {
+      "name": "questionnaire-template",
+      "count": 1,
+      "sources": [
+        "to-questionnaire"
+      ]
+    },
+    {
+      "name": "reporter",
+      "count": 1,
+      "sources": [
+        "triage"
+      ]
+    },
+    {
+      "name": "spec-template",
+      "count": 1,
+      "sources": [
+        "to-spec"
+      ]
+    },
+    {
+      "name": "tmp",
+      "count": 1,
+      "sources": [
+        "improve-codebase-architecture"
+      ]
+    },
+    {
+      "name": "user-story-example",
+      "count": 1,
+      "sources": [
+        "to-spec"
+      ]
+    },
+    {
+      "name": "vertical-slice-rules",
+      "count": 1,
+      "sources": [
+        "to-tickets"
+      ]
+    }
+  ]
+}

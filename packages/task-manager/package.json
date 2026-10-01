@@ -1,0 +1,9 @@
+{
+  "name": "@oneezy/task-manager",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Zero-touch bootstrap and repair of one GitHub project per repo (PowerShell 7 + gh), and the status.sh that .github/workflows/task-manager.yml runs.",
+  "scripts": {
+    "check": "pwsh -NoProfile -File ../../scripts/syntax-check.ps1 task-manager.ps1 scripts/status.sh setup-secrets.sh"
+  }
+}
