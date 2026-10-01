@@ -2,11 +2,11 @@
   "name": "@oneezy/skills-sync",
   "publishConfig": { "access": "public" },
   "version": "0.2.0",
-  "description": "One skills library, every agent harness, every project on the machine. Restores third-party skills from skills-lock.json, links every skill into Claude Code, Codex, Goose and Hermes, and into the projects you pick.",
+  "description": "One skills library, every agent harness, every project on the machine. Declares third-party sources in skills-sync.json, keeps them at upstream's tip (pins excepted) with snapshots and skills-lock.json, links every skill into Claude Code, Codex, Goose and Hermes, and into the projects you pick.",
   "license": "MIT",
   "type": "module",
   "bin": { "skills-sync": "dist/src/cli.js" },
-  "files": ["dist/src", "README.md"],
+  "files": ["dist/src", "schemas", "README.md"],
   "repository": { "type": "git", "url": "https://github.com/oneezy/tools.git", "directory": "clis/skills-sync" },
   "scripts": {
     "build": "tsc -p tsconfig.json",

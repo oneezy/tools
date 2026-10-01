@@ -1,9 +1,13 @@
 // Every step builds a list of actions first; apply() executes them unless planning.
 import fs from "node:fs";
 import path from "node:path";
-import { copyDir, isLink, lexists, linkTarget, makeLink, removeLink, samePath, under } from "./fs.js";
+import { copyDir, isLink, lexists, linkTarget, makeLink, removeLink, samePath, under, type LinkKind } from "./fs.js";
 
-export type Kind = "link" | "relink" | "remove" | "replace-copy" | "copy" | "write" | "exclude" | "skip" | "conflict";
+/**
+ * remove drops a link; delete drops a real folder or file (only ever a generated one: a snapshot or a working-set copy);
+ * move renames a file this tool wrote (path -> target).
+ */
+export type Kind = "link" | "relink" | "remove" | "delete" | "replace-copy" | "copy" | "write" | "move" | "exclude" | "skip" | "conflict";
 
 export interface Action {
   kind: Kind;
@@ -11,11 +15,13 @@ export interface Action {
   target?: string;
   note?: string;
   /** for write: the file body; for exclude: the entries */
-  payload?: string | string[];
+  payload?: string | Buffer | string[];
 }
 
 export class Report {
   actions: Action[] = [];
+  /** how many links apply() made of each kind, so the run can say which it used */
+  links: Record<LinkKind, number> = { symlink: 0, junction: 0 };
   add(a: Action): Action {
     this.actions.push(a);
     return a;
@@ -31,10 +37,12 @@ export class Report {
   }
   merge(other: Report): void {
     this.actions.push(...other.actions);
+    this.links.symlink += other.links.symlink;
+    this.links.junction += other.links.junction;
   }
 }
 
-const MARK: Record<Kind, string> = { link: "+", relink: "~", remove: "-", "replace-copy": "~", copy: "+", write: "+", exclude: "+", skip: "=", conflict: "!" };
+const MARK: Record<Kind, string> = { link: "+", relink: "~", remove: "-", delete: "-", "replace-copy": "~", copy: "+", write: "+", move: "~", exclude: "+", skip: "=", conflict: "!" };
 
 export function line(a: Action): string {
   const tail = a.target ? ` -> ${a.target}` : "";
@@ -44,28 +52,38 @@ export function line(a: Action): string {
 
 export function apply(report: Report, plan: boolean, exclude?: (repo: string, entries: string[]) => boolean): void {
   if (plan) return;
+  const link = (a: Action) => {
+    report.links[makeLink(a.target!, a.path)]++;
+  };
   for (const a of report.actions) {
     switch (a.kind) {
       case "link":
-        makeLink(a.target!, a.path);
+        link(a);
         break;
       case "relink":
         removeLink(a.path);
-        makeLink(a.target!, a.path);
+        link(a);
         break;
       case "remove":
         removeLink(a.path);
         break;
+      case "delete":
+        fs.rmSync(a.path, { recursive: true, force: true, maxRetries: 3 });
+        break;
       case "replace-copy":
         fs.rmSync(a.path, { recursive: true, force: true });
-        makeLink(a.target!, a.path);
+        link(a);
         break;
       case "copy":
         copyDir(a.target!, a.path);
         break;
       case "write":
         fs.mkdirSync(path.dirname(a.path), { recursive: true });
-        fs.writeFileSync(a.path, a.payload as string);
+        fs.writeFileSync(a.path, a.payload as string | Buffer);
+        break;
+      case "move":
+        fs.mkdirSync(path.dirname(a.target!), { recursive: true });
+        fs.renameSync(a.path, a.target!);
         break;
       case "exclude":
         exclude?.(a.path, a.payload as string[]);

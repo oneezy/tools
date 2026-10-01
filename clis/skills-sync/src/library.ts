@@ -1,11 +1,14 @@
-// The skills library: a folder with skills/<name>/ (own skills) and skills-lock.json (third-party pins).
+// The skills library: a folder with skills/ (own skills, flat or grouped by plugin) beside the committed config
+// skills-sync.json (third-party sources, plugins) or the lock skills-lock.json (what is installed, in the npx skills format).
 import { spawnSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import YAML from "yaml";
+import { CONFIG_NAME, configKind, LOCAL_NAME } from "./config.js";
 import { isDir, isSkillDir, real } from "./fs.js";
 import { RESERVED } from "./harnesses.js";
+import type { LockEntry } from "./sources.js";
 
 export class Library {
   constructor(public root: string) {}
@@ -16,16 +19,64 @@ export class Library {
   get agents(): string {
     return path.join(this.root, ".agents", "skills");
   }
+  /** The lock in the npx skills format: what is installed; written by refresh when a config exists. */
   get lockFile(): string {
     return path.join(this.root, "skills-lock.json");
   }
+  /** The committed config: the hand-edited declaration of third-party sources, selections, renames, pins, plugins. */
+  get configFile(): string {
+    return path.join(this.root, CONFIG_NAME);
+  }
+  /** This machine's answers, gitignored. */
+  get localFile(): string {
+    return path.join(this.root, LOCAL_NAME);
+  }
+  /** Snapshots: upstream/<source>/<upstream path>, generated and never edited. */
+  get upstream(): string {
+    return path.join(this.root, "upstream");
+  }
+  /** A config library: refresh owns the third-party working set and the lock. A legacy answers-only skills-sync.json does not count. */
+  hasConfig(): boolean {
+    return configKind(this.root) === "config";
+  }
 
+  /** Own skill names, sorted. */
   ownSkills(): string[] {
-    if (!isDir(this.own)) return [];
-    return fs
-      .readdirSync(this.own)
-      .filter((n) => !n.startsWith(".") && isSkillDir(path.join(this.own, n)))
-      .sort();
+    return this.scanOwn().skills.map((s) => s.name);
+  }
+
+  /**
+   * Own skills under skills/: a folder that holds SKILL.md is a flat skill; a folder without one is a
+   * group whose children are skills and whose name is their plugin id. A group's child without SKILL.md
+   * is not a skill, and a second skill with a name already taken (paths in sorted order) loses; both are
+   * reported once and never linked. Dot-folders are skipped at both levels.
+   */
+  scanOwn(): OwnScan {
+    const out: OwnScan = { skills: [], ignored: [] };
+    if (!isDir(this.own)) return out;
+    const taken = new Map<string, string>();
+    const add = (name: string, dir: string, plugin: string | null) => {
+      const first = taken.get(name);
+      if (first) out.ignored.push({ path: dir, note: `same name as ${path.relative(this.root, first).replace(/\\/g, "/")}, which wins; ignored` });
+      else {
+        taken.set(name, dir);
+        out.skills.push({ name, dir, plugin });
+      }
+    };
+    for (const n of folders(this.own)) {
+      const dir = path.join(this.own, n);
+      if (isSkillDir(dir)) {
+        add(n, dir, null);
+        continue;
+      }
+      for (const c of folders(dir)) {
+        const child = path.join(dir, c);
+        if (isSkillDir(child)) add(c, child, n);
+        else out.ignored.push({ path: child, note: "no SKILL.md: not a skill, and only folders directly under skills/ are groups; ignored" });
+      }
+    }
+    out.skills.sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
+    return out;
   }
 
   /** name -> real folder, for every entry of .agents/skills that holds a SKILL.md */
@@ -114,14 +165,30 @@ export class Library {
   }
 }
 
-export interface LockEntry {
-  source: string;
-  sourceType: string;
-  sourceUrl?: string;
-  ref?: string;
-  skillPath?: string;
-  computedHash?: string;
+/** One own skill: its folder name (the skill name), its real folder, and the group it sits in. */
+export interface OwnSkill {
+  name: string;
+  dir: string;
+  /** the group's name, which is the plugin id; null for a flat skill */
+  plugin: string | null;
 }
+
+export interface OwnScan {
+  skills: OwnSkill[];
+  /** folders that are not skills where a skill could have been; each is reported once */
+  ignored: Array<{ path: string; note: string }>;
+}
+
+/** Sub-folder names of `dir`, dot-folders excluded, sorted. */
+function folders(dir: string): string[] {
+  return fs
+    .readdirSync(dir, { withFileTypes: true })
+    .filter((e) => e.isDirectory() && !e.name.startsWith("."))
+    .map((e) => e.name)
+    .sort();
+}
+
+export type { LockEntry } from "./sources.js";
 
 export interface RestoreResult {
   restored: string[];
@@ -186,8 +253,13 @@ export function cloneLibrary(source: string, home = os.homedir(), log: (s: strin
   return { ok: true, root };
 }
 
-/** Fast-forward the library from its remote, at most once per `minutes`, only when the tree is clean. */
-export function pullLibrary(root: string, minutes: number, log: (s: string) => void): "pulled" | "skipped" | "dirty" | "failed" | "throttled" {
+/**
+ * Fast-forward the library from its remote, at most once per `minutes`, only when the tree is clean. `regenerated`
+ * names tracked files the tool itself writes on every machine (a config library's lock): a local change to one of
+ * them alone never counts as dirty. Each is put at HEAD so the pull can replace it, and put back as it was when
+ * the pull fails: the refresh that follows a pull writes it again, and a frozen one reads it.
+ */
+export function pullLibrary(root: string, minutes: number, log: (s: string) => void, regenerated: string[] = []): "pulled" | "skipped" | "dirty" | "failed" | "throttled" {
   const stamp = path.join(root, ".git", "skills-sync-pulled");
   try {
     const last = fs.statSync(stamp).mtimeMs;
@@ -198,7 +270,11 @@ export function pullLibrary(root: string, minutes: number, log: (s: string) => v
   if (!fs.existsSync(path.join(root, ".git"))) return "skipped";
   const status = spawnSync("git", ["-C", root, "status", "--porcelain", "--untracked-files=no"], { encoding: "utf8" });
   if (status.status !== 0) return "skipped";
-  if (status.stdout.trim()) return "dirty";
+  // porcelain v1: two status letters, a space, the path (relative to the repository root, which the library is)
+  const changed = status.stdout.split("\n").filter(Boolean).map((l) => l.slice(3).trim());
+  if (changed.some((f) => !regenerated.includes(f))) return "dirty";
+  const saved = changed.map((f) => [path.join(root, f), fs.existsSync(path.join(root, f)) ? fs.readFileSync(path.join(root, f)) : null] as const);
+  if (changed.length) spawnSync("git", ["-C", root, "checkout", "--", ...changed], { encoding: "utf8" });
   const r = spawnSync("git", ["-C", root, "pull", "--ff-only", "--quiet"], { encoding: "utf8", timeout: 20_000 });
   try {
     fs.writeFileSync(stamp, new Date().toISOString());
@@ -206,19 +282,26 @@ export function pullLibrary(root: string, minutes: number, log: (s: string) => v
     /* stamp is best-effort */
   }
   if (r.status !== 0) {
+    for (const [file, bytes] of saved) {
+      if (bytes) fs.writeFileSync(file, bytes);
+      else fs.rmSync(file, { force: true });
+    }
     log(`library pull skipped: ${(r.stderr ?? "").trim().split("\n").pop()}`);
     return "failed";
   }
   return "pulled";
 }
 
+/** The files that mark a library, either one beside skills/: the committed config, or the lock. */
+export const LIBRARY_MARKERS = [CONFIG_NAME, "skills-lock.json"];
+
 /**
- * A library has both skills/ and skills-lock.json, and is never a dot-folder: a harness config dir
+ * A library has skills/ beside one of the marker files, and is never a dot-folder: a harness config dir
  * such as ~/.claude also has a skills/ subfolder, and must never be mistaken for one.
  */
 export function looksLikeLibrary(dir: string): boolean {
   const abs = path.resolve(dir);
-  return isDir(path.join(abs, "skills")) && fs.existsSync(path.join(abs, "skills-lock.json"));
+  return isDir(path.join(abs, "skills")) && LIBRARY_MARKERS.some((m) => fs.existsSync(path.join(abs, m)));
 }
 
 /** An empty lock, for a library that has no third-party skills yet. */
