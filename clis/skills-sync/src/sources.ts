@@ -1,30 +1,30 @@
-// The sources manifest (skills-sources.json), its lock (skills-sources-lock.json), the skill hash recipe, and the
-// compatibility lock (skills-lock.json) regenerated from them. Reading, hashing and shaping only; refresh.ts moves files.
+// The committed config (skills-sync.json), the lock (skills-lock.json: the npx skills format plus the resolved commit per
+// entry) and the skill hash recipe. Reading, hashing and shaping only; refresh.ts moves files.
 import { createHash } from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 import { isSkillDir } from "./fs.js";
 import { shippedSchema, validate } from "./schema.js";
 
-export interface Manifest {
+export interface Config {
   version: 1;
   library?: { name?: string; owner?: string; homepage?: string };
+  /** the two forms, each behind a switch: the loose-skill layers and the plugin packages; both true when absent */
+  generate: { skills: boolean; plugins: boolean };
   sources: Record<string, Source>;
-  plugins?: Record<string, Plugin>;
+  plugins: Record<string, Plugin>;
 }
 
 export interface Source {
   /** owner/repo on GitHub, a git URL, or a local path */
   repo: string;
-  /** the branch or tag to follow, or a commit to hold */
+  /** the branch or tag followed: its tip at every refresh, except skills held by a pin; a full commit holds the whole source */
   ref: string;
-  /** follow: the tip of ref at every refresh; pin: the lock's commit until the lock is edited */
-  policy: "follow" | "pin";
   /** where skill folders live in the repo; the repo root when omitted */
   root?: string;
   /** selected folder names, or a map upstream name -> working-set name */
   skills: string[] | Record<string, string>;
-  /** per-skill commits that override the policy */
+  /** per-skill commits (by upstream folder name) that hold a skill while its siblings follow ref */
   pins?: Record<string, string>;
   /** upstream paths of the LICENSE and README files to carry */
   attribution?: string[];
@@ -37,36 +37,19 @@ export interface Plugin {
   source?: string;
 }
 
-export interface SourcesLock {
-  version: 1;
-  generated: { manifest: string };
-  sources: Record<string, LockedSource>;
-  releases: Record<string, Release>;
-}
-
-export interface LockedSource {
-  commit: string;
-  date: string;
-  /** keyed by upstream folder name */
-  skills: Record<string, LockedSkill>;
-}
-
-export interface LockedSkill {
-  /** the skill folder relative to the repo root, / separators */
-  path: string;
-  hash: string;
-  pinnedCommit?: string;
-  transforms?: Transform[];
-}
-
-export type Transform = { kind: "rename"; to: string };
-
-export interface Release {
-  plugin_id: string;
-  release_id: string;
-  sha256: string;
-  scope: string;
-  date: string;
+/**
+ * An entry of skills-lock.json: the npx skills local lock (version 1), keyed by the working-set name, plus `commit`,
+ * the resolved commit the skill was taken at. npx skills 1.7.0 reads an entry with that extra field (list, update) and
+ * keeps it on entries it does not rewrite; probed 2026-10-01 against the cached CLI.
+ */
+export interface LockEntry {
+  source: string;
+  sourceUrl?: string;
+  ref?: string;
+  sourceType: string;
+  skillPath?: string;
+  computedHash?: string;
+  commit?: string;
 }
 
 /** One selected skill: its folder name upstream and the name it takes in the working set. */
@@ -80,12 +63,14 @@ export function selection(s: Source): Selected[] {
   return pairs.map(([upstream, name]) => ({ upstream, name })).sort((a, b) => cmp(a.upstream, b.upstream));
 }
 
-export function transformsFor(sel: Selected): Transform[] | undefined {
-  return sel.name === sel.upstream ? undefined : [{ kind: "rename", to: sel.name }];
+/** The config, validated against the shipped schema, with the switches, sources and plugins filled in when absent; throws with every problem listed. */
+export function readConfig(file: string): Config {
+  const parsed = readConfigRaw(file) as Partial<Config>;
+  return { ...parsed, version: 1, generate: { skills: true, plugins: true, ...parsed.generate }, sources: parsed.sources ?? {}, plugins: parsed.plugins ?? {} };
 }
 
-/** The manifest, validated against the shipped schema; throws with every problem listed. */
-export function readManifest(file: string): Manifest {
+/** The config exactly as the file holds it, validated; what add writes back with one more source. */
+export function readConfigRaw(file: string): Record<string, unknown> {
   const raw = fs.readFileSync(file, "utf8");
   let parsed: unknown;
   try {
@@ -94,36 +79,12 @@ export function readManifest(file: string): Manifest {
     throw new Error(`${file}: not JSON (${String(e)})`);
   }
   const errors = validate(shippedSchema("skills-sync"), parsed);
-  if (errors.length) throw new Error(`${file} is not a valid manifest:\n  ${errors.join("\n  ")}`);
-  return parsed as Manifest;
+  if (errors.length) throw new Error(`${file} is not a valid config:\n  ${errors.join("\n  ")}`);
+  return parsed as Record<string, unknown>;
 }
 
-/** The lock, or an empty one when it does not exist yet. */
-export function readSourcesLock(file: string): SourcesLock {
-  try {
-    const parsed = JSON.parse(fs.readFileSync(file, "utf8")) as Partial<SourcesLock>;
-    return { version: 1, generated: parsed.generated ?? { manifest: "" }, sources: parsed.sources ?? {}, releases: parsed.releases ?? {} };
-  } catch {
-    return { version: 1, generated: { manifest: "" }, sources: {}, releases: {} };
-  }
-}
-
-export function manifestHash(file: string): string {
-  return createHash("sha256").update(fs.readFileSync(file)).digest("hex");
-}
-
-/** Stable JSON: sorted source and skill keys, two spaces, trailing newline. */
-export function lockText(lock: SourcesLock): string {
-  const sources: Record<string, LockedSource> = {};
-  for (const id of Object.keys(lock.sources).sort(cmp)) {
-    const s = lock.sources[id];
-    const skills: Record<string, LockedSkill> = {};
-    for (const n of Object.keys(s.skills).sort(cmp)) skills[n] = s.skills[n];
-    sources[id] = { commit: s.commit, date: s.date, skills };
-  }
-  const releases: Record<string, Release> = {};
-  for (const id of Object.keys(lock.releases).sort(cmp)) releases[id] = lock.releases[id];
-  return JSON.stringify({ version: 1, generated: lock.generated, sources, releases }, null, 2) + "\n";
+export function configText(c: Record<string, unknown>): string {
+  return JSON.stringify(c, null, 2) + "\n";
 }
 
 /**
@@ -192,40 +153,30 @@ export function githubSlug(repo: string): string | null {
   return m ? m[1] : null;
 }
 
-/** An entry of skills-lock.json, the npx skills local lock (version 1). */
-export interface CompatEntry {
-  source: string;
-  sourceUrl?: string;
-  ref?: string;
-  sourceType?: "github" | "git";
-  skillPath?: string;
-  computedHash?: string;
+/** What the lock writes as `source` for a config source: owner/repo for GitHub, else the repo as given. */
+export function lockSource(src: Source): string {
+  return githubSlug(src.repo) ?? src.repo;
 }
 
 /**
- * The compatibility lock: one npx skills entry per working-set skill, keyed by its working-set name, so older
- * skills-sync versions and npx skills keep restoring. `ref` is written only when it is a branch or tag: those tools
- * clone with --branch, which a commit cannot satisfy, so a source held at a commit restores from its ref's tip there.
+ * The lock entry for one skill of a source, keys in the order npx skills writes them, then `commit`. `ref` is written
+ * only when it is a branch or tag: npx skills and older skills-sync versions clone with --branch, which a commit
+ * cannot satisfy, so a source held at a commit restores from its ref's tip there.
  */
-export function compatLock(manifest: Manifest, lock: SourcesLock): string {
-  const skills: Record<string, CompatEntry> = {};
-  for (const id of Object.keys(lock.sources).sort(cmp)) {
-    const src = manifest.sources[id];
-    if (!src) continue;
-    const slug = githubSlug(src.repo);
-    for (const [upstream, s] of Object.entries(lock.sources[id].skills)) {
-      const name = s.transforms?.find((t) => t.kind === "rename")?.to ?? upstream;
-      // keys in the order npx skills writes them
-      const entry: CompatEntry = { source: slug ?? src.repo };
-      if (!slug) entry.sourceUrl = cloneUrl(src.repo);
-      if (!isCommit(src.ref)) entry.ref = src.ref;
-      Object.assign(entry, { sourceType: slug ? "github" : "git", skillPath: `${s.path}/SKILL.md`, computedHash: s.hash });
-      skills[name] = entry;
-    }
-  }
-  const sorted: Record<string, CompatEntry> = {};
-  for (const n of Object.keys(skills).sort(cmp)) sorted[n] = skills[n];
-  return JSON.stringify({ version: 1, skills: sorted }, null, 2) + "\n";
+export function lockEntry(src: Source, skillDir: string, hash: string, commit: string): LockEntry {
+  const slug = githubSlug(src.repo);
+  const entry: LockEntry = { source: slug ?? src.repo } as LockEntry;
+  if (!slug) entry.sourceUrl = cloneUrl(src.repo);
+  if (!isCommit(src.ref)) entry.ref = src.ref;
+  Object.assign(entry, { sourceType: slug ? "github" : "git", skillPath: `${skillDir}/SKILL.md`, computedHash: hash, commit });
+  return entry;
+}
+
+/** The lock as npx skills writes it: version 1, names sorted, two spaces, trailing newline. */
+export function lockText(entries: Record<string, LockEntry>): string {
+  const skills: Record<string, LockEntry> = {};
+  for (const n of Object.keys(entries).sort()) skills[n] = entries[n];
+  return JSON.stringify({ version: 1, skills }, null, 2) + "\n";
 }
 
 /** SKILL.md with its frontmatter `name` set to `name`; every other byte as upstream wrote it. */

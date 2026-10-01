@@ -4,13 +4,14 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import * as p from "@clack/prompts";
-import { addSource, manifestText } from "./add.js";
+import { addSource } from "./add.js";
 import { LOCAL_NAME, migrateAnswers, readLocal, writeLocal, type LinkMode, type Local } from "./config.js";
 import { gitExclude, isDir, isLink, lexists, linkMode, linkTarget, real, samePath, setLinkMode } from "./fs.js";
 import { detected, harnessTable, type Harness } from "./harnesses.js";
 import { cloneLibrary, DEFAULT_LIBRARY, findLibrary, homeLibrary, Library, looksLikeLibrary, pullLibrary } from "./library.js";
 import { apply, line, Report } from "./plan.js";
 import { refresh, type RefreshResult } from "./refresh.js";
+import { configText } from "./sources.js";
 import { discard } from "./stage.js";
 import { findProjects, home, isRepo, layers, projects, status, unlink, type Status } from "./steps.js";
 import { runInWsl, wslDistros } from "./wsl.js";
@@ -20,21 +21,22 @@ const HELP = `skills-sync ${VERSION}
 One skills library, every harness, every project on this machine. Run it anywhere; it works out the rest.
 
   no library on this machine   clone one into ~/.skills-sync (default: ${DEFAULT_LIBRARY}, or --library owner/repo)
-  library present              pull it, restore what the lock has, rebuild its layers, link the user folders
+  library present              pull it, bring its third-party skills up to date, rebuild its layers, link the user folders
 
 Usage: skills-sync [command] [options]
 
 Commands
-  sync (default)   everything above; with skills-sync.json, the restore is a frozen refresh
+  sync (default)   everything above; with skills-sync.json the third-party skills are refreshed to latest under the
+                   pull's 30-minute window (--pull forces, --no-pull runs it frozen); without one, skills-lock.json is restored
   status           what is linked and what is missing
   unlink           remove every link this tool made in the user folders
   projects         only the project step
-  refresh          resolve every source in skills-sync.json: snapshot under upstream/, write the lock,
-                   rebuild the third-party working set, regenerate skills-lock.json
+  refresh          resolve every source in skills-sync.json at the tip of its ref (a pinned skill at its pin): snapshot
+                   under upstream/, rebuild the third-party working set, write skills-lock.json
   add <source>     declare a source (owner/repo[#ref], a git URL or a path) in skills-sync.json, then refresh
 
 Refresh and add
-  --frozen               refresh at the lock's commits; nothing moves (what sync does)
+  --frozen               every skill at the commit skills-lock.json records; nothing moves, the lock is not written (CI)
   --id <id>              add: the source id (default: owner-repo, or the repo's folder name)
   --root <path>          add: where the skill folders live in the repo (default: skills/ when it exists, else the root)
   --skills <names|*>     add: which skills to take (default: all)
@@ -51,8 +53,8 @@ Options
   --wsl <distros|*>      Windows: also sync the user folders inside these WSL distros; --no-wsl for none
   --symlinks             make directory symlinks only (default: a symlink, or a junction when Windows refuses one)
   --junctions            Windows: make junctions only; either flag is remembered in ${LOCAL_NAME}
-  --no-pull / --pull     skip, or force, the library pull (default: at most every 30 minutes)
-  --no-restore           do not restore missing lock entries from their sources (skips the frozen refresh too)
+  --no-pull / --pull     skip, or force, the library pull and the refresh to latest (default: at most every 30 minutes)
+  --no-restore           do not restore missing lock entries from their sources (skips the refresh too)
   --retry                look again for skills an earlier run reported gone upstream (sync and refresh)
   --sidecars             generate agents/openai.yaml for own skills that lack one (writes into skills/, so opt-in)
   --no-layers            leave the library's own layers alone (used inside WSL, where Windows owns them)
@@ -227,7 +229,9 @@ async function main(): Promise<void> {
   apply(remember, args.plan);
   setup.merge(remember);
 
-  // 3. keep the library current
+  // 3. keep the library current: the pull, and with a config the refresh to latest, share one 30-minute window.
+  //    --pull forces both; --no-pull skips the pull and runs the refresh frozen; a throttled, dirty or failed pull does too
+  let latest = false;
   if (args.pull && args.command !== "status" && !args.plan) {
     if (args.pull === "force") {
       try {
@@ -239,6 +243,7 @@ async function main(): Promise<void> {
     const r = pullLibrary(lib.root, 30, log);
     if (r === "pulled" && !args.quiet) log("library pulled");
     if (r === "dirty" && !args.quiet) log("library has local changes; pull skipped");
+    latest = args.pull === "force" || r === "pulled" || r === "skipped";
   }
 
   const table = harnessTable();
@@ -260,8 +265,7 @@ async function main(): Promise<void> {
   if (!args.plan) saveLocal(lib.root, choices);
 
   // 5. run
-  const run = () => runOnce(lib, choices, args, cwd, setup);
-  await run();
+  await runOnce(lib, choices, args, cwd, setup, latest);
   if (args.watch) {
     log(`watching ${lib.own}, ${path.basename(lib.configFile)} and ${path.basename(lib.lockFile)}; ctrl-c to stop`);
     let timer: NodeJS.Timeout | null = null;
@@ -269,16 +273,16 @@ async function main(): Promise<void> {
       if (timer) clearTimeout(timer);
       timer = setTimeout(() => {
         log(`change in ${why}`);
-        runOnce(lib, choices, { ...args, restore: false }, cwd, new Report()).catch((e) => log(String(e)));
+        runOnce(lib, choices, { ...args, restore: false }, cwd, new Report(), false).catch((e) => log(String(e)));
       }, 400);
     };
     fs.watch(lib.own, { recursive: true }, (_e, f) => trigger(String(f ?? "skills/")));
-    for (const f of [lib.lockFile, lib.configFile, lib.sourcesLockFile]) if (fs.existsSync(f)) fs.watch(f, () => trigger(path.basename(f)));
+    for (const f of [lib.lockFile, lib.configFile]) if (fs.existsSync(f)) fs.watch(f, () => trigger(path.basename(f)));
     await new Promise(() => undefined);
   }
 }
 
-/** refresh: every source per its policy (or the lock's commits with --frozen); gone-upstream skills are remembered like restore's. */
+/** refresh: every source at the tip of its ref, pins and --frozen excepted; gone-upstream skills are remembered like restore's. */
 function runRefresh(lib: Library, args: Args, log: (m: string) => void, report: Report): void {
   if (!lib.hasConfig()) bail(`no ${path.basename(lib.configFile)} in ${lib.root}; add <source> writes one`);
   const local = readLocal(lib.root);
@@ -298,7 +302,7 @@ function reportRefresh(lib: Library, r: RefreshResult, unavailable: string[], ar
   for (const [id, s] of Object.entries(r.sources)) if (s.moved || verbose) log(`${id}: ${s.commit.slice(0, 7)} (${s.date.slice(0, 10)})${s.moved ? ", moved" : ""}`);
   for (const g of r.gone) log(`  gone upstream: ${g}`);
   if (r.gone.length) log(`  (not in the lock; deselect it in ${path.basename(lib.configFile)}, or a copy in skills/ keeps it as your own; --retry checks again)`);
-  if (r.unlocked.length && !args.quiet) log(`${r.unlocked.length} selected skill(s) not in ${path.basename(lib.sourcesLockFile)} (${r.unlocked.join(", ")}); run refresh to resolve them`);
+  if (r.unlocked.length && !args.quiet) log(`${r.unlocked.length} selected skill(s) have no commit in ${path.basename(lib.lockFile)} (${r.unlocked.join(", ")}); run refresh to resolve them`);
   for (const m of r.problems) log(`failed: ${m}`);
   const gone = r.gone.map((g) => g.split(":")[1]);
   const remembered = [...new Set([...unavailable, ...gone])];
@@ -326,7 +330,7 @@ function runAdd(lib: Library, args: Args, log: (m: string) => void, report: Repo
     process.stdout.write(`plan: would add to ${lib.configFile}:\n${JSON.stringify({ [r.id]: r.entry }, null, 2)}\n`);
     return;
   }
-  fs.writeFileSync(lib.configFile, manifestText(r.manifest));
+  fs.writeFileSync(lib.configFile, configText(r.config));
   log(`wrote ${path.basename(lib.configFile)}`);
   const local = readLocal(lib.root);
   const unavailable = args.retry ? [] : local.unavailable ?? [];
@@ -400,16 +404,17 @@ async function decide(args: Args, local: Local, lib: Library, table: Harness[], 
   return { agents, global, dev, projects: projectNames, mode, wsl, unavailable: args.retry ? [] : local.unavailable ?? [], links: args.links ?? local.links ?? "auto" };
 }
 
-async function runOnce(lib: Library, c: Choices, args: Args, cwd: string, report: Report): Promise<void> {
+/** One pass over the steps. `latest` moves the third-party skills to upstream's tip (a config library); otherwise the refresh is frozen. */
+async function runOnce(lib: Library, c: Choices, args: Args, cwd: string, report: Report, latest: boolean): Promise<void> {
   const log = (m: string) => (args.json ? undefined : process.stderr.write(m + "\n"));
 
   const missing = lib.missingFromLock().filter((n) => !c.unavailable.includes(n));
   if (lib.hasConfig() && args.restore && args.command !== "projects" && !args.plan) {
-    // a config library: the frozen refresh restores from the lock's commits and rebuilds the working set
-    const r = refresh(lib, { frozen: true, plan: false, unavailable: c.unavailable, log });
+    // a config library: the refresh rebuilds the working set, at the tip of every ref when due, else at the lock's commits
+    const r = refresh(lib, { frozen: !latest, plan: false, unavailable: c.unavailable, log });
     c.unavailable = reportRefresh(lib, r, c.unavailable, args, log, false);
     report.merge(r.report);
-  } else if (lib.hasConfig() && missing.length) log(`${missing.length} lock entries are not installed yet (run without --plan or --no-restore for the frozen refresh that restores them)`);
+  } else if (lib.hasConfig() && missing.length) log(`${missing.length} lock entries are not installed yet (run without --plan or --no-restore for the refresh that restores them)`);
   else if (args.restore && args.command !== "projects" && missing.length && !args.plan) {
     const r = lib.restore(log, missing);
     log(`restored ${r.restored.length} skill(s) from skills-lock.json`);

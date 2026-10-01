@@ -4,8 +4,7 @@
   "description": "The committed config of a skills library: the library itself, the third-party repositories it takes skills from (what is taken from each, renames, per-skill pins, attribution), and the plugins the library builds. Hand-edited and written by add; read by skills-sync refresh, sync and build.",
   "type": "object",
   "required": [
-    "version",
-    "sources"
+    "version"
   ],
   "additionalProperties": false,
   "properties": {
@@ -25,6 +24,21 @@
         },
         "homepage": {
           "type": "string"
+        }
+      }
+    },
+    "generate": {
+      "description": "The two forms, each behind a switch (both true when absent). skills: generate and link the loose-skill layers. plugins: generate plugins/<id>/ and the two marketplace catalogs. Read by build; parsed and validated here.",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "skills": {
+          "description": "Generate and link the loose-skill layers (default true).",
+          "type": "boolean"
+        },
+        "plugins": {
+          "description": "Generate plugins/<id>/ and both marketplace catalogs (default true).",
+          "type": "boolean"
         }
       }
     },
@@ -63,7 +77,6 @@
       "required": [
         "repo",
         "ref",
-        "policy",
         "skills"
       ],
       "additionalProperties": false,
@@ -74,16 +87,9 @@
           "minLength": 1
         },
         "ref": {
-          "description": "The branch or tag to follow, or a commit to hold.",
+          "description": "The branch or tag followed: every refresh takes its tip, except skills held by a pin. A full commit holds the whole source.",
           "type": "string",
           "minLength": 1
-        },
-        "policy": {
-          "description": "follow: the tip of ref at every refresh. pin: the lock's commit until the lock is edited.",
-          "enum": [
-            "follow",
-            "pin"
-          ]
         },
         "root": {
           "description": "Where skill folders live in the repo (skills, pstack/skills); the repo root when omitted.",
@@ -111,7 +117,7 @@
           ]
         },
         "pins": {
-          "description": "Per-skill commits that override the source's policy.",
+          "description": "Per-skill commits (by upstream folder name) that hold a skill while its siblings follow ref; edit the commit to move it.",
           "type": "object",
           "additionalProperties": false,
           "patternProperties": {

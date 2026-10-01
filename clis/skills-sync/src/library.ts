@@ -8,6 +8,7 @@ import YAML from "yaml";
 import { CONFIG_NAME, configKind, LOCAL_NAME } from "./config.js";
 import { isDir, isSkillDir, real } from "./fs.js";
 import { RESERVED } from "./harnesses.js";
+import type { LockEntry } from "./sources.js";
 
 export class Library {
   constructor(public root: string) {}
@@ -29,10 +30,6 @@ export class Library {
   /** This machine's answers, gitignored. */
   get localFile(): string {
     return path.join(this.root, LOCAL_NAME);
-  }
-  /** What the last refresh resolved: commit per source, path and hash per skill. */
-  get sourcesLockFile(): string {
-    return path.join(this.root, "skills-sources-lock.json");
   }
   /** Snapshots: upstream/<source>/<upstream path>, generated and never edited. */
   get upstream(): string {
@@ -191,14 +188,7 @@ function folders(dir: string): string[] {
     .sort();
 }
 
-export interface LockEntry {
-  source: string;
-  sourceType: string;
-  sourceUrl?: string;
-  ref?: string;
-  skillPath?: string;
-  computedHash?: string;
-}
+export type { LockEntry } from "./sources.js";
 
 export interface RestoreResult {
   restored: string[];

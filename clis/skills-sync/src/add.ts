@@ -1,10 +1,10 @@
-// add <source>: stage the repo in a temp clone, list its skills, write the manifest entry. The refresh that follows
-// reuses the clone. Nothing is installed anywhere: the manifest is the only thing add writes.
+// add <source>: stage the repo in a temp clone, list its skills, write the config entry. The refresh that follows
+// reuses the clone. Nothing is installed anywhere: the config is the only thing add writes.
 import fs from "node:fs";
 import path from "node:path";
 import { isDir } from "./fs.js";
 import { Library } from "./library.js";
-import { cloneUrl, cmp, findSkills, githubSlug, readManifest, type Manifest, type Source } from "./sources.js";
+import { cloneUrl, cmp, findSkills, githubSlug, readConfigRaw, type Source } from "./sources.js";
 import { defaultBranch, discard, stage, type Staged } from "./stage.js";
 
 export interface AddOptions {
@@ -17,7 +17,7 @@ export interface AddOptions {
   log: (s: string) => void;
 }
 
-export type AddResult = { ok: true; id: string; entry: Source; manifest: Manifest; staged: Staged; found: Map<string, string> } | { ok: false; error: string };
+export type AddResult = { ok: true; id: string; entry: Source; config: Record<string, unknown>; staged: Staged; found: Map<string, string> } | { ok: false; error: string };
 
 /** owner/repo[#ref], a git URL[#ref], or a local path. */
 export function parseSpec(spec: string): { repo: string; ref?: string } {
@@ -36,10 +36,12 @@ export function defaultId(repo: string): string {
 
 export function addSource(lib: Library, spec: string, opts: AddOptions): AddResult {
   const { repo, ref: askedRef } = parseSpec(spec);
-  const manifest: Manifest = lib.hasConfig() ? readManifest(lib.configFile) : { version: 1, sources: {}, plugins: {} };
+  // the config as the file holds it, so add changes one entry and nothing else
+  const config = lib.hasConfig() ? readConfigRaw(lib.configFile) : { version: 1, sources: {}, plugins: {} };
+  const sources = (config.sources ?? {}) as Record<string, Source>;
   const id = opts.id ?? defaultId(repo);
   if (!/^[a-z0-9][a-z0-9-]*$/.test(id)) return { ok: false, error: `source id ${id} must be lowercase letters, digits and dashes; pass --id` };
-  if (manifest.sources[id]) return { ok: false, error: `source ${id} is already declared in ${path.basename(lib.configFile)}; edit it there, or pass --id for a second entry` };
+  if (sources[id]) return { ok: false, error: `source ${id} is already declared in ${path.basename(lib.configFile)}; edit it there, or pass --id for a second entry` };
   const url = cloneUrl(repo);
   const ref = askedRef ?? defaultBranch(url) ?? "main";
   const r = stage(url, ref, opts.log);
@@ -58,13 +60,9 @@ export function addSource(lib: Library, spec: string, opts: AddOptions): AddResu
   if (notSelected.length) return fail(`--as names skills that are not selected: ${notSelected.join(", ")}`);
   const skills = Object.keys(opts.as).length ? Object.fromEntries(names.map((n) => [n, opts.as[n] ?? n])) : names;
   const attribution = findAttribution(r.staged.dir, root);
-  const entry: Source = { repo, ref, policy: "follow", ...(root ? { root } : {}), skills, ...(attribution.length ? { attribution } : {}) };
-  manifest.sources[id] = entry;
-  return { ok: true, id, entry, manifest, staged: r.staged, found };
-}
-
-export function manifestText(m: Manifest): string {
-  return JSON.stringify(m, null, 2) + "\n";
+  const entry: Source = { repo, ref, ...(root ? { root } : {}), skills, ...(attribution.length ? { attribution } : {}) };
+  config.sources = { ...sources, [id]: entry };
+  return { ok: true, id, entry, config, staged: r.staged, found };
 }
 
 /**
