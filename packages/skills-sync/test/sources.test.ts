@@ -14,14 +14,18 @@ import { Library } from "../src/library.js";
 let base: string;
 let lib: Library;
 let homeDir: string;
+let tmpDir: string;
 let up: Upstream;
 
 const CLI = path.resolve(import.meta.dirname, "..", "src", "cli.js");
 const HARNESS_ENV = ["CLAUDE_CONFIG_DIR", "CODEX_HOME", "XDG_CONFIG_HOME", "HERMES_HOME"] as const;
 
-/** Run the CLI against the temp library, home redirected into the temp folder, every harness override dropped. */
+/**
+ * Run the CLI against the temp library, home redirected into the temp folder, every harness override dropped. Its
+ * temp folder is this file's own, so what it stages there can be counted while other test files run beside this one.
+ */
 function cli(...args: string[]): { status: number | null; stdout: string; stderr: string } {
-  const env: NodeJS.ProcessEnv = { ...process.env, HOME: homeDir, USERPROFILE: homeDir };
+  const env: NodeJS.ProcessEnv = { ...process.env, HOME: homeDir, USERPROFILE: homeDir, TMP: tmpDir, TEMP: tmpDir, TMPDIR: tmpDir };
   for (const k of HARNESS_ENV) delete env[k];
   return spawnSync(process.execPath, [CLI, ...args, "--repo", lib.root], { encoding: "utf8", cwd: lib.root, env });
 }
@@ -112,6 +116,8 @@ beforeEach(() => {
   fs.writeFileSync(path.join(lib.own, "oneezy", "own-one", "SKILL.md"), "---\nname: own-one\ndescription: mine\n---\nmine\n");
   homeDir = path.join(base, "home");
   fs.mkdirSync(homeDir);
+  tmpDir = path.join(base, "tmp");
+  fs.mkdirSync(tmpDir);
   up = upstream("up");
   up.skill("a");
   up.skill("b");
@@ -438,13 +444,12 @@ test("a selected skill missing upstream is reported once, remembered in skills-s
   assert.deepEqual(Object.keys(json(lib.lockFile).skills), ["a", "zzz"]);
 });
 
-/** Temp clones this tool makes are named skills-sync-src-*; none may outlive the command. */
+/** Temp clones this tool makes are named skills-sync-src-*, in the temp folder the CLI was given; none may outlive the command. */
 function stagedClones(): string[] {
-  return fs.readdirSync(os.tmpdir()).filter((n) => n.startsWith("skills-sync-src-"));
+  return fs.readdirSync(tmpDir).filter((n) => n.startsWith("skills-sync-src-"));
 }
 
 test("add <path to the upstream> writes the config entry (default branch, all skills, no policy) and snapshots; --id, --root, --skills and --as are honoured; nothing lands outside the library and the temp clone is gone", () => {
-  const clonesBefore = stagedClones();
   const all = cli("add", up.dir, "--quiet");
   assert.equal(all.status, 0, all.stderr);
   assert.deepEqual(json(lib.configFile), { version: 1, sources: { up: { repo: up.dir, ref: "main", root: "skills", skills: ["a", "b", "c"], attribution: ["LICENSE"] } }, plugins: {} });
@@ -469,5 +474,5 @@ test("add <path to the upstream> writes the config entry (default branch, all sk
   assert.ok(!("nope" in json(lib.configFile).sources), "nothing written for a failed add");
 
   assert.deepEqual(fs.readdirSync(homeDir), [], "add writes nothing into the home folder or any harness");
-  assert.deepEqual(stagedClones(), clonesBefore, "temp clones deleted");
+  assert.deepEqual(stagedClones(), [], "temp clones deleted");
 });

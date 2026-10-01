@@ -1,0 +1,70 @@
+skill: oneezy-status
+purpose: Render the status report for the working tree, branch, PR or merged PR in the fixed shape of STATUS.md, ending with Next Up and the next session's prompt. Read-only.
+runtime: [git, gh, Vercel commit statuses and bot comments]
+refs:
+  - token: STATUS.md
+    kind: file
+    id: skills/oneezy/oneezy-status/STATUS.md
+    need: required
+    when: render
+  - token: /oneezy-merge
+    kind: skill
+    id: oneezy-merge
+    need: mention
+    when: never called; named as the skill that runs this one last, and in the closing code block
+  - token: /wayfinder
+    kind: skill
+    id: wayfinder
+    need: example
+    when: Next Up item 1 is a wayfinder map ticket; the code block opens with it
+  - token: /implement
+    kind: skill
+    id: implement
+    need: example
+    when: Next Up item 1 is an issue labelled ready-for-agent; the code block opens with it
+  - token: /grill-with-docs
+    kind: skill
+    id: grill-with-docs
+    need: example
+    when: Next Up item 1 is an idea or decision with no ticket; the code block opens with it
+  - token: /diagnosing-bugs
+    kind: skill
+    id: diagnosing-bugs
+    need: example
+    when: Next Up item 1 is something broken; the code block opens with it
+  - token: /wizard
+    kind: skill
+    id: wizard
+    need: example
+    when: Next Up item 1 is a task only Justin can do; the code block opens with it
+  - token: /ask-matt
+    kind: skill
+    id: ask-matt
+    need: example
+    when: none of the other openings fit; the code block opens with it
+unresolved: []
+agents:
+  max: 0
+steps:
+  - id: state
+    does: read one of closeout, blocked, open, branch, in that order, first match wins
+    outcome:
+      done: state chosen
+  - id: sources
+    after: state
+    does: at most five calls (the PR read, the combined status, the Vercel bot comment, the map read, one shell call for git facts); a missing source is skipped and its slot filled from the next source or omitted
+    needs: [gh, git]
+    outcome:
+      done: every slot has a source or an omission rule
+  - id: next-up
+    after: sources
+    does: rank the queue (the map's frontier, the board's Next Up column, ready-for-agent issues, what this branch leaves unfinished) by critical path, what blocks the most and the milestone date; item 1 picks the opening skill of the code block
+    outcome:
+      done: three items chosen, or a recommendation that says the queue is empty
+  - id: render
+    after: next-up
+    does: fill the STATUS.md template, apply its rules, print it as the whole message
+    needs: [STATUS.md]
+    returns: the status report
+    outcome:
+      done: report on screen within the line cap, every slot filled from a source or omitted by its rule, every link a real URL, Next Up with its code block

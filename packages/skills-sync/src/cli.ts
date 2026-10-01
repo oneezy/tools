@@ -5,6 +5,8 @@ import os from "node:os";
 import path from "node:path";
 import * as p from "@clack/prompts";
 import { addSource } from "./add.js";
+import { build } from "./build.js";
+import { check } from "./check.js";
 import { LOCAL_NAME, migrateAnswers, readLocal, writeLocal, type LinkMode, type Local } from "./config.js";
 import { gitExclude, isDir, isLink, lexists, linkMode, linkTarget, real, samePath, setLinkMode } from "./fs.js";
 import { detected, harnessTable, type Harness } from "./harnesses.js";
@@ -16,7 +18,7 @@ import { discard } from "./stage.js";
 import { findProjects, home, isRepo, layers, projects, status, unlink, type Status } from "./steps.js";
 import { runInWsl, wslDistros } from "./wsl.js";
 
-const VERSION = "0.2.0";
+const VERSION = "0.3.0";
 const HELP = `skills-sync ${VERSION}
 One skills library, every harness, every project on this machine. Run it anywhere; it works out the rest.
 
@@ -34,6 +36,30 @@ Commands
   refresh          resolve every source in skills-sync.json at the tip of its ref (a pinned skill at its pin): snapshot
                    under upstream/, rebuild the third-party working set, write skills-lock.json
   add <source>     declare a source (owner/repo[#ref], a git URL or a path) in skills-sync.json, then refresh
+  build            write the plugin form into the library when skills-sync.json has generate.plugins on: --plugins and
+                   --catalogs pick the committed outputs (both when neither is named), --artifacts writes the upload
+                   archives; --check diffs instead of writing
+  check            is what is committed consistent? every own skill's frontmatter (name is its folder's name and a
+                   valid id, description present), every flow.yaml beside one (schemas/flow.schema.json, unique step
+                   ids, after/parallel/join naming steps that exist), and generated-file drift (what build --check
+                   computes, plus skills-lock.json against the snapshots). One line per problem, path then reason;
+                   exit 1 on any, 0 when clean. Reads only: no network, nothing written (CI, and before committing)
+
+Build
+  --plugins              plugins/<id>/ for every plugin in the config: the skill copies, plugin.json,
+                         .codex-plugin/plugin.json, .claude-plugin/plugin.json, LICENSE, NOTICE.md. Every copied SKILL.md
+                         is marked metadata.internal: true, so npx skills installs each own skill once, from skills/
+                         (INSTALL_INTERNAL_SKILLS=1 re-exposes the copies). A package is versioned
+                         0.<commit count>.0+<sha12> of the library's HEAD, and keeps its version while its files do;
+                         a new or changed package needs the library's history for that count: not a shallow clone
+  --catalogs             .claude-plugin/marketplace.json and .agents/plugins/marketplace.json, listing ./plugins/<id>
+  --artifacts            artifacts/<id>-<version>.zip per plugin for the ChatGPT upload (stored, fixed timestamps, sorted:
+                         the same input gives the same bytes), artifacts/releases.json (archive, sha256, version, source
+                         commit, files, the release the config records), and artifacts/<id>.changes.md when that
+                         release holds a file the archive lacks (upload as a new plugin, not an update)
+  --check                compute every output in memory, print each path that differs from disk, write nothing;
+                         exit 1 on drift or a package that cannot be built, 0 when clean (CI); never looks at artifacts/.
+                         Needs no history: clean in a shallow clone, and after a squash merge left the build's commit behind
 
 Refresh and add
   --frozen               every skill at the commit skills-lock.json records; nothing moves, the lock is not written (CI)
@@ -78,6 +104,12 @@ interface Args {
   root?: string;
   skills?: string[] | "*";
   as: Record<string, string>;
+  /** build: which outputs; all when none is set */
+  plugins: boolean;
+  catalogs: boolean;
+  artifacts: boolean;
+  /** build: diff in memory, write nothing, exit 1 on drift */
+  check: boolean;
   repo?: string;
   library?: string;
   agents?: string[];
@@ -102,7 +134,7 @@ interface Args {
 }
 
 function parseArgs(argv: string[]): Args {
-  const a: Args = { command: "sync", positional: [], frozen: false, as: {}, pull: true, restore: true, retry: false, sidecars: false, layers: true, watch: false, plan: false, quiet: false, json: false, yes: false, ask: false };
+  const a: Args = { command: "sync", positional: [], frozen: false, as: {}, plugins: false, catalogs: false, artifacts: false, check: false, pull: true, restore: true, retry: false, sidecars: false, layers: true, watch: false, plan: false, quiet: false, json: false, yes: false, ask: false };
   const list = (v: string) => v.split(",").map((s) => s.trim()).filter(Boolean);
   let command: string | null = null;
   for (let i = 0; i < argv.length; i++) {
@@ -123,7 +155,11 @@ function parseArgs(argv: string[]): Args {
         if (!from || !to) bail(`--as takes old=new pairs, not ${pair}`);
         a.as[from] = to;
       }
-    } else if (x === "--repo") a.repo = next();
+    } else if (x === "--plugins") a.plugins = true;
+    else if (x === "--catalogs") a.catalogs = true;
+    else if (x === "--artifacts") a.artifacts = true;
+    else if (x === "--check") a.check = true;
+    else if (x === "--repo") a.repo = next();
     else if (x === "--library") a.library = next();
     else if (x === "--agents") a.agents = list(next());
     else if (x === "--global") a.global = true;
@@ -188,7 +224,8 @@ async function main(): Promise<void> {
 
   // 1. the library: find it, or get one
   let root = args.repo ? real(path.resolve(args.repo)) : findLibrary(cwd);
-  if (!root && !args.plan) {
+  // check reads what is there: it never clones a library to have one to check
+  if (!root && !args.plan && args.command !== "check") {
     let source = args.library ?? DEFAULT_LIBRARY;
     if (interactive) {
       p.intro("skills-sync");
@@ -209,14 +246,16 @@ async function main(): Promise<void> {
   const lib = new Library(root);
 
   // 2. this machine's answers: the local file, after a 0.2.0 answers file is moved there once; status only reads
-  if (!args.plan && args.command !== "status") migrateAnswers(lib.root, setup);
+  if (!args.plan && args.command !== "status" && args.command !== "check") migrateAnswers(lib.root, setup);
   apply(setup, args.plan);
   const local = readLocal(lib.root);
   setLinkMode(args.links ?? local.links ?? "auto");
 
-  // refresh and add edit the library they are pointed at and nothing else: no pull, no ~/.skills-sync, no harness
+  // check reads the library it is pointed at; refresh, add and build edit it and nothing else: no pull, no ~/.skills-sync, no harness
+  if (args.command === "check") return runCheck(lib, args);
   if (args.command === "refresh") return runRefresh(lib, args, log, setup);
   if (args.command === "add") return runAdd(lib, args, log, setup);
+  if (args.command === "build") return runBuild(lib, args, log, setup);
 
   // ~/.skills-sync points at the library from now on, so every later run finds it from anywhere
   const hl = homeLibrary(userHome);
@@ -341,6 +380,52 @@ function runAdd(lib: Library, args: Args, log: (m: string) => void, report: Repo
   report.merge(res.report);
   printReport(report, args, { sources: res.sources, gone: res.gone, unlocked: res.unlocked, problems: res.problems });
   if (res.problems.length) process.exitCode = 1;
+}
+
+/**
+ * build: the plugin form from skills-sync.json, every output computed in memory and written only where disk differs.
+ * --check reports the differences instead and exits 1 when there are any; CI runs it on every push. A package that
+ * cannot be built (a group without skills, a source not in the config or without a snapshot, a link inside the
+ * package) is a conflict: left alone, exit 1 in both modes, listed as drift by --check. So is a new or changed package
+ * in a shallow clone, for build alone: --check lists the paths that differ there. The committed form (packages
+ * and catalogs) is what a build with no output named writes and what --check looks at; the archives under artifacts/
+ * are written only when --artifacts asks, and never checked.
+ */
+function runBuild(lib: Library, args: Args, log: (m: string) => void, report: Report): void {
+  if (!lib.hasConfig()) bail(`no ${path.basename(lib.configFile)} in ${lib.root}; add <source> writes one`);
+  const none = !args.plugins && !args.catalogs && (args.check || !args.artifacts);
+  const r = build(lib, { plugins: args.plugins || none, catalogs: args.catalogs || none, artifacts: args.artifacts, check: args.check, plan: args.plan, log });
+  report.merge(r.report);
+  if (r.off && !args.quiet) log(`generate.plugins is false in ${path.basename(lib.configFile)}: nothing built, nothing checked`);
+  const conflicts = r.report.conflicts().length;
+  if (!args.check) {
+    printReport(report, args, { version: r.version });
+    if (conflicts) process.exitCode = 1;
+    return;
+  }
+  if (r.drift.length) process.exitCode = 1;
+  if (args.json) return printReport(report, args, { check: true, drift: r.drift, version: r.version });
+  for (const a of report.actions) if (a.kind === "note" || a.kind === "conflict") process.stdout.write(line(a) + "\n");
+  for (const d of r.drift) process.stdout.write(`drift        ${d}\n`);
+  const fix = conflicts ? `${conflicts} conflict(s) above to fix first, then build --plugins --catalogs` : "run build --plugins --catalogs";
+  process.stdout.write(r.drift.length ? `build --check: ${r.drift.length} path(s) differ from what build would write; ${fix}\n` : `build --check: clean, ${report.skips()} files as built\n`);
+}
+
+/**
+ * check: one line per problem (the file, then the rule it breaks) on stdout, exit 1 when there is any; a clean library
+ * gets one summary line and exit 0. It writes nothing, in the library or outside it.
+ */
+function runCheck(lib: Library, args: Args): void {
+  const r = check(lib);
+  if (r.problems.length) process.exitCode = 1;
+  if (args.json) {
+    process.stdout.write(JSON.stringify({ check: true, problems: r.problems, skills: r.skills, flows: r.flows, generated: r.generated }, null, 2) + "\n");
+    return;
+  }
+  for (const p of r.problems) process.stdout.write(`${p.path}: ${p.reason}\n`);
+  const count = (n: number, what: string) => `${n} ${what}${n === 1 ? "" : "s"}`;
+  if (r.problems.length) process.stdout.write(`check: ${[count(r.problems.length, "problem"), ...r.fixes].join("; ")}\n`);
+  else if (!args.quiet) process.stdout.write(`check: clean, ${count(r.skills, "own skill")}, ${count(r.flows, "flow")}, ${count(r.generated, "generated file")} as built\n`);
 }
 
 function saveLocal(root: string, c: Choices): void {

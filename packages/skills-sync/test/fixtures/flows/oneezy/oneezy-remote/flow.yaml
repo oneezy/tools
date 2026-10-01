@@ -1,0 +1,37 @@
+skill: oneezy-remote
+purpose: Start, resume, stop or list remote Claude threads through the remote-sessions engine in oneezy/tools.
+runtime: [python3, remote_sessions.py (oneezy/tools main checkout), Remote Control]
+refs: []
+unresolved: []
+agents:
+  max: 0
+steps:
+  - id: map-request
+    does: match Justin's words to one engine command (start, resume, stop, status, workspace) with --only <repo>, --task <slug>, --issue or --pr when named, and --session-id resolved through status --json; always --json
+    outcome:
+      done: one command chosen
+      input: two threads match a title or partial id → ask which one
+  - id: preview
+    after: map-request
+    if: the command is a mutation (start, resume, stop, workspace)
+    does: run the mapped command with --plan
+    outcome:
+      done: the plan matches the request (Mode new for a new thread, resume or running for an existing one, the meant threads for a stop)
+      input: Mode new for a resume, or a replacement named → show the plan to Justin instead of running it
+  - id: run
+    after: [map-request, preview]
+    does: run the same command without --plan
+    outcome:
+      done: the engine returned
+  - id: confirm-bridge
+    after: run
+    if: a started thread has no RemoteUrl
+    does: read status --json once more for its SessionId
+    outcome:
+      done: SessionId known
+  - id: report
+    after: [run, confirm-bridge]
+    does: one short block per thread (task, SessionId, folder, Remote URL or no bridge yet, state); blocked means waiting on a prompt, so name the Remote URL or claude attach; a stop names each stopped thread, says history and worktree are kept, and reports threads the tool did not start as not stopped
+    returns: the per-thread blocks
+    outcome:
+      done: every thread reported

@@ -61,9 +61,68 @@
           "$ref": "#/$defs/plugin"
         }
       }
+    },
+    "releases": {
+      "description": "The ChatGPT upload record, one entry per plugin id, written by hand after each upload (the library's docs/agents/chatgpt-upload.md). Read by build --artifacts to say whether an archive changed since its last upload.",
+      "type": "object",
+      "additionalProperties": false,
+      "patternProperties": {
+        "^[a-z0-9][a-z0-9-]*$": {
+          "$ref": "#/$defs/release"
+        }
+      }
     }
   },
   "$defs": {
+    "release": {
+      "type": "object",
+      "required": [
+        "plugin_id",
+        "release_id",
+        "sha256",
+        "scope",
+        "date"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "plugin_id": {
+          "description": "The plugin id ChatGPT returned on create.",
+          "type": "string",
+          "minLength": 1
+        },
+        "release_id": {
+          "description": "The release id ChatGPT returned on the last create or update; an update must name it.",
+          "type": "string",
+          "minLength": 1
+        },
+        "sha256": {
+          "description": "The sha256 of the archive that was uploaded, from artifacts/releases.json.",
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "scope": {
+          "description": "Where the plugin lives in ChatGPT: a personal plugin, or a workspace one.",
+          "enum": [
+            "personal",
+            "workspace"
+          ]
+        },
+        "date": {
+          "description": "The day of the upload, YYYY-MM-DD.",
+          "type": "string",
+          "pattern": "^\\d{4}-\\d{2}-\\d{2}"
+        },
+        "files": {
+          "description": "The archive's entries at that upload, so a later build can say which files a new archive lacks (an update cannot delete).",
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
+          "uniqueItems": true
+        }
+      }
+    },
     "name": {
       "type": "string",
       "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*$"

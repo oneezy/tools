@@ -13,6 +13,19 @@ export interface Config {
   generate: { skills: boolean; plugins: boolean };
   sources: Record<string, Source>;
   plugins: Record<string, Plugin>;
+  /** the ChatGPT upload record per plugin id, written by hand after each upload; read by build --artifacts */
+  releases?: Record<string, Release>;
+}
+
+/** What the last ChatGPT upload of a plugin returned, and the archive it was: the next build says whether it changed. */
+export interface Release {
+  plugin_id: string;
+  release_id: string;
+  sha256: string;
+  scope: "personal" | "workspace";
+  date: string;
+  /** the archive's entries at that upload, so a later build can list what a new archive lacks */
+  files?: string[];
 }
 
 export interface Source {

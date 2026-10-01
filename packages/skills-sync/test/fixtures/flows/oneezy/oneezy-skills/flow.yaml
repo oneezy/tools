@@ -1,0 +1,49 @@
+skill: oneezy-skills
+purpose: Keep Justin's skills in sync from the library by running the published sync tool through the script beside the skill, then report what it printed.
+runtime: [npx (Node 20+), git]
+refs:
+  - token: scripts/sync.ps1
+    kind: file
+    id: skills/oneezy/oneezy-skills/scripts/sync.ps1
+    need: conditional
+    when: Windows
+  - token: scripts/sync.sh
+    kind: file
+    id: skills/oneezy/oneezy-skills/scripts/sync.sh
+    need: conditional
+    when: Linux, macOS, WSL, cloud
+  - token: skills-sync.json
+    kind: file
+    id: skills-sync.json
+    need: mention
+    when: a skill is reported gone upstream; the fix the tool names edits the config
+unresolved:
+  - token: "@oneezy/skills-sync"
+    note: the npm package name of the published sync tool; not a plugin or app
+agents:
+  max: 0
+steps:
+  - id: map-request
+    does: match Justin's words to the script's arguments (none for sync, update, my skills are missing or nothing; add <owner/repo> for a new third-party library; update for third-party skills to upstream; status; unlink; --plan)
+    outcome:
+      done: arguments chosen
+  - id: run-script
+    after: map-request
+    does: run scripts/sync.ps1 on Windows or scripts/sync.sh elsewhere; one call to npx --yes @oneezy/skills-sync with Justin's words mapped to its arguments (no arguments is a quiet sync, which clones the library into ~/.skills-sync on a machine's first run, pulls it, moves unpinned third-party skills to upstream's tip when a pull is due, rebuilds the layers and links every skill into the user folders; add and update are the tool's add and refresh, which write the library and nothing outside it; status, unlink and --plan pass through as they are); no WSL fan-out here, that happens only when Justin runs the tool himself without --quiet
+    needs: [npx, git]
+    outcome:
+      done: the tool's output on screen (nothing when a quiet sync changed nothing)
+  - id: link-new
+    after: run-script
+    if: add or update changed the library
+    does: run the script again with no arguments, so what add or refresh brought into the library gets linked
+    needs: [npx, git]
+    outcome:
+      done: the new skills linked
+  - id: report
+    after: [run-script, link-new]
+    does: one line per change the tool printed, then its summary line; say plainly when a skill is reported gone upstream (the tool names the fix, deselect it in skills-sync.json or keep a copy under skills/ as an own skill) and when something was left alone as a conflict
+    returns: the change lines and the summary
+    outcome:
+      done: report on screen
+      fail: a skill Justin asked for is still missing after the sync → say which and stop; the fix belongs in the library

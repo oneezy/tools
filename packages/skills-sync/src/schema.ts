@@ -1,11 +1,11 @@
-// A small JSON Schema validator: the subset the two shipped schemas use, so the tool needs no dependency for it.
+// A small JSON Schema validator: the subset the shipped schemas use, so the tool needs no dependency for it.
 // Errors name the path and the rule broken. Not a general validator; extend it when a schema needs a keyword.
 import fs from "node:fs";
 import path from "node:path";
 
 export type Schema = Record<string, any>;
 
-/** The schema files this package ships, by name (skills-sync for the config, skills-sync.local for this machine's answers). */
+/** The schema files this package ships, by name (skills-sync for the config, skills-sync.local for this machine's answers, flow for flow.yaml). */
 export function shippedSchema(name: string): Schema {
   return JSON.parse(fs.readFileSync(path.join(import.meta.dirname, "..", "..", "schemas", `${name}.schema.json`), "utf8")) as Schema;
 }
@@ -27,6 +27,7 @@ export function validate(schema: Schema, value: unknown, at = "$", root: Schema 
     if (schema.minLength !== undefined && value.length < schema.minLength) errors.push(`${at}: must be at least ${schema.minLength} characters`);
     if (schema.pattern && !new RegExp(schema.pattern).test(value)) errors.push(`${at}: must match ${schema.pattern}`);
   }
+  if (typeof value === "number" && schema.minimum !== undefined && value < schema.minimum) errors.push(`${at}: must be at least ${schema.minimum}`);
   if (Array.isArray(value)) {
     if (schema.minItems !== undefined && value.length < schema.minItems) errors.push(`${at}: must have at least ${schema.minItems} items`);
     if (schema.uniqueItems && new Set(value.map((v) => JSON.stringify(v))).size !== value.length) errors.push(`${at}: items must be unique`);
@@ -34,6 +35,7 @@ export function validate(schema: Schema, value: unknown, at = "$", root: Schema 
   }
   if (isObject(value)) {
     for (const k of schema.required ?? []) if (!(k in value)) errors.push(`${at}: missing ${k}`);
+    for (const [k, needs] of Object.entries(schema.dependentRequired ?? {})) for (const n of needs as string[]) if (k in value && !(n in value)) errors.push(`${at}: ${k} needs ${n}`);
     for (const [k, v] of Object.entries(value)) {
       const here = `${at}.${k}`;
       const prop = schema.properties?.[k];

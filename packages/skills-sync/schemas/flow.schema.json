@@ -1,0 +1,283 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "flow.yaml",
+  "description": "What an own skill does today, beside its SKILL.md: the reference tokens its prose uses and its steps with stable ids. Authored by hand, read by people and a viewer, never by a harness. skills-sync check validates it against this schema and adds the rules a schema cannot say: skill is the folder's name, step ids are unique, and after, parallel and join name steps that exist.",
+  "type": "object",
+  "required": [
+    "skill",
+    "purpose",
+    "steps"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "skill": {
+      "description": "The skill's name: its folder's name.",
+      "type": "string",
+      "minLength": 1
+    },
+    "purpose": {
+      "description": "One sentence: what the skill is for.",
+      "type": "string",
+      "minLength": 1
+    },
+    "runtime": {
+      "description": "The tools and connections the whole skill needs (git, gh, pnpm).",
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      }
+    },
+    "refs": {
+      "description": "Every reference token the prose uses that names something known.",
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/ref"
+      }
+    },
+    "unresolved": {
+      "description": "Tokens with no target (a package name, a JSDoc tag), each with a note saying what it is.",
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/unresolved"
+      }
+    },
+    "agents": {
+      "type": "object",
+      "required": [
+        "max"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "max": {
+          "description": "Subagents this skill may create; 0 for none.",
+          "type": "integer",
+          "minimum": 0
+        }
+      }
+    },
+    "steps": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "$ref": "#/$defs/step"
+      }
+    }
+  },
+  "$defs": {
+    "stepId": {
+      "description": "A step's stable id: lowercase letters, digits and hyphens.",
+      "type": "string",
+      "pattern": "^[a-z0-9][a-z0-9-]*$"
+    },
+    "ref": {
+      "type": "object",
+      "required": [
+        "token",
+        "kind",
+        "id",
+        "need"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "token": {
+          "description": "The token as the prose writes it: /name for a skill, @Name for a plugin or app, a path for a file, a URL.",
+          "type": "string",
+          "minLength": 1
+        },
+        "kind": {
+          "enum": [
+            "skill",
+            "plugin",
+            "app",
+            "file",
+            "url"
+          ]
+        },
+        "id": {
+          "description": "What the token names: a skill's name, a plugin or app id, a path from the library root, a URL.",
+          "type": "string",
+          "minLength": 1
+        },
+        "need": {
+          "description": "required: the skill cannot finish without it. optional: used when present. conditional: used when `when` holds. example: named only as an example. mention: named as a boundary, or as a thing never called.",
+          "enum": [
+            "required",
+            "optional",
+            "conditional",
+            "example",
+            "mention"
+          ]
+        },
+        "when": {
+          "description": "The step or the condition under which it is used.",
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+    "unresolved": {
+      "type": "object",
+      "required": [
+        "token",
+        "note"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "token": {
+          "type": "string",
+          "minLength": 1
+        },
+        "note": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+    "step": {
+      "type": "object",
+      "required": [
+        "id"
+      ],
+      "additionalProperties": false,
+      "dependentRequired": {
+        "parallel": [
+          "join"
+        ],
+        "join": [
+          "parallel"
+        ]
+      },
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/stepId"
+        },
+        "does": {
+          "description": "What the step does, kept short.",
+          "type": "string",
+          "minLength": 1
+        },
+        "after": {
+          "description": "The step, or the steps, this one follows; each names an existing step id.",
+          "oneOf": [
+            {
+              "$ref": "#/$defs/stepId"
+            },
+            {
+              "type": "array",
+              "minItems": 1,
+              "uniqueItems": true,
+              "items": {
+                "$ref": "#/$defs/stepId"
+              }
+            }
+          ]
+        },
+        "parallel": {
+          "description": "The ids of the steps this one runs side by side; it needs `join`.",
+          "type": "array",
+          "minItems": 2,
+          "uniqueItems": true,
+          "items": {
+            "$ref": "#/$defs/stepId"
+          }
+        },
+        "join": {
+          "description": "The id of the step where the parallel members meet again.",
+          "$ref": "#/$defs/stepId"
+        },
+        "if": {
+          "description": "The condition under which the step runs; free text.",
+          "type": "string",
+          "minLength": 1
+        },
+        "loop": {
+          "description": "The step repeats until `until` holds, `every` so often.",
+          "type": "object",
+          "required": [
+            "until"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "until": {
+              "type": "string",
+              "minLength": 1
+            },
+            "every": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        },
+        "needs": {
+          "description": "The tools, connections and files this step needs.",
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "calls": {
+          "description": "The skill, plugin or app this step hands over to, by id.",
+          "type": "object",
+          "additionalProperties": false,
+          "anyOf": [
+            {
+              "required": [
+                "skill"
+              ]
+            },
+            {
+              "required": [
+                "plugin"
+              ]
+            },
+            {
+              "required": [
+                "app"
+              ]
+            }
+          ],
+          "properties": {
+            "skill": {
+              "type": "string",
+              "minLength": 1
+            },
+            "plugin": {
+              "type": "string",
+              "minLength": 1
+            },
+            "app": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        },
+        "returns": {
+          "description": "What the step hands back.",
+          "type": "string",
+          "minLength": 1
+        },
+        "outcome": {
+          "description": "How the step ends: done, fail, or input (it stops for a human).",
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "done": {
+              "type": "string",
+              "minLength": 1
+            },
+            "fail": {
+              "type": "string",
+              "minLength": 1
+            },
+            "input": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        }
+      }
+    }
+  }
+}
