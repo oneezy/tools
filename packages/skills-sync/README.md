@@ -43,6 +43,7 @@ Everything else in it is generated and should be gitignored:
 | `upstream/<source>/<upstream path>` | snapshots: each source's selected skill folders and attribution files at their upstream paths, plus `.snapshot.json`. Never edited. |
 | `.agents/skills/<name>` | the working set: one copy per third-party skill (from its snapshot, with its rename applied), plus one link per own skill (flat or grouped). Codex reads this folder directly. |
 | `.claude/skills/<name>`, `.goose/skills/<name>`, `.hermes/skills/<name>` | one link per working-set entry, for each harness that does not read `.agents/skills` |
+| `artifacts/` | the upload archives `build --artifacts` writes: one ZIP per plugin, `releases.json`, and a `<id>.changes.md` note when one is due (see [Artifacts](#artifacts)) |
 
 `oneezy/skills` is one such library; `npx skills add oneezy/skills` installs its own skills anywhere, `/plugin marketplace add oneezy/skills` and `codex plugin marketplace add oneezy/skills` offer its plugins (see [Plugins and catalogs](#plugins-and-catalogs)), and cloning it plus one `npx @oneezy/skills-sync` gives a new machine the whole set.
 
@@ -135,18 +136,61 @@ The version in `plugin.json` and `.codex-plugin/plugin.json` is `0.<commit count
 
 A package that cannot be built is a conflict: a group with no skills under `skills/<group>`, a source that is not in the config, a source with no snapshot under `upstream/` (a clone before `refresh`), or a link inside `plugins/<id>` (never followed, never written through). `build` leaves whatever `plugins/<id>` holds and exits 1; `build --check` lists `plugins/<id>` as drift. A link inside a source skill folder is not copied, with a note. Every file `build` writes is LF; on a checkout where git converts to CRLF (`core.autocrlf=true`) a committed file is compared as git sees it, so such a clone is as built and `build` rewrites nothing there. Give the library a `.gitattributes` with `* text=auto eol=lf` so every clone holds LF regardless of the machine's git settings.
 
-`build --catalogs` writes the two root catalogs, each listing every plugin with a `./plugins/<id>` source, in the config's order: `.claude-plugin/marketplace.json` (`name` is `<owner>-<name>` from `library`, `owner`, `description`, `plugins[]` with `name`, `source`, `description`) and `.agents/plugins/marketplace.json` (Codex: `name`, `interface.displayName`, `plugins[]` with `name`, `source`, `description`, `policy` `installation: AVAILABLE` and `authentication: ON_USE`, `category`). `build` with no output flag writes both forms. `--artifacts` (archives under `artifacts/` for the ChatGPT upload) is the next stage and prints a line saying so.
+`build --catalogs` writes the two root catalogs, each listing every plugin with a `./plugins/<id>` source, in the config's order: `.claude-plugin/marketplace.json` (`name` is `<owner>-<name>` from `library`, `owner`, `description`, `plugins[]` with `name`, `source`, `description`) and `.agents/plugins/marketplace.json` (Codex: `name`, `interface.displayName`, `plugins[]` with `name`, `source`, `description`, `policy` `installation: AVAILABLE` and `authentication: ON_USE`, `category`). `build` with no output flag writes both: the committed form. The upload archives are a third output, written only when `--artifacts` asks (see [Artifacts](#artifacts)).
 
-**`build --check`** computes every output in memory, prints each path that differs from disk (a hand-edited copy, a source edited since the last build, a missing catalog, a stale package, a package that cannot be built), writes nothing, and exits 1; a clean library exits 0. `--check --plugins` or `--check --catalogs` narrows it to one form. CI runs `build --check` on every push so a skipped local build cannot land drift. `build --plan` shows the writes without making them.
+**`build --check`** computes every output in memory, prints each path that differs from disk (a hand-edited copy, a source edited since the last build, a missing catalog, a stale package, a package that cannot be built), writes nothing, and exits 1; a clean library exits 0. `--check --plugins` or `--check --catalogs` narrows it to one form. It never looks at `artifacts/`. CI runs `build --check` on every push so a skipped local build cannot land drift. `build --plan` shows the writes without making them.
 
 Plugin skills run namespaced: `/oneezy:oneezy-status` in Claude Code, `$oneezy:oneezy-status` in Codex; their folder names do not change. Each package passes `claude plugin validate` (the only warning is the missing Claude version, by design) and the root passes it as a marketplace.
 
-The config's optional `releases` section is the ChatGPT upload record, one entry per plugin id written by hand after each upload: `plugin_id`, `release_id`, `sha256` of the archive, `scope` (`personal` or `workspace`), `date`, and optionally `files`, the archive's entries; the schema admits nothing else there. `build --artifacts` reads it to say whether an archive changed since its last upload.
+## Artifacts
+
+ChatGPT takes a plugin as an uploaded archive, by hand. **`build --artifacts`** writes what that upload needs into `artifacts/` (generated, gitignored, never part of a check):
+
+```
+artifacts/
+  <id>-<version>.zip     one archive per built plugin, holding the package under one folder named <id>
+  releases.json          per plugin: archive, sha256, version, commit, files, release
+  <id>.changes.md        only when the recorded release holds a file the new archive lacks
+```
+
+The archive is the package `build --plugins` writes, at the version its manifests carry, so `--artifacts` alone archives the packages as they are on disk when they are as built, and what a build would write when they are not; it writes no package and no catalog itself. The ZIP is written by the tool with no dependency and is **deterministic**: every entry stored (no compression), entries sorted by path, forward slashes, no directory entries, one fixed timestamp (1980-01-01 00:00), no symlinks (a link inside a skill folder is never followed: it is left out, with a report line). Two builds of the same input give identical bytes on any machine, so the sha256 says whether a plugin changed: a library commit that touches no input of a package leaves its archive's name and bytes as they were, and editing one skill changes only its plugin's archive. An older archive of a plugin, an archive for an id no longer in the config and a note that no longer applies are removed; any other file in `artifacts/` is left alone, and so is the archive of a plugin that could not be built this run.
+
+`releases.json` says, per plugin: `archive` (its path in the library), `sha256`, `version`, `commit` (the upstream commit for a source plugin, the library commit the package was built at for an own group, null without git), `files` (the archive's entries) and `release`, the last upload the config records for it, or null.
+
+The config's optional `releases` section is that record, one entry per plugin id written by hand after each upload: `plugin_id`, `release_id`, `sha256` of the archive, `scope` (`personal` or `workspace`), `date`, and optionally `files`, the archive's entries as `releases.json` lists them; the schema admits nothing else there. An archive whose sha256 equals the recorded one has not changed since its upload. A ChatGPT plugin update overlays files and cannot delete one, so when the recorded `files` name a file the new archive lacks (removed, or renamed so the old name is gone), the build writes `artifacts/<id>.changes.md`: it lists those files and says to upload the archive as a new plugin, not as an update. A recorded path counts with or without its leading `<id>/` folder. No recorded `files`, or every one still in the archive: no note.
+
+## Check
+
+**`check`** answers one question: is what is committed consistent? It reads the library and nothing else (no network, no clone, nothing written, no harness folder), prints one line per problem as `<path>: <reason>`, and exits 1 when there is any; a clean library gets one summary line and exit 0. Run it before committing; CI runs it on every push. It is a command, never a git hook. `--json` gives `problems` as `path` and `reason` pairs; `--quiet` says nothing when the library is clean.
+
+1. **Frontmatter of every own skill** (`skills/<name>/SKILL.md` and `skills/<group>/<name>/SKILL.md`): `name` is the folder's name and a valid skill id (lowercase letters, digits and single hyphens, at most 64 characters), and `description` is present. Third-party skills are upstream's and are not checked.
+2. **Every `flow.yaml` beside an own `SKILL.md`**, against `schemas/flow.schema.json` and the rules a schema cannot say:
+
+   | key | rule |
+   |---|---|
+   | `skill` | required; the folder's name |
+   | `purpose` | required text |
+   | `runtime` | a list of tools and connections |
+   | `refs[]` | `token`, `kind` (`skill`, `plugin`, `app`, `file`, `url`), `id`, `need` (`required`, `optional`, `conditional`, `example`, `mention`), optional `when` |
+   | `unresolved[]` | `token` and `note` |
+   | `agents.max` | an integer, 0 or more |
+   | `steps[]` | required, at least one; each has a unique `id` (lowercase letters, digits, hyphens) |
+   | step `after` | one step id or a list of them, each naming a step of this flow |
+   | step `parallel`, `join` | `parallel` lists at least two member ids and needs `join`, the id where they meet; all name steps of this flow |
+   | step `loop` | `until` required, `every` optional |
+   | step `outcome` | only the keys `done`, `fail`, `input` |
+   | step `does`, `if`, `returns`, `needs[]`, `calls` | free text; `needs` a list; `calls` names a `skill`, `plugin` or `app` |
+
+   Any other key is refused, so a typo is caught. A problem reads `skills/oneezy/x/flow.yaml: $.steps[2].after: no step has the id open-pr`.
+3. **Generated-file drift.** The plugin form, by the same computation as `build --check`: every file a build would write or remove, and every package it cannot build (nothing when `generate.plugins` is false). And `skills-lock.json`, against the lock a `refresh` would write from the snapshots under `upstream/` as they are: an entry edited by hand, an entry no source selects, a snapshot changed since. A library without snapshots (a clone before its first `refresh`) has nothing to compare the lock with, so CI runs `refresh --frozen` first. `artifacts/` is never drift. A `skills-sync.json` the schema refuses is reported rule by rule and nothing is computed from it. The summary line names the command that writes what drifted (`build --plugins --catalogs`, `refresh`).
+
+A library without a config has no generated files to check; its frontmatter and flows still are.
 
 ## Rules it never breaks
 
 - A link is created, retargeted or removed only when its target is inside the library. A real folder in the way, or a link pointing elsewhere, is reported as a conflict and left alone.
-- `build` writes only `plugins/<id>/` and the two catalogs, inside the library; `build --check` writes nothing at all. A package is rewritten only when its inputs changed. `build` never follows a link: one inside `plugins/<id>` is a conflict and the package is left alone.
+- `build` writes only `plugins/<id>/` and the two catalogs, inside the library, plus `artifacts/` when `--artifacts` asks; `build --check` and `check` write nothing at all. A package is rewritten only when its inputs changed. `build` never follows a link: one inside `plugins/<id>` is a conflict and the package is left alone.
+- `check` never touches the network and never clones a library to have one to check.
 - `synced/` (Claude's account skills) and `.system/` are never touched.
 - Third-party copies in `.agents/skills` are written only by `refresh` (config library) or by `npx skills` (legacy library); the link steps never edit them.
 - `refresh` and `add` touch nothing outside the library: no pull, no `~/.skills-sync`, no harness folder.
@@ -171,9 +215,10 @@ Every answer is also a flag, so scripts and agents never see a prompt:
 refresh: --frozen  --retry
 add <source>: --id <id>  --root <path>  --skills a,b | --skills '*'  --as old=new,...
 build: --plugins  --catalogs  --artifacts  --check
+check: --json  --quiet
 ```
 
-Commands: `sync` (default), `status`, `unlink` (remove every link this tool made in the user folders), `projects` (only step 6), `refresh` and `add <source>` (see [Third-party sources](#third-party-sources)), `build` (see [Plugins and catalogs](#plugins-and-catalogs)).
+Commands: `sync` (default), `status`, `unlink` (remove every link this tool made in the user folders), `projects` (only step 6), `refresh` and `add <source>` (see [Third-party sources](#third-party-sources)), `build` (see [Plugins and catalogs](#plugins-and-catalogs) and [Artifacts](#artifacts)), `check` (see [Check](#check)).
 
 `--watch` keeps running and redoes layers and user folders when `skills/`, the config or the lock changes, so a skill you add is linked the moment its folder appears.
 
@@ -185,4 +230,4 @@ pnpm test          # node:test on temp folders and temp git repos standing in fo
 node dist/src/cli.js --repo <library> --plan
 ```
 
-The two JSON Schemas under `schemas/` ship with the package: `skills-sync.schema.json` for the config (sources, plugins, the `generate` switches, the `releases` upload record), which `refresh`, `add` and `build` validate before doing anything, and `skills-sync.local.schema.json` for this machine's answers, validated on every read. The validator is in the tool; there is no dependency for it.
+The three JSON Schemas under `schemas/` ship with the package: `skills-sync.schema.json` for the config (sources, plugins, the `generate` switches, the `releases` upload record), which `refresh`, `add`, `build` and `check` validate before doing anything; `skills-sync.local.schema.json` for this machine's answers, validated on every read; and `flow.schema.json` for an own skill's `flow.yaml`, which `check` validates. The validator and the ZIP writer are in the tool; there is no dependency for either.
