@@ -4,6 +4,11 @@ The implementation is Python 3.10+ and uses only the standard library. Git and a
 Claude Code CLI with native background sessions must be installed on the host.
 No pip packages, PowerShell, or Bash are required by the Python engine.
 
+This is `packages/remote-sessions` in the tools workspace. `clis/remote-sessions-cli/`
+keeps compatibility shims (`remote_sessions.py`, the `.cmd`, `.ps1` and `.sh` launchers)
+that delegate here, so the old path still works. From the workspace root, `pnpm test`
+runs the suite below and `pnpm check` the syntax checks.
+
 ## Open the picker
 
 Windows: double-click `remote-control.cmd`. Existing `.ps1` entry points remain

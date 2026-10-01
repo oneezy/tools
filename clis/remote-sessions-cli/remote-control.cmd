@@ -1,11 +1,4 @@
 @echo off
-where py >nul 2>nul
-if errorlevel 1 goto python
-py -3 "%~dp0remote_sessions.py" %*
-goto done
-:python
-python "%~dp0remote_sessions.py" %*
-:done
-set "launcherExit=%errorlevel%"
-if "%~1"=="" if not "%launcherExit%"=="0" pause
-exit /b %launcherExit%
+rem Compatibility shim: the tool lives in packages\remote-sessions (oneezy/tools#75).
+call "%~dp0..\..\packages\remote-sessions\remote-control.cmd" %*
+exit /b %errorlevel%

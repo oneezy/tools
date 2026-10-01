@@ -31,3 +31,11 @@ only. Never bootstrap dependencies automatically on launch.
 Run the Python suite on Windows/Ubuntu and offline_smoke.py on each after relevant changes.
 tests/Test-Updater.ps1 verifies the launcher. Never use real upgrades as tests. A passing suite
 does not imply GUI installer coverage; report validation limits faithfully.
+
+## Workspace
+
+This is `packages/apps-sync` in the tools workspace; `clis/apps-sync-cli/` keeps compatibility shims that delegate here.
+`pnpm test` runs tests/test_software_manager.py and `pnpm check` syntax-checks the PowerShell and Python files.
+tests/test_launchers.py and tests/Test-Updater.ps1 expect `Manage Software.cmd` and `Manage-Software.ps1`, which this
+checkout names `App Sync.cmd` and `Apps Sync.ps1` (so do the launchers themselves, since ea0c5bc); reconcile the names
+before adding those two to the scripts.

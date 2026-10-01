@@ -32,7 +32,7 @@ Once a repo is bootstrapped, its board moves by itself. The workflow is [`.githu
 
 Secrets per repo: `PROJECT_PAT`, a classic PAT (`project` + `repo`) of the account that owns the project, one per account (`GITHUB_TOKEN`, fine-grained PATs and GitHub Apps cannot reach user-owned projects), and `CLAUDE_CODE_OAUTH_TOKEN`. `setup-secrets.sh` mints and stores them.
 
-Issue, branch and push events run from the repo's default branch, so the file must be on `main` before the board moves by itself; `pull_request` events and `workflow_dispatch -r dev` work from `dev`. `scripts/status.sh` reads everything from environment variables, so it runs by hand: `REPO=oneezy/tools EVENT=issues ACTION=assigned ISSUE=17 DRY_RUN=1 clis/task-manager-cli/scripts/status.sh` prints what it would move.
+Issue, branch and push events run from the repo's default branch, so the file must be on `main` before the board moves by itself; `pull_request` events and `workflow_dispatch -r dev` work from `dev`. `scripts/status.sh` reads everything from environment variables, so it runs by hand: `REPO=oneezy/tools EVENT=issues ACTION=assigned ISSUE=17 DRY_RUN=1 packages/task-manager/scripts/status.sh` prints what it would move.
 
 ## Not here yet
 

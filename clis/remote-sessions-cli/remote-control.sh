@@ -1,3 +1,3 @@
 #!/usr/bin/env sh
-# Run with: sh remote-control.sh. No executable bit or Bash dependency required.
-exec python3 "$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)/remote_sessions.py" "$@"
+# Compatibility shim: the tool lives in packages/remote-sessions (oneezy/tools#75).
+exec sh "$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)/../../packages/remote-sessions/remote-control.sh" "$@"

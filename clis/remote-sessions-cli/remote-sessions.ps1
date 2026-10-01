@@ -1,6 +1,3 @@
-# Compatibility entry point. All behavior lives in the cross-platform Python implementation.
-$engine = Join-Path $PSScriptRoot 'remote_sessions.py'
-if (Get-Command py -ErrorAction SilentlyContinue) { & py -3 $engine @args }
-elseif (Get-Command python3 -ErrorAction SilentlyContinue) { & python3 $engine @args }
-else { & python $engine @args }
+# Compatibility shim: the tool lives in packages/remote-sessions (oneezy/tools#75).
+& (Join-Path $PSScriptRoot '../../packages/remote-sessions/remote-sessions.ps1') @args
 exit $LASTEXITCODE
