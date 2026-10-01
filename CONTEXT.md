@@ -44,11 +44,11 @@ A Done ticket the client or Justin sent back. A red label on the reopened issue;
 
 ## Phase
 
-A big chunk of work that gets the client to a point: an issue labelled `phase` with a start and a due date, the only ticket kind that carries dates. Maps and stray tickets hang under a phase as sub-issues. A phase is a bar on the roadmap.
+A big chunk of work that gets the client to a point: an issue labelled `phase`, titled `Phase <n> — <title>` after a section of the repo's roadmap file, with a start and a due date once planned, the only ticket kind that carries dates. Tickets belong to a phase by taking its milestone, never as sub-issues (that slot is wayfinder's). A phase is a bar on the roadmap.
 
 ## Milestone
 
-A dated line the client pays against, held as a GitHub Milestone. Phases are assigned to the milestone they feed; one milestone can end several phases. A milestone is a marker on the roadmap.
+Two meanings. In a contract, a dated line the client pays against (Trident's Milestone 1 and 2); a phase heading may name the one it feeds. On GitHub, a GitHub Milestone with the same title as its phase, one per phase, made by the roadmap command with no due date: the link between a phase and the tickets that make it up, and a marker on the roadmap once dated.
 
 ## Priority
 
