@@ -6,6 +6,8 @@ task-manager: zero-touch bootstrap and repair of one GitHub project per repo, dr
   pwsh task-manager.ps1 status                     # print every repo's state, no prompt
   pwsh task-manager.ps1 bootstrap -Repo oneezy/tools          # create or repair one repo's project
   pwsh task-manager.ps1 bootstrap -Repo oneezy/tools -NoBrowser   # skip the Auto-add page and its poll
+  pwsh task-manager.ps1 roadmap -Repo owner/name -Source path\to\roadmap.md -Plan   # list the phases, write nothing
+  pwsh task-manager.ps1 roadmap -Repo owner/name -Source path\to\roadmap.md         # phases as issues + milestones
 
 Picker keys:  up/down move   space toggle   a all/none   enter bootstrap checked   o open project page
               h show/hide archived and forks   r refresh   q quit
@@ -23,7 +25,8 @@ What enter does per repo, in order, each step idempotent:
   status         the six options, re-sending existing option ids so item values survive
   views          Backlog (table, sorted by Priority), Board (columns by Status, cards sorted by Priority),
                  Roadmap via the REST create-view endpoint; a view whose sort drifts is recreated,
-                 then the default "View 1" is deleted
+                 then every view the spec does not name is deleted: the default "View 1" and any
+                 made by hand (status reports one as "extra view <name>")
   labels         type and state labels with the decided colours (gh label create --force)
   workflows      "Auto-close issue" deleted (it is on at creation); the five other built-ins are left on
   import         every issue of the repo added to the project
@@ -33,6 +36,15 @@ What enter does per repo, in order, each step idempotent:
   backfill       the caller workflow is dispatched with backfill=true once the file is on that branch
   auto-add       opens <project>/workflows in the browser and polls until "Auto-add to project" is on
 
+What roadmap does (oneezy/tools#77), idempotent by title, -Plan printing without writing:
+  reads every "## Phase <n> — <title>" section of the markdown at -Source (a path or URL; the
+  "(Milestone ...)" suffix stays in the title; "## Cross-cutting" and the like are not phases) and,
+  per phase: an issue titled "Phase <n> — <title>" labelled phase, body = the section's text plus a
+  footer naming the source file and commit; a Milestone of the same title (no due date, description
+  = the section's first paragraph), which the issue takes; the issue on the repo's project when it is
+  missing. Start and Due are never written. Reports created / updated / kept per phase. A task joins
+  a phase by taking its Milestone; sub-issues stay wayfinder's.
+
 Facts this relies on, checked 2026-09-22 on a throwaway project (oneezy/tools#16):
   the REST view endpoint takes the login in {user_id} and numeric field ids from GET .../fields,
   sort_by is [[field_id, "desc"]]; deleteProjectV2Workflow on Auto-close removes the row (= off);
@@ -40,17 +52,21 @@ Facts this relies on, checked 2026-09-22 on a throwaway project (oneezy/tools#16
   keeps "Item added -> Todo" and "Item closed -> Done" working.
 #>
 param(
-  [ValidateSet('menu', 'status', 'bootstrap')]
+  [ValidateSet('menu', 'status', 'bootstrap', 'roadmap')]
   [string]$Action = 'menu',
-  [string[]]$Repo = @(),                       # bootstrap/status: owner/name, comma-separated
+  [string[]]$Repo = @(),                       # bootstrap/status: owner/name, comma-separated; roadmap: one
   [string[]]$Owners = @('oneezy', 'layerdbiz'),
   [switch]$ShowHidden,                         # include archived repos and forks
   [switch]$NoBrowser,                          # never open the Workflows page or poll for Auto-add
-  [int]$PollSeconds = 600                      # how long to wait for the Auto-add clicks
+  [int]$PollSeconds = 600,                     # how long to wait for the Auto-add clicks
+  [string]$Source,                             # roadmap: path or URL of the roadmap markdown
+  [switch]$Plan                                # roadmap: print what would change, write nothing
 )
 
 $ErrorActionPreference = 'Stop'
 $PSNativeCommandUseErrorActionPreference = $false   # gh exit codes are checked by hand in Invoke-Gh
+# Phase titles carry em-dashes and bodies carry emoji: gh is spoken to and read back as UTF-8.
+$OutputEncoding = [Console]::OutputEncoding = [Text.UTF8Encoding]::new($false)
 
 # ---------------------------------------------------------------- spec (from oneezy/tools#7)
 
@@ -224,6 +240,10 @@ function Get-Drift($repo, $project, $labels) {
     if ($v.Sort -and (@($live.sortByFields.nodes.field.name) -join ',') -ne $v.Sort) { $d.Add("view $($v.Name) sort") }
   }
   if ($project.views.nodes | Where-Object name -eq 'View 1') { $d.Add('default View 1') }
+  foreach ($live in $project.views.nodes) {
+    if ($live.name -eq 'View 1' -or $Spec.Views.Name -contains $live.name) { continue }
+    $d.Add("extra view $($live.name)")
+  }
 
   foreach ($l in $Spec.Labels) {
     $live = $labels | Where-Object name -eq $l.Name
@@ -375,11 +395,13 @@ function Ensure-Views($owner, $project) {
     Step 'created' "view $($v.Name) ($($v.Layout), $($v.Filter))"
   }
   $fresh = Get-Project $owner $project.number
-  $default = $fresh.views.nodes | Where-Object { $_.name -eq 'View 1' -and $_.layout -eq 'TABLE_LAYOUT' -and -not $_.filter }
   $haveAll = -not ($Spec.Views | Where-Object { -not ($fresh.views.nodes | Where-Object name -eq $_.Name) })
-  if ($default -and $haveAll) {
-    $null = Invoke-Graphql $owner 'mutation($v: ID!) { deleteProjectV2View(input: { viewId: $v }) { clientMutationId } }' @{ v = $default.id }
-    Step 'deleted' 'default View 1'
+  if (-not $haveAll) { return }
+  # Every view the spec does not name goes: the default "View 1" and anything made by hand (a project
+  # keeps at least one view, which the spec's are). A view holds no data, only how items are shown.
+  foreach ($extra in @($fresh.views.nodes | Where-Object { $Spec.Views.Name -notcontains $_.name })) {
+    $null = Invoke-Graphql $owner 'mutation($v: ID!) { deleteProjectV2View(input: { viewId: $v }) { clientMutationId } }' @{ v = $extra.id }
+    Step 'deleted' $(if ($extra.name -eq 'View 1') { 'default View 1' } else { "view $($extra.name)" })
   }
 }
 
@@ -577,6 +599,144 @@ function Invoke-Bootstrap($row) {
   }
 }
 
+# ---------------------------------------------------------------- roadmap (oneezy/tools#77)
+
+# Phases come from a markdown file: every "## Phase <n> — <title>" section is one issue labelled
+# phase and one Milestone of the same title, which the issue takes. A task joins a phase by taking
+# that Milestone; sub-issues are wayfinder's and never a phase's. Start and Due stay a human's.
+
+function Format-Text([string]$s) {
+  # One shape for comparing text: LF line ends, no trailing spaces, no blank lines at either end.
+  if (-not $s) { return '' }
+  ((($s -replace "`r`n", "`n") -replace '[ \t]+(\n|$)', '$1')).Trim("`n")
+}
+
+function Read-Roadmap([string]$source) {
+  # The markdown and where it came from: a URL, or a file with its git commit when it sits in a clone.
+  if ($source -match '^https?://') {
+    $url = $source -replace '^https://github\.com/([^/]+/[^/]+)/blob/', 'https://raw.githubusercontent.com/$1/'
+    return @{ Text = [string](Invoke-WebRequest -Uri $url -UseBasicParsing).Content; Where = $source }
+  }
+  $path = (Resolve-Path -LiteralPath $source).Path
+  $text = Get-Content -LiteralPath $path -Raw -Encoding UTF8
+  $dir = Split-Path $path
+  $prefix = & git -C $dir rev-parse --show-prefix 2>$null
+  if ($LASTEXITCODE -ne 0) { return @{ Text = $text; Where = $path } }
+  $where = "``$prefix$(Split-Path $path -Leaf)``"
+  $commit = & git -C $dir log -1 --format=%h -- $path 2>$null
+  if ($commit) { $where += " at ``$commit``" }
+  if (& git -C $dir status --porcelain -- $path 2>$null) { $where += ' with uncommitted edits' }
+  if ("$(& git -C $dir remote get-url origin 2>$null)" -match 'github\.com[:/]([^/]+/[^/]+?)(\.git)?$') { $where += " in $($Matches[1])" }
+  @{ Text = $text; Where = $where }
+}
+
+function Get-Phases([string]$text) {
+  # Every "## Phase <n> — <title>" section in file order (em-dash, en-dash or hyphen after the number;
+  # the title keeps any "(Milestone ...)" suffix): the text under it up to the next "## ", sub-headings
+  # included, and that text's first paragraph. Other "## " sections (Cross-cutting, External sources) are skipped.
+  $phases = [System.Collections.Generic.List[hashtable]]::new()
+  $current = $null
+  foreach ($line in (($text -replace "`r`n", "`n") -split "`n")) {
+    if ($line -match '^## ') {
+      $current = $null
+      if ($line -match '^## Phase\s+(\d+)\s+[—–-]\s+(\S.*?)\s*$') {
+        $current = @{ Number = [int]$Matches[1]; Title = "Phase $($Matches[1]) $([char]0x2014) $($Matches[2])"; Lines = [System.Collections.Generic.List[string]]::new() }
+        $phases.Add($current)
+      }
+      continue
+    }
+    if ($current) { $current.Lines.Add($line) }
+  }
+  foreach ($p in $phases) {
+    $p.Text = Format-Text ($p.Lines -join "`n")
+    $p.First = ($p.Text -split "`n`n", 2)[0]
+    $p.Remove('Lines')
+  }
+  $phases
+}
+
+$FooterMark = "---`nSource: "
+
+function Get-IssueText($body) {
+  # The phase text a live issue holds: everything above the footer the command wrote under it.
+  $t = Format-Text $body
+  $i = $t.LastIndexOf("`n$FooterMark")
+  if ($i -ge 0) { $t = $t.Substring(0, $i) }
+  Format-Text $t
+}
+
+function Invoke-Roadmap([string]$full, [string]$source) {
+  if ($full -notmatch '^[^/,]+/[^/,]+$') { Write-Host 'roadmap needs -Repo owner/name (one repo)'; exit 1 }
+  if (-not $source) { Write-Host 'roadmap needs -Source <path or URL of the roadmap markdown>'; exit 1 }
+  $owner = ($full -split '/')[0]
+  if (-not (Get-Token $owner)) { Write-Host "login needed: gh auth login -u $owner -s project,repo,workflow"; exit 1 }
+  $md = Read-Roadmap $source
+  $phases = @(Get-Phases $md.Text)
+  Write-Host ''
+  Write-Host " $full  <-  $($md.Where)" -ForegroundColor Cyan
+  if ($phases.Count -eq 0) { Step 'error' "no `"## Phase <n> $([char]0x2014) <title>`" section in $source"; exit 1 }
+  if ($Plan) { Step 'plan' 'nothing is written; each line says what a real run would do' }
+  $footer = "${FooterMark}$($md.Where). Written by task-manager (oneezy/tools, packages/task-manager): edit the roadmap file, not this issue."
+
+  $repo = (Invoke-Gh $owner @('repo', 'view', $full, '--json', 'nameWithOwner,name,isPrivate,isArchived,isFork,url,id')) | ConvertFrom-Json
+  $project = Find-Project $repo (Get-OwnerProjects $owner)
+  $onBoard = if ($project) { @(Get-Items $owner $project | ForEach-Object { $_.content.url } | Where-Object { $_ }) } else { @() }
+  if (-not $project) { Step 'left' "no project is linked to $full; bootstrap it, then rerun to put the phases on the board" }
+  $issues = @((Invoke-Gh $owner @('issue', 'list', '-R', $full, '--state', 'all', '--limit', '1000', '--json', 'number,title,body,labels,milestone,id,url')) | ConvertFrom-Json)
+  $milestones = @(Invoke-Rest $owner 'GET' "repos/$full/milestones?state=all&per_page=100")
+  if (-not (Get-Labels $owner $full | Where-Object name -eq 'phase')) {
+    $l = $Spec.Labels | Where-Object Name -eq 'phase'
+    if (-not $Plan) { $null = Invoke-Gh $owner @('label', 'create', $l.Name, '-R', $full, '-c', $l.Color, '-d', $l.Description, '--force') }
+    Step $(if ($Plan) { 'create' } else { 'created' }) "label phase #$($l.Color)"
+  }
+
+  $count = @{ created = 0; updated = 0; kept = 0 }
+  $addQ = 'mutation($p: ID!, $c: ID!) { addProjectV2ItemById(input: { projectId: $p, contentId: $c }) { item { id } } }'
+  foreach ($p in $phases) {
+    $did = [System.Collections.Generic.List[string]]::new()
+    $ms = $milestones | Where-Object title -eq $p.Title | Select-Object -First 1
+    if (-not $ms) {
+      if (-not $Plan) { $ms = Invoke-Rest $owner 'POST' "repos/$full/milestones" @{ title = $p.Title; description = $p.First } }
+      $did.Add($(if ($ms) { "milestone #$($ms.number)" } else { 'milestone' }))
+    } elseif ((Format-Text $ms.description) -ne $p.First) {
+      if (-not $Plan) { $null = Invoke-Rest $owner 'PATCH' "repos/$full/milestones/$($ms.number)" @{ description = $p.First } }
+      $did.Add("milestone #$($ms.number) description")
+    }
+
+    $issue = $issues | Where-Object title -eq $p.Title | Sort-Object number | Select-Object -First 1
+    $body = "$($p.Text)`n`n$footer"
+    $new = -not $issue
+    if ($new) {
+      $in = @{ title = $p.Title; body = $body; labels = @('phase') }
+      if ($ms) { $in.milestone = $ms.number }
+      if (-not $Plan) {
+        $r = Invoke-Rest $owner 'POST' "repos/$full/issues" $in
+        $issue = [pscustomobject]@{ number = $r.number; id = $r.node_id; url = $r.html_url }
+      }
+      $did.Insert(0, $(if ($issue) { "issue #$($issue.number)" } else { 'issue' }))
+    } else {
+      $patch = @{}
+      if ((Get-IssueText $issue.body) -ne $p.Text) { $patch.body = $body; $did.Add("issue #$($issue.number) body") }
+      if (@($issue.labels.name) -notcontains 'phase') { $patch.labels = @(@($issue.labels.name) + 'phase'); $did.Add("issue #$($issue.number) label phase") }
+      if (-not $issue.milestone -and $ms) { $patch.milestone = $ms.number; $did.Add("issue #$($issue.number) milestone") }
+      if ($patch.Count -and -not $Plan) { $null = Invoke-Rest $owner 'PATCH' "repos/$full/issues/$($issue.number)" $patch }
+    }
+
+    if ($project -and (-not $issue -or $onBoard -notcontains $issue.url)) {
+      if ($issue -and -not $Plan) { $null = Invoke-Graphql $owner $addQ @{ p = $project.id; c = $issue.id } }
+      $did.Add('project item')
+    }
+
+    $verb = if ($new) { 'created' } elseif ($did.Count) { 'updated' } else { 'kept' }
+    $count[$verb]++
+    $detail = if ($verb -eq 'kept') { "issue #$($issue.number), milestone #$($ms.number)" } else { $did -join ', ' }
+    if ($Plan -and $verb -ne 'kept') { $verb = @{ created = 'create'; updated = 'update' }[$verb] }
+    Step $verb "$($p.Title): $detail"
+  }
+  $sum = "$($phases.Count) phase(s): $($count.created) created, $($count.updated) updated, $($count.kept) kept"
+  if ($Plan) { Step 'plan' ($sum -replace 'created', 'to create' -replace 'updated', 'to update') } else { Step 'roadmap' $sum }
+}
+
 # ---------------------------------------------------------------- status and picker
 
 function Get-StateColor($state) {
@@ -691,4 +851,5 @@ switch ($Action) {
     if ($Repo.Count -eq 0) { Write-Host 'bootstrap needs -Repo owner/name'; exit 1 }
     foreach ($r in @(Get-Rows $Repo)) { Invoke-Bootstrap $r }
   }
+  'roadmap'   { Invoke-Roadmap ($Repo -join ',') $Source }
 }
