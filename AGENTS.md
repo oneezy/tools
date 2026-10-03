@@ -28,7 +28,7 @@ A message that starts with `/<name>` runs that skill, even in a project thread, 
 
 ### Issue tracker
 
-Issues are tracked as GitHub Issues on `oneezy/tools` via the `gh` CLI. See `docs/agents/issue-tracker.md`.
+Issues are tracked as GitHub Issues on `oneezy/tools`, operated through `gh api` REST calls (never `gh issue` or GraphQL, which cloud sessions block). See `docs/agents/issue-tracker.md`.
 
 ### Triage labels
 
