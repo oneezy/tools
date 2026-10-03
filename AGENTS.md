@@ -22,7 +22,9 @@ A cloud session (`CLAUDE_CODE_REMOTE=true`) starts without them unless the cloud
 npx --yes @oneezy/skills-sync -y --agents claude-code --global --no-projects --no-wsl --quiet
 ```
 
-Claude Code lists the new skills about a minute later; until then, Read the SKILL.md. Skills marked `disable-model-invocation` (`/wayfinder`, `/grill-me`, `/to-tickets`, `/oneezy-merge` and others) never appear in your list, and in a project thread Justin's "/wayfinder" reaches you as plain text, not a command. When he names one, Read `~/.claude/skills/<name>/SKILL.md` and follow it as if he had run the command.
+Claude Code lists the new skills about a minute later; until then, Read the SKILL.md.
+
+A message that starts with `/<name>` runs that skill, even in a project thread, where it reaches you as plain text rather than a command. If the skill is in your list, invoke it. If it is not, which is always the case for skills marked `disable-model-invocation` (`/wayfinder`, `/grill-me`, `/to-tickets`, `/oneezy-merge` and others), Read `~/.claude/skills/<name>/SKILL.md` and follow it, with the rest of the message as its arguments.
 
 ### Issue tracker
 
