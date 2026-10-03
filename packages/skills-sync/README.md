@@ -10,7 +10,8 @@ Run it anywhere and it works out the rest:
 
 - **No library on this machine?** It clones one into `~/.skills-sync` (default `oneezy/skills`; `--library owner/repo` for another) and asks nothing.
 - **Library present?** It pulls it, brings the third-party skills up to date (or restores what the lock has), rebuilds the library's harness layers, and links every skill into each harness's user folder. Every step is skipped when its result is already right, so a no-op run is silent and fast.
-- **On another machine or in a cloud session?** Run the same command there (or ask the agent to run the `oneezy-skills` skill, which does exactly that). Nothing is installed into any harness's settings.
+- **On another machine?** Run the same command there (or ask the agent to run the `oneezy-skills` skill, which does exactly that). Nothing is installed into any harness's settings.
+- **In a cloud session?** The container starts with no library. Put `npx --yes @oneezy/skills-sync -y --agents claude-code --global --no-projects --no-wsl` in the cloud environment's setup script so the skills are linked before the session starts. Run mid-session instead, Claude Code lists them about a minute later.
 
 First run on a machine with a terminal asks which harnesses, whether to link the user folders, which projects (if any) should carry copies, and (on Windows) which WSL distros. Answers are remembered in `skills-sync.local.json` beside the config, gitignored, so the committed config is the same on every machine; `--ask` prompts again. Node 20+, git.
 
