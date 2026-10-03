@@ -1,0 +1,10 @@
+{
+  "name": "@oneezy/remote-sessions",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Claude sessions on Windows and Linux: the picker, the Remote Control launcher and the shared `workspace` worktree command. Python 3.10+, standard library only.",
+  "scripts": {
+    "test": "node ../../scripts/python.mjs -m unittest discover -s tests -p test_portable.py -v",
+    "check": "pwsh -NoProfile -File ../../scripts/syntax-check.ps1 remote_sessions.py task_worktrees.py tests/test_portable.py tests/fake_claude.py remote-control.ps1 remote-sessions.ps1 task-worktrees.ps1 test-native-lifecycle.ps1 test-picker.ps1 test-remote-control.ps1 test-task-worktrees.ps1 tests/fake-claude.ps1 remote-control.sh tests/test-linux.sh"
+  }
+}

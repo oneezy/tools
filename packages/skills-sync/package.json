@@ -1,0 +1,26 @@
+{
+  "name": "@oneezy/skills-sync",
+  "publishConfig": { "access": "public" },
+  "version": "0.3.0",
+  "description": "One skills library, every agent harness, every project on the machine. Declares third-party sources in skills-sync.json, keeps them at upstream's tip (pins excepted) with snapshots and skills-lock.json, links every skill into Claude Code, Codex, Goose and Hermes, and into the projects you pick.",
+  "license": "MIT",
+  "type": "module",
+  "bin": { "skills-sync": "dist/src/cli.js" },
+  "files": ["dist/src", "schemas", "README.md"],
+  "repository": { "type": "git", "url": "git+https://github.com/oneezy/tools.git", "directory": "packages/skills-sync" },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "test": "tsc -p tsconfig.json && node --test \"dist/test/*.test.js\"",
+    "start": "node dist/src/cli.js",
+    "prepublishOnly": "npm run build && node --test \"dist/test/*.test.js\""
+  },
+  "engines": { "node": ">=20" },
+  "dependencies": {
+    "@clack/prompts": "^1.8.1",
+    "yaml": "^2.8.0"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "typescript": "^5.9.0"
+  }
+}

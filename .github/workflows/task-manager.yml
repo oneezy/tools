@@ -3,14 +3,15 @@
 #
 # This one file is both the workflow oneezy/tools runs on its own events and the reusable workflow
 # every other bootstrapped repo calls (`uses: oneezy/tools/.github/workflows/task-manager.yml@main`)
-# from the thin caller that clis/task-manager-cli writes (clis/task-manager-cli/caller.yml). When
+# from the thin caller that packages/task-manager writes (packages/task-manager/caller.yml). When
 # called, the `github` context is the caller's, so github.event is the caller's event.
 #
 # Two jobs, chosen by the event:
-#   status    every event but "issue opened": clis/task-manager-cli/scripts/status.sh moves the
-#             issue's Status (assigned -> Next Up, branch -> In Progress, PR ready -> Review, merged
-#             into dev -> closed and Done, push to main -> Complete, ...). A dispatch with
-#             backfill=true recomputes the whole board from git facts.
+#   status    every event but "issue opened": packages/task-manager/scripts/status.sh moves the
+#             issue's Status (assigned -> Next Up, branch or draft PR -> In Progress, PR ready ->
+#             Review, merged into dev -> closed and Done, push to main -> Complete, ...). A dispatch
+#             with start=<n> moves that one issue to In Progress (an agent beginning work without a
+#             numbered branch); backfill=true recomputes the whole board from git facts.
 #   estimate  "issue opened", debounced two minutes in a cancel-in-progress group so a burst of new
 #             issues collapses into one run, then /oneezy-estimate (from oneezy/skills, the skills library)
 #             sizes every unsized open issue with the whole backlog in context. A dispatch with
@@ -33,6 +34,10 @@ on:
         description: Size every unsized open issue now
         type: boolean
         default: false
+      start:
+        description: Issue number to move to In Progress (work begun without a numbered branch)
+        type: string
+        default: ''
       integration-branch:
         description: Merging a pull request into this branch closes its linked issues
         type: string
@@ -65,6 +70,10 @@ on:
         description: Size every unsized open issue now
         type: boolean
         default: false
+      start:
+        description: Issue number to move to In Progress (work begun without a numbered branch)
+        type: string
+        default: ''
 
 permissions:
   contents: read
@@ -76,7 +85,7 @@ jobs:
   status:
     if: >-
       ${{ !(github.event_name == 'issues' && github.event.action == 'opened')
-          && !(github.event_name == 'workflow_dispatch' && !inputs.backfill) }}
+          && !(github.event_name == 'workflow_dispatch' && !inputs.backfill && !inputs.start) }}
 
     runs-on: ubuntu-latest
     steps:
@@ -85,10 +94,10 @@ jobs:
         with:
           repository: oneezy/tools
           ref: ${{ github.repository == 'oneezy/tools' && github.sha || 'main' }}
-          sparse-checkout: clis/task-manager-cli/scripts
+          sparse-checkout: packages/task-manager/scripts
           persist-credentials: false
       - name: Move Status
-        run: bash clis/task-manager-cli/scripts/status.sh
+        run: bash packages/task-manager/scripts/status.sh
         env:
           GH_TOKEN: ${{ secrets.PROJECT_PAT }}
           REPO: ${{ github.repository }}
@@ -104,6 +113,7 @@ jobs:
           PR_MERGED: ${{ github.event.pull_request.merged }}
           REVIEW_STATE: ${{ github.event.review.state }}
           PUSH_REF: ${{ github.ref }}
+          START: ${{ inputs.start }}
           BACKFILL: ${{ inputs.backfill || false }}
           INTEGRATION_BRANCH: ${{ inputs.integration-branch || 'dev' }}
           RELEASE_BRANCH: ${{ inputs.release-branch || 'main' }}
