@@ -1,7 +1,7 @@
 {
   "name": "skills-viewer",
-  "version": "0.1.0",
-  "description": "Statically analyze a folder of agent skills (SKILL.md) and generate a self-contained visual map: entry points, what each skill does, what it calls, and how.",
+  "version": "0.2.0",
+  "description": "Statically analyze an agent skills library or plugin (a local folder or a GitHub repo) into a JSON map, plus a self-contained visual map: entry points, what each skill does, what it calls, and the plugin's commands, agents, hooks and MCP servers.",
   "license": "MIT",
   "repository": {
     "type": "git",
@@ -9,6 +9,17 @@
     "directory": "packages/skills-viewer"
   },
   "type": "module",
+  "exports": {
+    ".": {
+      "types": "./dist/src/index.d.ts",
+      "default": "./dist/src/index.js"
+    },
+    "./node": {
+      "types": "./dist/src/node.d.ts",
+      "default": "./dist/src/node.js"
+    },
+    "./package.json": "./package.json"
+  },
   "bin": {
     "skills-viewer": "dist/src/cli.js"
   },

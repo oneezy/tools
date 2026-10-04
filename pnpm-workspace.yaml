@@ -1,3 +1,9 @@
 packages:
   - "apps/*"
   - "packages/*"
+
+# Vite+ (apps/*): every package that imports vite or vitest gets the copies Vite+ bundles.
+# Keep in step with the vite-plus version in apps; `vp --version` names the Vitest pin.
+overrides:
+  vite: npm:@voidzero-dev/vite-plus-core@1.0.0
+  vitest: 5.0.1
