@@ -9,6 +9,8 @@ export default defineConfig({
       adapter: adapter({ runtime: "nodejs22.x" }),
     }),
   ],
+  // ships .svelte files; vitefu misses it under the vite-plus-core alias, so SSR must compile it
+  ssr: { noExternal: ["@xyflow/svelte"] },
   test: {
     include: ["src/**/*.test.ts"],
   },

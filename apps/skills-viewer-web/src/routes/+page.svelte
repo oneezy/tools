@@ -1,7 +1,7 @@
 <script lang="ts">
   import { goto } from "$app/navigation";
   import { page } from "$app/state";
-  import SkillMap from "#lib/SkillMap.svelte";
+  import SkillMap from "#lib/map/SkillMap.svelte";
   import { formatRepo, parseRepoInput } from "#lib/repo.ts";
   import type { AnalyzeResult, ApiError } from "#lib/types.ts";
 
@@ -72,68 +72,61 @@
   <meta name="description" content="Paste a GitHub repo of agent skills and see how they connect." />
 </svelte:head>
 
-<main>
-  <header class:compact={status !== "idle"}>
-    <h1>Skills map</h1>
-    <p class="lede">Paste a GitHub repo of agent skills or a plugin. See where to start and what calls what.</p>
+{#if status === "done" && result && result.graph.nodes.length}
+  <SkillMap
+    graph={result.graph}
+    title={result.graph.meta.roots[0]}
+    repoName={result.source.repo}
+    blobBase={result.source.blobBase}
+  />
+{:else}
+  <main>
+    <header class:compact={status !== "idle"}>
+      <h1>Skills map</h1>
+      <p class="lede">Paste a GitHub repo of agent skills or a plugin. See where to start and what calls what.</p>
 
-    <form method="GET" onsubmit={submit}>
-      <input
-        name="repo"
-        bind:value={input}
-        type="text"
-        inputmode="url"
-        autocapitalize="off"
-        autocomplete="off"
-        spellcheck="false"
-        placeholder="owner/repo or https://github.com/…"
-        aria-label="GitHub repo"
-        aria-invalid={inputError ? "true" : undefined}
-      />
-      <button type="submit" disabled={status === "loading"}>{status === "loading" ? "Reading…" : "Map it"}</button>
-    </form>
-    {#if inputError}<p class="error">{inputError}</p>{/if}
+      <form method="GET" onsubmit={submit}>
+        <input
+          name="repo"
+          bind:value={input}
+          type="text"
+          inputmode="url"
+          autocapitalize="off"
+          autocomplete="off"
+          spellcheck="false"
+          placeholder="owner/repo or https://github.com/…"
+          aria-label="GitHub repo"
+          aria-invalid={inputError ? "true" : undefined}
+        />
+        <button type="submit" disabled={status === "loading"}>{status === "loading" ? "Reading…" : "Map it"}</button>
+      </form>
+      {#if inputError}<p class="error">{inputError}</p>{/if}
 
-    {#if status === "idle"}
-      <p class="examples">
-        Try
-        {#each EXAMPLES as ex, i}
-          <a href={`?repo=${ex}`}>{ex}</a>{i < EXAMPLES.length - 1 ? ", " : ""}
-        {/each}
+      {#if status === "idle"}
+        <p class="examples">
+          Try
+          {#each EXAMPLES as ex, i}
+            <a href={`?repo=${ex}`}>{ex}</a>{i < EXAMPLES.length - 1 ? ", " : ""}
+          {/each}
+        </p>
+      {/if}
+    </header>
+
+    {#if status === "loading"}
+      <p class="state">Fetching and reading the repo…</p>
+    {:else if status === "error" && error}
+      <div class="state error-box">
+        <p>{error.error}</p>
+        {#if error.rateLimitReset}<p class="muted">The limit resets at {resetTime(error.rateLimitReset)}.</p>{/if}
+      </div>
+    {:else if status === "done" && result}
+      <p class="state">
+        No SKILL.md files in {result.graph.meta.roots[0]}.
+        <button class="link" onclick={downloadJson}>graph.json</button>
       </p>
     {/if}
-  </header>
-
-  {#if status === "loading"}
-    <p class="state">Fetching and reading the repo…</p>
-  {:else if status === "error" && error}
-    <div class="state error-box">
-      <p>{error.error}</p>
-      {#if error.rateLimitReset}<p class="muted">The limit resets at {resetTime(error.rateLimitReset)}.</p>{/if}
-    </div>
-  {:else if status === "done" && result}
-    {@const g = result.graph}
-    <section class="summary">
-      <a class="repo" href={`https://github.com/${result.source.owner}/${result.source.repo}`} target="_blank" rel="noreferrer">
-        {g.meta.roots[0]}
-      </a>
-      <span class="muted">@ {result.source.ref ?? "default branch"} · {result.source.sha}</span>
-      <div class="stats">
-        <span><b>{g.meta.skillCount}</b> skills</span>
-        <span><b>{g.nodes.filter((n) => n.entry).length}</b> entry points</span>
-        <span><b>{g.meta.edgeCount}</b> links</span>
-        <span><b>{g.meta.flowCount}</b> flows</span>
-        <button class="link" onclick={downloadJson}>graph.json</button>
-      </div>
-    </section>
-
-    {#if g.nodes.length === 0}
-      <p class="state">No SKILL.md files in this repo{result.source.subpath ? " folder" : ""}.</p>
-    {:else}
-      <SkillMap graph={g} blobBase={result.source.blobBase} />
-    {/if}
-  {/if}
-</main>
+  </main>
+{/if}
 
 <style>
   main {
@@ -240,32 +233,10 @@
     color: var(--muted);
   }
 
-  .summary {
-    margin: 20px 0 16px;
-  }
 
-  .repo {
-    font-weight: 600;
-    margin-right: 6px;
-    overflow-wrap: anywhere;
-  }
 
-  .summary .muted {
-    font-size: 0.85rem;
-  }
 
-  .stats {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 6px 16px;
-    margin-top: 6px;
-    font-size: 0.9rem;
-    color: var(--muted);
-  }
 
-  .stats b {
-    color: var(--ink);
-  }
 
   .link {
     padding: 0;
