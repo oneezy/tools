@@ -10,7 +10,7 @@
 .svelte-flow__attribution { background: transparent; color: var(--muted); font-size: 9px; opacity: .6; }
 .svelte-flow__attribution a { color: inherit; }
 .svelte-flow__node { cursor: pointer; }
-.svelte-flow__node-group { cursor: default; pointer-events: none; }
+.svelte-flow__node-group { cursor: default; pointer-events: none; background: none; border: 0; padding: 0; border-radius: 0; box-shadow: none; }
 .hd { opacity: 0; pointer-events: none; width: 1px; height: 1px; min-width: 0; min-height: 0; border: 0; }
 
 .sk { --lc: var(--muted); width: 232px; height: 92px; box-sizing: border-box; background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 9px 11px 8px; display: flex; flex-direction: column; gap: 4px; box-shadow: var(--shadow); position: relative; transition: opacity .15s, border-color .15s, box-shadow .15s; }
@@ -143,3 +143,5 @@
 /* the detail panel covers the right edge; the minimap comes back when it closes */
 .board.has-detail .svelte-flow__minimap { display: none; }
 @media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
+.lk .part { display: flex; gap: 8px; align-items: center; padding: 5px 8px; border-radius: 8px; color: var(--ink); text-decoration: none; }
+.lk .part:hover { background: var(--surface-2); }

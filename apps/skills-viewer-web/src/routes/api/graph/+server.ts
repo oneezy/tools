@@ -22,7 +22,7 @@ export const GET: RequestHandler = async ({ url }) => {
     });
   } catch (err: unknown) {
     if (err instanceof AnalyzeError) {
-      return fail({ error: err.message, rateLimitRemaining: err.rateLimitRemaining, rateLimitReset: err.rateLimitReset }, err.status);
+      return fail({ error: err.message, rateLimitReset: err.rateLimitReset }, err.status);
     }
     console.error(err);
     return fail({ error: "Something went wrong reading that repo." }, 500);

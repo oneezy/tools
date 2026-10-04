@@ -21,6 +21,8 @@ export interface SkillNodeData extends Record<string, unknown> {
 export interface GroupNodeData extends Record<string, unknown> {
   label: string;
   count: number;
+  /** plugin parts by kind, shown after the skill count */
+  parts: Record<string, number>;
   color: number;
   family: boolean;
 }
@@ -150,6 +152,7 @@ async function layoutLibraries(
             label: fam ? `${fam.prefix}-*` : groupKey,
             count: family ? (c.children?.length ?? 0) : data.nodes.filter((n) => n.group === groupKey).length,
             color: colors.get(groupKey) ?? 0,
+            parts: family ? {} : (data.groups.find((g) => g.key === groupKey)?.parts ?? {}),
             family,
           },
         });

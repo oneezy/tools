@@ -2,6 +2,6 @@
   "$schema": "https://openapi.vercel.sh/vercel.json",
   "framework": "sveltekit",
   "installCommand": "corepack enable pnpm && pnpm install --frozen-lockfile",
-  "buildCommand": "pnpm run build",
+  "buildCommand": "cd ../.. && pnpm --filter \"skills-viewer-web...\" run build",
   "ignoreCommand": "npx turbo-ignore --fallback=HEAD^1"
 }

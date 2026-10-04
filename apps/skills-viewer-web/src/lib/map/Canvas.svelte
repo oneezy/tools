@@ -229,7 +229,7 @@
       <div class="brand-title"><a href="/" class="home" aria-label="Map another repo">←</a>{title}</div>
       <div class="brand-sub">
         {data.nodes.length} skills · {data.edges.length} links · {data.flows.length} flows{data.duplicates
-          ? ` · ${data.duplicates} copies merged`
+          ? ` · ${data.duplicates} ${data.duplicates === 1 ? "copy" : "copies"} merged`
           : ""}
       </div>
     </div>

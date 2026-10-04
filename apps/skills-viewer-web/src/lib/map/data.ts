@@ -1,4 +1,4 @@
-import type { EdgeType, Evidence, Graph, SkillNode } from "skills-viewer/src/types.ts";
+import type { EdgeType, Evidence, Graph } from "skills-viewer";
 
 /** One skill as the canvas draws it. */
 export interface MapNode {
@@ -18,6 +18,8 @@ export interface MapNode {
   references: number;
   /** repo-relative path of SKILL.md */
   file: string;
+  /** the skill's own files (scripts, references, assets) */
+  parts: { kind: string; name: string; file: string }[];
 }
 
 export interface MapEdge {
@@ -41,6 +43,8 @@ export interface MapGroup {
   /** index into the --g0..--g7 palette */
   color: number;
   count: number;
+  /** a plugin's own parts by kind (commands, agents, hooks, MCP servers), for the group label */
+  parts: Record<string, number>;
 }
 
 export interface MapData {
@@ -50,7 +54,7 @@ export interface MapData {
   groups: MapGroup[];
   /** "group:prefix" → family of 4+ skills sharing a name prefix inside one group */
   families: Record<string, { group: string; prefix: string }>;
-  /** skills dropped because another copy of the same id was kept (skills/ + plugins/ builds) */
+  /** skill copies the engine merged (skills/ + plugins/ builds of the same skill) */
   duplicates: number;
 }
 
@@ -58,12 +62,8 @@ export const PALETTE_SIZE = 8;
 
 /** Turn the engine's graph into what the canvas needs: unique ids, groups, families, degrees. */
 export function toMapData(graph: Graph, repoName: string): MapData {
-  const kept = new Map<string, SkillNode>();
-  for (const n of graph.nodes) {
-    const prev = kept.get(n.id);
-    if (!prev || preferCopy(n, prev)) kept.set(n.id, n);
-  }
-  const duplicates = graph.nodes.length - kept.size;
+  const kept = new Map(graph.nodes.map((n) => [n.id, n]));
+  const duplicates = graph.nodes.reduce((sum, n) => sum + (n.copies?.length ?? 0), 0);
 
   const seen = new Set<string>();
   const edges: MapEdge[] = [];
@@ -86,9 +86,21 @@ export function toMapData(graph: Graph, repoName: string): MapData {
     d(e.target).in++;
   }
 
+  const ownParts = new Map<string, MapNode["parts"]>();
+  const pluginParts = new Map<string, Record<string, number>>();
+  for (const p of graph.parts ?? []) {
+    if (p.skill) ownParts.set(p.skill, [...(ownParts.get(p.skill) ?? []), { kind: p.kind, name: p.name, file: p.file }]);
+    else if (p.plugin) {
+      const key = p.plugin.replace(/^plugin:/, "");
+      const counts = pluginParts.get(key) ?? {};
+      counts[p.kind] = (counts[p.kind] ?? 0) + 1;
+      pluginParts.set(key, counts);
+    }
+  }
+
   const nodes: MapNode[] = [...kept.values()].map((n) => ({
     id: n.id,
-    group: groupOf(n.dir, repoName),
+    group: n.plugin ? n.plugin.replace(/^plugin:/, "") : groupOf(n.dir, repoName),
     description: n.description,
     short: shortDescription(n.description),
     manual: n.mode === "manual",
@@ -100,26 +112,17 @@ export function toMapData(graph: Graph, repoName: string): MapData {
     scripts: n.scripts.length,
     references: n.references.length,
     file: n.file,
+    parts: ownParts.get(n.id) ?? [],
   }));
 
   const counts = new Map<string, number>();
   for (const n of nodes) counts.set(n.group, (counts.get(n.group) ?? 0) + 1);
   const groups: MapGroup[] = [...counts.entries()]
     .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
-    .map(([key, count], i) => ({ key, label: key, color: i % PALETTE_SIZE, count }));
+    .map(([key, count], i) => ({ key, label: key, color: i % PALETTE_SIZE, count, parts: pluginParts.get(key) ?? {} }));
 
   return { nodes, edges, flows, groups, families: findFamilies(nodes), duplicates };
 }
-
-/** The authored copy (outside plugins/) beats a built plugin copy; otherwise the shorter path. */
-function preferCopy(a: SkillNode, b: SkillNode): boolean {
-  const ap = isPluginPath(a.dir);
-  const bp = isPluginPath(b.dir);
-  if (ap !== bp) return !ap;
-  return a.dir.length < b.dir.length;
-}
-
-const isPluginPath = (dir: string) => dir.split("/").includes("plugins");
 
 /**
  * `plugins/<name>/…` → the plugin. Otherwise the folder that holds the skill folders,

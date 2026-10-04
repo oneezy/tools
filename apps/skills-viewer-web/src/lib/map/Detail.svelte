@@ -40,8 +40,8 @@
         <span class="chip">{n.manual ? "slash only" : "auto + slash"}</span>
         {#if n.entry}<span class="chip">entry point</span>{/if}
         <span class="chip">{n.lines} lines</span>
-        {#if n.references}<span class="chip">{n.references} reference files</span>{/if}
-        {#if n.scripts}<span class="chip">{n.scripts} scripts</span>{/if}
+        {#if n.references}<span class="chip">{n.references} reference {n.references === 1 ? "file" : "files"}</span>{/if}
+        {#if n.scripts}<span class="chip">{n.scripts} {n.scripts === 1 ? "script" : "scripts"}</span>{/if}
       </div>
     </div>
     <button class="close" onclick={onclose} aria-label="Close details">×</button>
@@ -79,6 +79,18 @@
         </div>
       </div>
     {/if}
-    <a class="path" href="{blobBase}/{n.file}" target="_blank" rel="noreferrer">{n.file}</a>
+    {#if n.parts.length}
+      <div class="d-sec">
+        <h4>Files · {n.parts.length}</h4>
+        <div class="lk">
+          {#each n.parts as part (part.file)}
+            <a class="part" href={blobBase.replace(/\/$/, "") + "/" + part.file} target="_blank" rel="noreferrer">
+              <span class="chip">{part.kind}</span><span class="nm">{part.name}</span>
+            </a>
+          {/each}
+        </div>
+      </div>
+    {/if}
+    <a class="path" href={blobBase.replace(/\/$/, "") + "/" + n.file} target="_blank" rel="noreferrer">{n.file}</a>
   </div>
 </aside>

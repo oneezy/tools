@@ -1,4 +1,4 @@
-import type { EdgeType } from "skills-viewer/src/types.ts";
+import type { EdgeType } from "skills-viewer";
 
 export const EDGE_TYPES: { key: EdgeType; label: string }[] = [
   { key: "calls", label: "Calls" },

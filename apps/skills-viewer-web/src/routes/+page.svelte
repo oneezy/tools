@@ -14,6 +14,8 @@
   let error = $state<ApiError | null>(null);
 
   const repoParam = $derived(page.url.searchParams.get("repo"));
+  const src = $derived(result?.graph.meta.source.kind === "github" ? result.graph.meta.source : null);
+  const mapTitle = $derived(src ? `${src.owner}/${src.repo}${src.subpath ? `/${src.subpath}` : ""}` : "");
 
   // the URL is the source of truth, so a pasted ?repo= link or Back loads that repo
   $effect(() => {
@@ -58,7 +60,7 @@
     const blob = new Blob([JSON.stringify(result.graph, null, 2)], { type: "application/json" });
     const a = document.createElement("a");
     a.href = URL.createObjectURL(blob);
-    a.download = `${result.source.owner}-${result.source.repo}-graph.json`;
+    a.download = `${mapTitle.replaceAll("/", "-")}-graph.json`;
     a.click();
     URL.revokeObjectURL(a.href);
   }
@@ -68,16 +70,16 @@
 </script>
 
 <svelte:head>
-  <title>{result && status === "done" ? `${result.source.owner}/${result.source.repo} · Skills map` : "Skills map"}</title>
+  <title>{status === "done" && mapTitle ? `${mapTitle} · Skills map` : "Skills map"}</title>
   <meta name="description" content="Paste a GitHub repo of agent skills and see how they connect." />
 </svelte:head>
 
-{#if status === "done" && result && result.graph.nodes.length}
+{#if status === "done" && result && src && result.graph.nodes.length}
   <SkillMap
     graph={result.graph}
-    title={result.graph.meta.roots[0]}
-    repoName={result.source.repo}
-    blobBase={result.source.blobBase}
+    title={mapTitle}
+    repoName={src.repo}
+    blobBase={src.blobBase}
   />
 {:else}
   <main>
@@ -121,7 +123,7 @@
       </div>
     {:else if status === "done" && result}
       <p class="state">
-        No SKILL.md files in {result.graph.meta.roots[0]}.
+        No SKILL.md files in {mapTitle}.
         <button class="link" onclick={downloadJson}>graph.json</button>
       </p>
     {/if}
