@@ -1,0 +1,9 @@
+{
+  "mcpServers": {
+    "tracker": {
+      "command": "node",
+      "args": ["${CLAUDE_PLUGIN_ROOT}/scripts/tracker.mjs"],
+      "env": { "TRACKER_TOKEN": "do-not-copy-me" }
+    }
+  }
+}

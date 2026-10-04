@@ -1,0 +1,8 @@
+{
+  "name": "example-tools",
+  "owner": { "name": "example" },
+  "plugins": [
+    { "name": "toolkit", "source": "./plugins/toolkit", "description": "Review and deploy helpers." },
+    { "name": "elsewhere", "source": { "source": "github", "repo": "example/elsewhere" }, "description": "Lives in another repo." }
+  ]
+}

@@ -1,7 +1,6 @@
-import fs from "node:fs";
-import path from "node:path";
 import YAML from "yaml";
 import type { Mode } from "./types.js";
+import { basename, dirname, join, type FileSet } from "./vfs.js";
 
 export interface ParsedSkill {
   id: string;
@@ -20,10 +19,14 @@ export interface ParsedSkill {
 
 const FM_RE = /^---\r?\n([\s\S]*?)\r?\n---[ \t]*(?:\r?\n|$)/;
 
-export function parseSkillFile(file: string): ParsedSkill {
-  const raw = fs.readFileSync(file, "utf8");
-  const dir = path.dirname(file);
-  const folder = path.basename(dir);
+export interface MarkdownDoc {
+  frontmatter: Record<string, unknown>;
+  body: string[];
+  bodyStart: number;
+}
+
+/** Split YAML frontmatter from a markdown body, keeping file line numbers. */
+export function parseMarkdown(raw: string): MarkdownDoc {
   let frontmatter: Record<string, unknown> = {};
   let bodyText = raw;
   let bodyStart = 1;
@@ -38,6 +41,14 @@ export function parseSkillFile(file: string): ParsedSkill {
     bodyText = raw.slice(m[0].length);
     bodyStart = m[0].split("\n").length;
   }
+  return { frontmatter, body: bodyText.split(/\r?\n/), bodyStart };
+}
+
+export function parseSkillFile(fs: FileSet, file: string): ParsedSkill {
+  const raw = fs.read(file) ?? "";
+  const dir = dirname(file);
+  const folder = basename(dir);
+  const { frontmatter, body, bodyStart } = parseMarkdown(raw);
   const name = typeof frontmatter.name === "string" && frontmatter.name.trim() ? frontmatter.name.trim() : folder;
   const description = typeof frontmatter.description === "string" ? frontmatter.description.trim() : "";
   return {
@@ -47,20 +58,20 @@ export function parseSkillFile(file: string): ParsedSkill {
     dir,
     file,
     frontmatter,
-    body: bodyText.split(/\r?\n/),
+    body,
     bodyStart,
-    codex: readCodexPolicy(dir),
-    scripts: listFiles(path.join(dir, "scripts")),
-    references: listFiles(path.join(dir, "references")),
+    codex: readCodexPolicy(fs, dir),
+    scripts: listFiles(fs, join(dir, "scripts")),
+    references: listFiles(fs, join(dir, "references")),
   };
 }
 
 /** Codex keeps invocation policy in agents/openai.yaml next to SKILL.md. */
-function readCodexPolicy(dir: string): { allowImplicitInvocation: boolean } {
-  const f = path.join(dir, "agents", "openai.yaml");
-  if (!fs.existsSync(f)) return { allowImplicitInvocation: true };
+function readCodexPolicy(fs: FileSet, dir: string): { allowImplicitInvocation: boolean } {
+  const text = fs.read(join(dir, "agents", "openai.yaml"));
+  if (text === undefined) return { allowImplicitInvocation: true };
   try {
-    const y = YAML.parse(fs.readFileSync(f, "utf8")) as Record<string, unknown> | null;
+    const y = YAML.parse(text) as Record<string, unknown> | null;
     const policy = (y?.policy as Record<string, unknown> | undefined) ?? y ?? {};
     return { allowImplicitInvocation: policy.allow_implicit_invocation !== false };
   } catch {
@@ -68,16 +79,12 @@ function readCodexPolicy(dir: string): { allowImplicitInvocation: boolean } {
   }
 }
 
-function listFiles(dir: string): string[] {
-  try {
-    return fs
-      .readdirSync(dir, { withFileTypes: true })
-      .filter((e) => e.isFile())
-      .map((e) => e.name)
-      .sort();
-  } catch {
-    return [];
-  }
+/** Direct children of `dir`. */
+function listFiles(fs: FileSet, dir: string): string[] {
+  return fs.paths
+    .filter((p) => dirname(p) === dir)
+    .map(basename)
+    .sort();
 }
 
 export function claudeMode(fm: Record<string, unknown>): Mode {
