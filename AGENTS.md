@@ -6,11 +6,11 @@
 
 - **pnpm** (`packageManager` in the root `package.json`) installs dependencies. `pnpm install` once at the root.
 - **Turborepo** (`turbo.json`) runs tasks across packages: `pnpm build`, `pnpm test`, `pnpm check` and `pnpm dev` at the root run every package's script of that name, in dependency order, cached.
-- **Vite Plus** (`vp`) is the dev server where a package has one. No package has one yet; the first app under `apps/` adds Vite Plus to its own `package.json`, never to a package without a dev server.
+- **Vite Plus** (`vp`) is the dev server where a package has one. Only `apps/skills-viewer-web` has one (SvelteKit on `vite-plus`); an app adds Vite Plus to its own `package.json`, never to a package without a dev server. The `vite`/`vitest` overrides in `pnpm-workspace.yaml` keep every package on the copies Vite Plus bundles; bump them with `vite-plus`.
 
 Windows 11 with PowerShell 7 is the primary host: every script is run there first. Linux is a future target, so nothing in a `package.json` may be Windows-only: `scripts/python.mjs` runs Python (`py -3` on Windows, `python3` elsewhere) and `scripts/syntax-check.ps1` runs under pwsh on either.
 
-Each package keeps its language. `packages/skills-sync` (TypeScript, published as `@oneezy/skills-sync`), `packages/skills-viewer` (TypeScript), `packages/remote-sessions` (Python), `packages/task-manager` (PowerShell + bash), `packages/apps-sync` (PowerShell + Python). A Python or PowerShell package has a minimal `package.json` whose `test` and `check` scripts run what the package already had, so Turborepo can run them. `clis/<old-name>/` holds compatibility shims only: every launcher and old path there delegates to its package, so saved shortcuts and documented paths keep working. Do not add code under `clis/`.
+Each package keeps its language. `packages/skills-sync` (TypeScript, published as `@oneezy/skills-sync`), `packages/skills-viewer` (TypeScript), `packages/remote-sessions` (Python), `packages/task-manager` (PowerShell + bash), `packages/apps-sync` (PowerShell + Python), `apps/skills-viewer-web` (SvelteKit, deployed to Vercel). A Python or PowerShell package has a minimal `package.json` whose `test` and `check` scripts run what the package already had, so Turborepo can run them. `clis/<old-name>/` holds compatibility shims only: every launcher and old path there delegates to its package, so saved shortcuts and documented paths keep working. Do not add code under `clis/`.
 
 ## Agent skills
 

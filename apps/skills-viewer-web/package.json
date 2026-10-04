@@ -1,0 +1,37 @@
+{
+  "name": "skills-viewer-web",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Paste a GitHub repo, see its agent skills map. SvelteKit on Vite+, deployed to Vercel; parses with the skills-viewer engine.",
+  "type": "module",
+  "imports": {
+    "#lib": "./src/lib",
+    "#lib/*": "./src/lib/*"
+  },
+  "scripts": {
+    "dev": "vp dev",
+    "build": "vp build",
+    "preview": "vp preview",
+    "test": "vp test",
+    "check": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json",
+    "prepare": "svelte-kit sync || echo ''"
+  },
+  "dependencies": {
+    "@xyflow/svelte": "^1.7.0",
+    "d3-force": "^3.0.0",
+    "elkjs": "^0.12.0",
+    "skills-viewer": "workspace:*"
+  },
+  "devDependencies": {
+    "@sveltejs/adapter-vercel": "^7.0.0",
+    "@sveltejs/kit": "^3.0.0",
+    "@sveltejs/vite-plugin-svelte": "^7.3.1",
+    "@types/d3-force": "^3.0.10",
+    "@types/node": "^24.0.0",
+    "svelte": "^5.57.1",
+    "svelte-check": "^4.7.6",
+    "typescript": "^6.0.0",
+    "vite": "npm:@voidzero-dev/vite-plus-core@1.0.0",
+    "vite-plus": "1.0.0"
+  }
+}
