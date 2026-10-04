@@ -35,9 +35,15 @@ const SUGGEST = /\b(tell the (?:user|human)|ask the (?:user|human)|suggest|recom
 /** the mention is the subject of a sentence that describes it: "/x sharpens the idea", "/x is for ..." */
 const DESCRIBES = /^\W{0,6}(?:is|are|was|does|sharpens|works|comes|runs|moves|builds|turns|helps|handles|takes|learns|delegates|answers|makes|gives|lets|reads|writes|records|keeps|finds|sets|guides|walks|reviews|plans|charts|resolves|investigates|generates|creates|produces|migrates|scaffolds|grills|renders|drives|covers|reports|for\b|when\b|if\b|to\b|:)/i;
 const ROUTES = /(?:→|->|=>|⇒)\s*\W{0,4}$/;
-const VERB_NEAR = /\b(call|calls|calling|invoke|invokes|invoking|run|runs|running|use|uses|using|dispatch|delegate|delegates|spin up|launch|launches|start|trigger|apply|follow|load|loads|execute|switch to|go to|enter|drive|driving|via|with|through)\b\W{0,25}$/i;
+const VERB_NEAR = /\b(call|calls|calling|invoke|invokes|invoking|run|runs|running|use|uses|using|dispatch|delegate|delegates|spin up|launch|launches|start|trigger|apply|follow|load|loads|execute|switch to|go to|enter|drive|driving|via|with|through)\b(?:\W{1,3}(?:the|a|an))?\W{0,25}$/i;
 
 const RANK: Record<EdgeType, number> = { calls: 3, prerequisite: 2, suggests: 1, reference: 0 };
+
+/** Anything with a markdown body that can name skills: a skill, a plugin command or an agent. */
+export type Doc = Pick<ParsedSkill, "id" | "name" | "body" | "bodyStart"> & {
+  /** a plugin part: its name resolves only when no skill already has it */
+  part?: boolean;
+};
 
 export interface DetectResult {
   edges: Edge[];
@@ -46,13 +52,21 @@ export interface DetectResult {
   mentions: Mention[];
 }
 
-export function detect(skills: ParsedSkill[], modes: Map<string, Mode>): DetectResult {
+export function detect(skills: Doc[], modes: Map<string, Mode>): DetectResult {
   const byName = new Map<string, string>();
   for (const s of skills) {
+    if (s.part) continue;
     byName.set(s.id.toLowerCase(), s.id);
     byName.set(s.name.toLowerCase(), s.id);
   }
-  const hyphenated = skills.map((s) => s.id).filter((id) => id.includes("-"));
+  for (const s of skills) if (s.part && !byName.has(s.name.toLowerCase())) byName.set(s.name.toLowerCase(), s.id);
+  // bare hyphenated names: a skill by its id (as before), a part by its name
+  const hyphenated: Array<[string, string]> = [
+    ...skills.filter((s) => !s.part && s.id.includes("-")).map((s): [string, string] => [s.id, s.id]),
+    ...skills
+      .filter((s) => s.part && s.name.includes("-") && new RegExp(`^${NAME}$`).test(s.name) && byName.get(s.name.toLowerCase()) === s.id)
+      .map((s): [string, string] => [s.name, s.id]),
+  ];
 
   const mentions: Mention[] = [];
   const flows: Flow[] = [];
@@ -113,7 +127,7 @@ function dominantType(evidence: Evidence[]): EdgeType {
   return "reference";
 }
 
-function lineOf(skills: ParsedSkill[], id: string, line: number): string {
+function lineOf(skills: Doc[], id: string, line: number): string {
   const s = skills.find((x) => x.id === id);
   if (!s) return "";
   const text = s.body[line - s.bodyStart] ?? "";
@@ -121,7 +135,7 @@ function lineOf(skills: ParsedSkill[], id: string, line: number): string {
   return t.length > 220 ? t.slice(0, 217) + "..." : t;
 }
 
-function mentionsIn(s: ParsedSkill, byName: Map<string, string>, hyphenated: string[]): Mention[] {
+function mentionsIn(s: Doc, byName: Map<string, string>, hyphenated: Array<[string, string]>): Mention[] {
   const out: Mention[] = [];
   s.body.forEach((text, i) => {
     const lineNo = s.bodyStart + i;
@@ -160,16 +174,16 @@ function mentionsIn(s: ParsedSkill, byName: Map<string, string>, hyphenated: str
       }
     }
     // bare hyphenated names (e.g. "grill-with-docs" without a slash) count as references
-    for (const id of hyphenated) {
+    for (const [name, id] of hyphenated) {
       if (id === s.id) continue;
-      const re = new RegExp(`(?<![\\w/.$@\`-])${escape(id)}(?![\\w/.-])`, "g");
+      const re = new RegExp(`(?<![\\w/.$@\`-])${escape(name)}(?![\\w/.-])`, "g");
       let m: RegExpExecArray | null;
       while ((m = re.exec(text))) {
         const start = m.index;
-        const end = start + id.length;
+        const end = start + name.length;
         if (!free(start, end)) continue;
         consumed.push([start, end]);
-        out.push({ source: s.id, target: id, rawName: id, line: lineNo, col: start, end, pattern: "bare", type: classify(text, start, end, "bare") });
+        out.push({ source: s.id, target: id, rawName: name, line: lineNo, col: start, end, pattern: "bare", type: classify(text, start, end, "bare") });
       }
     }
   });
@@ -191,6 +205,8 @@ export function classify(text: string, start: number, end: number, pattern: stri
   if (PREREQ.test(before + " " + after) || PREREQ_AFTER.test(after)) return "prerequisite";
   if (pattern !== "backtick" && pattern !== "bare" && (ROUTES.test(near) || DESCRIBES.test(after))) return "suggests";
   if (/^\s*(?:[-*+]|\d+[.)])\s*\*\*\W{0,3}$/.test(before)) return "suggests";
+  // a menu entry with a bold title first: "- **Fix Root Causes** (**principle-fix-root-causes**). Debugging."
+  if (/^\s*(?:[-*+]|\d+[.)])\s*\*\*[^*]{1,60}\*\*\s*[(:—–-]?\s*\*{0,2}`?$/.test(before)) return "suggests";
   if (SUGGEST.test(before)) return "suggests";
   if (pattern === "backtick" || pattern === "bare") return VERB_NEAR.test(near) ? "calls" : "reference";
   if (VERB_NEAR.test(near)) return "calls";
@@ -218,7 +234,7 @@ const LOOP = /\b(until|loop|repeat(?:ed|s|edly)?|iterate|each round|every round|
 const UNTIL = /\buntil\s+([^.;:\n]{3,90})/i;
 
 /** Split a body into paragraphs and ordered-list items, tracking file line numbers. */
-function blocksOf(s: ParsedSkill): Block[] {
+function blocksOf(s: Doc): Block[] {
   const blocks: Block[] = [];
   let cur: Block | null = null;
   let listId = 0;
@@ -277,7 +293,7 @@ function blocksOf(s: ParsedSkill): Block[] {
   return blocks;
 }
 
-function flowsIn(s: ParsedSkill, mentions: Mention[]): Flow[] {
+function flowsIn(s: Doc, mentions: Mention[]): Flow[] {
   const flows: Flow[] = [];
   const blocks = blocksOf(s);
   const inBlock = (b: Block) => mentions.filter((m) => m.target && m.target !== s.id && m.line >= b.start && m.line <= b.end && m.type !== "reference");
@@ -326,17 +342,21 @@ function flowsIn(s: ParsedSkill, mentions: Mention[]): Flow[] {
   for (const b of blocks) {
     const ms = inBlock(b);
     if (ms.length === 0) continue;
+    // a menu entry ("- **Title** (**skill**). When to use it.") describes the skill, not a flow
+    if (/^\s*(?:[-*+]|\d+[.)])\s*\*\*[^*]{1,60}\*\*\s*[(:—–-]?\s*\*{0,2}`?[a-z][a-z0-9-]*`?\*{0,2}\)?\./.test(b.text)) continue;
     // only mentions within ~160 chars of the cue word belong to the flow
     const lines = b.text.split("\n");
     const offsetOf = (x: Mention) => lines.slice(0, x.line - b.start).reduce((n, l) => n + l.length + 1, 0) + x.col;
+    // cue words inside quotes are examples ("/loop until X"), not the skill's own flow
+    const cueText = b.text.replace(/"[^"\n]*"|“[^”\n]*”/g, (q) => " ".repeat(q.length));
     const nearCue = (re: RegExp): Mention[] => {
-      const m = re.exec(b.text);
+      const m = re.exec(cueText);
       if (!m) return [];
       return ms.filter((x) => Math.abs(offsetOf(x) - m.index) <= 160);
     };
     // "X ... until <condition>": the skill that loops is the nearest one named before the cue
     const subjectOf = (re: RegExp): Mention[] => {
-      const m = re.exec(b.text);
+      const m = re.exec(cueText);
       if (!m) return [];
       const before = ms.filter((x) => offsetOf(x) < m.index);
       if (before.length) return [before[before.length - 1]];
@@ -346,7 +366,7 @@ function flowsIn(s: ParsedSkill, mentions: Mention[]): Flow[] {
     if (par.length) add("parallel", [...new Set(par.map((m) => m.target as string))], `${s.name}: in parallel`, evidence(b, par));
     const loop = subjectOf(LOOP);
     if (loop.length) {
-      const u = UNTIL.exec(b.text)?.[1];
+      const u = UNTIL.exec(cueText)?.[1];
       add("loop", [...new Set(loop.map((m) => m.target as string))], u ? `loop until ${u.trim()}` : `${s.name}: loop`, evidence(b, loop), u);
     }
   }
@@ -359,7 +379,7 @@ function isSubsequence(small: string[], big: string[]): boolean {
   return i === small.length;
 }
 
-function trimLine(s: ParsedSkill, line: number): string {
+function trimLine(s: Doc, line: number): string {
   const t = (s.body[line - s.bodyStart] ?? "").trim();
   return t.length > 220 ? t.slice(0, 217) + "..." : t;
 }
