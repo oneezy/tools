@@ -44,6 +44,8 @@ jobs:
         with:
           node-version: 24
           registry-url: https://registry.npmjs.org
+          # the root packageManager names pnpm, which is installed in the next step, not yet here
+          package-manager-cache: false
 
       - name: npm 11.5.1 or later (trusted publishing) and pnpm
         run: |
