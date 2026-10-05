@@ -41,13 +41,15 @@ jobs:
         shell: bash
         working-directory: packages/skills-sync
     steps:
-      # The runner sets core.autocrlf true globally; the tests' own temp repos and clones must keep LF, as a
-      # contributor's checkout does (README: a package holds LF).
+      # The runner's Git sets core.autocrlf true; the tests' own temp repos and clones must keep LF, as a
+      # contributor's checkout does (README: a package holds LF). System level, because the CLI children the tests
+      # spawn run with a temp HOME and never read the global config.
       # The runner's default TEMP is an 8.3 short path (C:\Users\RUNNER~1) on another drive than the checkout; the
       # tests compare paths under temp folders with the real ones, so they get the runner's long-named temp folder.
       - name: git keeps line endings, temp has a long name
         working-directory: .
         run: |
+          git config --system core.autocrlf false
           git config --global core.autocrlf false
           echo "TEMP=$RUNNER_TEMP" >> "$GITHUB_ENV"
           echo "TMP=$RUNNER_TEMP" >> "$GITHUB_ENV"
