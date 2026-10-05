@@ -3,9 +3,10 @@
 # workflow, and only this workflow, publish the package, with a provenance statement tying each version to its commit.
 #
 # Runs on every push to main that touches the package or this file, and by hand from the Actions tab
-# (workflow_dispatch, e.g. to retry). A version already on npm is skipped, so a promotion that does not bump
-# `version` in packages/skills-sync/package.json publishes nothing. Windows, the primary host (AGENTS.md): the
-# junction tests in test/build.test.ts only pass there, and `prepublishOnly` reruns the whole suite.
+# (workflow_dispatch, e.g. to retry). A pull request touching them runs the same build and tests and publishes
+# nothing. A version already on npm is skipped, so a promotion that does not bump `version` in
+# packages/skills-sync/package.json publishes nothing. Windows, the primary host (AGENTS.md): the junction tests in
+# test/build.test.ts only pass there, and `prepublishOnly` reruns the whole suite.
 #
 # One-time setup on npmjs.com (works from a phone): @oneezy/skills-sync -> Settings -> Trusted Publisher ->
 # GitHub Actions, organization or user `oneezy`, repository `tools`, workflow filename `publish-skills-sync.yml`,
@@ -18,6 +19,10 @@ on:
     paths:
       - packages/skills-sync/**
       - .github/workflows/publish-skills-sync.yml
+  pull_request:
+    paths:
+      - packages/skills-sync/**
+      - .github/workflows/publish-skills-sync.yml
   workflow_dispatch:
 
 permissions:
@@ -25,7 +30,7 @@ permissions:
   id-token: write
 
 concurrency:
-  group: publish-skills-sync
+  group: publish-skills-sync-${{ github.event_name == 'pull_request' && github.ref || 'publish' }}
   cancel-in-progress: false
 
 jobs:
@@ -36,6 +41,17 @@ jobs:
         shell: bash
         working-directory: packages/skills-sync
     steps:
+      # The runner sets core.autocrlf true globally; the tests' own temp repos and clones must keep LF, as a
+      # contributor's checkout does (README: a package holds LF).
+      # The runner's default TEMP is an 8.3 short path (C:\Users\RUNNER~1) on another drive than the checkout; the
+      # tests compare paths under temp folders with the real ones, so they get the runner's long-named temp folder.
+      - name: git keeps line endings, temp has a long name
+        working-directory: .
+        run: |
+          git config --global core.autocrlf false
+          echo "TEMP=$RUNNER_TEMP" >> "$GITHUB_ENV"
+          echo "TMP=$RUNNER_TEMP" >> "$GITHUB_ENV"
+
       - uses: actions/checkout@v5
         with:
           persist-credentials: false
@@ -54,7 +70,14 @@ jobs:
           npm --version
           pnpm --version
 
+      - name: Build and test (pull request)
+        if: github.event_name == 'pull_request'
+        run: |
+          pnpm install --frozen-lockfile
+          pnpm test
+
       - name: Is this version on npm yet
+        if: github.event_name != 'pull_request'
         id: version
         run: |
           v=$(node -p "require('./package.json').version")
