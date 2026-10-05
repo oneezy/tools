@@ -18,7 +18,7 @@ import { discard } from "./stage.js";
 import { findProjects, home, isRepo, layers, projects, status, unlink, type Status } from "./steps.js";
 import { runInWsl, wslDistros } from "./wsl.js";
 
-const VERSION = "0.3.0";
+const VERSION = "0.4.0";
 const HELP = `skills-sync ${VERSION}
 One skills library, every harness, every project on this machine. Run it anywhere; it works out the rest.
 
@@ -35,7 +35,8 @@ Commands
   projects         only the project step
   refresh          resolve every source in skills-sync.json at the tip of its ref (a pinned skill at its pin): snapshot
                    under upstream/, rebuild the third-party working set, write skills-lock.json
-  add <source>     declare a source (owner/repo[#ref], a git URL or a path) in skills-sync.json, then refresh
+  add <source>     declare a source (owner/repo[#ref], a git URL or a path) and the plugin that packages it in
+                   skills-sync.json, then refresh
   build            write the plugin form into the library when skills-sync.json has generate.plugins on: --plugins and
                    --catalogs pick the committed outputs (both when neither is named), --artifacts writes the upload
                    archives; --check diffs instead of writing
@@ -49,9 +50,9 @@ Build
   --plugins              plugins/<id>/ for every plugin in the config: the skill copies, plugin.json,
                          .codex-plugin/plugin.json, .claude-plugin/plugin.json, LICENSE, NOTICE.md. Every copied SKILL.md
                          is marked metadata.internal: true, so npx skills installs each own skill once, from skills/
-                         (INSTALL_INTERNAL_SKILLS=1 re-exposes the copies). A package is versioned
-                         0.<commit count>.0+<sha12> of the library's HEAD, and keeps its version while its files do;
-                         a new or changed package needs the library's history for that count: not a shallow clone
+                         (INSTALL_INTERNAL_SKILLS=1 re-exposes the copies). A package is versioned 0.<n>.0+<sha12>:
+                         it keeps its version while its files do, and a change takes the next n (1 for a new package)
+                         with the library HEAD's sha; n never comes from git history, so it never goes backwards
   --catalogs             .claude-plugin/marketplace.json and .agents/plugins/marketplace.json, listing ./plugins/<id>
   --artifacts            artifacts/<id>-<version>.zip per plugin for the ChatGPT upload (stored, fixed timestamps, sorted:
                          the same input gives the same bytes), artifacts/releases.json (archive, sha256, version, source
@@ -67,6 +68,7 @@ Refresh and add
   --root <path>          add: where the skill folders live in the repo (default: skills/ when it exists, else the root)
   --skills <names|*>     add: which skills to take (default: all)
   --as <old=new,...>     add: take a skill under another name (tdd=pstack-tdd)
+  --plugin <id>          add: the plugin entry's id (default: the source id); --no-plugin declares none
 
 Options
   --repo <path>          the skills library (default: $SKILLS_REPO, ~/.skills-sync, a library folder above here)
@@ -104,6 +106,8 @@ interface Args {
   root?: string;
   skills?: string[] | "*";
   as: Record<string, string>;
+  /** add: the plugin entry's id; false for --no-plugin */
+  plugin?: string | false;
   /** build: which outputs; all when none is set */
   plugins: boolean;
   catalogs: boolean;
@@ -146,6 +150,8 @@ function parseArgs(argv: string[]): Args {
     } else if (x === "--frozen") a.frozen = true;
     else if (x === "--id") a.id = next();
     else if (x === "--root") a.root = next();
+    else if (x === "--plugin") a.plugin = next();
+    else if (x === "--no-plugin") a.plugin = false;
     else if (x === "--skills") {
       const v = next();
       a.skills = v === "*" ? "*" : list(v);
@@ -361,18 +367,18 @@ function reportRefresh(lib: Library, r: RefreshResult, unavailable: string[], ar
 function runAdd(lib: Library, args: Args, log: (m: string) => void, report: Report): void {
   const spec = args.positional[0];
   if (!spec) bail("add: which source? owner/repo[#ref], a git URL or a local path");
-  const r = addSource(lib, spec, { id: args.id, root: args.root, skills: args.skills, as: args.as, log });
+  const r = addSource(lib, spec, { id: args.id, root: args.root, skills: args.skills, as: args.as, plugin: args.plugin, log });
   if (!r.ok) bail(r.error);
   const names = Object.keys(r.entry.skills).length;
   const renames = Array.isArray(r.entry.skills) ? [] : Object.entries(r.entry.skills).filter(([a, b]) => a !== b);
   log(`${r.id}: ${r.entry.repo}@${r.entry.ref} (${r.staged.commit.slice(0, 7)}), ${names} of ${r.found.size} skills under ${r.entry.root ?? "the root"}${renames.length ? `, renaming ${renames.map(([a, b]) => `${a} -> ${b}`).join(", ")}` : ""}`);
   if (args.plan) {
     discard(r.staged);
-    process.stdout.write(`plan: would add to ${lib.configFile}:\n${JSON.stringify({ [r.id]: r.entry }, null, 2)}\n`);
+    process.stdout.write(`plan: would add to ${lib.configFile}:\n${JSON.stringify({ sources: { [r.id]: r.entry }, ...(r.plugin ? { plugins: { [r.plugin.id]: r.plugin.entry } } : {}) }, null, 2)}\n`);
     return;
   }
   fs.writeFileSync(lib.configFile, configText(r.config));
-  log(`wrote ${path.basename(lib.configFile)}`);
+  log(`wrote ${path.basename(lib.configFile)}${r.plugin ? `, with plugin ${r.plugin.id}; build --plugins --catalogs packages it` : ""}`);
   const local = readLocal(lib.root);
   const unavailable = args.retry ? [] : local.unavailable ?? [];
   const res = refresh(lib, { frozen: false, plan: false, unavailable, log, prestaged: { [r.id]: r.staged } });
@@ -386,8 +392,7 @@ function runAdd(lib: Library, args: Args, log: (m: string) => void, report: Repo
  * build: the plugin form from skills-sync.json, every output computed in memory and written only where disk differs.
  * --check reports the differences instead and exits 1 when there are any; CI runs it on every push. A package that
  * cannot be built (a group without skills, a source not in the config or without a snapshot, a link inside the
- * package) is a conflict: left alone, exit 1 in both modes, listed as drift by --check. So is a new or changed package
- * in a shallow clone, for build alone: --check lists the paths that differ there. The committed form (packages
+ * package) is a conflict: left alone, exit 1 in both modes, listed as drift by --check. The committed form (packages
  * and catalogs) is what a build with no output named writes and what --check looks at; the archives under artifacts/
  * are written only when --artifacts asks, and never checked.
  */
@@ -399,12 +404,12 @@ function runBuild(lib: Library, args: Args, log: (m: string) => void, report: Re
   if (r.off && !args.quiet) log(`generate.plugins is false in ${path.basename(lib.configFile)}: nothing built, nothing checked`);
   const conflicts = r.report.conflicts().length;
   if (!args.check) {
-    printReport(report, args, { version: r.version });
+    printReport(report, args, { versions: r.versions });
     if (conflicts) process.exitCode = 1;
     return;
   }
   if (r.drift.length) process.exitCode = 1;
-  if (args.json) return printReport(report, args, { check: true, drift: r.drift, version: r.version });
+  if (args.json) return printReport(report, args, { check: true, drift: r.drift, versions: r.versions });
   for (const a of report.actions) if (a.kind === "note" || a.kind === "conflict") process.stdout.write(line(a) + "\n");
   for (const d of r.drift) process.stdout.write(`drift        ${d}\n`);
   const fix = conflicts ? `${conflicts} conflict(s) above to fix first, then build --plugins --catalogs` : "run build --plugins --catalogs";

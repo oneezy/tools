@@ -246,7 +246,7 @@ test("two builds of the same input give byte-identical archives and record, from
   library.commit("edit own-one");
   const edited = cli(...ALL, "--json");
   assert.equal(edited.status, 0, edited.stderr);
-  const v3 = `0.3.0+${library.git("rev-parse", "--short=12", "HEAD")}`;
+  const v3 = `0.2.0+${library.git("rev-parse", "--short=12", "HEAD")}`;
   const after = files("artifacts");
   assert.deepEqual([...after.keys()].sort(), [`oneezy-${v3}.zip`, "releases.json", `up-${v1}.zip`], "the older oneezy archive is gone");
   assert.ok(after.get(`up-${v1}.zip`)!.equals(first.get(`up-${v1}.zip`)!), "the untouched plugin's archive: same name, same bytes");
@@ -338,7 +338,7 @@ test("artifacts/releases.json records per plugin its archive, sha256, version, s
   config({ releases: { up: recorded, oneezy: own } });
   const head = library.commit("releases");
   assert.equal(cli(...ALL, "--quiet").status, 0);
-  const version = `0.2.0+${library.git("rev-parse", "--short=12", "HEAD")}`;
+  const version = `0.1.0+${library.git("rev-parse", "--short=12", "HEAD")}`;
   assert.deepEqual(artifacts(), [`oneezy-${version}.zip`, "releases.json", `up-${version}.zip`, "up.changes.md"]);
 
   const record = json("artifacts/releases.json");

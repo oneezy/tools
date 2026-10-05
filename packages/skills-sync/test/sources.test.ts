@@ -449,10 +449,10 @@ function stagedClones(): string[] {
   return fs.readdirSync(tmpDir).filter((n) => n.startsWith("skills-sync-src-"));
 }
 
-test("add <path to the upstream> writes the config entry (default branch, all skills, no policy) and snapshots; --id, --root, --skills and --as are honoured; nothing lands outside the library and the temp clone is gone", () => {
+test("add <path to the upstream> writes the config entry (default branch, all skills, no policy) and the plugin entry that packages it, and snapshots; --id, --root, --skills, --as, --plugin and --no-plugin are honoured; a plugin id already declared is refused before anything is written; nothing lands outside the library and the temp clone is gone", () => {
   const all = cli("add", up.dir, "--quiet");
   assert.equal(all.status, 0, all.stderr);
-  assert.deepEqual(json(lib.configFile), { version: 1, sources: { up: { repo: up.dir, ref: "main", root: "skills", skills: ["a", "b", "c"], attribution: ["LICENSE"] } }, plugins: {} });
+  assert.deepEqual(json(lib.configFile), { version: 1, sources: { up: { repo: up.dir, ref: "main", root: "skills", skills: ["a", "b", "c"], attribution: ["LICENSE"] } }, plugins: { up: { displayName: "Up", source: "up" } } });
   for (const n of ["a", "b", "c"]) assert.ok(fs.existsSync(path.join(lib.upstream, "up", "skills", n, "SKILL.md")), `${n} snapshotted`);
   assert.deepEqual(Object.keys(json(lib.lockFile).skills), ["a", "b", "c"]);
   assert.equal(json(lib.lockFile).skills.a.commit, up.head());
@@ -464,6 +464,7 @@ test("add <path to the upstream> writes the config entry (default branch, all sk
   const picked = cli("add", up.dir, "--id", "picked", "--root", "skills", "--skills", "a,b", "--as", "b=x-b", "--quiet");
   assert.equal(picked.status, 0, picked.stderr);
   assert.deepEqual(json(lib.configFile).sources.picked, { repo: up.dir, ref: "main", root: "skills", skills: { a: "a", b: "x-b" }, attribution: ["LICENSE"] });
+  assert.deepEqual(json(lib.configFile).plugins.picked, { displayName: "Picked", source: "picked" }, "the plugin id defaults to the source id");
   assert.ok(fs.existsSync(path.join(lib.upstream, "picked", "skills", "b", "SKILL.md")));
   assert.ok(!fs.existsSync(path.join(lib.upstream, "picked", "skills", "c")));
   assert.ok(body("x-b").startsWith("---\nname: x-b\n"));
@@ -472,6 +473,21 @@ test("add <path to the upstream> writes the config entry (default branch, all sk
   assert.equal(unknown.status, 1);
   assert.match(unknown.stderr, /zzz/);
   assert.ok(!("nope" in json(lib.configFile).sources), "nothing written for a failed add");
+
+  const named = cli("add", up.dir, "--id", "named-src", "--skills", "a", "--plugin", "my-plugin", "--quiet");
+  assert.equal(named.status, 0, named.stderr);
+  assert.deepEqual(json(lib.configFile).plugins["my-plugin"], { displayName: "My Plugin", source: "named-src" });
+  assert.ok(!("named-src" in json(lib.configFile).plugins));
+
+  const taken = cli("add", up.dir, "--id", "taken", "--skills", "a", "--plugin", "up", "--quiet");
+  assert.equal(taken.status, 1);
+  assert.match(taken.stderr, /plugin up is already declared/);
+  assert.ok(!("taken" in json(lib.configFile).sources), "a refused plugin id writes no source either");
+
+  const bare = cli("add", up.dir, "--id", "bare", "--skills", "a", "--no-plugin", "--quiet");
+  assert.equal(bare.status, 0, bare.stderr);
+  assert.ok("bare" in json(lib.configFile).sources);
+  assert.ok(!Object.values(json(lib.configFile).plugins as Record<string, { source?: string }>).some((p) => p.source === "bare"), "--no-plugin declares none");
 
   assert.deepEqual(fs.readdirSync(homeDir), [], "add writes nothing into the home folder or any harness");
   assert.deepEqual(stagedClones(), [], "temp clones deleted");
