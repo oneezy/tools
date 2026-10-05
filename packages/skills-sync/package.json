@@ -1,7 +1,7 @@
 {
   "name": "@oneezy/skills-sync",
   "publishConfig": { "access": "public" },
-  "version": "0.3.0",
+  "version": "0.4.0",
   "description": "One skills library, every agent harness, every project on the machine. Declares third-party sources in skills-sync.json, keeps them at upstream's tip (pins excepted) with snapshots and skills-lock.json, links every skill into Claude Code, Codex, Goose and Hermes, and into the projects you pick.",
   "license": "MIT",
   "type": "module",

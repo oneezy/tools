@@ -1,0 +1,84 @@
+# publish-skills-sync: publishes packages/skills-sync to npm as @oneezy/skills-sync whenever main carries a version
+# npm does not have yet. Nobody runs `npm login` or answers a 2FA prompt: npm trusted publishing (OIDC) lets this
+# workflow, and only this workflow, publish the package, with a provenance statement tying each version to its commit.
+#
+# Runs on every push to main that touches the package or this file, and by hand from the Actions tab
+# (workflow_dispatch, e.g. to retry). A version already on npm is skipped, so a promotion that does not bump
+# `version` in packages/skills-sync/package.json publishes nothing. Windows, the primary host (AGENTS.md): the
+# junction tests in test/build.test.ts only pass there, and `prepublishOnly` reruns the whole suite.
+#
+# One-time setup on npmjs.com (works from a phone): @oneezy/skills-sync -> Settings -> Trusted Publisher ->
+# GitHub Actions, organization or user `oneezy`, repository `tools`, workflow filename `publish-skills-sync.yml`,
+# environment empty. No NPM_TOKEN secret is used or needed.
+name: publish-skills-sync
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - packages/skills-sync/**
+      - .github/workflows/publish-skills-sync.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: publish-skills-sync
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    runs-on: windows-latest
+    defaults:
+      run:
+        shell: bash
+        working-directory: packages/skills-sync
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24
+          registry-url: https://registry.npmjs.org
+
+      - name: npm 11.5.1 or later (trusted publishing) and pnpm
+        run: |
+          node -e "const [a,b,c]=process.argv[1].split('.').map(Number);process.exit(a>11||(a===11&&(b>5||(b===5&&c>=1)))?0:1)" "$(npm --version)" || npm install -g npm@^11.5.1
+          npm install -g pnpm@12
+          npm --version
+          pnpm --version
+
+      - name: Is this version on npm yet
+        id: version
+        run: |
+          v=$(node -p "require('./package.json').version")
+          echo "version=$v" >> "$GITHUB_OUTPUT"
+          if npm view "@oneezy/skills-sync@$v" version >/dev/null 2>&1; then
+            echo "@oneezy/skills-sync $v is already on npm; nothing to publish."
+            echo "publish=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "publish=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Install
+        if: steps.version.outputs.publish == 'true'
+        run: pnpm install --frozen-lockfile
+
+      - name: Publish (prepublishOnly builds and runs the tests)
+        if: steps.version.outputs.publish == 'true'
+        run: npm publish --access public --provenance
+
+      - name: Verify
+        if: steps.version.outputs.publish == 'true'
+        run: |
+          v="${{ steps.version.outputs.version }}"
+          for i in 1 2 3 4 5 6 7 8 9 10 11 12; do
+            [ "$(npm view @oneezy/skills-sync@$v version 2>/dev/null)" = "$v" ] && break
+            sleep 10
+          done
+          npm view "@oneezy/skills-sync@$v" version
+          npx --yes "@oneezy/skills-sync@$v" --help | head -n 1
