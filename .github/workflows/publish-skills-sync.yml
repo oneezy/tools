@@ -103,7 +103,8 @@ jobs:
         if: steps.version.outputs.publish == 'true'
         run: |
           v="${{ steps.version.outputs.version }}"
-          for i in 1 2 3 4 5 6 7 8 9 10 11 12; do
+          # npm takes a few minutes to serve a new version ("being processed"); 0.4.0 took about three
+          for i in $(seq 1 60); do
             [ "$(npm view @oneezy/skills-sync@$v version 2>/dev/null)" = "$v" ] && break
             sleep 10
           done
