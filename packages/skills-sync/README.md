@@ -237,4 +237,6 @@ pnpm test          # node:test on temp folders and temp git repos standing in fo
 node dist/src/cli.js --repo <library> --plan
 ```
 
+Publishing is not done by hand. Bump `version` here (and `VERSION` in `src/cli.ts`), merge to `dev`, promote to `main`: `.github/workflows/publish-skills-sync.yml` publishes any version npm does not have yet, through npm trusted publishing (no token, no `npm login`, no 2FA prompt), with provenance. To retry, run that workflow from the Actions tab.
+
 The three JSON Schemas under `schemas/` ship with the package: `skills-sync.schema.json` for the config (sources, plugins, the `generate` switches, the `releases` upload record), which `refresh`, `add`, `build` and `check` validate before doing anything; `skills-sync.local.schema.json` for this machine's answers, validated on every read; and `flow.schema.json` for an own skill's `flow.yaml`, which `check` validates. The validator and the ZIP writer are in the tool; there is no dependency for either.
