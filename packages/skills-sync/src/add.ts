@@ -1,10 +1,11 @@
-// add <source>: stage the repo in a temp clone, list its skills, write the config entry. The refresh that follows
-// reuses the clone. Nothing is installed anywhere: the config is the only thing add writes.
+// add <source>: stage the repo in a temp clone, list its skills, write the config entry and the plugin entry that
+// packages the source. The refresh that follows reuses the clone. Nothing is installed anywhere: the config is the only
+// thing add writes.
 import fs from "node:fs";
 import path from "node:path";
 import { isDir } from "./fs.js";
 import { Library } from "./library.js";
-import { cloneUrl, cmp, findSkills, githubSlug, readConfigRaw, type Source } from "./sources.js";
+import { cloneUrl, cmp, findSkills, githubSlug, readConfigRaw, type Plugin, type Source } from "./sources.js";
 import { defaultBranch, discard, stage, type Staged } from "./stage.js";
 
 export interface AddOptions {
@@ -14,10 +15,12 @@ export interface AddOptions {
   skills?: string[] | "*";
   /** upstream name -> working-set name */
   as: Record<string, string>;
+  /** the id of the plugin that packages the source (default: the source id); false declares none */
+  plugin?: string | false;
   log: (s: string) => void;
 }
 
-export type AddResult = { ok: true; id: string; entry: Source; config: Record<string, unknown>; staged: Staged; found: Map<string, string> } | { ok: false; error: string };
+export type AddResult = { ok: true; id: string; entry: Source; plugin: { id: string; entry: Plugin } | null; config: Record<string, unknown>; staged: Staged; found: Map<string, string> } | { ok: false; error: string };
 
 /** owner/repo[#ref], a git URL[#ref], or a local path. */
 export function parseSpec(spec: string): { repo: string; ref?: string } {
@@ -42,6 +45,10 @@ export function addSource(lib: Library, spec: string, opts: AddOptions): AddResu
   const id = opts.id ?? defaultId(repo);
   if (!/^[a-z0-9][a-z0-9-]*$/.test(id)) return { ok: false, error: `source id ${id} must be lowercase letters, digits and dashes; pass --id` };
   if (sources[id]) return { ok: false, error: `source ${id} is already declared in ${path.basename(lib.configFile)}; edit it there, or pass --id for a second entry` };
+  const plugins = (config.plugins ?? {}) as Record<string, Plugin>;
+  const pluginId = opts.plugin === false ? null : opts.plugin ?? id;
+  if (pluginId !== null && !/^[a-z0-9][a-z0-9-]*$/.test(pluginId)) return { ok: false, error: `plugin id ${pluginId} must be lowercase letters, digits and dashes; pass --plugin` };
+  if (pluginId !== null && plugins[pluginId]) return { ok: false, error: `plugin ${pluginId} is already declared in ${path.basename(lib.configFile)}; pass --plugin <id> for another name, or --no-plugin` };
   const url = cloneUrl(repo);
   const ref = askedRef ?? defaultBranch(url) ?? "main";
   const r = stage(url, ref, opts.log);
@@ -62,7 +69,14 @@ export function addSource(lib: Library, spec: string, opts: AddOptions): AddResu
   const attribution = findAttribution(r.staged.dir, root);
   const entry: Source = { repo, ref, ...(root ? { root } : {}), skills, ...(attribution.length ? { attribution } : {}) };
   config.sources = { ...sources, [id]: entry };
-  return { ok: true, id, entry, config, staged: r.staged, found };
+  const plugin = pluginId === null ? null : { id: pluginId, entry: { displayName: displayName(pluginId), source: id } };
+  if (plugin) config.plugins = { ...plugins, [plugin.id]: plugin.entry };
+  return { ok: true, id, entry, plugin, config, staged: r.staged, found };
+}
+
+/** frontend-design -> Frontend Design: the plugin's display name until someone writes a better one in the config. */
+function displayName(id: string): string {
+  return id.split("-").filter(Boolean).map((w) => w[0].toUpperCase() + w.slice(1)).join(" ");
 }
 
 /**

@@ -15,11 +15,11 @@ function cli(...args: string[]): { status: number | null; stdout: string; stderr
   return spawnSync(process.execPath, [CLI, ...args], { encoding: "utf8", cwd: PACKAGE });
 }
 
-test("the package is 0.3.0 and --help opens with that version: the banner and package.json never differ", () => {
-  assert.equal(manifest.version, "0.3.0");
+test("the package is 0.4.0 and --help opens with that version: the banner and package.json never differ", () => {
+  assert.equal(manifest.version, "0.4.0");
   const r = cli("--help");
   assert.equal(r.status, 0);
-  assert.equal(r.stdout.split("\n")[0], "skills-sync 0.3.0");
+  assert.equal(r.stdout.split("\n")[0], "skills-sync 0.4.0");
 });
 
 test("--help lists every command and every flag of build, check, refresh and add beside the 0.2.0 ones; an unknown option exits 2 with the same help", () => {
@@ -34,18 +34,18 @@ test("--help lists every command and every flag of build, check, refresh and add
   // a flag is named at the start of its line under its section
   const flags = [
     ["--plugins", "--catalogs", "--artifacts", "--check"],
-    ["--frozen", "--id <id>", "--root <path>", "--skills <names|*>", "--as <old=new,...>"],
+    ["--frozen", "--id <id>", "--root <path>", "--skills <names|*>", "--as <old=new,...>", "--plugin <id>"],
     ["--repo <path>", "--library <src>", "--agents <ids>", "--global / --no-global", "--projects <names|*>", "--dev <dir>", "--copy", "--wsl <distros|*>", "--symlinks", "--junctions", "--no-pull / --pull", "--no-restore", "--retry", "--sidecars", "--no-layers", "--watch", "--plan", "--quiet", "--json", "-y, --yes", "--ask", "-h, --help"],
   ].flat();
   for (const f of flags) assert.ok(help.split("\n").some((l) => l.startsWith(`  ${f}`)), `flag ${f}`);
   // what the new commands promise: the internal marker and its escape, the version rule, check's exit codes
   assert.match(help, /metadata\.internal: true/);
   assert.match(help, /INSTALL_INTERNAL_SKILLS=1/);
-  assert.match(help, /0\.<commit count>\.0\+<sha12>/);
+  assert.match(help, /0\.<n>\.0\+<sha12>/);
   assert.match(help, /exit 1 on any, 0 when clean/);
-  // what a library's CI has to know about its checkout: a check needs no history, a build of a changed package does
+  // what a library's CI has to know about its checkout: neither a check nor a build needs history, and versions only go up
   assert.match(help, /Needs no history: clean in a shallow clone/);
-  assert.match(help, /needs the library's history for that count: not a shallow clone/);
+  assert.match(help, /n never comes from git history, so it never goes backwards/);
 
   const bad = cli("--nope");
   assert.equal(bad.status, 2);

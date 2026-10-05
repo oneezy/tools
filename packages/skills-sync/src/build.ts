@@ -27,22 +27,25 @@ export interface BuildOptions {
 
 export interface BuildResult {
   report: Report;
-  /** 0.<commit count>.0+<sha12> of the library's HEAD, what every package built this run carries */
-  version: string;
+  /** plugin id -> the version its manifests carry after this run (kept, or bumped because its files changed) */
+  versions: Record<string, string>;
   /** --check: every path that differs from what the build would write, and every package that cannot be built, relative to the library, / separators */
   drift: string[];
   /** generate.plugins is false: nothing built, nothing checked */
   off: boolean;
 }
 
-/** The library's HEAD: its version by the rule 0.<commit count>.0+<sha12>, and the commit itself for the NOTICE of an own package. */
+/**
+ * The library's HEAD, for the NOTICE of an own package and the build metadata of a changed one. `version` is what a
+ * package new at this HEAD carries (0.1.0+<sha12>); a changed package takes the next minor after its own (see bump).
+ */
 export interface Head {
   version: string;
   commit: string | null;
   date: string | null;
   /** the library is a git checkout, with or without a commit yet */
   checkout: boolean;
-  /** a shallow clone: its commit counts are of the commits it fetched, not the library's */
+  /** a shallow clone: it holds only the commits it fetched, so a commit a version names may be missing */
   shallow: boolean;
 }
 
@@ -51,7 +54,11 @@ export const PLUGIN_SCHEMA = "https://agent-plugins.org/schemas/1.0.0/plugin.sch
 /** What the ChatGPT interface and the Codex catalog say every package is; the hosts enumerate neither value in their docs. */
 const CATEGORY = "Developer Tools";
 const CAPABILITIES = ["Interactive"];
-/** 0.<commit count>.0+<sha12>: what a package built in a checkout with a commit carries. */
+/**
+ * 0.<n>.0+<sha12>: what a package built in a checkout with a commit carries. n starts at 1 and goes up by one each time
+ * the package's files change; the sha is the library's HEAD at that build. n never comes from git history: a commit
+ * count shrinks across a squash merge or a promotion, and a version must never move backwards.
+ */
 const VERSION_RE = /^0\.(\d+)\.0\+([0-9a-f]{12,40})$/;
 const NOGIT = "0.0.0+nogit";
 
@@ -67,11 +74,28 @@ function git(root: string, ...args: string[]): string | null {
 /** A library without git, or a checkout without a commit yet, gets 0.0.0+nogit and no commit. */
 export function libraryHead(root: string): Head {
   const checkout = git(root, "rev-parse", "--git-dir") !== null;
-  const count = checkout ? git(root, "rev-list", "--count", "HEAD") : null;
   const short = checkout ? git(root, "rev-parse", "--short=12", "HEAD") : null;
   const shallow = checkout && git(root, "rev-parse", "--is-shallow-repository") === "true";
-  if (!count || !short) return { version: NOGIT, commit: null, date: null, checkout, shallow };
-  return { version: `0.${count}.0+${short}`, commit: git(root, "rev-parse", "HEAD"), date: git(root, "log", "-1", "--format=%cI"), checkout, shallow };
+  if (!short) return { version: NOGIT, commit: null, date: null, checkout, shallow };
+  return { version: `0.1.0+${short}`, commit: git(root, "rev-parse", "HEAD"), date: isoDate(git(root, "log", "-1", "--format=%cI")), checkout, shallow };
+}
+
+/**
+ * A commit date as git's %cI gives it, in one spelling: git 2.45 and later write UTC as `Z`, older git as `+00:00`.
+ * The NOTICE must not depend on which git built it, so `+00:00` is written `Z`, what CI's git prints.
+ */
+export function isoDate<T extends string | null>(d: T): T {
+  return (d === null ? d : d.replace(/[+-]00:?00$/, "Z")) as T;
+}
+
+/**
+ * The version a package whose files changed takes: the next minor after the one on disk (1 for a new package, or one
+ * whose version is not of the rule), with HEAD's sha. Monotonic whatever the branch history did.
+ */
+export function bump(diskVersion: unknown, head: Head): string {
+  if (!head.commit) return NOGIT;
+  const v = typeof diskVersion === "string" ? VERSION_RE.exec(diskVersion) : null;
+  return `0.${v ? Number(v[1]) + 1 : 1}.0+${head.version.split("+")[1]}`;
 }
 
 /** Where a package's skills came from, for its NOTICE. */
@@ -92,7 +116,7 @@ export function build(lib: Library, opts: BuildOptions): BuildResult {
   const config = readConfig(lib.configFile);
   const report = new Report();
   const head = libraryHead(lib.root);
-  const result: BuildResult = { report, version: head.version, drift: [], off: !config.generate.plugins };
+  const result: BuildResult = { report, versions: {}, drift: [], off: !config.generate.plugins };
   if (result.off) return result;
   const changes = new Report(); // what differs from disk, applied unless checking
   // a check never looks at artifacts/: the archives are upload material, generated and ignored by git
@@ -115,14 +139,9 @@ export function build(lib: Library, opts: BuildOptions): BuildResult {
       const prior = priorHead(lib.root, disk.files, head, pkg.origin.kind === "own");
       const atPrior = render(pkg, config, prior);
       const unchanged = sameFiles(disk.files, atPrior);
-      if (!unchanged && head.shallow && !opts.check) {
-        // HEAD's version counts the library's commits, and a shallow clone holds only the ones it fetched: a version
-        // written here would be 0.<depth>.0. A check still lists what differs; it writes no version.
-        changes.add({ kind: "conflict", path: dir, note: "a new or changed package in a shallow clone, which cannot count the library's commits for its version; fetch the history (git fetch --unshallow, or fetch-depth: 0 in actions/checkout) and build again; package left alone" });
-        continue;
-      }
-      const at = unchanged ? prior : head;
-      const files = unchanged ? atPrior : render(pkg, config, head);
+      const at = unchanged ? prior : { ...head, version: bump(diskVersion(disk.files), head) };
+      const files = unchanged ? atPrior : render(pkg, config, at);
+      result.versions[id] = at.version;
       if (opts.plugins) reconcile(changes, dir, disk.files, files, opts.check);
       // the archive is made from the same files, so it is the package build writes, at the version its manifests carry
       built.push({ id, version: at.version, commit: pkg.origin.kind === "source" ? pkg.origin.commit : at.commit, files });
@@ -257,7 +276,7 @@ function notice(pkg: Package, config: Config, head: Head): string {
   const lib = config.library ?? {};
   const o = pkg.origin;
   const libraryName = lib.owner && lib.name ? `${lib.owner}/${lib.name}` : lib.name ?? "the skills library";
-  const commitLine = o.kind === "source" ? `${o.commit} (${o.date})` : head.commit ? `${head.commit} (${head.date})` : head.checkout ? "a git checkout without a commit yet" : "not a git checkout";
+  const commitLine = o.kind === "source" ? `${o.commit} (${isoDate(o.date)})` : head.commit ? `${head.commit} (${isoDate(head.date)})` : head.checkout ? "a git checkout without a commit yet" : "not a git checkout";
   const source = o.kind === "own" ? `\`skills/${o.group}\` of ${libraryName}${lib.homepage ? ` (${lib.homepage})` : ""}` : `${o.src.repo} (ref \`${o.src.ref}\`${o.src.root ? `, skills under \`${o.src.root}\`` : ""})`;
   const license = pkg.license ? `${pkg.spdx ?? "see LICENSE"}${pkg.spdx ? ", see LICENSE" : ""}` : o.kind === "own" ? "no LICENSE file in the library" : "no LICENSE among the source's attribution files";
   const renamed = o.kind === "source" ? new Map(selection(o.src).filter((s) => s.upstream !== s.name).map((s) => [s.name, s.upstream])) : new Map<string, string>();
@@ -368,34 +387,34 @@ export function spdx(text: string): string | null {
   return null;
 }
 
+/** The version a package's plugin.json on disk carries; undefined when there is none or it does not parse. */
+function diskVersion(disk: Map<string, Buffer>): unknown {
+  try {
+    return (JSON.parse(disk.get("plugin.json")?.toString("utf8") ?? "{}") as { version?: unknown }).version;
+  } catch {
+    return undefined;
+  }
+}
+
 /**
  * The version and commit a package on disk was built with. The package is the record of that: its commit need not be
  * in HEAD's history, or in the repository at all. A squash merge lands the package and leaves the branch commit it
  * was built at behind, and a shallow clone holds no commit but the newest, so on the branch a pull request merges
  * into, and in CI, the commit a version names is routinely one git cannot show. What is checked is what can be:
  * the version has the form of the rule; an own package's NOTICE names, in full and with a date, the commit the
- * version abbreviates; and when the repository does hold that commit, its commit count (not in a shallow clone,
- * which counts only what it fetched) and its date are the ones recorded. A package that fails any of these (a hand-set
- * version, 0.0.0+nogit once there is a commit, a NOTICE naming another commit) is treated as changed: the current
- * HEAD. Without a commit there is no prior, only 0.0.0+nogit.
+ * version abbreviates; and when the repository does hold that commit, its date is the one recorded. A package that
+ * fails any of these (a hand-set version, 0.0.0+nogit once there is a commit, a NOTICE naming another commit) is
+ * treated as changed: it takes the next version at HEAD. Without a commit there is no prior, only 0.0.0+nogit.
  */
 function priorHead(root: string, disk: Map<string, Buffer>, head: Head, own: boolean): Head {
   if (!head.commit) return head;
-  let version: unknown;
-  try {
-    version = (JSON.parse(disk.get("plugin.json")?.toString("utf8") ?? "{}") as { version?: unknown }).version;
-  } catch {
-    return head;
-  }
+  const version = diskVersion(disk);
   const v = typeof version === "string" ? VERSION_RE.exec(version) : null;
   if (!v) return head;
   const n = own ? /^- Commit: ([0-9a-f]{40}) \(([^)]+)\)$/m.exec(disk.get("NOTICE.md")?.toString("utf8") ?? "") : null;
   if (own && (!n || !n[1].startsWith(v[2]))) return head;
-  const held = git(root, "rev-parse", "--verify", "--quiet", `${n ? n[1] : v[2]}^{commit}`);
-  if (held) {
-    if (!head.shallow && git(root, "rev-list", "--count", held) !== v[1]) return head;
-    if (n && git(root, "log", "-1", "--format=%cI", held) !== n[2]) return head;
-  }
+  const held = n ? git(root, "rev-parse", "--verify", "--quiet", `${n[1]}^{commit}`) : null;
+  if (held && n && isoDate(git(root, "log", "-1", "--format=%cI", held)) !== isoDate(n[2])) return head;
   return n ? { ...head, version: v[0], commit: n[1], date: n[2] } : { ...head, version: v[0] };
 }
 
