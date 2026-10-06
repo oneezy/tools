@@ -509,3 +509,43 @@ test("an upstream that commits CHANGELOG.md and its manifest with CRLF line endi
   const v = JSON.parse(cli("versions", "up", "--json").stdout);
   assert.deepEqual(v.versions.map((x: { version: string }) => x.version), ["1.3.1", "1.3.0", "1.2.3", "1.2.0"]);
 });
+
+/** The git processes one CLI run spawns, counted by a wrapper put first on its PATH (POSIX only). */
+function gitCalls(...args: string[]): number {
+  const bin = path.join(base, "bin");
+  const count = path.join(base, "git-calls");
+  if (!fs.existsSync(bin)) {
+    const real = spawnSync("sh", ["-c", "command -v git"], { encoding: "utf8" }).stdout.trim();
+    fs.mkdirSync(bin);
+    fs.writeFileSync(path.join(bin, "git"), `#!/bin/sh\necho x >> "${count}"\nexec "${real}" "$@"\n`, { mode: 0o755 });
+  }
+  fs.rmSync(count, { force: true });
+  const env: NodeJS.ProcessEnv = { ...process.env, HOME: homeDir, USERPROFILE: homeDir, TMP: tmpDir, TEMP: tmpDir, TMPDIR: tmpDir, PATH: `${bin}${path.delimiter}${process.env.PATH}` };
+  for (const k of HARNESS_ENV) delete env[k];
+  const r = spawnSync(process.execPath, [CLI, ...args, "--repo", root], { encoding: "utf8", cwd: root, env });
+  assert.equal(r.status, 0, r.stderr);
+  return fs.existsSync(count) ? fs.readFileSync(count, "utf8").split("\n").filter(Boolean).length : 0;
+}
+
+test("resolving a version and listing versions takes as many git processes for a long history as for a short one: by release tags, and by a manifest whose version changed many times", { skip: process.platform === "win32" && "counts git through a POSIX shell wrapper" }, () => {
+  const calls = (n: number, tagged: boolean): [number, number] => {
+    for (const d of ["up", "dev", "bin"]) fs.rmSync(path.join(base, d), { recursive: true, force: true });
+    fs.mkdirSync(path.join(root, "skills", "oneezy", "own-one"), { recursive: true });
+    fs.writeFileSync(path.join(root, "skills", "oneezy", "own-one", "SKILL.md"), "---\nname: own-one\ndescription: mine\n---\nmine\n");
+    const u = new Upstream(path.join(base, "up"));
+    for (let i = 1; i <= n; i++) {
+      u.skill("a", `release ${i}`);
+      if (!tagged) u.file("skills/.claude-plugin/plugin.json", JSON.stringify({ name: "up", version: `1.${i}.0` }, null, 2) + "\n");
+      u.commit(`1.${i}.0`);
+      if (tagged) u.tag(`v1.${i}.0`);
+      u.skill("b", `past ${i}`);
+      u.commit(`past ${i}`);
+    }
+    config({ up: source(u) });
+    const update = gitCalls("update", "--json");
+    assert.equal(json(LOCK).sources.up.version, `1.${n}.0`);
+    const versions = gitCalls("versions", "up", "--json");
+    return [update, versions];
+  };
+  for (const tagged of [true, false]) assert.deepEqual(calls(12, tagged), calls(3, tagged), tagged ? "by tags" : "by manifest");
+});

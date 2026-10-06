@@ -19,8 +19,9 @@ export type StageResult = { ok: true; staged: Staged } | { ok: false; error: str
  * this machine's core.autocrlf says: the hash recipe runs over those bytes and must give the same value on every
  * machine, or a lock written on one could never verify on another.
  */
-export function git(args: string[], cwd?: string): { ok: boolean; out: string; err: string } {
-  const r = spawnSync("git", ["-c", "core.autocrlf=false", ...args], { encoding: "utf8", cwd, timeout: 120_000 });
+export function git(args: string[], cwd?: string, input?: string): { ok: boolean; out: string; err: string } {
+  // a whole history's patches of a manifest can pass the default 1 MB of output
+  const r = spawnSync("git", ["-c", "core.autocrlf=false", ...args], { encoding: "utf8", cwd, input, timeout: 120_000, maxBuffer: 256 * 1024 * 1024 });
   return { ok: r.status === 0, out: (r.stdout ?? "").trim(), err: (r.stderr ?? "").trim().split("\n").filter(Boolean).pop() ?? "" };
 }
 
