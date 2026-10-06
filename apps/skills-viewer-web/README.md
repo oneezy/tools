@@ -23,7 +23,7 @@ Unauthenticated, GitHub allows 60 tarball requests an hour per server IP. Set `G
 
 ## Deploy (Vercel)
 
-One Vercel project, linked to `oneezy/tools`, **Root Directory `apps/skills-viewer-web`**. `vercel.json` sets the rest: SvelteKit preset, pnpm through corepack (the root `packageManager` pins pnpm 12), a build of this app and its workspace dependencies (`pnpm --filter "skills-viewer-web..." run build`, so the engine's `dist` exists), and an `ignoreCommand` (`git diff` over this app, the engine and the workspace files) so pushes that don't touch them skip the deploy. Every PR gets a preview URL.
+One Vercel project, linked to `oneezy/tools`, **Root Directory `apps/skills-viewer-web`**. `vercel.json` sets the rest: SvelteKit preset, pnpm through corepack (the root `packageManager` pins pnpm 12), a build of this app and its workspace dependencies (`pnpm --filter "skills-viewer-web..." run build`, so the engine's `dist` exists), and an `ignoreCommand` (`scripts/vercel-ignore.sh`: a `git diff` over this app, the engine and the workspace files) so pushes that don't touch them skip the deploy. Every PR gets a preview URL.
 
 ## SvelteKit 3 notes
 
