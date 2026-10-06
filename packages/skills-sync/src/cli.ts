@@ -41,10 +41,11 @@ Commands
                    --catalogs pick the committed outputs (both when neither is named), --artifacts writes the upload
                    archives; --check diffs instead of writing
   check            is what is committed consistent? every own skill's frontmatter (name is its folder's name and a
-                   valid id, description present), every flow.yaml beside one (schemas/flow.schema.json, unique step
-                   ids, after/parallel/join naming steps that exist), and generated-file drift (what build --check
-                   computes, plus skills-lock.json against the snapshots). One line per problem, path then reason;
-                   exit 1 on any, 0 when clean. Reads only: no network, nothing written (CI, and before committing)
+                   valid id, description present), every skill under skills/play/ named play-<name>, every flow.yaml
+                   beside one (schemas/flow.schema.json, unique step ids, after/parallel/join naming steps that exist),
+                   and generated-file drift (what build --check computes, plus skills-lock.json against the snapshots).
+                   One line per problem, path then reason; exit 1 on any, 0 when clean. Reads only: no network,
+                   nothing written (CI, and before committing)
 
 Build
   --plugins              plugins/<id>/ for every plugin in the config: the skill copies, plugin.json,
@@ -391,8 +392,8 @@ function runAdd(lib: Library, args: Args, log: (m: string) => void, report: Repo
 /**
  * build: the plugin form from skills-sync.json, every output computed in memory and written only where disk differs.
  * --check reports the differences instead and exits 1 when there are any; CI runs it on every push. A package that
- * cannot be built (a group without skills, a source not in the config or without a snapshot, a link inside the
- * package) is a conflict: left alone, exit 1 in both modes, listed as drift by --check. The committed form (packages
+ * cannot be built (a source not in the config or without a snapshot, a link inside the package) is a conflict: left
+ * alone, exit 1 in both modes, listed as drift by --check. A group with no skill yet is skipped with a note. The committed form (packages
  * and catalogs) is what a build with no output named writes and what --check looks at; the archives under artifacts/
  * are written only when --artifacts asks, and never checked.
  */
@@ -424,10 +425,11 @@ function runCheck(lib: Library, args: Args): void {
   const r = check(lib);
   if (r.problems.length) process.exitCode = 1;
   if (args.json) {
-    process.stdout.write(JSON.stringify({ check: true, problems: r.problems, skills: r.skills, flows: r.flows, generated: r.generated }, null, 2) + "\n");
+    process.stdout.write(JSON.stringify({ check: true, problems: r.problems, notes: r.notes, skills: r.skills, flows: r.flows, generated: r.generated }, null, 2) + "\n");
     return;
   }
   for (const p of r.problems) process.stdout.write(`${p.path}: ${p.reason}\n`);
+  if (!args.quiet) for (const n of r.notes) process.stdout.write(`note: ${n.path}: ${n.reason}\n`);
   const count = (n: number, what: string) => `${n} ${what}${n === 1 ? "" : "s"}`;
   if (r.problems.length) process.stdout.write(`check: ${[count(r.problems.length, "problem"), ...r.fixes].join("; ")}\n`);
   else if (!args.quiet) process.stdout.write(`check: clean, ${count(r.skills, "own skill")}, ${count(r.flows, "flow")}, ${count(r.generated, "generated file")} as built\n`);
