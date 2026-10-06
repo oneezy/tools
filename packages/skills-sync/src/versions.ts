@@ -88,8 +88,8 @@ export function tagAt(dir: string, commit: string): (Tag & { ahead: number }) | 
   return best;
 }
 
-/** The folders a source's manifest is looked for in: its root, then each parent up to the repo root ("" is the root). */
-function manifestDirs(root: string | undefined): string[] {
+/** The folders a source's manifest (and its changelog) is looked for in: its root, then each parent up to the repo root ("" is the root). */
+export function manifestDirs(root: string | undefined): string[] {
   const dirs: string[] = [];
   for (let d = root ? path.posix.normalize(root.split("\\").join("/")).replace(/\/+$/, "") : "."; ; d = path.posix.dirname(d)) {
     dirs.push(d === "." ? "" : d);
