@@ -5,6 +5,7 @@
 // each at the commit update takes for it. Git over a staged checkout that has the history and tags (stage.ts fetches
 // them); nothing here writes.
 import path from "node:path";
+import { cmp } from "./sources.js";
 import { discard, git, stage } from "./stage.js";
 
 export interface SourceVersion {
@@ -40,7 +41,7 @@ export function isPrerelease(version: string): boolean {
 export function compareVersions(a: string, b: string): number {
   const x = SEMVER.exec(a);
   const y = SEMVER.exec(b);
-  if (!x || !y) return a < b ? -1 : a > b ? 1 : 0;
+  if (!x || !y) return cmp(a, b);
   for (let i = 1; i <= 3; i++) if (Number(x[i]) !== Number(y[i])) return Number(x[i]) - Number(y[i]);
   if (!x[4] || !y[4]) return x[4] ? -1 : y[4] ? 1 : 0;
   const p = x[4].split(".");
@@ -129,12 +130,16 @@ function ancestors(graph: Map<string, string[]>, from: string): Set<string> {
   return seen;
 }
 
-/** The folders a source's manifest (and its changelog) is looked for in: its root, then each parent up to the repo root ("" is the root). */
+/**
+ * The folders a source's manifest (and its changelog) is looked for in: its root, then each parent up to the repo root
+ * ("" is the root). The root is relative to the repo root even when written with a leading slash (or a drive).
+ */
 export function manifestDirs(root: string | undefined): string[] {
+  const rel = (root ?? "").split("\\").join("/").replace(/^[A-Za-z]:/, "").replace(/^\/+/, "");
   const dirs: string[] = [];
-  for (let d = root ? path.posix.normalize(root.split("\\").join("/")).replace(/\/+$/, "") : "."; ; d = path.posix.dirname(d)) {
+  for (let d = rel ? path.posix.normalize(rel).replace(/\/+$/, "") || "." : "."; ; d = path.posix.dirname(d)) {
     dirs.push(d === "." ? "" : d);
-    if (d === "." || d === "/") break;
+    if (d === ".") break;
   }
   return dirs;
 }
@@ -309,5 +314,10 @@ function commitDates(dir: string, commits: string[]): Map<string, string> {
 /** How a source's version reads in output: `1.3.1`, `1.3.1 (+4 commits)`, or `<date> <short commit>` without a version. */
 export function versionLabel(v: { version: string | null; ahead: number | null; commit: string; date: string }): string {
   if (v.version === null) return `${v.date.slice(0, 10)} ${v.commit.slice(0, 7)}`;
-  return v.ahead ? `${v.version} (+${v.ahead} commit${v.ahead === 1 ? "" : "s"})` : v.version;
+  return `${v.version}${commitsPast(v.ahead)}`;
+}
+
+/** How far past its version a commit is, as output says it after the version: ` (+4 commits)`, ` (+1 commit)`, or nothing at 0 or unknown. */
+export function commitsPast(ahead: number | null): string {
+  return ahead ? ` (+${ahead} commit${ahead === 1 ? "" : "s"})` : "";
 }

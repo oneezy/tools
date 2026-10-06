@@ -40,8 +40,7 @@ const PLAY = "play";
 
 export function check(lib: Library): CheckResult {
   const result: CheckResult = { problems: [], notes: [], skills: 0, flows: 0, generated: 0, fixes: [] };
-  const rel = (p: string) => path.relative(lib.root, p).split("\\").join("/");
-  const problem = (file: string, reason: string) => result.problems.push({ path: rel(file), reason });
+  const problem = (file: string, reason: string) => result.problems.push({ path: rel(lib, file), reason });
   for (const s of lib.scanOwn().skills) {
     const md = path.join(s.dir, "SKILL.md");
     result.skills++;
@@ -61,6 +60,11 @@ export function check(lib: Library): CheckResult {
 }
 
 type AddProblem = (file: string, reason: string) => void;
+
+/** A path as problems give it: relative to the library, / separators. */
+function rel(lib: Library, p: string): string {
+  return path.relative(lib.root, p).split("\\").join("/");
+}
 
 /** The config against its schema, one problem per rule broken; false when it is not valid, so nothing is computed from it. */
 function validConfig(lib: Library, problem: AddProblem): boolean {
@@ -85,7 +89,7 @@ function pluginDrift(lib: Library, result: CheckResult, problem: AddProblem): vo
   const before = result.problems.length;
   const skipped = new Set(r.skipped.map((id) => path.join(lib.plugins, id)));
   for (const a of r.report.actions) {
-    if (a.kind === "note" && skipped.has(a.path)) result.notes.push({ path: path.relative(lib.root, a.path).split("\\").join("/"), reason: a.note! });
+    if (a.kind === "note" && skipped.has(a.path)) result.notes.push({ path: rel(lib, a.path), reason: a.note! });
     else if (a.kind === "write") problem(a.path, a.note === "missing" ? "missing; build would write it" : "differs from what build would write");
     else if (a.kind === "delete") problem(a.path, `${a.note}; build would remove it`);
     else if (a.kind === "conflict") problem(a.path, a.note ?? "cannot be built");

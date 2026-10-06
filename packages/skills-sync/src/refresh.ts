@@ -12,7 +12,7 @@ import { isDir, isLink, isSkillDir } from "./fs.js";
 import { RESERVED } from "./harnesses.js";
 import { Library } from "./library.js";
 import { apply, Report } from "./plan.js";
-import { hasOldLock, LOCK_NAME, lockText, readLock, type LockedSkill, type LockedSource } from "./lock.js";
+import { hasOldLock, LOCK_NAME, lockedSource, lockText, readLock, type LockedSkill, type LockedSource } from "./lock.js";
 import { cloneUrl, cmp, findSkills, isCommit, readConfig, selection, skillHash, withName, type Selected } from "./sources.js";
 import { discard, git, moveTo, remoteTip, stage, type Staged } from "./stage.js";
 import { compareVersions, isPrerelease, listVersions, plainVersion, resolveVersion, type Release, type SourceVersion } from "./versions.js";
@@ -99,8 +99,8 @@ export function refresh(lib: Library, opts: RefreshOptions): RefreshResult {
       const url = cloneUrl(src.repo);
       const snapDir = path.join(lib.upstream, id);
       const meta = readMeta(snapDir);
-      // this source in the lock, which counts only while it names the same repo; its skills by working-set name, each at its commit
-      const prior = old?.sources[id]?.repo === src.repo ? old.sources[id] : undefined;
+      // this source in the lock (only while it names the same repo); its skills by working-set name, each at its commit
+      const prior = lockedSource(old, id, src);
       const mine = (s: Selected): Required<LockedSkill> | undefined => {
         const k = prior?.skills?.[s.name];
         return k ? { path: k.path, hash: k.hash, commit: k.commit ?? prior!.commit } : undefined;
@@ -319,7 +319,7 @@ export function snapshotLock(lib: Library): Record<string, LockedSource> | null 
     const meta = readMeta(snapDir);
     const sel = selection(src).filter((s) => !taken.has(s.name));
     if (!meta) {
-      const prior = old?.sources[id]?.repo === src.repo ? old.sources[id] : undefined;
+      const prior = lockedSource(old, id, src);
       if (!prior) continue;
       next[id] = { ...prior, skills: Object.fromEntries(sel.filter((s) => prior.skills[s.name]).map((s) => [s.name, prior.skills[s.name]])) };
     } else {

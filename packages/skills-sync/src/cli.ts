@@ -14,11 +14,11 @@ import { cloneLibrary, DEFAULT_LIBRARY, findLibrary, homeLibrary, Library, looks
 import { apply, line, Report } from "./plan.js";
 import { byDirection, type Moved, type Position } from "./changelog.js";
 import { refresh, type RefreshResult } from "./refresh.js";
-import { readLock } from "./lock.js";
+import { lockedSource, readLock } from "./lock.js";
 import { cloneUrl, cmp, configText, readConfig } from "./sources.js";
 import { discard } from "./stage.js";
 import { findProjects, home, isRepo, layers, projects, status, unlink, type Status } from "./steps.js";
-import { releasesOf, versionLabel } from "./versions.js";
+import { commitsPast, releasesOf, versionLabel } from "./versions.js";
 import { runInWsl, wslDistros } from "./wsl.js";
 
 const VERSION = "0.5.0";
@@ -424,8 +424,7 @@ function runVersions(lib: Library, args: Args, log: (m: string) => void): void {
   const id = args.positional[0];
   if (!id || !config.sources[id]) bail(`versions: ${id ? `no source ${id}` : "which source?"} in ${path.basename(lib.configFile)} (sources: ${ids.join(", ") || "none"})`);
   const src = config.sources[id];
-  const locked = readLock(lib.root, config)?.sources[id];
-  const prior = locked?.repo === src.repo ? locked : undefined;
+  const prior = lockedSource(readLock(lib.root, config), id, src);
   const r = releasesOf(cloneUrl(src.repo), src.ref, src.root, prior?.commit ?? null, log);
   if (!r.ok) bail(`versions: ${id}: ${r.error}`);
   const current: Position | null = prior ? { version: prior.version, commit: prior.commit, ahead: r.current?.version === prior.version ? r.current.ahead : null } : null;
@@ -435,7 +434,7 @@ function runVersions(lib: Library, args: Args, log: (m: string) => void): void {
     return;
   }
   process.stdout.write(`${id}: ${src.repo}@${src.ref}, ${versions.length} version${versions.length === 1 ? "" : "s"}, newest first${src.version ? `; held at ${src.version} in ${path.basename(lib.configFile)}` : ""}\n`);
-  for (const v of versions) process.stdout.write(`${v.current ? "*" : " "} ${v.version.padEnd(12)} ${v.commit.slice(0, 7)}  ${v.date.slice(0, 10)}${v.current ? `  current${current!.ahead ? ` (+${current!.ahead} commit${current!.ahead === 1 ? "" : "s"})` : ""}` : ""}\n`);
+  for (const v of versions) process.stdout.write(`${v.current ? "*" : " "} ${v.version.padEnd(12)} ${v.commit.slice(0, 7)}  ${v.date.slice(0, 10)}${v.current ? `  current${commitsPast(current!.ahead)}` : ""}\n`);
   if (!versions.length) process.stdout.write("  no release tag and no manifest version\n");
   if (current && !versions.some((v) => v.current)) process.stdout.write(`  the lock is at ${current.version ?? "no version"} ${current.commit.slice(0, 7)}\n`);
 }
