@@ -7,7 +7,7 @@ import { spawnSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import { archives, type Built } from "./artifacts.js";
-import { isDir, isLink, isSkillDir } from "./fs.js";
+import { isDir, isLink, isSkillDir, lexists } from "./fs.js";
 import { Library } from "./library.js";
 import { apply, Report } from "./plan.js";
 import { cmp, githubSlug, readConfig, selection, type Config, type Plugin, type Source } from "./sources.js";
@@ -33,6 +33,8 @@ export interface BuildResult {
   drift: string[];
   /** generate.plugins is false: nothing built, nothing checked */
   off: boolean;
+  /** plugin ids of an own group holding no skill yet: neither built nor cataloged, one note (or removal) each */
+  skipped: string[];
 }
 
 /**
@@ -116,14 +118,22 @@ export function build(lib: Library, opts: BuildOptions): BuildResult {
   const config = readConfig(lib.configFile);
   const report = new Report();
   const head = libraryHead(lib.root);
-  const result: BuildResult = { report, versions: {}, drift: [], off: !config.generate.plugins };
+  const result: BuildResult = { report, versions: {}, drift: [], off: !config.generate.plugins, skipped: [] };
   if (result.off) return result;
   const changes = new Report(); // what differs from disk, applied unless checking
   // a check never looks at artifacts/: the archives are upload material, generated and ignored by git
   const artifacts = opts.artifacts && !opts.check;
   const built: Built[] = [];
-  const ids = Object.keys(config.plugins);
+  const empty = emptyGroups(lib, config);
+  result.skipped = [...empty.keys()];
+  const ids = Object.keys(config.plugins).filter((id) => !empty.has(id));
   if (opts.plugins || artifacts) {
+    // a declared group with no skills yet (a new playground) is skipped, not a conflict: one line, a removal when it once had a package
+    for (const [id, note] of empty) {
+      const dir = path.join(lib.plugins, id);
+      if (!opts.plugins || !lexists(dir)) changes.add({ kind: "note", path: dir, note });
+      else changes.add(isLink(dir) ? { kind: "conflict", path: dir, note: `${note}; a link, not a package built here; left alone` } : { kind: "delete", path: dir, note });
+    }
     for (const id of ids) {
       const dir = path.join(lib.plugins, id);
       const pkg = resolvePackage(lib, config, id, changes);
@@ -152,14 +162,14 @@ export function build(lib: Library, opts: BuildOptions): BuildResult {
     if (isDir(lib.plugins)) {
       for (const n of fs.readdirSync(lib.plugins).sort(cmp)) {
         const p = path.join(lib.plugins, n);
-        if (n.startsWith(".") || ids.includes(n) || !isDir(p)) continue;
+        if (n.startsWith(".") || ids.includes(n) || empty.has(n) || !isDir(p)) continue;
         if (isLink(p)) changes.add({ kind: "conflict", path: p, note: "a link, not a package built here; left alone" });
         else changes.add({ kind: "delete", path: p, note: "no longer in skills-sync.json" });
       }
     }
   }
   if (opts.catalogs) {
-    const files = catalogs(config, lib);
+    const files = catalogs(config, lib, ids);
     for (const [file, bytes] of files) {
       const have = fs.existsSync(file) ? fs.readFileSync(file) : null;
       if (have && asBuilt(have, bytes)) changes.add({ kind: "skip", path: file, note: "ok" });
@@ -174,16 +184,22 @@ export function build(lib: Library, opts: BuildOptions): BuildResult {
   return result;
 }
 
-/** The plugin's skills, license and origin; null (reported) when the config names a group or source that yields nothing. */
+/** Plugin id -> its note, for every plugin of an own group that holds no skill yet: nothing to package or catalog. */
+function emptyGroups(lib: Library, config: Config): Map<string, string> {
+  const own = lib.scanOwn().skills;
+  const out = new Map<string, string>();
+  for (const [id, p] of Object.entries(config.plugins)) {
+    if (p.group && !own.some((s) => s.plugin === p.group)) out.set(id, `no skills under skills/${p.group} yet; not built, not cataloged`);
+  }
+  return out;
+}
+
+/** The plugin's skills, license and origin; null (reported) when the config names a source that yields nothing (an empty group never gets here). */
 function resolvePackage(lib: Library, config: Config, id: string, report: Report): Package | null {
   const plugin = config.plugins[id];
   const where = path.join(lib.plugins, id);
   if (plugin.group) {
     const own = lib.scanOwn().skills.filter((s) => s.plugin === plugin.group);
-    if (!own.length) {
-      report.add({ kind: "conflict", path: where, note: `no own skills under skills/${plugin.group}; package not built` });
-      return null;
-    }
     const skills = new Map<string, Map<string, Buffer>>();
     for (const s of own) skills.set(s.name, skillCopy(s.dir, report));
     const licenseFile = ["LICENSE", "LICENSE.md", "LICENSE.txt"].map((n) => path.join(lib.root, n)).find((f) => fs.existsSync(f));
@@ -301,12 +317,11 @@ function notice(pkg: Package, config: Config, head: Head): string {
   ].join("\n");
 }
 
-/** The two root catalogs, file -> bytes: Claude Code's and Codex's, each entry pointing at ./plugins/<id>. */
-function catalogs(config: Config, lib: Library): Map<string, Buffer> {
+/** The two root catalogs, file -> bytes: Claude Code's and Codex's, each entry pointing at ./plugins/<id> for every plugin built. */
+function catalogs(config: Config, lib: Library, ids: string[]): Map<string, Buffer> {
   const l = config.library ?? {};
   const name = l.name ?? path.basename(lib.root);
   const marketplace = l.owner ? `${l.owner}-${name}` : name;
-  const ids = Object.keys(config.plugins);
   const description = (id: string) => config.plugins[id].description;
   const claude = {
     name: marketplace,

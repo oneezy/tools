@@ -112,6 +112,18 @@ test("status --json names each own skill's plugin id: oneezy, oneezy, none", () 
   assert.ok(!lexists(path.join(os.homedir(), ".skills-sync")) || !samePath(real(path.join(os.homedir(), ".skills-sync")), lib.root), "the real home is untouched");
 });
 
+test("a play group links exactly like oneezy: skills/play/play-unslop is play-unslop in .agents, every layer and every user folder, by its folder name", () => {
+  const dir = skill(path.join(lib.own, "play"), "play-unslop");
+  const r = runAll();
+  assert.deepEqual(r.conflicts(), []);
+  assert.ok(samePath(real(path.join(lib.agents, "play-unslop")), dir));
+  assert.ok(isLink(path.join(lib.root, claude.projectSkills, "play-unslop")));
+  for (const h of [claude, codex]) assert.ok(samePath(linkTarget(path.join(h.userSkills, "play-unslop"))!, dir), h.userSkills);
+  assert.ok(!lexists(path.join(lib.agents, "play")), "the group itself is never linked");
+  assert.ok(fs.readFileSync(path.join(lib.agents, ".gitignore"), "utf8").includes("/play-unslop/\n"));
+  assert.deepEqual(lib.scanOwn().skills.map((s) => [s.name, s.plugin]), [["a", "oneezy"], ["b", "oneezy"], ["c", null], ["play-unslop", "play"]]);
+});
+
 test("removing a grouped skill drops its links everywhere; its siblings stay", () => {
   runAll();
   fs.rmSync(path.join(lib.own, "oneezy", "b"), { recursive: true });

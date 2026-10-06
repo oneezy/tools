@@ -546,27 +546,87 @@ test("a checkout without a commit yet builds 0.0.0+nogit and its NOTICE says so;
   assert.equal(cliIn(fresh.dir, "build", "--check").status, 0);
 });
 
-test("a package that cannot be built is a conflict that fails the run: a group without skills, a source not in the config, a source without a snapshot (a clone before refresh); build leaves plugins/<id> alone and exits 1, build --check lists plugins/<id> as drift and exits 1", () => {
+test("a play group with skills is packaged and cataloged exactly like oneezy: the same files in plugins/play as in plugins/oneezy, its skill copies marked internal, its NOTICE naming skills/play, an entry in both catalogs; build --check and check are clean", () => {
+  config({ ...CONFIG(), plugins: { ...CONFIG().plugins, play: { displayName: "Play", description: "Justin's playground.", group: "play" } } });
+  write("skills/play/play-unslop/SKILL.md", "---\nname: play-unslop\ndescription: unslop\n---\nunslop\n");
+  write("skills/play/play-unslop/agents/openai.yaml", "interface:\n  display_name: play-unslop\n");
+  write("skills/oneezy/own-two/agents/openai.yaml", "interface:\n  display_name: own-two\n");
+  write("LICENSE", MIT);
+  library.commit("playground");
+  const r = cli("build", "--json");
+  assert.equal(r.status, 0, r.stdout + r.stderr);
+  const shape = (id: string, skill: string) => Object.keys(tree(path.join(root, "plugins", id))).filter((f) => !f.startsWith("skills/") || f.startsWith(`skills/${skill}/`)).map((f) => f.replace(`skills/${skill}/`, "skills/<skill>/")).sort();
+  assert.deepEqual(shape("play", "play-unslop"), shape("oneezy", "own-two"));
+  assert.match(read("plugins", "play", "skills", "play-unslop", "SKILL.md"), /metadata:\n  internal: true\n/);
+  assert.match(read("plugins", "play", "NOTICE.md"), /^- Source: `skills\/play` of oneezy\/skills/m);
+  assert.match(read("plugins", "play", "NOTICE.md"), /^- Skills: play-unslop$/m);
+  assert.equal(json(path.join(root, "plugins", "play", "plugin.json")).version, json(path.join(root, "plugins", "oneezy", "plugin.json")).version, "both new at the same HEAD");
+  for (const catalog of [".claude-plugin/marketplace.json", ".agents/plugins/marketplace.json"]) {
+    assert.deepEqual(json(path.join(root, catalog)).plugins.map((p: { name: string }) => p.name), ["oneezy", "up", "play"], catalog);
+  }
+  assert.equal(cli("build", "--check").status, 0);
+  assert.equal(cli("check").status, 0);
+});
+
+test("a group declared as a plugin but holding no skills yet is skipped with one note, exit 0: build writes no package and no catalog entry for it, build --check and check are clean and print the note; once it has a skill it is built, and when its last skill goes its package and catalog entries go too", () => {
+  const withPlay = () => config({ ...CONFIG(), plugins: { ...CONFIG().plugins, play: { displayName: "Play", description: "Justin's playground.", group: "play" } } });
+  withPlay();
+  const NOTE = "no skills under skills/play yet; not built, not cataloged";
+  const r = cli("build", "--json");
+  assert.equal(r.status, 0, r.stdout + r.stderr);
+  const about = actions(r).filter((a) => a.path.split(path.sep).join("/").endsWith("plugins/play"));
+  assert.deepEqual(about.map((a) => [a.kind, a.note]), [["note", NOTE]], "one note, nothing else about plugins/play");
+  assert.ok(!fs.existsSync(path.join(root, "plugins", "play")));
+  for (const catalog of [".claude-plugin/marketplace.json", ".agents/plugins/marketplace.json"]) {
+    assert.deepEqual(json(path.join(root, catalog)).plugins.map((p: { name: string }) => p.name), ["oneezy", "up"], catalog);
+  }
+  library.commit("empty playground");
+  const buildCheck = cli("build", "--check");
+  assert.equal(buildCheck.status, 0, buildCheck.stdout);
+  assert.equal(buildCheck.stdout.split("\n").filter((l) => l.includes(NOTE)).length, 1, buildCheck.stdout);
+  assert.match(buildCheck.stdout, /^build --check: clean\b/m);
+  const check = cli("check");
+  assert.equal(check.status, 0, check.stdout);
+  assert.deepEqual(check.stdout.split("\n").filter((l) => l && !l.startsWith("check:")), [`note: plugins/play: ${NOTE}`]);
+  assert.deepEqual(JSON.parse(cli("check", "--json").stdout).notes, [{ path: "plugins/play", reason: NOTE }]);
+
+  // a first skill: built and cataloged; the last one gone: package and catalog entries removed, the note again
+  write("skills/play/play-unslop/SKILL.md", "---\nname: play-unslop\ndescription: unslop\n---\nunslop\n");
   assert.equal(cli("build", "--quiet").status, 0);
-  config({ ...CONFIG(), plugins: { ...CONFIG().plugins, ghost: { displayName: "Ghost", group: "nope" }, src: { displayName: "Src", source: "nosrc" } } });
-  write("plugins/ghost/plugin.json", "{}\n");
+  assert.ok(fs.existsSync(path.join(root, "plugins", "play", "skills", "play-unslop", "SKILL.md")));
+  assert.ok(json(path.join(root, ".claude-plugin", "marketplace.json")).plugins.some((p: { name: string }) => p.name === "play"));
+  library.commit("first play skill");
+  fs.rmSync(path.join(root, "skills", "play"), { recursive: true });
+  const stale = cli("check");
+  assert.equal(stale.status, 1, "the committed package is drift once its group is empty");
+  assert.ok(stale.stdout.includes(`plugins/play: ${NOTE}; build would remove it`), stale.stdout);
+  const emptied = cli("build", "--json");
+  assert.equal(emptied.status, 0, emptied.stdout);
+  assert.deepEqual(actions(emptied).filter((a) => a.path.split(path.sep).join("/").endsWith("plugins/play")).map((a) => [a.kind, a.note]), [["delete", NOTE]], "one line: the removal, with the reason");
+  assert.ok(!fs.existsSync(path.join(root, "plugins", "play")));
+  assert.deepEqual(json(path.join(root, ".claude-plugin", "marketplace.json")).plugins.map((p: { name: string }) => p.name), ["oneezy", "up"]);
+  assert.equal(cli("check").status, 0);
+});
+
+test("a package that cannot be built is a conflict that fails the run: a source not in the config, a source without a snapshot (a clone before refresh); build leaves plugins/<id> alone and exits 1, build --check lists plugins/<id> as drift and exits 1", () => {
+  assert.equal(cli("build", "--quiet").status, 0);
+  config({ ...CONFIG(), plugins: { ...CONFIG().plugins, src: { displayName: "Src", source: "nosrc" } } });
+  write("plugins/src/plugin.json", "{}\n");
   const check = cli("build", "--check");
   assert.equal(check.status, 1);
-  assert.match(check.stdout, /no own skills under skills\/nope/);
   assert.match(check.stdout, /source nosrc is not in skills-sync\.json/);
-  assert.match(check.stdout, /2 conflict\(s\) above to fix first/);
+  assert.match(check.stdout, /1 conflict\(s\) above to fix first/);
   const paths = check.stdout.split("\n").filter((l) => l.startsWith("drift")).map((l) => l.replace(/^drift\s+/, "").trim()).sort();
-  assert.deepEqual(paths, [".agents/plugins/marketplace.json", ".claude-plugin/marketplace.json", "plugins/ghost", "plugins/src"], "the catalogs gained two entries; the two packages cannot be built");
+  assert.deepEqual(paths, [".agents/plugins/marketplace.json", ".claude-plugin/marketplace.json", "plugins/src"], "the catalogs gained an entry; the package cannot be built");
   const r = cli("build", "--json");
   assert.equal(r.status, 1, "a conflict fails build too");
-  assert.equal(actions(r).filter((a) => a.kind === "conflict").length, 2);
-  assert.equal(read("plugins/ghost/plugin.json"), "{}\n", "whatever plugins/ghost holds is left alone");
-  assert.ok(!fs.existsSync(path.join(root, "plugins", "src")));
+  assert.equal(actions(r).filter((a) => a.kind === "conflict").length, 1);
+  assert.equal(read("plugins/src/plugin.json"), "{}\n", "whatever plugins/src holds is left alone");
   assert.ok(fs.existsSync(path.join(root, "plugins", "up", "plugin.json")), "the other packages are built");
   // the clone-before-refresh shape: the source is in the config, its snapshot is not there
   config();
-  assert.equal(cli("build", "--quiet").status, 0, "back to the two plugins; plugins/ghost goes as a stale id");
-  assert.ok(!fs.existsSync(path.join(root, "plugins", "ghost")));
+  assert.equal(cli("build", "--quiet").status, 0, "back to the two plugins; plugins/src goes as a stale id");
+  assert.ok(!fs.existsSync(path.join(root, "plugins", "src")));
   fs.rmSync(path.join(root, "upstream"), { recursive: true });
   const noSnapshot = cli("build", "--check", "--json");
   assert.equal(noSnapshot.status, 1);

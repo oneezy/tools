@@ -24,13 +24,13 @@ const HELP = `skills-sync ${VERSION}
 One skills library, every harness, every project on this machine. Run it anywhere; it works out the rest.
 
   no library on this machine   clone one into ~/.skills-sync (default: ${DEFAULT_LIBRARY}, or --library owner/repo)
-  library present              pull it, bring its third-party skills up to date, rebuild its layers, link the user folders
+  library present              pull it, install the third-party skills its lock records, rebuild its layers, link the user folders
 
 Usage: skills-sync [command] [options]
 
 Commands
-  sync (default)   everything above; with skills-sync.json the third-party skills are refreshed to latest under the
-                   pull's 30-minute window (--pull forces, --no-pull runs it frozen); without one, skills-lock.json is restored
+  sync (default)   everything above; nothing moves upstream: with skills-sync.json every third-party skill is installed
+                   at the commit the lock records (frozen, the lock never written); without one, skills-lock.json is restored
   status           what is linked and what is missing
   unlink           remove every link this tool made in the user folders
   projects         only the project step
@@ -43,10 +43,11 @@ Commands
                    --catalogs pick the committed outputs (both when neither is named), --artifacts writes the upload
                    archives; --check diffs instead of writing
   check            is what is committed consistent? every own skill's frontmatter (name is its folder's name and a
-                   valid id, description present), every flow.yaml beside one (schemas/flow.schema.json, unique step
-                   ids, after/parallel/join naming steps that exist), and generated-file drift (what build --check
-                   computes, plus skills-sync.lock.json against the snapshots). One line per problem, path then reason;
-                   exit 1 on any, 0 when clean. Reads only: no network, nothing written (CI, and before committing)
+                   valid id, description present), every skill under skills/play/ named play-<name>, every flow.yaml
+                   beside one (schemas/flow.schema.json, unique step ids, after/parallel/join naming steps that exist),
+                   and generated-file drift (what build --check computes, plus skills-sync.lock.json against the snapshots).
+                   One line per problem, path then reason; exit 1 on any, 0 when clean. Reads only: no network,
+                   nothing written (CI, and before committing)
 
 Build
   --plugins              plugins/<id>/ for every plugin in the config: the skill copies, plugin.json,
@@ -83,7 +84,7 @@ Options
   --wsl <distros|*>      Windows: also sync the user folders inside these WSL distros; --no-wsl for none
   --symlinks             make directory symlinks only (default: a symlink, or a junction when Windows refuses one)
   --junctions            Windows: make junctions only; either flag is remembered in ${LOCAL_NAME}
-  --no-pull / --pull     skip, or force, the library pull and the refresh to latest (default: at most every 30 minutes)
+  --no-pull / --pull     skip, or force, the library pull (default: at most every 30 minutes)
   --no-restore           do not restore missing lock entries from their sources (skips the refresh too)
   --retry                look again for skills an earlier run reported gone upstream (sync and refresh)
   --sidecars             generate agents/openai.yaml for own skills that lack one (writes into skills/, so opt-in)
@@ -276,11 +277,9 @@ async function main(): Promise<void> {
   apply(remember, args.plan);
   setup.merge(remember);
 
-  // 3. keep the library current: the pull, and with a config the refresh to latest, share one 30-minute window.
-  //    --pull forces both; --no-pull skips the pull and runs the refresh frozen; a throttled, dirty or failed pull does too.
-  //    A config library's lock is written by that refresh on every machine, so a clone's tree is "dirty" by the lock
-  //    alone from its first latest refresh on: that never blocks the pull (the pull replaces it, the refresh writes it again)
-  let latest = false;
+  // 3. keep the library current: the pull, at most every 30 minutes; --pull forces it, --no-pull skips it. Nothing
+  //    moves upstream here: the refresh that follows is frozen at the lock the library commits. A lock moved on this
+  //    machine (a refresh run here, or an older version's sync) never blocks the pull: the pull puts it back at HEAD
   if (args.pull && args.command !== "status" && !args.plan) {
     if (args.pull === "force") {
       try {
@@ -292,7 +291,6 @@ async function main(): Promise<void> {
     const r = pullLibrary(lib.root, 30, log, lib.hasConfig() ? [path.basename(lib.lockFile), path.basename(lib.npxLockFile)] : []);
     if (r === "pulled" && !args.quiet) log("library pulled");
     if (r === "dirty" && !args.quiet) log("library has local changes; pull skipped");
-    latest = args.pull === "force" || r === "pulled" || r === "skipped";
   }
 
   const table = harnessTable();
@@ -314,7 +312,7 @@ async function main(): Promise<void> {
   if (!args.plan) saveLocal(lib.root, choices);
 
   // 5. run
-  await runOnce(lib, choices, args, cwd, setup, latest);
+  await runOnce(lib, choices, args, cwd, setup);
   if (args.watch) {
     log(`watching ${lib.own}, ${path.basename(lib.configFile)} and ${path.basename(lib.lockFile)}; ctrl-c to stop`);
     let timer: NodeJS.Timeout | null = null;
@@ -322,7 +320,7 @@ async function main(): Promise<void> {
       if (timer) clearTimeout(timer);
       timer = setTimeout(() => {
         log(`change in ${why}`);
-        runOnce(lib, choices, { ...args, restore: false }, cwd, new Report(), false).catch((e) => log(String(e)));
+        runOnce(lib, choices, { ...args, restore: false }, cwd, new Report()).catch((e) => log(String(e)));
       }, 400);
     };
     fs.watch(lib.own, { recursive: true }, (_e, f) => trigger(String(f ?? "skills/")));
@@ -393,8 +391,8 @@ function runAdd(lib: Library, args: Args, log: (m: string) => void, report: Repo
 /**
  * build: the plugin form from skills-sync.json, every output computed in memory and written only where disk differs.
  * --check reports the differences instead and exits 1 when there are any; CI runs it on every push. A package that
- * cannot be built (a group without skills, a source not in the config or without a snapshot, a link inside the
- * package) is a conflict: left alone, exit 1 in both modes, listed as drift by --check. The committed form (packages
+ * cannot be built (a source not in the config or without a snapshot, a link inside the package) is a conflict: left
+ * alone, exit 1 in both modes, listed as drift by --check. A group with no skill yet is skipped with a note. The committed form (packages
  * and catalogs) is what a build with no output named writes and what --check looks at; the archives under artifacts/
  * are written only when --artifacts asks, and never checked.
  */
@@ -426,10 +424,11 @@ function runCheck(lib: Library, args: Args): void {
   const r = check(lib);
   if (r.problems.length) process.exitCode = 1;
   if (args.json) {
-    process.stdout.write(JSON.stringify({ check: true, problems: r.problems, skills: r.skills, flows: r.flows, generated: r.generated }, null, 2) + "\n");
+    process.stdout.write(JSON.stringify({ check: true, problems: r.problems, notes: r.notes, skills: r.skills, flows: r.flows, generated: r.generated }, null, 2) + "\n");
     return;
   }
   for (const p of r.problems) process.stdout.write(`${p.path}: ${p.reason}\n`);
+  if (!args.quiet) for (const n of r.notes) process.stdout.write(`note: ${n.path}: ${n.reason}\n`);
   const count = (n: number, what: string) => `${n} ${what}${n === 1 ? "" : "s"}`;
   if (r.problems.length) process.stdout.write(`check: ${[count(r.problems.length, "problem"), ...r.fixes].join("; ")}\n`);
   else if (!args.quiet) process.stdout.write(`check: clean, ${count(r.skills, "own skill")}, ${count(r.flows, "flow")}, ${count(r.generated, "generated file")} as built\n`);
@@ -498,14 +497,14 @@ async function decide(args: Args, local: Local, lib: Library, table: Harness[], 
   return { agents, global, dev, projects: projectNames, mode, wsl, unavailable: args.retry ? [] : local.unavailable ?? [], links: args.links ?? local.links ?? "auto" };
 }
 
-/** One pass over the steps. `latest` moves the third-party skills to upstream's tip (a config library); otherwise the refresh is frozen. */
-async function runOnce(lib: Library, c: Choices, args: Args, cwd: string, report: Report, latest: boolean): Promise<void> {
+/** One pass over the steps. A config library's refresh is always frozen: every third-party skill at the lock's commit. */
+async function runOnce(lib: Library, c: Choices, args: Args, cwd: string, report: Report): Promise<void> {
   const log = (m: string) => (args.json ? undefined : process.stderr.write(m + "\n"));
 
   const missing = lib.missingFromLock().filter((n) => !c.unavailable.includes(n));
   if (lib.hasConfig() && args.restore && args.command !== "projects" && !args.plan) {
-    // a config library: the refresh rebuilds the working set, at the tip of every ref when due, else at the lock's commits
-    const r = refresh(lib, { frozen: !latest, plan: false, unavailable: c.unavailable, log });
+    // a config library: the frozen refresh rebuilds the working set at the lock's commits and never writes the lock
+    const r = refresh(lib, { frozen: true, plan: false, unavailable: c.unavailable, log });
     c.unavailable = reportRefresh(lib, r, c.unavailable, args, log, false);
     report.merge(r.report);
   } else if (lib.hasConfig() && missing.length) log(`${missing.length} lock entries are not installed yet (run without --plan or --no-restore for the refresh that restores them)`);
