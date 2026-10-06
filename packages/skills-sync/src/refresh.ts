@@ -382,8 +382,10 @@ function workingCopy(lib: Library, r: Resolved, own: Set<string>, report: Report
   if (renamed) report.add({ kind: "write", path: path.join(dst, "SKILL.md"), payload: expected.get("SKILL.md"), note: `frontmatter name: ${r.name}` });
 }
 
+/** A write of `text` unless the file already says it: CRLF line endings on disk (a checkout under core.autocrlf=true) are no difference. */
 function writeIfChanged(report: Report, file: string, text: string, note: string): void {
-  if (fs.existsSync(file) && fs.readFileSync(file, "utf8") === text) report.add({ kind: "skip", path: file, note: "ok" });
+  const lf = (s: string) => s.replace(/\r\n/g, "\n");
+  if (fs.existsSync(file) && lf(fs.readFileSync(file, "utf8")) === lf(text)) report.add({ kind: "skip", path: file, note: "ok" });
   else report.add({ kind: "write", path: file, payload: text, note });
 }
 

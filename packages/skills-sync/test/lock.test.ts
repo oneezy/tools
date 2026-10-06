@@ -292,3 +292,23 @@ test("skills-lock.json counts as a version 1 lock only when it parses, has an en
     }
   }
 });
+
+test("a lock checked out with CRLF line endings (core.autocrlf=true) that says what an update would write is not rewritten: its bytes stay, no write is reported, and check passes", () => {
+  config({ up: source(up) });
+  assert.equal(cli("refresh", "--quiet").status, 0);
+  const file = path.join(root, LOCK);
+  const crlf = fs.readFileSync(file, "utf8").replace(/\n/g, "\r\n");
+  fs.writeFileSync(file, crlf);
+  for (const cmd of ["update", "refresh"]) {
+    const r = cli(cmd, "--json");
+    assert.equal(r.status, 0, r.stderr);
+    assert.deepEqual(JSON.parse(r.stdout).actions.filter((a: { kind: string; path: string }) => a.kind !== "skip" && a.path === file), [], `${cmd} reports no write`);
+    assert.equal(fs.readFileSync(file, "utf8"), crlf, `${cmd} leaves the bytes`);
+  }
+  assert.equal(cli("check").status, 0);
+
+  up.skill("a", "two");
+  const two = up.commit("two");
+  assert.equal(cli("update", "--quiet").status, 0);
+  assert.equal(json(LOCK).sources.up.commit, two, "a real change is still written");
+});

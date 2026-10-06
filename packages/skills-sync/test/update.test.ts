@@ -480,3 +480,32 @@ test("check reports a held version the lock is not at as one problem on skills-s
   config({ up: source(up) });
   assert.equal(cli("check").status, 0, "no hold: the lock may be at any version");
 });
+
+test("an upstream that commits CHANGELOG.md and its manifest with CRLF line endings: the changelog sections between two versions still resolve (reported with LF), and so do the manifest's versions", () => {
+  const crlf = (s: string) => s.replace(/\n/g, "\r\n");
+  const last: Record<string, string> = {}; // per version, the newest commit carrying it
+  const all = ["1.2.0", "1.2.3", "1.3.0", "1.3.1"];
+  for (const [i, v] of all.entries()) {
+    up.skill("a", `release ${v}`);
+    up.file("CHANGELOG.md", crlf(changelog(all.slice(0, i + 1).reverse())));
+    up.file("skills/.claude-plugin/plugin.json", crlf(JSON.stringify({ name: "up", version: v }, null, 2) + "\n"));
+    up.commit(v);
+    up.skill("b", `past ${v}`);
+    last[v] = up.commit(`past ${v}`);
+  }
+  assert.ok(fs.readFileSync(path.join(up.dir, "CHANGELOG.md"), "utf8").includes("\r\n"), "committed with CRLF");
+  config({ up: source(up, { version: "1.2.3" }) });
+  const held = cli("update", "--json");
+  assert.equal(held.status, 0, held.stderr);
+  assert.equal(json(LOCK).sources.up.commit, last["1.2.3"], "the newest commit whose manifest carried the held version");
+  assert.equal(json(LOCK).sources.up.version, "1.2.3");
+
+  const j = cli("update", "up", "--to", "1.3.1", "--json", "--plan");
+  assert.equal(j.status, 0, j.stderr);
+  const [u] = JSON.parse(j.stdout).updated;
+  assert.deepEqual([u.from, u.to, u.direction], [{ version: "1.2.3", commit: last["1.2.3"], ahead: 1 }, { version: "1.3.1", commit: last["1.3.1"], ahead: 1 }, "upgrade"]);
+  assert.equal(u.changelog, UPGRADE);
+
+  const v = JSON.parse(cli("versions", "up", "--json").stdout);
+  assert.deepEqual(v.versions.map((x: { version: string }) => x.version), ["1.3.1", "1.3.0", "1.2.3", "1.2.0"]);
+});
