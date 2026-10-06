@@ -1,12 +1,12 @@
 # skills-viewer-web
 
-Paste `owner/repo` or a GitHub URL, get the map of that repo's agent skills. The website half of the skills viewer ([#86](https://github.com/oneezy/tools/issues/86), map [#54](https://github.com/oneezy/tools/issues/54)); the parsing is the `skills-viewer` package (v0.2, [#88](https://github.com/oneezy/tools/pull/88)); build it once (`pnpm build` at the root) before `pnpm dev` here.
+Paste `owner/repo` or a GitHub URL, get the map of that repo's agent skills. The website half of the skills viewer ([#86](https://github.com/oneezy/tools/issues/86), map [#54](https://github.com/oneezy/tools/issues/54)); the parsing is the `skills-viewer` package (v0.2, [#88](https://github.com/oneezy/tools/pull/88)); build it once (`pnpm build` at the root) before `pnpm dev`. `test` and `check` are Vite Plus tasks in `vite.config.ts` that build the engine first.
 
 ```
 pnpm install          # once, at the workspace root
-pnpm dev              # here: vp dev, http://localhost:5173
-pnpm test             # vp test: input round trip, map data
-pnpm check            # svelte-check
+pnpm dev              # here or at the root: vp dev, http://localhost:5173
+vp run test           # here (pnpm test at the root): builds the engine, then vp test
+vp run check          # here (pnpm check at the root): builds the engine, then svelte-check
 pnpm build            # vp build → .vercel/output
 ```
 
@@ -23,7 +23,7 @@ Unauthenticated, GitHub allows 60 tarball requests an hour per server IP. Set `G
 
 ## Deploy (Vercel)
 
-One Vercel project, linked to `oneezy/tools`, **Root Directory `apps/skills-viewer-web`**. `vercel.json` sets the rest: SvelteKit preset, pnpm through corepack (the root `packageManager` pins pnpm 12), a build of this app and its workspace dependencies (`pnpm --filter "skills-viewer-web..." run build`, so the engine's `dist` exists), and `turbo-ignore` so pushes that don't touch this app or its dependencies skip the deploy. Every PR gets a preview URL.
+One Vercel project, linked to `oneezy/tools`, **Root Directory `apps/skills-viewer-web`**. `vercel.json` sets the rest: SvelteKit preset, pnpm through corepack (the root `packageManager` pins pnpm 12), a build of this app and its workspace dependencies (`pnpm --filter "skills-viewer-web..." run build`, so the engine's `dist` exists), and an `ignoreCommand` (`scripts/vercel-ignore.sh`: a `git diff` over this app, the engine and the workspace files) so pushes that don't touch them skip the deploy. Every PR gets a preview URL.
 
 ## SvelteKit 3 notes
 

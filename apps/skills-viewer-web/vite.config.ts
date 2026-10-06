@@ -14,4 +14,18 @@ export default defineConfig({
   test: {
     include: ["src/**/*.test.ts"],
   },
+  // `vp run test` / `vp run check` (and `pnpm test` / `pnpm check` at the root) build the
+  // skills-viewer engine first: both import its dist.
+  run: {
+    tasks: {
+      test: {
+        command: "vp test",
+        dependsOn: [{ task: "build", from: "dependencies" }],
+      },
+      check: {
+        command: "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json",
+        dependsOn: [{ task: "build", from: "dependencies" }],
+      },
+    },
+  },
 });

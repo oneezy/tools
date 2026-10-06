@@ -2,15 +2,14 @@
 
 ## Workspace
 
-`oneezy/tools` is one pnpm workspace (`pnpm-workspace.yaml`: `packages/*` and `apps/*`). Three tools, one job each; no duplicate orchestration:
+`oneezy/tools` is one pnpm workspace (`pnpm-workspace.yaml`: `packages/*` and `apps/*`). Two tools, one job each:
 
 - **pnpm** (`packageManager` in the root `package.json`) installs dependencies. `pnpm install` once at the root.
-- **Turborepo** (`turbo.json`) runs tasks across packages: `pnpm build`, `pnpm test`, `pnpm check` and `pnpm dev` at the root run every package's script of that name, in dependency order, cached.
-- **Vite Plus** (`vp`) is the dev server where a package has one. Only `apps/skills-viewer-web` has one (SvelteKit on `vite-plus`); an app adds Vite Plus to its own `package.json`, never to a package without a dev server. The `vite`/`vitest` overrides in `pnpm-workspace.yaml` keep every package on the copies Vite Plus bundles; bump them with `vite-plus`.
+- **Vite Plus** (`vite-plus`, the `vp` CLI; docs in `node_modules/vite-plus/docs`) does everything else. At the root, `pnpm build`, `pnpm test` and `pnpm check` run `vp run -r <name>`: every package's script of that name, in workspace dependency order. `pnpm dev` runs `vp dev`, which serves `apps/skills-viewer-web` (`defaultPackage` in the root `vite.config.ts`). A package whose task needs another package built first says so in its own `vite.config.ts` (`run.tasks`, `dependsOn`), as `apps/skills-viewer-web` does for `test` and `check`. The `vite`/`vitest` overrides in `pnpm-workspace.yaml` keep every package on the copies Vite Plus bundles; bump them with `vite-plus`.
 
 Windows 11 with PowerShell 7 is the primary host: every script is run there first. Linux is a future target, so nothing in a `package.json` may be Windows-only: `scripts/python.mjs` runs Python (`py -3` on Windows, `python3` elsewhere) and `scripts/syntax-check.ps1` runs under pwsh on either.
 
-Each package keeps its language. `packages/skills-sync` (TypeScript, published as `@oneezy/skills-sync`), `packages/skills-viewer` (TypeScript), `packages/remote-sessions` (Python), `packages/task-manager` (PowerShell + bash), `packages/apps-sync` (PowerShell + Python), `apps/skills-viewer-web` (SvelteKit, deployed to Vercel). A Python or PowerShell package has a minimal `package.json` whose `test` and `check` scripts run what the package already had, so Turborepo can run them. Every tool lives in its package; there is no `clis/` folder (the compatibility shims were removed), so shortcuts and docs point into `packages/`.
+Each package keeps its language. `packages/skills-sync` (TypeScript, published as `@oneezy/skills-sync`), `packages/skills-viewer` (TypeScript), `packages/remote-sessions` (Python), `packages/task-manager` (PowerShell + bash), `packages/apps-sync` (PowerShell + Python), `apps/skills-viewer-web` (SvelteKit, deployed to Vercel). A Python or PowerShell package has a minimal `package.json` whose `test` and `check` scripts run what the package already had, so `vp run -r` can run them. Every tool lives in its package; there is no `clis/` folder (the compatibility shims were removed), so shortcuts and docs point into `packages/`.
 
 ## Agent skills
 
@@ -53,14 +52,3 @@ to prepare a named persistent worktree, then start either harness in its returne
 If using a native worktree tool instead, supply this readable name when its API allows it.
 Keep the task's display title descriptive too; changing a chat title does not rename its
 folder. Do not move existing worktrees or rewrite saved session paths just to rename them.
-
-<!-- BEGIN:turborepo-agent-rules -->
-
-# This is NOT the Turborepo you know
-
-Turborepo configuration, task behavior, and CLI commands can vary between installed versions and may differ from your training data. Resolve the `turbo` package from this file's directory or relevant workspace; in monorepos, it may not be visible from the repository root. For example, run `node -p "require.resolve('turbo/package.json')"` from a workspace that depends on `turbo`.
-
-Read `docs/README.md` inside that installed package first, then read the relevant pages from its `docs/` directory before changing Turborepo configuration or commands. Heed deprecation notices. These bundled docs match the installed package version and are available without network access.
-
-This block is written and re-added by `turbo` before repository-scoped commands when an AI agent is detected. In the Turborepo source repository, its template is defined in `crates/turborepo-cli/src/cli/agent_guidance.rs`. Removing the managed block while updates are enabled means a later qualifying invocation will add it again. Set `"agentGuidance": false` in the root `turbo.json` or `turbo.jsonc` to opt out; this does not remove an existing block. Keep the block committed with your work to avoid an uncommitted change on the next agent invocation.
-<!-- END:turborepo-agent-rules -->
