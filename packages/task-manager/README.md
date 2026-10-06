@@ -2,7 +2,7 @@
 
 Zero-touch bootstrap and repair of one GitHub project per repo, and the repo's roadmap from a markdown file. Double-click `task-manager.cmd`, check the repos, press enter. Everything a GitHub project needs is created or repaired from the spec in `task-manager.ps1`; the only hand step GitHub leaves is turning on **Auto-add to project**, and the tool opens that page and waits until it sees the switch flipped.
 
-Decisions behind the spec: [Task-manager model](https://github.com/oneezy/tools/issues/7) (fields, statuses, labels, views), [How much of a GitHub Project can be set up by automation?](https://github.com/oneezy/tools/issues/5) (what the API can and cannot do) and [#77](https://github.com/oneezy/tools/issues/77) (phases and milestones, view pruning, the In Progress rules). Glossary in the repo's `GLOSSARY.md`; ADRs in `docs/adr/`.
+Decisions behind the spec: [Task-manager model](https://github.com/oneezy/tools/issues/7) (fields, statuses, labels, views), [How much of a GitHub Project can be set up by automation?](https://github.com/oneezy/tools/issues/5) (what the API can and cannot do) and [#77](https://github.com/oneezy/tools/issues/77) (phases and milestones, view pruning, the In Progress rules). Glossary in [`GLOSSARY.md`](GLOSSARY.md); ADRs in [`docs/adr/`](docs/adr/).
 
 ## Use
 
