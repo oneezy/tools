@@ -275,3 +275,20 @@ test("a version 1 skills-lock.json (what 0.4.0 wrote) is read in memory by a fro
   assert.equal(fs.readFileSync(path.join(root, OLD_LOCK), "utf8"), npx);
   assert.equal(cli("check").status, 0, "and not a problem");
 });
+
+test("skills-lock.json counts as a version 1 lock only when it parses, has an entry and every entry has a commit: an npx skills lock with no skills, or a file with merge-conflict markers, in a config library is neither a check problem nor removed by update or refresh", () => {
+  config({ up: source(up) });
+  assert.equal(cli("refresh", "--quiet").status, 0);
+  const empty = JSON.stringify({ version: 1, skills: {} }, null, 2) + "\n";
+  const conflicted = `{\n<<<<<<< HEAD\n  "version": 1,\n=======\n  "version": 2,\n>>>>>>> other\n  "skills": {}\n}\n`;
+  for (const body of [empty, conflicted]) {
+    fs.writeFileSync(path.join(root, OLD_LOCK), body);
+    const checked = cli("check");
+    assert.equal(checked.status, 0, checked.stdout);
+    for (const cmd of ["refresh", "update"]) {
+      const r = cli(cmd, "--quiet");
+      assert.equal(r.status, 0, r.stderr);
+      assert.equal(fs.readFileSync(path.join(root, OLD_LOCK), "utf8"), body, `${cmd} leaves it`);
+    }
+  }
+});

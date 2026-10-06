@@ -73,12 +73,20 @@ export function npxLockEntries(root: string): Record<string, LockEntry> {
 }
 
 /**
- * Whether skills-lock.json is a version 1 lock skills-sync wrote: every entry carries the commit it was taken at, which
- * npx skills never writes. An npx skills lock of its own (one without commits) is never migrated or removed.
+ * Whether skills-lock.json is a version 1 lock skills-sync wrote: it parses, has at least one entry, and every entry
+ * carries the commit it was taken at, which npx skills never writes. An npx skills lock of its own (one without commits,
+ * or with no skills), or a file that does not parse (a merge left conflict markers in it), is never migrated or removed.
  */
 export function hasOldLock(root: string): boolean {
-  if (!fs.existsSync(path.join(root, NPX_LOCK_NAME))) return false;
-  return Object.values(npxLockEntries(root)).every((e) => typeof e?.commit === "string");
+  let entries: unknown;
+  try {
+    entries = (JSON.parse(fs.readFileSync(path.join(root, NPX_LOCK_NAME), "utf8")) as { skills?: unknown })?.skills;
+  } catch {
+    return false;
+  }
+  if (!entries || typeof entries !== "object") return false;
+  const all = Object.values(entries as Record<string, LockEntry>);
+  return all.length > 0 && all.every((e) => typeof e?.commit === "string");
 }
 
 /** The lock of a config library: the version 2 file, else a version 1 lock read as version 2 in memory, else null. */
