@@ -35,6 +35,8 @@ A library with a config gets its third-party skills through `refresh` (see [Thir
 
 A folder directly under `skills/` that holds `SKILL.md` is a flat own skill. One without `SKILL.md` is a **group**: its children are own skills, and the group's name (`oneezy`, `trident`) is the plugin id they will be packaged under. A skill is known everywhere by its folder name alone, so `skills/oneezy/oneezy-status` links as `oneezy-status`, exactly as `skills/oneezy-status` would, and moving a skill into a group retargets its links without dropping any. Groups do not nest: a `SKILL.md` two levels below a group, or a second skill with a name already taken, is reported once on every run and never linked. `status --json` lists each own skill with its `plugin` (null when flat) and its `path` under the library.
 
+The group named `play` is the playground: a place to try a skill (your own idea, or one copied from someone else's repo) before promoting it into another group. It is packaged, cataloged and linked exactly like any other group, and every skill in it is named `play-<name>` (`skills/play/play-unslop`, used as `/play-unslop`), so it never clashes with a skill from a source; `check` fails on one that is not. Other groups' skill names are not held to a prefix.
+
 Before 0.3.0 the answers lived in `skills-sync.json` itself. A `skills-sync.json` that holds only answers is moved to `skills-sync.local.json` on the next run, reported as one `move` line; one that has a `version`, `sources` or `plugins` key is the config and is never read as answers.
 
 Everything else in it is generated and should be gitignored:
@@ -139,7 +141,9 @@ The package is the record of the version it was built with: the commit that vers
 
 A new or changed package needs no history either: `build` works in a shallow clone, because the next version comes from the package on disk, not from counting commits.
 
-A package that cannot be built is a conflict: a group with no skills under `skills/<group>`, a source that is not in the config, a source with no snapshot under `upstream/` (a clone before `refresh`), a link inside `plugins/<id>` (never followed, never written through). `build` leaves whatever `plugins/<id>` holds and exits 1; `build --check` lists `plugins/<id>` as drift. A link inside a source skill folder is not copied, with a note.
+A package that cannot be built is a conflict: a source that is not in the config, a source with no snapshot under `upstream/` (a clone before `refresh`), a link inside `plugins/<id>` (never followed, never written through). `build` leaves whatever `plugins/<id>` holds and exits 1; `build --check` lists `plugins/<id>` as drift. A link inside a source skill folder is not copied, with a note.
+
+A group the config declares as a plugin but that holds no skill yet (a new, empty `play`) is not a conflict: `build` and `build --check` skip it with one note (`no skills under skills/<group> yet; not built, not cataloged`) and exit 0, and the catalogs leave it out. When a group's last skill goes, `build` removes its `plugins/<id>` with that reason, and until then `check` reports the package as drift.
 
 A package holds LF line endings, whatever the checkout it was built in holds. A source file (a skill's file, the LICENSE) whose line endings are all CRLF is copied with LF: that is what `core.autocrlf=true` makes of a committed LF file, and copied as read it would give a different package, and a different archive, from the same commit, with shell scripts that fail on Linux. A file committed with CRLF is copied with LF too, the library's or upstream's; a binary file (a NUL byte, or more than one control character in 128 bytes) and a file with mixed line endings are copied as they are. Every file `build` writes is therefore LF; on a checkout where git converts to CRLF a committed file is compared as git sees it, so such a clone is as built and `build` rewrites nothing there. Give the library a `.gitattributes` with `* text=auto eol=lf` so every clone holds LF regardless of the machine's git settings.
 
@@ -168,9 +172,9 @@ The config's optional `releases` section is that record, one entry per plugin id
 
 ## Check
 
-**`check`** answers one question: is what is committed consistent? It reads the library and nothing else (no network, no clone, nothing written, no harness folder), prints one line per problem as `<path>: <reason>`, and exits 1 when there is any; a clean library gets one summary line and exit 0. Run it before committing; CI runs it on every push. It is a command, never a git hook. `--json` gives `problems` as `path` and `reason` pairs; `--quiet` says nothing when the library is clean.
+**`check`** answers one question: is what is committed consistent? It reads the library and nothing else (no network, no clone, nothing written, no harness folder), prints one line per problem as `<path>: <reason>`, and exits 1 when there is any; a clean library gets one summary line and exit 0. Run it before committing; CI runs it on every push. It is a command, never a git hook. `--json` gives `problems` as `path` and `reason` pairs, and `notes` the same way for what was passed over without failing (a declared group with no skill yet, printed as `note: <path>: <reason>`); `--quiet` says nothing when the library is clean.
 
-1. **Frontmatter of every own skill** (`skills/<name>/SKILL.md` and `skills/<group>/<name>/SKILL.md`): `name` is the folder's name and a valid skill id (lowercase letters, digits and single hyphens, at most 64 characters), and `description` is present. Third-party skills are upstream's and are not checked.
+1. **Frontmatter of every own skill** (`skills/<name>/SKILL.md` and `skills/<group>/<name>/SKILL.md`): `name` is the folder's name and a valid skill id (lowercase letters, digits and single hyphens, at most 64 characters), and `description` is present. A skill folder under `skills/play/` is named `play-<name>`; one that is not fails as `skills/play/unslop: a skill in the play group is named play-<name>; rename the folder (and its frontmatter name) to play-unslop`. Third-party skills are upstream's and are not checked.
 2. **Every `flow.yaml` beside an own `SKILL.md`**, against `schemas/flow.schema.json` and the rules a schema cannot say:
 
    | key | rule |

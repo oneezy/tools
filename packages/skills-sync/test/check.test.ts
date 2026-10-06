@@ -224,7 +224,7 @@ test("check fails on generated-file drift, the computation of build --check: a h
   fs.rmSync(path.join(root, ".agents", "plugins", "marketplace.json"));
   write("plugins/old/plugin.json", "{}\n");
   const config = CONFIG();
-  write("skills-sync.json", JSON.stringify({ ...config, plugins: { ...config.plugins, ghost: { displayName: "Ghost", group: "nope" } } }, null, 2) + "\n");
+  write("skills-sync.json", JSON.stringify({ ...config, plugins: { ...config.plugins, ghost: { displayName: "Ghost", source: "nosrc" } } }, null, 2) + "\n");
   const before = tree(root);
   const r = cli("check");
   assert.equal(r.status, 1);
@@ -232,7 +232,7 @@ test("check fails on generated-file drift, the computation of build --check: a h
     "plugins/up/.codex-plugin/plugin.json: differs from what build would write",
     "plugins/up/plugin.json: differs from what build would write",
     "plugins/up/skills/a/SKILL.md: differs from what build would write",
-    "plugins/ghost: no own skills under skills/nope; package not built",
+    "plugins/ghost: source nosrc is not in skills-sync.json; package not built",
     "plugins/old: no longer in skills-sync.json; build would remove it",
     ".claude-plugin/marketplace.json: differs from what build would write",
     ".agents/plugins/marketplace.json: missing; build would write it",
@@ -291,4 +291,27 @@ test("check fails when skills-lock.json is not what refresh would write from the
   const clone = cli("check");
   assert.equal(clone.status, 0, clone.stdout);
   assert.match(clone.stdout, /^check: clean, 3 own skills, 1 flow, 0 generated files as built$/m);
+});
+
+test("a skill folder in the play group must be named play-<name>: skills/play/unslop fails with its path and the reason, skills/play/play-unslop passes; the same name in another group or flat is not held to it", () => {
+  const config = CONFIG();
+  write("skills-sync.json", JSON.stringify({ ...config, plugins: { ...config.plugins, play: { displayName: "Play", description: "Justin's playground.", group: "play" } } }, null, 2) + "\n");
+  write("skills/play/unslop/SKILL.md", skillMd("unslop"));
+  write("skills/oneezy/plain/SKILL.md", skillMd("plain"));
+  write("skills/plain-flat/SKILL.md", skillMd("plain-flat"));
+  assert.equal(cli("build", "--quiet").status, 0);
+  const reason = "a skill in the play group is named play-<name>; rename the folder (and its frontmatter name) to play-unslop";
+  const bad = cli("check");
+  assert.equal(bad.status, 1, bad.stdout);
+  assert.deepEqual(problems(bad), [`skills/play/unslop: ${reason}`]);
+  assert.match(bad.stdout, /^check: 1 problem$/m);
+  assert.deepEqual(JSON.parse(cli("check", "--json").stdout).problems, [{ path: "skills/play/unslop", reason }]);
+
+  fs.renameSync(path.join(root, "skills", "play", "unslop"), path.join(root, "skills", "play", "play-unslop"));
+  write("skills/play/play-unslop/SKILL.md", skillMd("play-unslop"));
+  assert.equal(cli("build", "--quiet").status, 0);
+  const good = cli("check");
+  assert.deepEqual(problems(good), []);
+  assert.equal(good.status, 0, good.stdout);
+  assert.match(good.stdout, /^check: clean, 6 own skills, 1 flow\b/m);
 });

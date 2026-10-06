@@ -19,6 +19,8 @@ export interface Problem {
 
 export interface CheckResult {
   problems: Problem[];
+  /** what was passed over and why, never a failure: a declared group with no skill yet */
+  notes: Problem[];
   /** own skills whose frontmatter was read */
   skills: number;
   /** flow.yaml files validated */
@@ -32,14 +34,17 @@ export interface CheckResult {
 /** A skill id by the Agent Skills rule: lowercase letters, digits and single hyphens. */
 const SKILL_ID = /^[a-z0-9]+(-[a-z0-9]+)*$/;
 const SKILL_ID_MAX = 64;
+/** The playground group: every skill in skills/play/ is named play-<name>, so it never clashes with a source's skill. */
+const PLAY = "play";
 
 export function check(lib: Library): CheckResult {
-  const result: CheckResult = { problems: [], skills: 0, flows: 0, generated: 0, fixes: [] };
+  const result: CheckResult = { problems: [], notes: [], skills: 0, flows: 0, generated: 0, fixes: [] };
   const rel = (p: string) => path.relative(lib.root, p).split("\\").join("/");
   const problem = (file: string, reason: string) => result.problems.push({ path: rel(file), reason });
   for (const s of lib.scanOwn().skills) {
     const md = path.join(s.dir, "SKILL.md");
     result.skills++;
+    if (s.plugin === PLAY && !s.name.startsWith(`${PLAY}-`)) problem(s.dir, `a skill in the ${PLAY} group is named ${PLAY}-<name>; rename the folder (and its frontmatter name) to ${PLAY}-${s.name}`);
     for (const reason of frontmatterProblems(fs.readFileSync(md, "utf8"), s.name)) problem(md, reason);
     const flow = path.join(s.dir, "flow.yaml");
     if (!fs.existsSync(flow)) continue;
@@ -76,8 +81,10 @@ function validConfig(lib: Library, problem: AddProblem): boolean {
 function pluginDrift(lib: Library, result: CheckResult, problem: AddProblem): void {
   const r = build(lib, { plugins: true, catalogs: true, artifacts: false, check: true, plan: false, log: () => undefined });
   const before = result.problems.length;
+  const skipped = new Set(r.skipped.map((id) => path.join(lib.plugins, id)));
   for (const a of r.report.actions) {
-    if (a.kind === "write") problem(a.path, a.note === "missing" ? "missing; build would write it" : "differs from what build would write");
+    if (a.kind === "note" && skipped.has(a.path)) result.notes.push({ path: path.relative(lib.root, a.path).split("\\").join("/"), reason: a.note! });
+    else if (a.kind === "write") problem(a.path, a.note === "missing" ? "missing; build would write it" : "differs from what build would write");
     else if (a.kind === "delete") problem(a.path, `${a.note}; build would remove it`);
     else if (a.kind === "conflict") problem(a.path, a.note ?? "cannot be built");
   }
