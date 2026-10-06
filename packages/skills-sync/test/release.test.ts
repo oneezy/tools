@@ -4,11 +4,11 @@ import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
-import { test } from "node:test";
+import { test } from "vite-plus/test";
 
-const CLI = path.resolve(import.meta.dirname, "..", "src", "cli.js");
+const CLI = path.resolve(import.meta.dirname, "..", "dist", "src", "cli.js");
 /** The package's own folder, wherever the workspace keeps it: two levels above the compiled tests. */
-const PACKAGE = path.resolve(import.meta.dirname, "..", "..");
+const PACKAGE = path.resolve(import.meta.dirname, "..");
 const manifest = JSON.parse(fs.readFileSync(path.join(PACKAGE, "package.json"), "utf8")) as { version: string; files: string[]; bin: Record<string, string> };
 
 function cli(...args: string[]): { status: number | null; stdout: string; stderr: string } {

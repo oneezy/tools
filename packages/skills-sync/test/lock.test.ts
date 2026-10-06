@@ -8,7 +8,7 @@ import { createHash } from "node:crypto";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { after, before, beforeEach, test } from "node:test";
+import { afterAll, beforeAll, beforeEach, test } from "vite-plus/test";
 
 let base: string;
 let root: string;
@@ -16,7 +16,7 @@ let homeDir: string;
 let tmpDir: string;
 let up: Upstream;
 
-const CLI = path.resolve(import.meta.dirname, "..", "src", "cli.js");
+const CLI = path.resolve(import.meta.dirname, "..", "dist", "src", "cli.js");
 const HARNESS_ENV = ["CLAUDE_CONFIG_DIR", "CODEX_HOME", "XDG_CONFIG_HOME", "HERMES_HOME"] as const;
 const GIT = ["-c", "user.name=t", "-c", "user.email=t@example.com", "-c", "commit.gpgsign=false"];
 const LOCK = "skills-sync.lock.json";
@@ -98,10 +98,10 @@ function source(u: Upstream, extra: Record<string, unknown> = {}): Record<string
   return { repo: u.dir, ref: "main", root: "skills", skills: ["a", "b"], ...extra };
 }
 
-before(() => {
+beforeAll(() => {
   base = fs.mkdtempSync(path.join(os.tmpdir(), "skills-sync-lock-"));
 });
-after(() => {
+afterAll(() => {
   fs.rmSync(base, { recursive: true, force: true });
 });
 beforeEach(() => {

@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { after, before, beforeEach, test } from "node:test";
+import { afterAll, beforeAll, beforeEach, test } from "vite-plus/test";
 import { gitExclude, isLink, lexists, linkTarget, real, samePath, under } from "../src/fs.js";
 import { harnessTable, type Harness } from "../src/harnesses.js";
 import { findLibrary, Library, sidecarFor } from "../src/library.js";
@@ -24,10 +24,10 @@ function skill(folder: string, name: string, body = "do the thing", extraFm = ""
   return d;
 }
 
-before(() => {
+beforeAll(() => {
   base = fs.mkdtempSync(path.join(os.tmpdir(), "skills-sync-"));
 });
-after(() => {
+afterAll(() => {
   fs.rmSync(base, { recursive: true, force: true });
 });
 beforeEach(() => {

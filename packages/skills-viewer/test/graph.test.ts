@@ -1,14 +1,14 @@
 import assert from "node:assert/strict";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { test } from "node:test";
+import { test } from "vite-plus/test";
 import { classify } from "../src/edges.js";
 import { buildGraph } from "../src/graph.js";
 import { toMermaid } from "../src/mermaid.js";
 import { claudeMode, unionMode } from "../src/parse.js";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
-const FIXTURE = path.resolve(here, "..", "..", "fixtures", "mattpocock-skills");
+const FIXTURE = path.resolve(here, "..", "fixtures", "mattpocock-skills");
 const graph = buildGraph([FIXTURE]);
 const edge = (s: string, t: string) => graph.edges.find((e) => e.source === s && e.target === t);
 const node = (id: string) => graph.nodes.find((n) => n.id === id)!;

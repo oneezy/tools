@@ -6,7 +6,7 @@ import { spawnSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { after, before, beforeEach, test } from "node:test";
+import { afterAll, beforeAll, beforeEach, test } from "vite-plus/test";
 
 let base: string;
 let root: string;
@@ -14,9 +14,9 @@ let homeDir: string;
 let up: Repo;
 let library: Repo;
 
-const CLI = path.resolve(import.meta.dirname, "..", "src", "cli.js");
+const CLI = path.resolve(import.meta.dirname, "..", "dist", "src", "cli.js");
 /** The eight flow.yaml files of oneezy/skills (feature/skills-sync-migration at 69c0434), copied as they are. */
-const FLOWS = path.resolve(import.meta.dirname, "..", "..", "test", "fixtures", "flows");
+const FLOWS = path.resolve(import.meta.dirname, "fixtures", "flows");
 const HARNESS_ENV = ["CLAUDE_CONFIG_DIR", "CODEX_HOME", "XDG_CONFIG_HOME", "HERMES_HOME"] as const;
 const GIT = ["-c", "user.name=t", "-c", "user.email=t@example.com", "-c", "commit.gpgsign=false"];
 
@@ -90,10 +90,10 @@ const CONFIG = () => ({
   },
 });
 
-before(() => {
+beforeAll(() => {
   base = fs.mkdtempSync(path.join(os.tmpdir(), "skills-sync-check-"));
 });
-after(() => {
+afterAll(() => {
   fs.rmSync(base, { recursive: true, force: true });
 });
 beforeEach(() => {
