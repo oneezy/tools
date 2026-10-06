@@ -52,17 +52,8 @@
             "Estimations (show total story points sum in parenthesis)",
             "Status"
           ],
-          "Table Column Sort": [
-            "Priority (higest first)",
-            "Estimations (lowest first)"
-          ],
-          "Status Filter": [
-            "To Do",
-            "Next Up",
-            "In Progress",
-            "Blocked",
-            "Done"
-          ],
+          "Table Column Sort": ["Priority (higest first)", "Estimations (lowest first)"],
+          "Status Filter": ["To Do", "Next Up", "In Progress", "Blocked", "Done"],
           "Next Action": "Continue"
         },
         {

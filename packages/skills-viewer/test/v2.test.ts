@@ -30,8 +30,14 @@ test("parseRepoInput takes owner/repo and GitHub URLs, rejects the rest", () => 
     ["github.com/mattpocock/skills.git", { owner: "mattpocock", repo: "skills" }],
     ["https://www.github.com/mattpocock/skills/?tab=readme#top", { owner: "mattpocock", repo: "skills" }],
     ["git@github.com:mattpocock/skills.git", { owner: "mattpocock", repo: "skills" }],
-    ["https://github.com/cursor/plugins/tree/main/pstack", { owner: "cursor", repo: "plugins", refPath: ["main", "pstack"] }],
-    ["https://github.com/o/r/blob/feat/x/skills/a/SKILL.md", { owner: "o", repo: "r", refPath: ["feat", "x", "skills", "a", "SKILL.md"] }],
+    [
+      "https://github.com/cursor/plugins/tree/main/pstack",
+      { owner: "cursor", repo: "plugins", refPath: ["main", "pstack"] },
+    ],
+    [
+      "https://github.com/o/r/blob/feat/x/skills/a/SKILL.md",
+      { owner: "o", repo: "r", refPath: ["feat", "x", "skills", "a", "SKILL.md"] },
+    ],
     ["https://github.com/o/r/issues/3", { owner: "o", repo: "r" }],
     ["https://gitlab.com/o/r", null],
     ["./skills", null],
@@ -89,7 +95,10 @@ test("links connect parts: command -> skill, command -> agent, skill -> files, h
   assert.ok(!link("hook:toolkit/SessionStart", "script:toolkit/scripts/format.sh"));
   for (const l of graph.links) assert.ok(l.evidence.length > 0 && l.evidence[0].line > 0);
   // skill -> skill stays in edges
-  assert.deepEqual(graph.edges.map((e) => [e.source, e.target, e.type]), [["deploy", "review", "calls"]]);
+  assert.deepEqual(
+    graph.edges.map((e) => [e.source, e.target, e.type]),
+    [["deploy", "review", "calls"]],
+  );
   // a command that runs a manual-only skill is its entry point, so the skill is not one
   assert.equal(graph.nodes.find((n) => n.id === "deploy")?.entry, false);
 });
@@ -107,17 +116,26 @@ test("marketplaces list their plugins and point at the ones read", () => {
   assert.equal(graph.marketplaces.length, 1);
   const m = graph.marketplaces[0];
   assert.equal(m.name, "example-tools");
-  assert.deepEqual(m.plugins.map((p) => [p.name, p.source, p.pluginId]), [
-    ["toolkit", "./plugins/toolkit", "plugin:toolkit"],
-    ["elsewhere", "github:example/elsewhere", undefined],
-  ]);
+  assert.deepEqual(
+    m.plugins.map((p) => [p.name, p.source, p.pluginId]),
+    [
+      ["toolkit", "./plugins/toolkit", "plugin:toolkit"],
+      ["elsewhere", "github:example/elsewhere", undefined],
+    ],
+  );
 });
 
 test("analyze runs on an in-memory file set and matches the local result", () => {
   const files = fixtureFiles();
   const mem = analyze(memoryFileSet(files));
   assert.equal(mem.nodes[1].file, "skills/review/SKILL.md", "paths are as the source reports them");
-  const strip = (g: typeof graph) => JSON.stringify([g.nodes.map((n) => n.id), g.edges, g.parts.map((p) => p.id), g.links.map((l) => [l.source, l.target, l.type])]);
+  const strip = (g: typeof graph) =>
+    JSON.stringify([
+      g.nodes.map((n) => n.id),
+      g.edges,
+      g.parts.map((p) => p.id),
+      g.links.map((l) => [l.source, l.target, l.type]),
+    ]);
   assert.equal(strip(mem), strip(graph));
 });
 
@@ -129,9 +147,15 @@ test("filesToRead asks for SKILL.md and manifests first, then what manifests poi
   assert.ok(first.includes("plugins/toolkit/.claude-plugin/plugin.json"));
   assert.ok(first.includes("plugins/toolkit/commands/ship.md"));
   assert.ok(first.includes("plugins/toolkit/hooks/hooks.json"));
-  assert.ok(!first.some((p) => p.endsWith(".sh") || p.endsWith(".mjs") || p.endsWith("env.md")), "scripts and references are listed, not read");
+  assert.ok(
+    !first.some((p) => p.endsWith(".sh") || p.endsWith(".mjs") || p.endsWith("env.md")),
+    "scripts and references are listed, not read",
+  );
   const loaded = new Map(first.map((p) => [p, files.get(p) ?? ""]));
-  assert.deepEqual(filesToRead(paths, (p) => loaded.get(p)), []);
+  assert.deepEqual(
+    filesToRead(paths, (p) => loaded.get(p)),
+    [],
+  );
 });
 
 test("browser-safe modules import nothing from node:", () => {
@@ -209,12 +233,17 @@ test("untar reads ustar, pax paths and the global sha comment", () => {
   ]);
   const out = untar(new Uint8Array(tar));
   assert.equal(out.globalComment, SHA);
-  assert.deepEqual(out.files.map((f) => [f.path, Buffer.from(f.data).toString()]), [[long, "hello"]]);
+  assert.deepEqual(
+    out.files.map((f) => [f.path, Buffer.from(f.data).toString()]),
+    [[long, "hello"]],
+  );
 });
 
 test("loadGitHub via tarball: one API request, repo-relative paths, sha in blob links", async () => {
   const tgz = fixtureTarball();
-  const { f, calls } = fakeFetch((url) => (url.includes("/tarball/") ? new Response(new Uint8Array(tgz)) : new Response("", { status: 500 })));
+  const { f, calls } = fakeFetch((url) =>
+    url.includes("/tarball/") ? new Response(new Uint8Array(tgz)) : new Response("", { status: 500 }),
+  );
   const g = await loadGitHub("https://github.com/acme/lib", { via: "tarball", fetch: f });
   assert.deepEqual(calls, ["https://api.github.com/repos/acme/lib/tarball/HEAD"]);
   assert.equal(g.meta.source.kind, "github");
@@ -230,30 +259,54 @@ test("loadGitHub via tree: one API request, raw downloads only for files it read
   const files = fixtureFiles();
   const tree = { tree: [...files.keys()].map((p) => ({ path: p, type: "blob" })), truncated: false };
   const { f, calls } = fakeFetch((url) => {
-    if (url.startsWith("https://api.github.com/repos/acme/lib/git/trees/feat?")) return new Response("{}", { status: 404 });
-    if (url.startsWith("https://api.github.com/repos/acme/lib/git/trees/feat/x?recursive=1")) return Response.json(tree);
+    if (url.startsWith("https://api.github.com/repos/acme/lib/git/trees/feat?"))
+      return new Response("{}", { status: 404 });
+    if (url.startsWith("https://api.github.com/repos/acme/lib/git/trees/feat/x?recursive=1"))
+      return Response.json(tree);
     const raw = /^https:\/\/raw\.githubusercontent\.com\/acme\/lib\/feat\/x\/(.+)$/.exec(url);
     if (raw && files.has(decodeURIComponent(raw[1]))) return new Response(files.get(decodeURIComponent(raw[1])));
     return new Response("nope", { status: 404 });
   });
   const g = await loadGitHub("https://github.com/acme/lib/tree/feat/x/plugins/toolkit", { fetch: f });
-  assert.equal(calls.filter((u) => u.startsWith("https://api.github.com")).length, 2, "one miss for branch 'feat', one hit for 'feat/x'");
+  assert.equal(
+    calls.filter((u) => u.startsWith("https://api.github.com")).length,
+    2,
+    "one miss for branch 'feat', one hit for 'feat/x'",
+  );
   assert.ok(!calls.some((u) => u.endsWith(".sh") || u.endsWith(".mjs")), "scripts are never downloaded");
-  assert.ok(!calls.some((u) => u.endsWith("skills/review/SKILL.md") && !u.includes("plugins/")), "files outside the subpath are not downloaded");
+  assert.ok(
+    !calls.some((u) => u.endsWith("skills/review/SKILL.md") && !u.includes("plugins/")),
+    "files outside the subpath are not downloaded",
+  );
   assert.equal(g.meta.source.kind === "github" && g.meta.source.ref, "feat/x");
   assert.equal(g.meta.source.kind === "github" && g.meta.source.subpath, "plugins/toolkit");
-  assert.deepEqual(g.nodes.map((n) => [n.id, n.file]), [
-    ["deploy", "plugins/toolkit/skills/deploy/SKILL.md"],
-    ["review", "plugins/toolkit/skills/review/SKILL.md"],
-  ]);
+  assert.deepEqual(
+    g.nodes.map((n) => [n.id, n.file]),
+    [
+      ["deploy", "plugins/toolkit/skills/deploy/SKILL.md"],
+      ["review", "plugins/toolkit/skills/review/SKILL.md"],
+    ],
+  );
   assert.equal(g.plugins[0]?.id, "plugin:toolkit");
   assert.deepEqual(g.meta.warnings, []);
 });
 
 test("loadGitHub reports rate limits and missing repos as GitHubError", async () => {
-  const limited = fakeFetch(() => new Response("{}", { status: 403, headers: { "x-ratelimit-remaining": "0", "x-ratelimit-reset": "1700000000" } }));
-  await assert.rejects(loadGitHub("acme/lib", { fetch: limited.f }), (e: unknown) => e instanceof GitHubError && e.rateLimitReset === 1700000000 && /rate limit/.test(e.message));
+  const limited = fakeFetch(
+    () =>
+      new Response("{}", { status: 403, headers: { "x-ratelimit-remaining": "0", "x-ratelimit-reset": "1700000000" } }),
+  );
+  await assert.rejects(
+    loadGitHub("acme/lib", { fetch: limited.f }),
+    (e: unknown) => e instanceof GitHubError && e.rateLimitReset === 1700000000 && /rate limit/.test(e.message),
+  );
   const missing = fakeFetch(() => new Response("{}", { status: 404 }));
-  await assert.rejects(loadGitHub("acme/lib", { fetch: missing.f }), (e: unknown) => e instanceof GitHubError && e.status === 404);
-  await assert.rejects(loadGitHub("not a repo", { fetch: missing.f }), (e: unknown) => e instanceof GitHubError && e.status === 400);
+  await assert.rejects(
+    loadGitHub("acme/lib", { fetch: missing.f }),
+    (e: unknown) => e instanceof GitHubError && e.status === 404,
+  );
+  await assert.rejects(
+    loadGitHub("not a repo", { fetch: missing.f }),
+    (e: unknown) => e instanceof GitHubError && e.status === 400,
+  );
 });

@@ -8,7 +8,19 @@ import { copyDir, isLink, lexists, linkTarget, makeLink, removeLink, samePath, u
  * a built package); move renames a file this tool wrote (path -> target). note says something about a path without
  * touching it (a package built without a LICENSE): printed, and neither a change nor a conflict.
  */
-export type Kind = "link" | "relink" | "remove" | "delete" | "replace-copy" | "copy" | "write" | "move" | "exclude" | "skip" | "conflict" | "note";
+export type Kind =
+  | "link"
+  | "relink"
+  | "remove"
+  | "delete"
+  | "replace-copy"
+  | "copy"
+  | "write"
+  | "move"
+  | "exclude"
+  | "skip"
+  | "conflict"
+  | "note";
 
 export interface Action {
   kind: Kind;
@@ -43,7 +55,20 @@ export class Report {
   }
 }
 
-const MARK: Record<Kind, string> = { link: "+", relink: "~", remove: "-", delete: "-", "replace-copy": "~", copy: "+", write: "+", move: "~", exclude: "+", skip: "=", conflict: "!", note: "." };
+const MARK: Record<Kind, string> = {
+  link: "+",
+  relink: "~",
+  remove: "-",
+  delete: "-",
+  "replace-copy": "~",
+  copy: "+",
+  write: "+",
+  move: "~",
+  exclude: "+",
+  skip: "=",
+  conflict: "!",
+  note: ".",
+};
 
 export function line(a: Action): string {
   const tail = a.target ? ` -> ${a.target}` : "";
@@ -102,8 +127,14 @@ export function ensureLink(report: Report, link: string, target: string, managed
   if (isLink(link)) {
     const current = linkTarget(link);
     if (current && samePath(current, target)) report.add({ kind: "skip", path: link, note: "ok" });
-    else if (current && under(current, managedRoot)) report.add({ kind: "relink", path: link, target, note: `was ${current}` });
-    else report.add({ kind: "conflict", path: link, note: `${what}: link points outside the skills library (${current}); left alone` });
+    else if (current && under(current, managedRoot))
+      report.add({ kind: "relink", path: link, target, note: `was ${current}` });
+    else
+      report.add({
+        kind: "conflict",
+        path: link,
+        note: `${what}: link points outside the skills library (${current}); left alone`,
+      });
     return;
   }
   report.add({ kind: "conflict", path: link, note: `${what}: a real folder is in the way; left alone` });

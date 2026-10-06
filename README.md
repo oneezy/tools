@@ -6,7 +6,8 @@ Justin's tools, one pnpm workspace on Vite Plus. Windows 11 with PowerShell 7 is
 pnpm install   # once, at the root
 pnpm build     # Vite Plus (vp run -r): every package's build, in dependency order
 pnpm test      # every package's tests
-pnpm check     # static checks (PowerShell parse, bash -n, py_compile, tsc)
+pnpm check     # vp check (format, lint, type check the JS/TS), then each package's checks (PowerShell parse, bash -n, py_compile, svelte-check)
+vp fmt         # format the JS/TS, JSON, CSS and YAML in place
 pnpm dev       # vp dev: the skills viewer website
 ```
 

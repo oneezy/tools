@@ -29,12 +29,14 @@ export function layers(lib: Library, harnesses: Harness[], report: Report, sidec
       if (!isLink(p)) continue;
       const t = linkTarget(p);
       // a name still in own is ensureLink's business (it retargets a moved skill); any other link into skills/ is stale
-      if (t && under(t, lib.own) && !names.has(n)) report.add({ kind: "remove", path: p, note: "stale link to a removed own skill" });
+      if (t && under(t, lib.own) && !names.has(n))
+        report.add({ kind: "remove", path: p, note: "stale link to a removed own skill" });
     }
   }
   const gi = path.join(lib.agents, ".gitignore");
   const body = GITIGNORE_HEADER + own.map((s) => `/${s.name}/\n`).join("");
-  if (!fs.existsSync(gi) || fs.readFileSync(gi, "utf8") !== body) report.add({ kind: "write", path: gi, payload: body, note: `${own.length} entries` });
+  if (!fs.existsSync(gi) || fs.readFileSync(gi, "utf8") !== body)
+    report.add({ kind: "write", path: gi, payload: body, note: `${own.length} entries` });
   else report.add({ kind: "skip", path: gi, note: "ok" });
 
   if (sidecars) {
@@ -45,7 +47,8 @@ export function layers(lib: Library, harnesses: Harness[], report: Report, sidec
         continue;
       }
       const yaml = sidecarFor(s.dir);
-      if (yaml) report.add({ kind: "write", path: file, payload: yaml, note: "Codex sidecar from SKILL.md frontmatter" });
+      if (yaml)
+        report.add({ kind: "write", path: file, payload: yaml, note: "Codex sidecar from SKILL.md frontmatter" });
     }
   }
 
@@ -55,7 +58,8 @@ export function layers(lib: Library, harnesses: Harness[], report: Report, sidec
     const layer = path.join(lib.root, h.projectSkills);
     for (const [n, target] of [...working].sort()) {
       const link = path.join(layer, n);
-      if (lexists(link) && !isLink(link) && isSkillDir(link)) report.add({ kind: "replace-copy", path: link, target, note: "stale copy in a generated layer" });
+      if (lexists(link) && !isLink(link) && isSkillDir(link))
+        report.add({ kind: "replace-copy", path: link, target, note: "stale copy in a generated layer" });
       else ensureLink(report, link, target, lib.root, `${h.name} layer`);
     }
     if (isDir(layer)) {
@@ -119,7 +123,14 @@ export function isRepo(dir: string): boolean {
  * Give a project its skills. Link mode: one link per skill per harness layer, hidden from git through
  * .git/info/exclude. Copy mode: real folders, meant to be committed.
  */
-export function projects(lib: Library, harnesses: Harness[], targets: string[], names: string[] | null, mode: "link" | "copy", report: Report): void {
+export function projects(
+  lib: Library,
+  harnesses: Harness[],
+  targets: string[],
+  names: string[] | null,
+  mode: "link" | "copy",
+  report: Report,
+): void {
   const working = workingSetWithOwn(lib);
   const chosen = [...working].filter(([n]) => !names || names.includes(n)).sort();
   const layersFor = (h: Harness) => h.projectSkills;
@@ -131,15 +142,27 @@ export function projects(lib: Library, harnesses: Harness[], targets: string[], 
       for (const [n, src] of chosen) {
         const dst = path.join(proj, layer, n);
         if (mode === "link") {
-          if (lexists(dst) && !isLink(dst)) report.add({ kind: "conflict", path: dst, note: "a real folder is in the way (a committed copy?); left alone" });
+          if (lexists(dst) && !isLink(dst))
+            report.add({
+              kind: "conflict",
+              path: dst,
+              note: "a real folder is in the way (a committed copy?); left alone",
+            });
           else ensureLink(report, dst, src, lib.root, "project");
           excludes.push("/" + path.join(layer, n).replace(/\\/g, "/") + "/");
-        } else if (isLink(dst)) report.add({ kind: "conflict", path: dst, note: "is a link; a committed copy must be a real folder" });
+        } else if (isLink(dst))
+          report.add({ kind: "conflict", path: dst, note: "is a link; a committed copy must be a real folder" });
         else if (isDir(dst) && folderHash(dst) === folderHash(src)) report.add({ kind: "skip", path: dst, note: "ok" });
         else report.add({ kind: "copy", path: dst, target: src });
       }
     }
-    if (mode === "link" && excludes.length) report.add({ kind: "exclude", path: proj, payload: excludes, note: `${excludes.length} entries in .git/info/exclude` });
+    if (mode === "link" && excludes.length)
+      report.add({
+        kind: "exclude",
+        path: proj,
+        payload: excludes,
+        note: `${excludes.length} entries in .git/info/exclude`,
+      });
   }
 }
 
@@ -170,7 +193,11 @@ export function status(lib: Library, harnesses: Harness[]): Status {
   const out: Status = {
     library: lib.root,
     own,
-    ownSkills: scan.map((s) => ({ name: s.name, plugin: s.plugin, path: path.relative(lib.root, s.dir).replace(/\\/g, "/") })),
+    ownSkills: scan.map((s) => ({
+      name: s.name,
+      plugin: s.plugin,
+      path: path.relative(lib.root, s.dir).replace(/\\/g, "/"),
+    })),
     thirdParty: [...working.keys()].filter((n) => !own.includes(n)),
     missingFromLock: lib.missingFromLock(),
     layers: {},

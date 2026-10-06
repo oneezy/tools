@@ -14,7 +14,9 @@ export function renderHtml(graph: Graph, opts: { title?: string; watch?: boolean
     .replace(/^export\s+(?=(?:async\s+)?function|const|let|class)/gm, "")
     .replace(/^export\s*\{[^}]*\};?\s*$/gm, "")
     .replace(/^import[^\n]*\n/gm, "");
-  const json = JSON.stringify(graph).replace(/<\/script/gi, "<\\/script").replace(/<!--/g, "<\\!--");
+  const json = JSON.stringify(graph)
+    .replace(/<\/script/gi, "<\\/script")
+    .replace(/<!--/g, "<\\!--");
   return template
     .replace(/__TITLE__/g, escapeHtml(opts.title ?? "Skills map"))
     .replace("__GRAPH_JSON__", () => json)

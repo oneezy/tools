@@ -22,7 +22,14 @@ const LOCK = "skills-sync.lock.json";
 
 /** Run the CLI against the temp library, home and temp folder redirected, every harness override dropped. */
 function cli(...args: string[]): { status: number | null; stdout: string; stderr: string } {
-  const env: NodeJS.ProcessEnv = { ...process.env, HOME: homeDir, USERPROFILE: homeDir, TMP: tmpDir, TEMP: tmpDir, TMPDIR: tmpDir };
+  const env: NodeJS.ProcessEnv = {
+    ...process.env,
+    HOME: homeDir,
+    USERPROFILE: homeDir,
+    TMP: tmpDir,
+    TEMP: tmpDir,
+    TMPDIR: tmpDir,
+  };
   for (const k of HARNESS_ENV) delete env[k];
   return spawnSync(process.execPath, [CLI, ...args, "--repo", root], { encoding: "utf8", cwd: root, env });
 }
@@ -67,7 +74,10 @@ function json(rel: string): any {
 }
 
 function config(sources: Record<string, unknown>): void {
-  fs.writeFileSync(path.join(root, "skills-sync.json"), JSON.stringify({ version: 1, generate: { skills: true, plugins: false }, sources, plugins: {} }, null, 2) + "\n");
+  fs.writeFileSync(
+    path.join(root, "skills-sync.json"),
+    JSON.stringify({ version: 1, generate: { skills: true, plugins: false }, sources, plugins: {} }, null, 2) + "\n",
+  );
 }
 
 function source(u: Upstream, extra: Record<string, unknown> = {}): Record<string, unknown> {
@@ -84,7 +94,10 @@ beforeEach(() => {
   for (const n of fs.readdirSync(base)) fs.rmSync(path.join(base, n), { recursive: true, force: true });
   root = path.join(base, "dev", "skills");
   fs.mkdirSync(path.join(root, "skills", "oneezy", "own-one"), { recursive: true });
-  fs.writeFileSync(path.join(root, "skills", "oneezy", "own-one", "SKILL.md"), "---\nname: own-one\ndescription: mine\n---\nmine\n");
+  fs.writeFileSync(
+    path.join(root, "skills", "oneezy", "own-one", "SKILL.md"),
+    "---\nname: own-one\ndescription: mine\n---\nmine\n",
+  );
   homeDir = path.join(base, "home");
   fs.mkdirSync(homeDir);
   tmpDir = path.join(base, "tmp");
@@ -95,7 +108,6 @@ beforeEach(() => {
   up.skill("c");
   up.commit("one");
 });
-
 
 function text(rel: string): string {
   return fs.readFileSync(path.join(root, rel), "utf8");
@@ -187,7 +199,16 @@ test("update <source> --to: a version takes its tag's commit, previous the next 
   const exact = cli("update", "up", "--to", "1.0.0", "--json");
   assert.equal(exact.status, 0, exact.stderr);
   const out = JSON.parse(exact.stdout);
-  assert.deepEqual(out.updated, [{ id: "up", from: { version: "1.2.0", commit: at.tip, ahead: 1 }, to: { version: "1.0.0", commit: at["1.0.0"], ahead: 0 }, direction: "downgrade", changelog: null, changelogReason: "no CHANGELOG.md upstream" }]);
+  assert.deepEqual(out.updated, [
+    {
+      id: "up",
+      from: { version: "1.2.0", commit: at.tip, ahead: 1 },
+      to: { version: "1.0.0", commit: at["1.0.0"], ahead: 0 },
+      direction: "downgrade",
+      changelog: null,
+      changelogReason: "no CHANGELOG.md upstream",
+    },
+  ]);
   assert.deepEqual(out.config, [{ source: "up", version: "1.0.0" }]);
   assert.equal(json(LOCK).sources.up.commit, at["1.0.0"]);
   assert.equal(json(LOCK).sources.up.version, "1.0.0");
@@ -201,21 +222,31 @@ test("update <source> --to: a version takes its tag's commit, previous the next 
   const prev = cli("update", "up", "--to", "previous");
   assert.equal(prev.status, 0, prev.stderr);
   assert.equal(json(LOCK).sources.up.commit, at["1.1.0"]);
-  assert.ok(prev.stdout.includes(`updated up: 1.2.0 ${at["1.2.0"].slice(0, 7)} -> 1.1.0 ${at["1.1.0"].slice(0, 7)}\n`), prev.stdout);
+  assert.ok(
+    prev.stdout.includes(`updated up: 1.2.0 ${at["1.2.0"].slice(0, 7)} -> 1.1.0 ${at["1.1.0"].slice(0, 7)}\n`),
+    prev.stdout,
+  );
   assert.ok(prev.stdout.includes(`skills-sync.json: sources.up.version = "1.1.0"`), prev.stdout);
   assert.equal(text("skills-sync.json"), held);
 
   const latest = cli("update", "up", "--to", "latest");
   assert.equal(latest.status, 0, latest.stderr);
   assert.equal(json(LOCK).sources.up.commit, at.tip, "the tip of ref, past the held version");
-  assert.ok(latest.stdout.includes(`updated up: 1.1.0 ${at["1.1.0"].slice(0, 7)} -> 1.2.0 (+1 commit) ${at.tip.slice(0, 7)}\n`), latest.stdout);
+  assert.ok(
+    latest.stdout.includes(`updated up: 1.1.0 ${at["1.1.0"].slice(0, 7)} -> 1.2.0 (+1 commit) ${at.tip.slice(0, 7)}\n`),
+    latest.stdout,
+  );
   assert.ok(latest.stdout.includes("skills-sync.json: remove sources.up.version"), latest.stdout);
   assert.equal(text("skills-sync.json"), held);
 });
 
 test("a source versioned by its manifest (no tags): --to a version takes the newest commit on ref's history whose manifest carried it, previous the newest commit carrying the next lower distinct version, a held version likewise", () => {
   const ps = new Upstream(path.join(base, "plugins"));
-  const manifest = (version: string, description = "pstack") => ps.file("pstack/.cursor-plugin/plugin.json", JSON.stringify({ name: "pstack", description, version }, null, 2) + "\n");
+  const manifest = (version: string, description = "pstack") =>
+    ps.file(
+      "pstack/.cursor-plugin/plugin.json",
+      JSON.stringify({ name: "pstack", description, version }, null, 2) + "\n",
+    );
   const at: Record<string, string> = {};
   ps.skill("a", "one", "pstack/skills");
   manifest("0.15.8");
@@ -240,7 +271,16 @@ test("a source versioned by its manifest (no tags): --to a version takes the new
 
   const nine = cli("update", "pstack", "--to", "0.15.9", "--json");
   assert.equal(nine.status, 0, nine.stderr);
-  assert.deepEqual(JSON.parse(nine.stdout).updated, [{ id: "pstack", from: { version: "0.15.10", commit: at.tip, ahead: 1 }, to: { version: "0.15.9", commit: at["0.15.9"], ahead: 3 }, direction: "downgrade", changelog: null, changelogReason: "no CHANGELOG.md upstream" }]);
+  assert.deepEqual(JSON.parse(nine.stdout).updated, [
+    {
+      id: "pstack",
+      from: { version: "0.15.10", commit: at.tip, ahead: 1 },
+      to: { version: "0.15.9", commit: at["0.15.9"], ahead: 3 },
+      direction: "downgrade",
+      changelog: null,
+      changelogReason: "no CHANGELOG.md upstream",
+    },
+  ]);
   assert.deepEqual(JSON.parse(nine.stdout).config, [{ source: "pstack", version: "0.15.9" }]);
   assert.ok(working("a").includes("last of 0.15.9"));
 
@@ -268,7 +308,11 @@ test("versions <source> lists the releases newest first with the lock's one mark
   const lines = r.stdout.split("\n").filter((l) => /^[* ] \d/.test(l));
   assert.deepEqual(
     lines.map((l) => l.split(/\s+/).slice(0, 3).join(" ")),
-    [`  1.2.0 ${at["1.2.0"].slice(0, 7)}`, `* 1.1.0 ${at["1.1.0"].slice(0, 7)}`, `  1.0.0 ${at["1.0.0"].slice(0, 7)}`].map((l) => l.split(/\s+/).slice(0, 3).join(" ")),
+    [
+      `  1.2.0 ${at["1.2.0"].slice(0, 7)}`,
+      `* 1.1.0 ${at["1.1.0"].slice(0, 7)}`,
+      `  1.0.0 ${at["1.0.0"].slice(0, 7)}`,
+    ].map((l) => l.split(/\s+/).slice(0, 3).join(" ")),
   );
   assert.match(lines[1], /current/);
 
@@ -279,7 +323,11 @@ test("versions <source> lists the releases newest first with the lock's one mark
   assert.deepEqual(out.current, { version: "1.1.0", commit: at["1.1.0"], ahead: 0 });
   assert.deepEqual(
     out.versions.map((v: { version: string; commit: string; current: boolean }) => [v.version, v.commit, v.current]),
-    [["1.2.0", at["1.2.0"], false], ["1.1.0", at["1.1.0"], true], ["1.0.0", at["1.0.0"], false]],
+    [
+      ["1.2.0", at["1.2.0"], false],
+      ["1.1.0", at["1.1.0"], true],
+      ["1.0.0", at["1.0.0"], false],
+    ],
   );
   assert.ok(out.versions.every((v: { date: string }) => /^\d{4}-\d\d-\d\d/.test(v.date)));
   assert.equal(text(LOCK), lock, "versions writes nothing");
@@ -314,7 +362,11 @@ test("update refuses, writing nothing and exiting non-zero: a version the source
   const below = cli("update", "up", "--to", "previous");
   assert.equal(below.status, 1);
   assert.match(below.stderr, /no release below 1\.0\.0/);
-  for (const args of [["update", "--to", "1.1.0"], ["update", "up", "other", "--to", "1.1.0"], ["update", "nope"]]) {
+  for (const args of [
+    ["update", "--to", "1.1.0"],
+    ["update", "up", "other", "--to", "1.1.0"],
+    ["update", "nope"],
+  ]) {
     const r = cli(...args);
     assert.equal(r.status, 1, args.join(" "));
     assert.ok(r.stderr.trim(), args.join(" "));
@@ -326,8 +378,11 @@ test("update refuses, writing nothing and exiting non-zero: a version the source
 
 /** The stand-in upstream's CHANGELOG.md: a title, an Unreleased section, then one section per version newest first in the heading styles found in the wild, each with a line naming it. */
 function changelog(versions: string[]): string {
-  const heading = (v: string, i: number) => (i % 3 === 0 ? `## [${v}] - 2026-10-0${i + 1}` : i % 3 === 1 ? `## v${v}` : `## ${v}`);
-  const sections = versions.map((v, i) => `${heading(v, i)}\n\n### Minor Changes\n\n- change in ${v}\n- migration note for ${v}\n`);
+  const heading = (v: string, i: number) =>
+    i % 3 === 0 ? `## [${v}] - 2026-10-0${i + 1}` : i % 3 === 1 ? `## v${v}` : `## ${v}`;
+  const sections = versions.map(
+    (v, i) => `${heading(v, i)}\n\n### Minor Changes\n\n- change in ${v}\n- migration note for ${v}\n`,
+  );
   return `# Changelog\n\nAll notable changes.\n\n## Unreleased\n\n- not released yet\n\n${sections.join("\n")}`;
 }
 
@@ -344,7 +399,8 @@ function changelogReleases(u: Upstream, file = "CHANGELOG.md"): Record<string, s
   return at;
 }
 
-const UPGRADE = "## [1.3.1] - 2026-10-01\n\n### Minor Changes\n\n- change in 1.3.1\n- migration note for 1.3.1\n\n## v1.3.0\n\n### Minor Changes\n\n- change in 1.3.0\n- migration note for 1.3.0\n";
+const UPGRADE =
+  "## [1.3.1] - 2026-10-01\n\n### Minor Changes\n\n- change in 1.3.1\n- migration note for 1.3.1\n\n## v1.3.0\n\n### Minor Changes\n\n- change in 1.3.0\n- migration note for 1.3.0\n";
 
 test("update from 1.2.3 to 1.3.1 reports the CHANGELOG.md sections between them (1.3.1 and 1.3.0, whole, subheadings included) and nothing outside: indented under the updated line in text, as changelog text with direction upgrade in --json", () => {
   const at = changelogReleases(up);
@@ -354,14 +410,26 @@ test("update from 1.2.3 to 1.3.1 reports the CHANGELOG.md sections between them 
   const j = cli("update", "up", "--to", "latest", "--json", "--plan");
   assert.equal(j.status, 0, j.stderr);
   const [u] = JSON.parse(j.stdout).updated;
-  assert.deepEqual(u, { id: "up", from: { version: "1.2.3", commit: at["1.2.3"], ahead: 0 }, to: { version: "1.3.1", commit: at["1.3.1"], ahead: 0 }, direction: "upgrade", changelog: UPGRADE });
+  assert.deepEqual(u, {
+    id: "up",
+    from: { version: "1.2.3", commit: at["1.2.3"], ahead: 0 },
+    to: { version: "1.3.1", commit: at["1.3.1"], ahead: 0 },
+    direction: "upgrade",
+    changelog: UPGRADE,
+  });
 
   const r = cli("update", "up", "--to", "latest");
   assert.equal(r.status, 0, r.stderr);
   const block = r.stdout.slice(r.stdout.indexOf("updated up:"));
-  assert.ok(block.startsWith(`updated up: 1.2.3 ${at["1.2.3"].slice(0, 7)} -> 1.3.1 ${at["1.3.1"].slice(0, 7)}\n  changelog after 1.2.3 up to 1.3.1:\n    ## [1.3.1] - 2026-10-01\n\n    ### Minor Changes\n\n    - change in 1.3.1\n`), r.stdout);
+  assert.ok(
+    block.startsWith(
+      `updated up: 1.2.3 ${at["1.2.3"].slice(0, 7)} -> 1.3.1 ${at["1.3.1"].slice(0, 7)}\n  changelog after 1.2.3 up to 1.3.1:\n    ## [1.3.1] - 2026-10-01\n\n    ### Minor Changes\n\n    - change in 1.3.1\n`,
+    ),
+    r.stdout,
+  );
   assert.ok(block.includes("    - migration note for 1.3.0\n"), r.stdout);
-  for (const outside of ["change in 1.2.3", "change in 1.2.0", "Unreleased", "not released yet", "All notable"]) assert.ok(!block.includes(outside), `${outside}: ${r.stdout}`);
+  for (const outside of ["change in 1.2.3", "change in 1.2.0", "Unreleased", "not released yet", "All notable"])
+    assert.ok(!block.includes(outside), `${outside}: ${r.stdout}`);
 });
 
 test("a downgrade from 1.3.1 to 1.2.3 reports the same range, read at 1.3.1, as what it undoes: direction downgrade in --json, the sections under an undoes line in text", () => {
@@ -372,12 +440,25 @@ test("a downgrade from 1.3.1 to 1.2.3 reports the same range, read at 1.3.1, as 
 
   const j = cli("update", "up", "--to", "1.2.3", "--json", "--plan");
   assert.equal(j.status, 0, j.stderr);
-  assert.deepEqual(JSON.parse(j.stdout).updated, [{ id: "up", from: { version: "1.3.1", commit: at["1.3.1"], ahead: 0 }, to: { version: "1.2.3", commit: at["1.2.3"], ahead: 0 }, direction: "downgrade", changelog: UPGRADE }]);
+  assert.deepEqual(JSON.parse(j.stdout).updated, [
+    {
+      id: "up",
+      from: { version: "1.3.1", commit: at["1.3.1"], ahead: 0 },
+      to: { version: "1.2.3", commit: at["1.2.3"], ahead: 0 },
+      direction: "downgrade",
+      changelog: UPGRADE,
+    },
+  ]);
 
   const r = cli("update", "up", "--to", "1.2.3");
   assert.equal(r.status, 0, r.stderr);
   const block = r.stdout.slice(r.stdout.indexOf("updated up:"));
-  assert.ok(block.startsWith(`updated up: 1.3.1 ${at["1.3.1"].slice(0, 7)} -> 1.2.3 ${at["1.2.3"].slice(0, 7)}\n  undoes the changelog after 1.2.3 up to 1.3.1:\n    ## [1.3.1] - 2026-10-01\n`), r.stdout);
+  assert.ok(
+    block.startsWith(
+      `updated up: 1.3.1 ${at["1.3.1"].slice(0, 7)} -> 1.2.3 ${at["1.2.3"].slice(0, 7)}\n  undoes the changelog after 1.2.3 up to 1.3.1:\n    ## [1.3.1] - 2026-10-01\n`,
+    ),
+    r.stdout,
+  );
   assert.ok(block.includes("    - migration note for 1.3.0\n"), r.stdout);
   assert.ok(!block.includes("change in 1.2.3"), r.stdout);
 });
@@ -398,25 +479,47 @@ test("changelog null with the reason: no CHANGELOG.md upstream, a version withou
   bare.skill("a", "one");
   bare.file("CHANGELOG.md", changelog(["1.0.0"]));
   bare.commit("one");
-  config({ up: source(up, { version: "1.1.0" }), still: source(stillUp, { skills: { a: "still-a" } }), noheading: source(noHeading, { skills: { a: "nh-a" }, version: "1.2.3" }), bare: source(bare, { skills: { a: "bare-a" } }) });
+  config({
+    up: source(up, { version: "1.1.0" }),
+    still: source(stillUp, { skills: { a: "still-a" } }),
+    noheading: source(noHeading, { skills: { a: "nh-a" }, version: "1.2.3" }),
+    bare: source(bare, { skills: { a: "bare-a" } }),
+  });
   assert.equal(cli("update", "--quiet").status, 0);
   assert.equal(json(LOCK).sources.still.commit, still["1.3.1"]);
 
-  config({ up: source(up), still: source(stillUp, { skills: { a: "still-a" } }), noheading: source(noHeading, { skills: { a: "nh-a" } }), bare: source(bare, { skills: { a: "bare-a" } }) });
+  config({
+    up: source(up),
+    still: source(stillUp, { skills: { a: "still-a" } }),
+    noheading: source(noHeading, { skills: { a: "nh-a" } }),
+    bare: source(bare, { skills: { a: "bare-a" } }),
+  });
   bare.skill("a", "two");
   bare.commit("two");
   const j = cli("update", "--json", "--plan");
   assert.equal(j.status, 0, j.stderr);
-  const updated = JSON.parse(j.stdout).updated as Array<{ id: string; direction: string; changelog: string | null; changelogReason?: string }>;
-  assert.deepEqual(updated.map((u) => [u.id, u.direction, u.changelog, u.changelogReason]), [
-    ["bare", "upgrade", null, `no upstream version for ${json(LOCK).sources.bare.commit.slice(0, 7)}`],
-    ["noheading", "upgrade", null, "CHANGELOG.md has no heading for 1.2.3"],
-    ["up", "upgrade", null, "no CHANGELOG.md upstream"],
-  ], "still did not move: not reported");
+  const updated = JSON.parse(j.stdout).updated as Array<{
+    id: string;
+    direction: string;
+    changelog: string | null;
+    changelogReason?: string;
+  }>;
+  assert.deepEqual(
+    updated.map((u) => [u.id, u.direction, u.changelog, u.changelogReason]),
+    [
+      ["bare", "upgrade", null, `no upstream version for ${json(LOCK).sources.bare.commit.slice(0, 7)}`],
+      ["noheading", "upgrade", null, "CHANGELOG.md has no heading for 1.2.3"],
+      ["up", "upgrade", null, "no CHANGELOG.md upstream"],
+    ],
+    "still did not move: not reported",
+  );
 
   const r = cli("update");
   assert.equal(r.status, 0, r.stderr);
-  assert.match(r.stdout, /^updated up: 1\.1\.0 \w{7} -> 1\.2\.0 \(\+1 commit\) \w{7}\n  changelog: none \(no CHANGELOG\.md upstream\)\n/m);
+  assert.match(
+    r.stdout,
+    /^updated up: 1\.1\.0 \w{7} -> 1\.2\.0 \(\+1 commit\) \w{7}\n  changelog: none \(no CHANGELOG\.md upstream\)\n/m,
+  );
   assert.match(r.stdout, /^  changelog: none \(CHANGELOG\.md has no heading for 1\.2\.3\)$/m);
   assert.ok(!r.stdout.includes("updated still"), r.stdout);
 });
@@ -451,7 +554,16 @@ test("add resolves only the source it declares: an unheld source with a new upst
   assert.equal(json(LOCK).sources.up.commit, at["1.3.1"]);
   assert.ok(working("a").includes("release 1.3.1"));
   assert.equal(json(LOCK).sources.other.commit, head);
-  assert.deepEqual(JSON.parse(r.stdout).updated, [{ id: "other", from: null, to: { version: null, commit: head, ahead: null }, direction: "upgrade", changelog: null, changelogReason: "new to the lock: no version to compare with" }]);
+  assert.deepEqual(JSON.parse(r.stdout).updated, [
+    {
+      id: "other",
+      from: null,
+      to: { version: null, commit: head, ahead: null },
+      direction: "upgrade",
+      changelog: null,
+      changelogReason: "new to the lock: no version to compare with",
+    },
+  ]);
 
   const third = new Upstream(path.join(base, "third"));
   third.skill("y");
@@ -459,7 +571,12 @@ test("add resolves only the source it declares: an unheld source with a new upst
   const t = cli("add", third.dir, "--id", "third", "--no-plugin");
   assert.equal(t.status, 0, t.stderr);
   assert.equal(entry(text(LOCK)), before);
-  assert.ok(t.stdout.includes(`updated third: (new) -> ${h3.slice(0, 7)}\n  changelog: none (new to the lock: no version to compare with)\n`), t.stdout);
+  assert.ok(
+    t.stdout.includes(
+      `updated third: (new) -> ${h3.slice(0, 7)}\n  changelog: none (new to the lock: no version to compare with)\n`,
+    ),
+    t.stdout,
+  );
 });
 
 test("check reports a held version the lock is not at as one problem on skills-sync.json, naming the update that fixes it; clean once update takes the source there, and a source without a hold is never held to its lock's version", () => {
@@ -471,9 +588,14 @@ test("check reports a held version the lock is not at as one problem on skills-s
   config({ up: source(up, { version: "1.0.0" }) });
   const r = cli("check");
   assert.equal(r.status, 1);
-  assert.deepEqual(r.stdout.split("\n").filter((l) => l && !l.startsWith("check:")), ["skills-sync.json: sources.up.version holds 1.0.0 but the lock has 1.1.0; run update up"]);
+  assert.deepEqual(
+    r.stdout.split("\n").filter((l) => l && !l.startsWith("check:")),
+    ["skills-sync.json: sources.up.version holds 1.0.0 but the lock has 1.1.0; run update up"],
+  );
   const j = JSON.parse(cli("check", "--json").stdout);
-  assert.deepEqual(j.problems, [{ path: "skills-sync.json", reason: "sources.up.version holds 1.0.0 but the lock has 1.1.0; run update up" }]);
+  assert.deepEqual(j.problems, [
+    { path: "skills-sync.json", reason: "sources.up.version holds 1.0.0 but the lock has 1.1.0; run update up" },
+  ]);
 
   assert.equal(cli("update", "up", "--quiet").status, 0);
   assert.equal(cli("check").status, 0, "update took it to the hold");
@@ -497,17 +619,31 @@ test("an upstream that commits CHANGELOG.md and its manifest with CRLF line endi
   config({ up: source(up, { version: "1.2.3" }) });
   const held = cli("update", "--json");
   assert.equal(held.status, 0, held.stderr);
-  assert.equal(json(LOCK).sources.up.commit, last["1.2.3"], "the newest commit whose manifest carried the held version");
+  assert.equal(
+    json(LOCK).sources.up.commit,
+    last["1.2.3"],
+    "the newest commit whose manifest carried the held version",
+  );
   assert.equal(json(LOCK).sources.up.version, "1.2.3");
 
   const j = cli("update", "up", "--to", "1.3.1", "--json", "--plan");
   assert.equal(j.status, 0, j.stderr);
   const [u] = JSON.parse(j.stdout).updated;
-  assert.deepEqual([u.from, u.to, u.direction], [{ version: "1.2.3", commit: last["1.2.3"], ahead: 1 }, { version: "1.3.1", commit: last["1.3.1"], ahead: 1 }, "upgrade"]);
+  assert.deepEqual(
+    [u.from, u.to, u.direction],
+    [
+      { version: "1.2.3", commit: last["1.2.3"], ahead: 1 },
+      { version: "1.3.1", commit: last["1.3.1"], ahead: 1 },
+      "upgrade",
+    ],
+  );
   assert.equal(u.changelog, UPGRADE);
 
   const v = JSON.parse(cli("versions", "up", "--json").stdout);
-  assert.deepEqual(v.versions.map((x: { version: string }) => x.version), ["1.3.1", "1.3.0", "1.2.3", "1.2.0"]);
+  assert.deepEqual(
+    v.versions.map((x: { version: string }) => x.version),
+    ["1.3.1", "1.3.0", "1.2.3", "1.2.0"],
+  );
 });
 
 /** The git processes one CLI run spawns, counted by a wrapper put first on its PATH (POSIX only). */
@@ -520,7 +656,15 @@ function gitCalls(...args: string[]): number {
     fs.writeFileSync(path.join(bin, "git"), `#!/bin/sh\necho x >> "${count}"\nexec "${real}" "$@"\n`, { mode: 0o755 });
   }
   fs.rmSync(count, { force: true });
-  const env: NodeJS.ProcessEnv = { ...process.env, HOME: homeDir, USERPROFILE: homeDir, TMP: tmpDir, TEMP: tmpDir, TMPDIR: tmpDir, PATH: `${bin}${path.delimiter}${process.env.PATH}` };
+  const env: NodeJS.ProcessEnv = {
+    ...process.env,
+    HOME: homeDir,
+    USERPROFILE: homeDir,
+    TMP: tmpDir,
+    TEMP: tmpDir,
+    TMPDIR: tmpDir,
+    PATH: `${bin}${path.delimiter}${process.env.PATH}`,
+  };
   for (const k of HARNESS_ENV) delete env[k];
   const r = spawnSync(process.execPath, [CLI, ...args, "--repo", root], { encoding: "utf8", cwd: root, env });
   assert.equal(r.status, 0, r.stderr);
@@ -528,33 +672,47 @@ function gitCalls(...args: string[]): number {
 }
 
 // not on Windows: it counts git through a POSIX shell wrapper
-test.skipIf(process.platform === "win32")("resolving a version and listing versions takes as many git processes for a long history as for a short one: by release tags, and by a manifest whose version changed many times", () => {
-  const calls = (n: number, tagged: boolean): [number, number] => {
-    for (const d of ["up", "dev", "bin"]) fs.rmSync(path.join(base, d), { recursive: true, force: true });
-    fs.mkdirSync(path.join(root, "skills", "oneezy", "own-one"), { recursive: true });
-    fs.writeFileSync(path.join(root, "skills", "oneezy", "own-one", "SKILL.md"), "---\nname: own-one\ndescription: mine\n---\nmine\n");
-    const u = new Upstream(path.join(base, "up"));
-    for (let i = 1; i <= n; i++) {
-      u.skill("a", `release ${i}`);
-      if (!tagged) u.file("skills/.claude-plugin/plugin.json", JSON.stringify({ name: "up", version: `1.${i}.0` }, null, 2) + "\n");
-      u.commit(`1.${i}.0`);
-      if (tagged) u.tag(`v1.${i}.0`);
-      u.skill("b", `past ${i}`);
-      u.commit(`past ${i}`);
-    }
-    config({ up: source(u) });
-    const update = gitCalls("update", "--json");
-    assert.equal(json(LOCK).sources.up.version, `1.${n}.0`);
-    const versions = gitCalls("versions", "up", "--json");
-    return [update, versions];
-  };
-  for (const tagged of [true, false]) assert.deepEqual(calls(12, tagged), calls(3, tagged), tagged ? "by tags" : "by manifest");
-});
+test.skipIf(process.platform === "win32")(
+  "resolving a version and listing versions takes as many git processes for a long history as for a short one: by release tags, and by a manifest whose version changed many times",
+  () => {
+    const calls = (n: number, tagged: boolean): [number, number] => {
+      for (const d of ["up", "dev", "bin"]) fs.rmSync(path.join(base, d), { recursive: true, force: true });
+      fs.mkdirSync(path.join(root, "skills", "oneezy", "own-one"), { recursive: true });
+      fs.writeFileSync(
+        path.join(root, "skills", "oneezy", "own-one", "SKILL.md"),
+        "---\nname: own-one\ndescription: mine\n---\nmine\n",
+      );
+      const u = new Upstream(path.join(base, "up"));
+      for (let i = 1; i <= n; i++) {
+        u.skill("a", `release ${i}`);
+        if (!tagged)
+          u.file(
+            "skills/.claude-plugin/plugin.json",
+            JSON.stringify({ name: "up", version: `1.${i}.0` }, null, 2) + "\n",
+          );
+        u.commit(`1.${i}.0`);
+        if (tagged) u.tag(`v1.${i}.0`);
+        u.skill("b", `past ${i}`);
+        u.commit(`past ${i}`);
+      }
+      config({ up: source(u) });
+      const update = gitCalls("update", "--json");
+      assert.equal(json(LOCK).sources.up.version, `1.${n}.0`);
+      const versions = gitCalls("versions", "up", "--json");
+      return [update, versions];
+    };
+    for (const tagged of [true, false])
+      assert.deepEqual(calls(12, tagged), calls(3, tagged), tagged ? "by tags" : "by manifest");
+  },
+);
 
 test("a source committed in UTC is locked with its date spelled Z, whatever git printed (git before 2.45 prints +00:00), so check agrees across hosts", () => {
   up.skill("a", "utc");
   up.git("add", "-A");
-  const r = spawnSync("git", [...GIT, "-C", up.dir, "commit", "-q", "-m", "utc"], { encoding: "utf8", env: { ...process.env, GIT_COMMITTER_DATE: "2026-10-06T06:44:34+00:00" } });
+  const r = spawnSync("git", [...GIT, "-C", up.dir, "commit", "-q", "-m", "utc"], {
+    encoding: "utf8",
+    env: { ...process.env, GIT_COMMITTER_DATE: "2026-10-06T06:44:34+00:00" },
+  });
   assert.equal(r.status, 0, r.stderr);
   config({ up: source(up) });
   assert.equal(cli("update", "--quiet").status, 0);

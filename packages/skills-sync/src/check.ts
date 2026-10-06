@@ -44,7 +44,11 @@ export function check(lib: Library): CheckResult {
   for (const s of lib.scanOwn().skills) {
     const md = path.join(s.dir, "SKILL.md");
     result.skills++;
-    if (s.plugin === PLAY && !s.name.startsWith(`${PLAY}-`)) problem(s.dir, `a skill in the ${PLAY} group is named ${PLAY}-<name>; rename the folder (and its frontmatter name) to ${PLAY}-${s.name}`);
+    if (s.plugin === PLAY && !s.name.startsWith(`${PLAY}-`))
+      problem(
+        s.dir,
+        `a skill in the ${PLAY} group is named ${PLAY}-<name>; rename the folder (and its frontmatter name) to ${PLAY}-${s.name}`,
+      );
     for (const reason of frontmatterProblems(fs.readFileSync(md, "utf8"), s.name)) problem(md, reason);
     const flow = path.join(s.dir, "flow.yaml");
     if (!fs.existsSync(flow)) continue;
@@ -85,12 +89,20 @@ function validConfig(lib: Library, problem: AddProblem): boolean {
  * is a package it cannot build. Nothing is looked at when generate.plugins is off, and artifacts/ never is.
  */
 function pluginDrift(lib: Library, result: CheckResult, problem: AddProblem): void {
-  const r = build(lib, { plugins: true, catalogs: true, artifacts: false, check: true, plan: false, log: () => undefined });
+  const r = build(lib, {
+    plugins: true,
+    catalogs: true,
+    artifacts: false,
+    check: true,
+    plan: false,
+    log: () => undefined,
+  });
   const before = result.problems.length;
   const skipped = new Set(r.skipped.map((id) => path.join(lib.plugins, id)));
   for (const a of r.report.actions) {
     if (a.kind === "note" && skipped.has(a.path)) result.notes.push({ path: rel(lib, a.path), reason: a.note! });
-    else if (a.kind === "write") problem(a.path, a.note === "missing" ? "missing; build would write it" : "differs from what build would write");
+    else if (a.kind === "write")
+      problem(a.path, a.note === "missing" ? "missing; build would write it" : "differs from what build would write");
     else if (a.kind === "delete") problem(a.path, `${a.note}; build would remove it`);
     else if (a.kind === "conflict") problem(a.path, a.note ?? "cannot be built");
   }
@@ -120,7 +132,12 @@ function lockDrift(lib: Library, result: CheckResult, problem: AddProblem): void
   }
   const names = lockDiff(expected, readLockFile(lib.root)?.sources ?? {});
   const which = names.length ? ` (${names.join(", ")})` : "";
-  problem(lib.lockFile, have ? `differs from what refresh would write from the snapshots under upstream/${which}` : `missing; refresh would write it from the snapshots under upstream/${which}`);
+  problem(
+    lib.lockFile,
+    have
+      ? `differs from what refresh would write from the snapshots under upstream/${which}`
+      : `missing; refresh would write it from the snapshots under upstream/${which}`,
+  );
   result.fixes.push(`refresh writes ${path.basename(lib.lockFile)}`);
 }
 
@@ -136,10 +153,14 @@ function heldVersions(lib: Library, result: CheckResult, problem: AddProblem): v
     const held = sources[id].version;
     const locked = lockedSource(lock, id, sources[id]);
     if (!held || !locked || locked.version === held) continue;
-    problem(lib.configFile, `sources.${id}.version holds ${held} but the lock has ${locked.version ?? "no version"}; run update ${id}`);
+    problem(
+      lib.configFile,
+      `sources.${id}.version holds ${held} but the lock has ${locked.version ?? "no version"}; run update ${id}`,
+    );
     off.push(id);
   }
-  if (off.length) result.fixes.push(`update ${off.join(" ")} takes ${off.length === 1 ? "it" : "them"} to the held version`);
+  if (off.length)
+    result.fixes.push(`update ${off.join(" ")} takes ${off.length === 1 ? "it" : "them"} to the held version`);
 }
 
 /** What differs between two locks: a source id where the source itself does (its version, commit, or the whole of it), source:name per skill. */
@@ -150,8 +171,16 @@ function lockDiff(a: Record<string, LockedSource>, b: Record<string, LockedSourc
     const scalars = (s?: LockedSource) => (s ? JSON.stringify([s.repo, s.ref, s.version, s.commit, s.date]) : null);
     if (!x || !y || scalars(x) !== scalars(y)) out.push(id);
     if (!x || !y) continue;
-    const skill = (s: LockedSource, n: string) => (s.skills?.[n] ? JSON.stringify([s.skills[n].path, s.skills[n].hash, s.skills[n].commit === s.commit ? undefined : s.skills[n].commit]) : null);
-    for (const n of [...new Set([...Object.keys(x.skills ?? {}), ...Object.keys(y.skills ?? {})])].sort(cmp)) if (skill(x, n) !== skill(y, n)) out.push(`${id}:${n}`);
+    const skill = (s: LockedSource, n: string) =>
+      s.skills?.[n]
+        ? JSON.stringify([
+            s.skills[n].path,
+            s.skills[n].hash,
+            s.skills[n].commit === s.commit ? undefined : s.skills[n].commit,
+          ])
+        : null;
+    for (const n of [...new Set([...Object.keys(x.skills ?? {}), ...Object.keys(y.skills ?? {})])].sort(cmp))
+      if (skill(x, n) !== skill(y, n)) out.push(`${id}:${n}`);
   }
   return out;
 }
@@ -170,14 +199,18 @@ export function frontmatterProblems(md: string, folder: string): string[] {
     // the position YAML gives counts from the frontmatter's first line, not the file's, so it is left out
     return [`frontmatter is not YAML (${firstLine(e).replace(/ at line \d+, column \d+$/, "")})`];
   }
-  if (typeof fm !== "object" || fm === null || Array.isArray(fm)) return ["frontmatter is not a map: name and description are required"];
+  if (typeof fm !== "object" || fm === null || Array.isArray(fm))
+    return ["frontmatter is not a map: name and description are required"];
   const { name, description } = fm as Record<string, unknown>;
   const out: string[] = [];
   if (name === undefined || name === null) out.push("name: missing");
   else if (typeof name !== "string") out.push("name: must be a string");
   else {
     if (name !== folder) out.push(`name: ${name} is not the folder's name, ${folder}`);
-    if (!SKILL_ID.test(name) || name.length > SKILL_ID_MAX) out.push(`name: ${name} is not a valid skill id (lowercase letters, digits and single hyphens, at most ${SKILL_ID_MAX} characters)`);
+    if (!SKILL_ID.test(name) || name.length > SKILL_ID_MAX)
+      out.push(
+        `name: ${name} is not a valid skill id (lowercase letters, digits and single hyphens, at most ${SKILL_ID_MAX} characters)`,
+      );
   }
   if (description === undefined || description === null || description === "") out.push("description: missing");
   else if (typeof description !== "string") out.push("description: must be a string");

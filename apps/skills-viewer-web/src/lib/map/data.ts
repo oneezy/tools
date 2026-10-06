@@ -89,7 +89,8 @@ export function toMapData(graph: Graph, repoName: string): MapData {
   const ownParts = new Map<string, MapNode["parts"]>();
   const pluginParts = new Map<string, Record<string, number>>();
   for (const p of graph.parts ?? []) {
-    if (p.skill) ownParts.set(p.skill, [...(ownParts.get(p.skill) ?? []), { kind: p.kind, name: p.name, file: p.file }]);
+    if (p.skill)
+      ownParts.set(p.skill, [...(ownParts.get(p.skill) ?? []), { kind: p.kind, name: p.name, file: p.file }]);
     else if (p.plugin) {
       const key = p.plugin.replace(/^plugin:/, "");
       const counts = pluginParts.get(key) ?? {};

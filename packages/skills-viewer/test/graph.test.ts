@@ -55,7 +55,10 @@ test("no self edges, no path-like false positives, no unknown targets", () => {
     assert.ok(e.evidence.length > 0);
     for (const v of e.evidence) assert.ok(v.line > 0 && v.snippet.length > 0);
   }
-  assert.ok(graph.unresolved.some((u) => u.name === "what-to-do"), "unknown /what-to-do is reported, not dropped");
+  assert.ok(
+    graph.unresolved.some((u) => u.name === "what-to-do"),
+    "unknown /what-to-do is reported, not dropped",
+  );
   assert.ok(!graph.unresolved.some((u) => u.name === "the"));
 });
 
@@ -81,7 +84,7 @@ test("flows: sequential, parallel and loop are detected with evidence", () => {
 
 test("classify reads the words around a mention", () => {
   assert.equal(classify("If not, tell the user to run /setup first.", 25, 31, "slash"), "prerequisite");
-  assert.equal(classify("Call the Skill tool with \"grilling\".", 25, 33, "skill-tool"), "calls");
+  assert.equal(classify('Call the Skill tool with "grilling".', 25, 33, "skill-tool"), "calls");
   assert.equal(classify("- **Something's broken** → /diagnosing-bugs.", 27, 43, "slash"), "suggests");
   assert.equal(classify("Use /tdd where possible.", 4, 8, "slash"), "calls");
   assert.equal(classify("See the notes on `triage` for details.", 17, 25, "backtick"), "reference");

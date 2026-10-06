@@ -66,7 +66,10 @@ export function readLockFile(root: string): Lock | null {
 /** The entries of skills-lock.json, when there is one; {} when absent or unreadable. */
 export function npxLockEntries(root: string): Record<string, LockEntry> {
   try {
-    return (JSON.parse(fs.readFileSync(path.join(root, NPX_LOCK_NAME), "utf8")) as { skills?: Record<string, LockEntry> }).skills ?? {};
+    return (
+      (JSON.parse(fs.readFileSync(path.join(root, NPX_LOCK_NAME), "utf8")) as { skills?: Record<string, LockEntry> })
+        .skills ?? {}
+    );
   } catch {
     return {};
   }
@@ -110,7 +113,12 @@ export function fromV1(entries: Record<string, LockEntry>, config: Config): Lock
     if (!mine.length) continue;
     const commit = (mine.find(([s]) => !src.pins?.[s.upstream]) ?? mine[0])[1].commit!;
     const skills: Record<string, LockedSkill> = {};
-    for (const [s, e] of mine) skills[s.name] = { path: path.posix.dirname(e.skillPath!), hash: e.computedHash ?? "", ...(e.commit !== commit ? { commit: e.commit } : {}) };
+    for (const [s, e] of mine)
+      skills[s.name] = {
+        path: path.posix.dirname(e.skillPath!),
+        hash: e.computedHash ?? "",
+        ...(e.commit !== commit ? { commit: e.commit } : {}),
+      };
     sources[id] = { repo: src.repo, ref: src.ref, version: null, commit, date: "", skills };
   }
   return { version: 2, sources, migrated: true };

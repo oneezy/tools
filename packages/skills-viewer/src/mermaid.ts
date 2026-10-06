@@ -20,7 +20,15 @@ export interface MermaidOptions {
   direction?: "LR" | "TB";
 }
 
-const DEFAULTS: Omit<Required<MermaidOptions>, "suggests"> & { suggests?: boolean } = { html: false, focus: null, depth: 2, flows: true, references: false, files: false, direction: "LR" };
+const DEFAULTS: Omit<Required<MermaidOptions>, "suggests"> & { suggests?: boolean } = {
+  html: false,
+  focus: null,
+  depth: 2,
+  flows: true,
+  references: false,
+  files: false,
+  direction: "LR",
+};
 
 export function toMermaid(graph: Graph, options: MermaidOptions = {}): string {
   const o = { ...DEFAULTS, ...options };
@@ -30,7 +38,9 @@ export function toMermaid(graph: Graph, options: MermaidOptions = {}): string {
   const included = o.focus ? neighborhood(graph, o.focus, o.depth, keepType) : new Set(graph.nodes.map((n) => n.id));
   const nodes = graph.nodes.filter((n) => included.has(n.id));
   const edges = graph.edges.filter((e) => included.has(e.source) && included.has(e.target) && keepType(e.type));
-  const flows = o.flows ? graph.flows.filter((f) => included.has(f.owner) && (!o.focus || f.owner === o.focus || f.steps.includes(o.focus))) : [];
+  const flows = o.flows
+    ? graph.flows.filter((f) => included.has(f.owner) && (!o.focus || f.owner === o.focus || f.steps.includes(o.focus)))
+    : [];
 
   const L: string[] = [];
   const links: string[] = []; // parallel array of edge kinds for linkStyle
@@ -53,7 +63,9 @@ export function toMermaid(graph: Graph, options: MermaidOptions = {}): string {
   // a node with no visible edge is either truly standalone (no edge of any kind in the data)
   // or only reached by edges this view hides; group the latter under whoever points at it
   const hiddenSource = (id: string): string | null => {
-    const e = graph.edges.find((x) => x.target === id && x.source !== id && included.has(x.source) && !keepType(x.type));
+    const e = graph.edges.find(
+      (x) => x.target === id && x.source !== id && included.has(x.source) && !keepType(x.type),
+    );
     return e ? e.source : null;
   };
   const entries = nodes.filter((n) => n.entry);
@@ -74,7 +86,9 @@ export function toMermaid(graph: Graph, options: MermaidOptions = {}): string {
   }
   for (const n of rest) L.push("  " + nodeLine(n, o.html));
   for (const [src, group] of hiddenGroups) {
-    const label = suggests ? `mentioned by ${byId.get(src)?.name ?? src}` : `${byId.get(src)?.name ?? src} suggests these (turn on "suggests" to see the edges)`;
+    const label = suggests
+      ? `mentioned by ${byId.get(src)?.name ?? src}`
+      : `${byId.get(src)?.name ?? src} suggests these (turn on "suggests" to see the edges)`;
     L.push(`  subgraph hidden_${nid(src)} ["${esc(label)}"]`);
     L.push(`    direction TB`);
     for (const n of group) L.push("    " + nodeLine(n, o.html));
@@ -172,15 +186,22 @@ const LINK_STYLES: Record<string, string> = {
 };
 
 /** Skills reachable from the focus: everything downstream by `depth` hops, plus one hop upstream. */
-export function neighborhood(graph: Graph, focus: string, depth: number, keepType: (t: Edge["type"]) => boolean): Set<string> {
+export function neighborhood(
+  graph: Graph,
+  focus: string,
+  depth: number,
+  keepType: (t: Edge["type"]) => boolean,
+): Set<string> {
   const keep = (e: Edge) => keepType(e.type);
   const set = new Set<string>([focus]);
   let frontier = [focus];
   for (let d = 0; d < depth && frontier.length; d++) {
     const next: string[] = [];
     for (const id of frontier) {
-      for (const e of graph.edges) if (e.source === id && keep(e) && !set.has(e.target)) (set.add(e.target), next.push(e.target));
-      for (const f of graph.flows) if (f.owner === id) for (const s of f.steps) if (!set.has(s)) (set.add(s), next.push(s));
+      for (const e of graph.edges)
+        if (e.source === id && keep(e) && !set.has(e.target)) (set.add(e.target), next.push(e.target));
+      for (const f of graph.flows)
+        if (f.owner === id) for (const s of f.steps) if (!set.has(s)) (set.add(s), next.push(s));
     }
     frontier = next;
   }
@@ -199,8 +220,10 @@ function fileId(skill: string, kind: string, file: string): string {
 
 function nodeLine(n: SkillNode, html: boolean): string {
   // Mermaid accepts one class after ":::"; extra classes go on a separate "class" statement
-  const extra = n.entry ? `
-  class ${nid(n.id)} entry` : "";
+  const extra = n.entry
+    ? `
+  class ${nid(n.id)} entry`
+    : "";
   return `${nid(n.id)}["${label(n, html, false)}"]:::${n.mode}${extra}`;
 }
 

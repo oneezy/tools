@@ -14,7 +14,8 @@ export function flowProblems(text: string, folder: string): string[] {
   }
   const problems = validate(shippedSchema("flow"), doc);
   if (!isObject(doc)) return problems;
-  if (typeof doc.skill === "string" && doc.skill !== folder) problems.push(`$.skill: ${doc.skill} is not the folder's name, ${folder}`);
+  if (typeof doc.skill === "string" && doc.skill !== folder)
+    problems.push(`$.skill: ${doc.skill} is not the folder's name, ${folder}`);
   const steps = (Array.isArray(doc.steps) ? doc.steps : []).map((s) => (isObject(s) ? s : {}));
   // the first step to carry an id owns it; a later one with the same id is the duplicate
   const owner = new Map<string, number>();
@@ -26,7 +27,8 @@ export function flowProblems(text: string, folder: string): string[] {
   // every id another step is named by must be a step of this flow
   steps.forEach((s, i) => {
     for (const key of ["after", "parallel", "join"]) {
-      for (const [id, at] of named(s[key])) if (!owner.has(id)) problems.push(`$.steps[${i}].${key}${at}: no step has the id ${id}`);
+      for (const [id, at] of named(s[key]))
+        if (!owner.has(id)) problems.push(`$.steps[${i}].${key}${at}: no step has the id ${id}`);
     }
   });
   return problems;

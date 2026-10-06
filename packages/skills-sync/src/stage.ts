@@ -21,8 +21,18 @@ export type StageResult = { ok: true; staged: Staged } | { ok: false; error: str
  */
 export function git(args: string[], cwd?: string, input?: string): { ok: boolean; out: string; err: string } {
   // a whole history's patches of a manifest can pass the default 1 MB of output
-  const r = spawnSync("git", ["-c", "core.autocrlf=false", ...args], { encoding: "utf8", cwd, input, timeout: 120_000, maxBuffer: 256 * 1024 * 1024 });
-  return { ok: r.status === 0, out: (r.stdout ?? "").trim(), err: (r.stderr ?? "").trim().split("\n").filter(Boolean).pop() ?? "" };
+  const r = spawnSync("git", ["-c", "core.autocrlf=false", ...args], {
+    encoding: "utf8",
+    cwd,
+    input,
+    timeout: 120_000,
+    maxBuffer: 256 * 1024 * 1024,
+  });
+  return {
+    ok: r.status === 0,
+    out: (r.stdout ?? "").trim(),
+    err: (r.stderr ?? "").trim().split("\n").filter(Boolean).pop() ?? "",
+  };
 }
 
 /** The commit a branch or tag points at on the remote, without cloning; null when the remote or the ref is unreachable. */
@@ -56,7 +66,12 @@ export function stage(url: string, ref: string, log: (s: string) => void, tipOf?
   };
   if (isCommit(ref)) {
     log(`fetching ${url} at ${ref.slice(0, 7)}`);
-    for (const args of [["init", "--quiet"], ["remote", "add", "origin", url], ["fetch", "--quiet", "--filter=blob:none", "--tags", "origin", ref], ["checkout", "--quiet", "FETCH_HEAD"]]) {
+    for (const args of [
+      ["init", "--quiet"],
+      ["remote", "add", "origin", url],
+      ["fetch", "--quiet", "--filter=blob:none", "--tags", "origin", ref],
+      ["checkout", "--quiet", "FETCH_HEAD"],
+    ]) {
       const r = git(args, dir);
       if (r.ok) continue;
       if (!tipOf) return fail(`${url}: ${r.err || `git ${args[0]} failed`}`);
@@ -65,7 +80,10 @@ export function stage(url: string, ref: string, log: (s: string) => void, tipOf?
       if (!viaRef.ok) return viaRef;
       if (viaRef.staged.commit === ref) return viaRef;
       discard(viaRef.staged);
-      return { ok: false, error: `${url}: ${tipOf} moved from ${ref.slice(0, 7)} to ${viaRef.staged.commit.slice(0, 7)} while refreshing; run again` };
+      return {
+        ok: false,
+        error: `${url}: ${tipOf} moved from ${ref.slice(0, 7)} to ${viaRef.staged.commit.slice(0, 7)} while refreshing; run again`,
+      };
     }
   } else {
     log(`cloning ${url}@${ref}`);

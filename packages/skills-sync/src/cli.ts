@@ -10,7 +10,15 @@ import { check } from "./check.js";
 import { LOCAL_NAME, migrateAnswers, readLocal, writeLocal, type LinkMode, type Local } from "./config.js";
 import { gitExclude, isDir, isLink, lexists, linkMode, linkTarget, real, samePath, setLinkMode } from "./fs.js";
 import { detected, harnessTable, type Harness } from "./harnesses.js";
-import { cloneLibrary, DEFAULT_LIBRARY, findLibrary, homeLibrary, Library, looksLikeLibrary, pullLibrary } from "./library.js";
+import {
+  cloneLibrary,
+  DEFAULT_LIBRARY,
+  findLibrary,
+  homeLibrary,
+  Library,
+  looksLikeLibrary,
+  pullLibrary,
+} from "./library.js";
 import { apply, line, Report } from "./plan.js";
 import { byDirection, type Moved, type Position } from "./changelog.js";
 import { refresh, type RefreshResult } from "./refresh.js";
@@ -160,8 +168,32 @@ interface Args {
 }
 
 function parseArgs(argv: string[]): Args {
-  const a: Args = { command: "sync", positional: [], frozen: false, as: {}, plugins: false, catalogs: false, artifacts: false, check: false, pull: true, restore: true, retry: false, sidecars: false, layers: true, watch: false, plan: false, quiet: false, json: false, yes: false, ask: false };
-  const list = (v: string) => v.split(",").map((s) => s.trim()).filter(Boolean);
+  const a: Args = {
+    command: "sync",
+    positional: [],
+    frozen: false,
+    as: {},
+    plugins: false,
+    catalogs: false,
+    artifacts: false,
+    check: false,
+    pull: true,
+    restore: true,
+    retry: false,
+    sidecars: false,
+    layers: true,
+    watch: false,
+    plan: false,
+    quiet: false,
+    json: false,
+    yes: false,
+    ask: false,
+  };
+  const list = (v: string) =>
+    v
+      .split(",")
+      .map((s) => s.trim())
+      .filter(Boolean);
   let command: string | null = null;
   for (let i = 0; i < argv.length; i++) {
     const x = argv[i];
@@ -258,7 +290,11 @@ async function main(): Promise<void> {
     let source = args.library ?? DEFAULT_LIBRARY;
     if (interactive) {
       p.intro("skills-sync");
-      const v = await p.text({ message: "No skills library on this machine. Clone which one into ~/.skills-sync?", initialValue: source, placeholder: "owner/repo, a git URL, or a local path" });
+      const v = await p.text({
+        message: "No skills library on this machine. Clone which one into ~/.skills-sync?",
+        initialValue: source,
+        placeholder: "owner/repo, a git URL, or a local path",
+      });
       if (p.isCancel(v)) return p.cancel("nothing changed");
       source = String(v);
     }
@@ -271,7 +307,8 @@ async function main(): Promise<void> {
   }
   // the first add is how a library gets its config: with --repo, skills/ alone is enough for it
   const firstAdd = args.command === "add" && !!args.repo && !!root && isDir(path.join(root, "skills"));
-  if (!root || (!looksLikeLibrary(root) && !firstAdd)) bail("no skills library found: run this inside one, or pass --repo <path> or --library owner/repo");
+  if (!root || (!looksLikeLibrary(root) && !firstAdd))
+    bail("no skills library found: run this inside one, or pass --repo <path> or --library owner/repo");
   const lib = new Library(root);
 
   // 2. this machine's answers: the local file, after a 0.2.0 answers file is moved there once; status only reads
@@ -291,9 +328,15 @@ async function main(): Promise<void> {
   const hl = homeLibrary(userHome);
   const remember = new Report();
   if (!samePath(real(hl), lib.root)) {
-    if (!lexists(hl)) remember.add({ kind: "link", path: hl, target: lib.root, note: "remembers where the library is" });
+    if (!lexists(hl))
+      remember.add({ kind: "link", path: hl, target: lib.root, note: "remembers where the library is" });
     else if (isLink(hl)) remember.add({ kind: "relink", path: hl, target: lib.root, note: `was ${linkTarget(hl)}` });
-    else remember.add({ kind: "conflict", path: hl, note: "a folder is in the way; ~/.skills-sync is not a link to the library" });
+    else
+      remember.add({
+        kind: "conflict",
+        path: hl,
+        note: "a folder is in the way; ~/.skills-sync is not a link to the library",
+      });
   }
   apply(remember, args.plan);
   setup.merge(remember);
@@ -309,7 +352,12 @@ async function main(): Promise<void> {
         /* nothing to reset */
       }
     }
-    const r = pullLibrary(lib.root, 30, log, lib.hasConfig() ? [path.basename(lib.lockFile), path.basename(lib.npxLockFile)] : []);
+    const r = pullLibrary(
+      lib.root,
+      30,
+      log,
+      lib.hasConfig() ? [path.basename(lib.lockFile), path.basename(lib.npxLockFile)] : [],
+    );
     if (r === "pulled" && !args.quiet) log("library pulled");
     if (r === "dirty" && !args.quiet) log("library has local changes; pull skipped");
   }
@@ -345,7 +393,8 @@ async function main(): Promise<void> {
       }, 400);
     };
     fs.watch(lib.own, { recursive: true }, (_e, f) => trigger(String(f ?? "skills/")));
-    for (const f of [lib.lockFile, lib.npxLockFile, lib.configFile]) if (fs.existsSync(f)) fs.watch(f, () => trigger(path.basename(f)));
+    for (const f of [lib.lockFile, lib.npxLockFile, lib.configFile])
+      if (fs.existsSync(f)) fs.watch(f, () => trigger(path.basename(f)));
     await new Promise(() => undefined);
   }
 }
@@ -358,11 +407,17 @@ function runUpdate(lib: Library, args: Args, log: (m: string) => void, report: R
   if (!lib.hasConfig()) bail(`no ${path.basename(lib.configFile)} in ${lib.root}; add <source> writes one`);
   const ids = Object.keys(readConfig(lib.configFile).sources).sort(cmp);
   const unknown = args.positional.filter((n) => !ids.includes(n));
-  if (unknown.length) bail(`${args.command}: no source ${unknown.join(", ")} in ${path.basename(lib.configFile)} (sources: ${ids.join(", ") || "none"})`);
+  if (unknown.length)
+    bail(
+      `${args.command}: no source ${unknown.join(", ")} in ${path.basename(lib.configFile)} (sources: ${ids.join(", ") || "none"})`,
+    );
   const local = readLocal(lib.root);
-  const unavailable = args.retry ? [] : local.unavailable ?? [];
+  const unavailable = args.retry ? [] : (local.unavailable ?? []);
   const only = args.positional.length ? [...new Set(args.positional)] : undefined;
-  if (args.to !== undefined && only?.length !== 1) bail(`${args.command} --to: name the one source it moves (${args.command} <source> --to ${args.to || "<version>|previous|latest"})`);
+  if (args.to !== undefined && only?.length !== 1)
+    bail(
+      `${args.command} --to: name the one source it moves (${args.command} <source> --to ${args.to || "<version>|previous|latest"})`,
+    );
   if (args.to !== undefined && args.frozen) bail(`${args.command}: --to and --frozen do not go together`);
   const to = args.to !== undefined ? { [only![0]]: args.to } : undefined;
   const r = refresh(lib, { frozen: args.frozen, only, to, plan: args.plan, unavailable, log });
@@ -374,23 +429,43 @@ function runUpdate(lib: Library, args: Args, log: (m: string) => void, report: R
   }
   reportRefresh(lib, r, unavailable, args, log, !args.quiet);
   report.merge(r.report);
-  printReport(report, args, { sources: r.sources, updated: r.updated, config: r.config, gone: r.gone, unlocked: r.unlocked, problems: r.problems });
+  printReport(report, args, {
+    sources: r.sources,
+    updated: r.updated,
+    config: r.config,
+    gone: r.gone,
+    unlocked: r.unlocked,
+    problems: r.problems,
+  });
   if (!args.json) {
     printUpdated(r.updated);
     const file = path.basename(lib.configFile);
-    for (const c of r.config) process.stdout.write(c.version === null ? `${file}: remove sources.${c.source}.version (follow latest); land this change, skills-sync never writes it\n` : `${file}: sources.${c.source}.version = "${c.version}"; land this change, skills-sync never writes it\n`);
+    for (const c of r.config)
+      process.stdout.write(
+        c.version === null
+          ? `${file}: remove sources.${c.source}.version (follow latest); land this change, skills-sync never writes it\n`
+          : `${file}: sources.${c.source}.version = "${c.version}"; land this change, skills-sync never writes it\n`,
+      );
   }
   if (r.problems.length) process.exitCode = 1;
 }
 
 /** Per source a refresh moved: from and to (version, commits past it, commit), then the changelog range it brings or undoes, indented. */
 function printUpdated(updated: Moved[]): void {
-  const at = (x: Position) => `${x.version === null ? "" : `${versionLabel({ ...x, date: "" })} `}${x.commit.slice(0, 7)}`;
+  const at = (x: Position) =>
+    `${x.version === null ? "" : `${versionLabel({ ...x, date: "" })} `}${x.commit.slice(0, 7)}`;
   for (const u of updated) {
     process.stdout.write(`updated ${u.id}: ${u.from ? at(u.from) : "(new)"} -> ${at(u.to)}\n`);
     const [low, high] = byDirection(u);
     if (u.changelog === null) process.stdout.write(`  changelog: none (${u.changelogReason})\n`);
-    else process.stdout.write(`  ${u.direction === "upgrade" ? "changelog" : "undoes the changelog"} after ${low!.version} up to ${high!.version}:\n${u.changelog.replace(/\n$/, "").split("\n").map((l) => (l ? `    ${l}\n` : "\n")).join("")}`);
+    else
+      process.stdout.write(
+        `  ${u.direction === "upgrade" ? "changelog" : "undoes the changelog"} after ${low!.version} up to ${high!.version}:\n${u.changelog
+          .replace(/\n$/, "")
+          .split("\n")
+          .map((l) => (l ? `    ${l}\n` : "\n"))
+          .join("")}`,
+      );
   }
 }
 
@@ -398,15 +473,32 @@ function printUpdated(updated: Moved[]): void {
  * The refresh's lines that are not file actions, and the remembered gone-upstream list, shared by refresh and sync.
  * `verbose` names every source's commit; otherwise only one that moved, so a sync with nothing new says nothing.
  */
-function reportRefresh(lib: Library, r: RefreshResult, unavailable: string[], args: Args, log: (m: string) => void, verbose: boolean): string[] {
-  for (const [id, s] of Object.entries(r.sources)) if (s.moved || verbose) log(`${id}: ${versionLabel(s)}${s.moved ? ", moved" : ""}`);
+function reportRefresh(
+  lib: Library,
+  r: RefreshResult,
+  unavailable: string[],
+  args: Args,
+  log: (m: string) => void,
+  verbose: boolean,
+): string[] {
+  for (const [id, s] of Object.entries(r.sources))
+    if (s.moved || verbose) log(`${id}: ${versionLabel(s)}${s.moved ? ", moved" : ""}`);
   for (const g of r.gone) log(`  gone upstream: ${g}`);
-  if (r.gone.length) log(`  (not in the lock; deselect it in ${path.basename(lib.configFile)}, or a copy in skills/ keeps it as your own; --retry checks again)`);
-  if (r.unlocked.length && !args.quiet) log(`${r.unlocked.length} selected skill(s) have no commit in ${path.basename(lib.lockFile)} (${r.unlocked.join(", ")}); run update to resolve them`);
+  if (r.gone.length)
+    log(
+      `  (not in the lock; deselect it in ${path.basename(lib.configFile)}, or a copy in skills/ keeps it as your own; --retry checks again)`,
+    );
+  if (r.unlocked.length && !args.quiet)
+    log(
+      `${r.unlocked.length} selected skill(s) have no commit in ${path.basename(lib.lockFile)} (${r.unlocked.join(", ")}); run update to resolve them`,
+    );
   for (const m of r.problems) log(`failed: ${m}`);
   const gone = r.gone.map((g) => g.split(":")[1]);
   const remembered = [...new Set([...unavailable, ...gone])];
-  if (remembered.length && !args.quiet) log(`${remembered.length} selected skill${remembered.length === 1 ? " is" : "s are"} gone upstream (${remembered.join(", ")}); --retry to check again`);
+  if (remembered.length && !args.quiet)
+    log(
+      `${remembered.length} selected skill${remembered.length === 1 ? " is" : "s are"} gone upstream (${remembered.join(", ")}); --retry to check again`,
+    );
   if (!args.plan) {
     const local = readLocal(lib.root);
     const next: Local = { ...local, unavailable: remembered };
@@ -422,21 +514,38 @@ function runVersions(lib: Library, args: Args, log: (m: string) => void): void {
   const config = readConfig(lib.configFile);
   const ids = Object.keys(config.sources).sort(cmp);
   const id = args.positional[0];
-  if (!id || !config.sources[id]) bail(`versions: ${id ? `no source ${id}` : "which source?"} in ${path.basename(lib.configFile)} (sources: ${ids.join(", ") || "none"})`);
+  if (!id || !config.sources[id])
+    bail(
+      `versions: ${id ? `no source ${id}` : "which source?"} in ${path.basename(lib.configFile)} (sources: ${ids.join(", ") || "none"})`,
+    );
   const src = config.sources[id];
   const prior = lockedSource(readLock(lib.root, config), id, src);
   const r = releasesOf(cloneUrl(src.repo), src.ref, src.root, prior?.commit ?? null, log);
   if (!r.ok) bail(`versions: ${id}: ${r.error}`);
-  const current: Position | null = prior ? { version: prior.version, commit: prior.commit, ahead: r.current?.version === prior.version ? r.current.ahead : null } : null;
+  const current: Position | null = prior
+    ? {
+        version: prior.version,
+        commit: prior.commit,
+        ahead: r.current?.version === prior.version ? r.current.ahead : null,
+      }
+    : null;
   const versions = r.releases.map((x) => ({ ...x, current: !!current && x.version === current.version }));
   if (args.json) {
-    process.stdout.write(JSON.stringify({ source: id, repo: src.repo, ref: src.ref, current, versions }, null, 2) + "\n");
+    process.stdout.write(
+      JSON.stringify({ source: id, repo: src.repo, ref: src.ref, current, versions }, null, 2) + "\n",
+    );
     return;
   }
-  process.stdout.write(`${id}: ${src.repo}@${src.ref}, ${versions.length} version${versions.length === 1 ? "" : "s"}, newest first${src.version ? `; held at ${src.version} in ${path.basename(lib.configFile)}` : ""}\n`);
-  for (const v of versions) process.stdout.write(`${v.current ? "*" : " "} ${v.version.padEnd(12)} ${v.commit.slice(0, 7)}  ${v.date.slice(0, 10)}${v.current ? `  current${commitsPast(current!.ahead)}` : ""}\n`);
+  process.stdout.write(
+    `${id}: ${src.repo}@${src.ref}, ${versions.length} version${versions.length === 1 ? "" : "s"}, newest first${src.version ? `; held at ${src.version} in ${path.basename(lib.configFile)}` : ""}\n`,
+  );
+  for (const v of versions)
+    process.stdout.write(
+      `${v.current ? "*" : " "} ${v.version.padEnd(12)} ${v.commit.slice(0, 7)}  ${v.date.slice(0, 10)}${v.current ? `  current${commitsPast(current!.ahead)}` : ""}\n`,
+    );
   if (!versions.length) process.stdout.write("  no release tag and no manifest version\n");
-  if (current && !versions.some((v) => v.current)) process.stdout.write(`  the lock is at ${current.version ?? "no version"} ${current.commit.slice(0, 7)}\n`);
+  if (current && !versions.some((v) => v.current))
+    process.stdout.write(`  the lock is at ${current.version ?? "no version"} ${current.commit.slice(0, 7)}\n`);
 }
 
 /**
@@ -446,25 +555,51 @@ function runVersions(lib: Library, args: Args, log: (m: string) => void): void {
 function runAdd(lib: Library, args: Args, log: (m: string) => void, report: Report): void {
   const spec = args.positional[0];
   if (!spec) bail("add: which source? owner/repo[#ref], a git URL or a local path");
-  const r = addSource(lib, spec, { id: args.id, root: args.root, skills: args.skills, as: args.as, plugin: args.plugin, log });
+  const r = addSource(lib, spec, {
+    id: args.id,
+    root: args.root,
+    skills: args.skills,
+    as: args.as,
+    plugin: args.plugin,
+    log,
+  });
   if (!r.ok) bail(r.error);
   const names = Object.keys(r.entry.skills).length;
   const renames = Array.isArray(r.entry.skills) ? [] : Object.entries(r.entry.skills).filter(([a, b]) => a !== b);
-  log(`${r.id}: ${r.entry.repo}@${r.entry.ref} (${r.staged.commit.slice(0, 7)}), ${names} of ${r.found.size} skills under ${r.entry.root ?? "the root"}${renames.length ? `, renaming ${renames.map(([a, b]) => `${a} -> ${b}`).join(", ")}` : ""}`);
+  log(
+    `${r.id}: ${r.entry.repo}@${r.entry.ref} (${r.staged.commit.slice(0, 7)}), ${names} of ${r.found.size} skills under ${r.entry.root ?? "the root"}${renames.length ? `, renaming ${renames.map(([a, b]) => `${a} -> ${b}`).join(", ")}` : ""}`,
+  );
   if (args.plan) {
     discard(r.staged);
-    process.stdout.write(`plan: would add to ${lib.configFile}:\n${JSON.stringify({ sources: { [r.id]: r.entry }, ...(r.plugin ? { plugins: { [r.plugin.id]: r.plugin.entry } } : {}) }, null, 2)}\n`);
+    process.stdout.write(
+      `plan: would add to ${lib.configFile}:\n${JSON.stringify({ sources: { [r.id]: r.entry }, ...(r.plugin ? { plugins: { [r.plugin.id]: r.plugin.entry } } : {}) }, null, 2)}\n`,
+    );
     return;
   }
   fs.writeFileSync(lib.configFile, configText(r.config));
-  log(`wrote ${path.basename(lib.configFile)}${r.plugin ? `, with plugin ${r.plugin.id}; build --plugins --catalogs packages it` : ""}`);
+  log(
+    `wrote ${path.basename(lib.configFile)}${r.plugin ? `, with plugin ${r.plugin.id}; build --plugins --catalogs packages it` : ""}`,
+  );
   const local = readLocal(lib.root);
-  const unavailable = args.retry ? [] : local.unavailable ?? [];
+  const unavailable = args.retry ? [] : (local.unavailable ?? []);
   // only the new source resolves upstream: every other one stays at the lock, as update <source> leaves them
-  const res = refresh(lib, { frozen: false, only: [r.id], plan: false, unavailable, log, prestaged: { [r.id]: r.staged } });
+  const res = refresh(lib, {
+    frozen: false,
+    only: [r.id],
+    plan: false,
+    unavailable,
+    log,
+    prestaged: { [r.id]: r.staged },
+  });
   reportRefresh(lib, res, unavailable, args, log, !args.quiet);
   report.merge(res.report);
-  printReport(report, args, { sources: res.sources, updated: res.updated, gone: res.gone, unlocked: res.unlocked, problems: res.problems });
+  printReport(report, args, {
+    sources: res.sources,
+    updated: res.updated,
+    gone: res.gone,
+    unlocked: res.unlocked,
+    problems: res.problems,
+  });
   if (!args.json) printUpdated(res.updated);
   if (res.problems.length) process.exitCode = 1;
 }
@@ -480,9 +615,17 @@ function runAdd(lib: Library, args: Args, log: (m: string) => void, report: Repo
 function runBuild(lib: Library, args: Args, log: (m: string) => void, report: Report): void {
   if (!lib.hasConfig()) bail(`no ${path.basename(lib.configFile)} in ${lib.root}; add <source> writes one`);
   const none = !args.plugins && !args.catalogs && (args.check || !args.artifacts);
-  const r = build(lib, { plugins: args.plugins || none, catalogs: args.catalogs || none, artifacts: args.artifacts, check: args.check, plan: args.plan, log });
+  const r = build(lib, {
+    plugins: args.plugins || none,
+    catalogs: args.catalogs || none,
+    artifacts: args.artifacts,
+    check: args.check,
+    plan: args.plan,
+    log,
+  });
   report.merge(r.report);
-  if (r.off && !args.quiet) log(`generate.plugins is false in ${path.basename(lib.configFile)}: nothing built, nothing checked`);
+  if (r.off && !args.quiet)
+    log(`generate.plugins is false in ${path.basename(lib.configFile)}: nothing built, nothing checked`);
   const conflicts = r.report.conflicts().length;
   if (!args.check) {
     printReport(report, args, { versions: r.versions });
@@ -493,8 +636,14 @@ function runBuild(lib: Library, args: Args, log: (m: string) => void, report: Re
   if (args.json) return printReport(report, args, { check: true, drift: r.drift, versions: r.versions });
   for (const a of report.actions) if (a.kind === "note" || a.kind === "conflict") process.stdout.write(line(a) + "\n");
   for (const d of r.drift) process.stdout.write(`drift        ${d}\n`);
-  const fix = conflicts ? `${conflicts} conflict(s) above to fix first, then build --plugins --catalogs` : "run build --plugins --catalogs";
-  process.stdout.write(r.drift.length ? `build --check: ${r.drift.length} path(s) differ from what build would write; ${fix}\n` : `build --check: clean, ${report.skips()} files as built\n`);
+  const fix = conflicts
+    ? `${conflicts} conflict(s) above to fix first, then build --plugins --catalogs`
+    : "run build --plugins --catalogs";
+  process.stdout.write(
+    r.drift.length
+      ? `build --check: ${r.drift.length} path(s) differ from what build would write; ${fix}\n`
+      : `build --check: clean, ${report.skips()} files as built\n`,
+  );
 }
 
 /**
@@ -505,35 +654,64 @@ function runCheck(lib: Library, args: Args): void {
   const r = check(lib);
   if (r.problems.length) process.exitCode = 1;
   if (args.json) {
-    process.stdout.write(JSON.stringify({ check: true, problems: r.problems, notes: r.notes, skills: r.skills, flows: r.flows, generated: r.generated }, null, 2) + "\n");
+    process.stdout.write(
+      JSON.stringify(
+        { check: true, problems: r.problems, notes: r.notes, skills: r.skills, flows: r.flows, generated: r.generated },
+        null,
+        2,
+      ) + "\n",
+    );
     return;
   }
   for (const p of r.problems) process.stdout.write(`${p.path}: ${p.reason}\n`);
   if (!args.quiet) for (const n of r.notes) process.stdout.write(`note: ${n.path}: ${n.reason}\n`);
   const count = (n: number, what: string) => `${n} ${what}${n === 1 ? "" : "s"}`;
-  if (r.problems.length) process.stdout.write(`check: ${[count(r.problems.length, "problem"), ...r.fixes].join("; ")}\n`);
-  else if (!args.quiet) process.stdout.write(`check: clean, ${count(r.skills, "own skill")}, ${count(r.flows, "flow")}, ${count(r.generated, "generated file")} as built\n`);
+  if (r.problems.length)
+    process.stdout.write(`check: ${[count(r.problems.length, "problem"), ...r.fixes].join("; ")}\n`);
+  else if (!args.quiet)
+    process.stdout.write(
+      `check: clean, ${count(r.skills, "own skill")}, ${count(r.flows, "flow")}, ${count(r.generated, "generated file")} as built\n`,
+    );
 }
 
 function saveLocal(root: string, c: Choices): void {
-  const saved: Local = { agents: c.agents.map((h) => h.id), global: c.global, dev: c.dev, projects: c.projects, mode: c.mode, wsl: c.wsl, links: c.links };
+  const saved: Local = {
+    agents: c.agents.map((h) => h.id),
+    global: c.global,
+    dev: c.dev,
+    projects: c.projects,
+    mode: c.mode,
+    wsl: c.wsl,
+    links: c.links,
+  };
   if (c.unavailable.length) saved.unavailable = c.unavailable;
   writeLocal(root, saved);
 }
 
-async function decide(args: Args, local: Local, lib: Library, table: Harness[], cwd: string, interactive: boolean): Promise<Choices | null> {
+async function decide(
+  args: Args,
+  local: Local,
+  lib: Library,
+  table: Harness[],
+  cwd: string,
+  interactive: boolean,
+): Promise<Choices | null> {
   const found = detected(table);
   const byId = new Map(table.map((h) => [h.id, h]));
   // first run with nothing remembered: only the two harnesses this tool is built around, unless asked
-  let agentIds = args.agents ?? local.agents ?? found.filter((h) => h.id === "claude-code" || h.id === "codex").map((h) => h.id);
+  let agentIds =
+    args.agents ?? local.agents ?? found.filter((h) => h.id === "claude-code" || h.id === "codex").map((h) => h.id);
   let global = args.global ?? local.global ?? true;
   const here = path.resolve(cwd);
-  let dev = args.dev ? path.resolve(args.dev) : local.dev ?? (isRepo(here) && !looksLikeLibrary(here) ? path.dirname(here) : here);
+  let dev = args.dev
+    ? path.resolve(args.dev)
+    : (local.dev ?? (isRepo(here) && !looksLikeLibrary(here) ? path.dirname(here) : here));
   const offered = findProjects(dev, lib).map((pp) => path.basename(pp));
-  let projectNames: string[] = args.projects === false ? [] : args.projects === "*" ? offered : args.projects ?? local.projects ?? [];
-  let mode: "link" | "copy" = args.copy ? "copy" : local.mode ?? "link";
+  let projectNames: string[] =
+    args.projects === false ? [] : args.projects === "*" ? offered : (args.projects ?? local.projects ?? []);
+  let mode: "link" | "copy" = args.copy ? "copy" : (local.mode ?? "link");
   const distros = args.quiet ? [] : wslDistros();
-  let wsl: string[] = args.wsl === false ? [] : args.wsl === "*" ? distros : args.wsl ?? local.wsl ?? [];
+  let wsl: string[] = args.wsl === false ? [] : args.wsl === "*" ? distros : (args.wsl ?? local.wsl ?? []);
 
   const remembered = Object.keys(local).length > 0;
   if (interactive && (args.ask || !remembered || args.command === "projects")) {
@@ -547,13 +725,30 @@ async function decide(args: Args, local: Local, lib: Library, table: Harness[], 
     if (p.isCancel(agentsPick)) return null;
     agentIds = agentsPick as string[];
 
-    const whereOptions = [{ value: "global", label: "User folders", hint: "every project on this machine; edits are live" }];
-    if (offered.length) whereOptions.push({ value: "projects", label: `Projects in ${dev}`, hint: `${offered.length} git repos; only for repos that must carry copies` });
-    const where = await p.multiselect({ message: "Where", options: whereOptions, initialValues: [global ? "global" : "", projectNames.length ? "projects" : ""].filter(Boolean), required: false });
+    const whereOptions = [
+      { value: "global", label: "User folders", hint: "every project on this machine; edits are live" },
+    ];
+    if (offered.length)
+      whereOptions.push({
+        value: "projects",
+        label: `Projects in ${dev}`,
+        hint: `${offered.length} git repos; only for repos that must carry copies`,
+      });
+    const where = await p.multiselect({
+      message: "Where",
+      options: whereOptions,
+      initialValues: [global ? "global" : "", projectNames.length ? "projects" : ""].filter(Boolean),
+      required: false,
+    });
     if (p.isCancel(where)) return null;
     global = (where as string[]).includes("global");
     if ((where as string[]).includes("projects")) {
-      const pick = await p.multiselect({ message: "Which projects (space to check)", options: offered.map((n) => ({ value: n, label: n })), initialValues: projectNames.length ? projectNames : offered, required: false });
+      const pick = await p.multiselect({
+        message: "Which projects (space to check)",
+        options: offered.map((n) => ({ value: n, label: n })),
+        initialValues: projectNames.length ? projectNames : offered,
+        required: false,
+      });
       if (p.isCancel(pick)) return null;
       projectNames = pick as string[];
       const m = await p.select({
@@ -568,14 +763,31 @@ async function decide(args: Args, local: Local, lib: Library, table: Harness[], 
       mode = m as "link" | "copy";
     } else projectNames = [];
     if (distros.length) {
-      const m = await p.multiselect({ message: "Machines", options: [{ value: "__win__", label: "Windows", hint: "this one" }, ...distros.map((d) => ({ value: d, label: `WSL: ${d}` }))], initialValues: ["__win__", ...wsl], required: true });
+      const m = await p.multiselect({
+        message: "Machines",
+        options: [
+          { value: "__win__", label: "Windows", hint: "this one" },
+          ...distros.map((d) => ({ value: d, label: `WSL: ${d}` })),
+        ],
+        initialValues: ["__win__", ...wsl],
+        required: true,
+      });
       if (p.isCancel(m)) return null;
       wsl = (m as string[]).filter((x) => x !== "__win__");
     }
   }
   const agents = agentIds.map((id) => byId.get(id)).filter((h): h is Harness => !!h);
   if (!agents.length) bail("no harness selected; pass --agents claude-code,codex");
-  return { agents, global, dev, projects: projectNames, mode, wsl, unavailable: args.retry ? [] : local.unavailable ?? [], links: args.links ?? local.links ?? "auto" };
+  return {
+    agents,
+    global,
+    dev,
+    projects: projectNames,
+    mode,
+    wsl,
+    unavailable: args.retry ? [] : (local.unavailable ?? []),
+    links: args.links ?? local.links ?? "auto",
+  };
 }
 
 /** One pass over the steps. A config library's refresh is always frozen: every third-party skill at the lock's commit. */
@@ -588,18 +800,28 @@ async function runOnce(lib: Library, c: Choices, args: Args, cwd: string, report
     const r = refresh(lib, { frozen: true, plan: false, unavailable: c.unavailable, log });
     c.unavailable = reportRefresh(lib, r, c.unavailable, args, log, false);
     report.merge(r.report);
-  } else if (lib.hasConfig() && missing.length) log(`${missing.length} lock entries are not installed yet (run without --plan or --no-restore for the refresh that restores them)`);
+  } else if (lib.hasConfig() && missing.length)
+    log(
+      `${missing.length} lock entries are not installed yet (run without --plan or --no-restore for the refresh that restores them)`,
+    );
   else if (args.restore && args.command !== "projects" && missing.length && !args.plan) {
     const r = lib.restore(log, missing);
     log(`restored ${r.restored.length} skill(s) from skills-lock.json`);
     for (const m of r.moved) log(`  moved upstream: ${m}`);
     for (const m of r.missing) log(`  gone upstream: ${m}`);
-    if (r.missing.length) log(`  (npx skills remove <name> drops it from the lock; a copy in skills/ keeps it as your own; --retry checks again)`);
+    if (r.missing.length)
+      log(
+        `  (npx skills remove <name> drops it from the lock; a copy in skills/ keeps it as your own; --retry checks again)`,
+      );
     for (const m of r.failed) log(`  failed: ${m}`);
     c.unavailable = [...new Set([...c.unavailable, ...r.missing.map((m) => m.split(":")[0])])];
     saveLocal(lib.root, c);
-  } else if (missing.length) log(`${missing.length} lock entries are not installed yet (run without --plan or --no-restore to restore them)`);
-  if (c.unavailable.length && !args.quiet && !lib.hasConfig()) log(`${c.unavailable.length} lock entr${c.unavailable.length === 1 ? "y is" : "ies are"} gone upstream (${c.unavailable.join(", ")}); --retry to check again`);
+  } else if (missing.length)
+    log(`${missing.length} lock entries are not installed yet (run without --plan or --no-restore to restore them)`);
+  if (c.unavailable.length && !args.quiet && !lib.hasConfig())
+    log(
+      `${c.unavailable.length} lock entr${c.unavailable.length === 1 ? "y is" : "ies are"} gone upstream (${c.unavailable.join(", ")}); --retry to check again`,
+    );
 
   if (args.command !== "projects") {
     if (args.layers) {
@@ -635,8 +857,12 @@ async function runOnce(lib: Library, c: Choices, args: Args, cwd: string, report
 function printReport(r: Report, args: Args, extra: Record<string, unknown> = {}): void {
   if (args.json) {
     // a write's payload is the file body; bytes (an attribution file) are summarised, text is kept as before
-    const actions = r.actions.map((a) => (Buffer.isBuffer(a.payload) ? { ...a, payload: `<${a.payload.length} bytes>` } : a));
-    process.stdout.write(JSON.stringify({ plan: args.plan, actions, links: r.links, linkMode: linkMode(), ...extra }, null, 2) + "\n");
+    const actions = r.actions.map((a) =>
+      Buffer.isBuffer(a.payload) ? { ...a, payload: `<${a.payload.length} bytes>` } : a,
+    );
+    process.stdout.write(
+      JSON.stringify({ plan: args.plan, actions, links: r.links, linkMode: linkMode(), ...extra }, null, 2) + "\n",
+    );
     return;
   }
   const changes = r.changes();
@@ -645,14 +871,17 @@ function printReport(r: Report, args: Args, extra: Record<string, unknown> = {})
   for (const a of r.actions) if (a.kind !== "skip") process.stdout.write(line(a) + "\n");
   if (r.links.symlink + r.links.junction) process.stdout.write(linksLine(r) + "\n");
   const verb = args.plan ? "would change" : "changed";
-  process.stdout.write(`${args.plan ? "plan: " : ""}${changes.length} ${verb}, ${r.skips()} already right, ${conflicts.length} left alone\n`);
+  process.stdout.write(
+    `${args.plan ? "plan: " : ""}${changes.length} ${verb}, ${r.skips()} already right, ${conflicts.length} left alone\n`,
+  );
 }
 
 /** Which kind of link this run made, and why, when it made any. */
 function linksLine(r: Report): string {
   const { symlink, junction } = r.links;
   const mode = linkMode();
-  if (junction && !symlink) return `links: ${junction} made as junctions${mode === "auto" ? " (directory symlinks were refused: Developer Mode or elevation allows them; --junctions makes this the rule)" : " (--junctions)"}`;
+  if (junction && !symlink)
+    return `links: ${junction} made as junctions${mode === "auto" ? " (directory symlinks were refused: Developer Mode or elevation allows them; --junctions makes this the rule)" : " (--junctions)"}`;
   if (junction) return `links: ${symlink} made as symlinks, ${junction} as junctions (symlinks were refused part way)`;
   return `links: ${symlink} made as symlinks${mode === "symlink" ? " (--symlinks)" : ""}`;
 }
@@ -663,9 +892,13 @@ function printStatus(lib: Library, table: Harness[], json: boolean): void {
     process.stdout.write(JSON.stringify(s, null, 2) + "\n");
     return;
   }
-  process.stdout.write(`library ${s.library}: ${s.own.length} own${groupSummary(s)}, ${s.thirdParty.length} third-party, ${s.missingFromLock.length} in the lock but not installed\n`);
-  for (const [layer, v] of Object.entries(s.layers)) process.stdout.write(`${layer}: ${v.linked} linked, ${v.missing.length} missing\n`);
-  for (const [dir, v] of Object.entries(s.user)) process.stdout.write(`${dir}: ${v.linked} linked, ${v.missing.length} missing\n`);
+  process.stdout.write(
+    `library ${s.library}: ${s.own.length} own${groupSummary(s)}, ${s.thirdParty.length} third-party, ${s.missingFromLock.length} in the lock but not installed\n`,
+  );
+  for (const [layer, v] of Object.entries(s.layers))
+    process.stdout.write(`${layer}: ${v.linked} linked, ${v.missing.length} missing\n`);
+  for (const [dir, v] of Object.entries(s.user))
+    process.stdout.write(`${dir}: ${v.linked} linked, ${v.missing.length} missing\n`);
 }
 
 /** " (oneezy: 2, flat: 1)" when any own skill sits in a group; nothing for a flat-only library. */

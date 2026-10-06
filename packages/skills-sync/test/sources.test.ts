@@ -25,7 +25,14 @@ const HARNESS_ENV = ["CLAUDE_CONFIG_DIR", "CODEX_HOME", "XDG_CONFIG_HOME", "HERM
  * temp folder is this file's own, so what it stages there can be counted while other test files run beside this one.
  */
 function cli(...args: string[]): { status: number | null; stdout: string; stderr: string } {
-  const env: NodeJS.ProcessEnv = { ...process.env, HOME: homeDir, USERPROFILE: homeDir, TMP: tmpDir, TEMP: tmpDir, TMPDIR: tmpDir };
+  const env: NodeJS.ProcessEnv = {
+    ...process.env,
+    HOME: homeDir,
+    USERPROFILE: homeDir,
+    TMP: tmpDir,
+    TEMP: tmpDir,
+    TMPDIR: tmpDir,
+  };
   for (const k of HARNESS_ENV) delete env[k];
   return spawnSync(process.execPath, [CLI, ...args, "--repo", lib.root], { encoding: "utf8", cwd: lib.root, env });
 }
@@ -98,7 +105,9 @@ function source(u: Upstream, extra: Record<string, unknown> = {}): Record<string
 
 /** The actions of a --json run that touch a file: neither a skip nor a reported conflict. */
 function changes(r: { stdout: string }): Array<{ kind: string; path: string }> {
-  return (JSON.parse(r.stdout).actions as Array<{ kind: string; path: string }>).filter((a) => a.kind !== "skip" && a.kind !== "conflict");
+  return (JSON.parse(r.stdout).actions as Array<{ kind: string; path: string }>).filter(
+    (a) => a.kind !== "skip" && a.kind !== "conflict",
+  );
 }
 
 const body = (name: string) => fs.readFileSync(path.join(lib.agents, name, "SKILL.md"), "utf8");
@@ -113,7 +122,10 @@ beforeEach(() => {
   for (const n of fs.readdirSync(base)) fs.rmSync(path.join(base, n), { recursive: true, force: true });
   lib = new Library(path.join(base, "dev", "skills"));
   fs.mkdirSync(path.join(lib.own, "oneezy", "own-one"), { recursive: true });
-  fs.writeFileSync(path.join(lib.own, "oneezy", "own-one", "SKILL.md"), "---\nname: own-one\ndescription: mine\n---\nmine\n");
+  fs.writeFileSync(
+    path.join(lib.own, "oneezy", "own-one", "SKILL.md"),
+    "---\nname: own-one\ndescription: mine\n---\nmine\n",
+  );
   homeDir = path.join(base, "home");
   fs.mkdirSync(homeDir);
   tmpDir = path.join(base, "tmp");
@@ -146,11 +158,19 @@ test("refresh snapshots the selected skills and the attribution file, writes .sn
   for (const n of ["a", "b"]) {
     assert.equal(lock.sources.up.skills[n].path, `skills/${n}`);
     assert.equal(lock.sources.up.skills[n].commit, undefined, "no commit of its own: it is at the source's");
-    assert.equal(lock.sources.up.skills[n].hash, recipeHash(path.join(up.dir, "skills", n)), `${n} hash is the recipe's`);
+    assert.equal(
+      lock.sources.up.skills[n].hash,
+      recipeHash(path.join(up.dir, "skills", n)),
+      `${n} hash is the recipe's`,
+    );
     assert.equal(lock.sources.up.skills[n].hash, recipeHash(path.join(snap, "skills", n)), `${n} snapshot matches`);
   }
   assert.ok(!fs.existsSync(path.join(lib.root, "skills-sources-lock.json")), "one lock only");
-  assert.deepEqual(fs.readdirSync(lib.root).sort(), [".agents", "skills", "skills-sync.json", "skills-sync.lock.json", "upstream"], "refresh writes nothing else into the library");
+  assert.deepEqual(
+    fs.readdirSync(lib.root).sort(),
+    [".agents", "skills", "skills-sync.json", "skills-sync.lock.json", "upstream"],
+    "refresh writes nothing else into the library",
+  );
 
   for (const n of ["a", "b"]) {
     const w = path.join(lib.agents, n);
@@ -163,7 +183,10 @@ test("refresh snapshots the selected skills and the attribution file, writes .sn
   const again = cli("refresh", "--json");
   assert.equal(again.status, 0, again.stderr);
   assert.deepEqual(changes(again), [], "second refresh changes nothing");
-  assert.deepEqual([lib.lockFile, path.join(snap, ".snapshot.json")].map((f) => fs.readFileSync(f, "utf8")), before);
+  assert.deepEqual(
+    [lib.lockFile, path.join(snap, ".snapshot.json")].map((f) => fs.readFileSync(f, "utf8")),
+    before,
+  );
 });
 
 test("latest by default: a new upstream commit moves unpinned skills on refresh, not on refresh --frozen; a per-skill pin holds that skill at its commit while its sibling moves; editing the pin moves it", () => {
@@ -185,23 +208,45 @@ test("latest by default: a new upstream commit moves unpinned skills on refresh,
   const lock = json(lib.lockFile);
   assert.equal(lock.sources.up.commit, second, "unpinned a and b moved with their source");
   assert.equal(lock.sources.held.commit, second, "the held source is at the tip");
-  assert.equal(lock.sources.held.skills["held-a"].commit, first, "the pinned skill is held at its pin, which the lock shows on the skill");
-  assert.equal(lock.sources.held.skills["held-b"].commit, undefined, "its sibling in the same source moved with the source");
+  assert.equal(
+    lock.sources.held.skills["held-a"].commit,
+    first,
+    "the pinned skill is held at its pin, which the lock shows on the skill",
+  );
+  assert.equal(
+    lock.sources.held.skills["held-b"].commit,
+    undefined,
+    "its sibling in the same source moved with the source",
+  );
   assert.equal(lock.sources.held.skills["held-a"].hash, recipeHash(path.join(lib.upstream, "held", "skills", "a")));
   assert.ok(body("a").includes("second edition"));
-  assert.ok(!body("held-a").includes("second edition"), "the working-set copy of the pinned skill is the first edition");
+  assert.ok(
+    !body("held-a").includes("second edition"),
+    "the working-set copy of the pinned skill is the first edition",
+  );
   assert.ok(body("held-b").includes("second edition"));
-  assert.ok(fs.readFileSync(path.join(lib.upstream, "up", "skills", "a", "SKILL.md"), "utf8").includes("second edition"));
-  assert.ok(!fs.readFileSync(path.join(lib.upstream, "held", "skills", "a", "SKILL.md"), "utf8").includes("second edition"));
+  assert.ok(
+    fs.readFileSync(path.join(lib.upstream, "up", "skills", "a", "SKILL.md"), "utf8").includes("second edition"),
+  );
+  assert.ok(
+    !fs.readFileSync(path.join(lib.upstream, "held", "skills", "a", "SKILL.md"), "utf8").includes("second edition"),
+  );
   assert.deepEqual(changes(cli("refresh", "--json")), [], "settled");
 
   // the pin is edited to the new commit: the held skill moves, and nothing else changes
   config({ up: source(up), held: source(up, { skills: { a: "held-a", b: "held-b" }, pins: { a: second } }) });
   const edited = cli("refresh", "--json");
   assert.equal(edited.status, 0, edited.stderr);
-  assert.equal(json(lib.lockFile).sources.held.skills["held-a"].commit, undefined, "pinned at the source's own commit: nothing to show");
+  assert.equal(
+    json(lib.lockFile).sources.held.skills["held-a"].commit,
+    undefined,
+    "pinned at the source's own commit: nothing to show",
+  );
   assert.ok(body("held-a").includes("second edition"));
-  assert.ok(changes(edited).every((a) => /held|skills-sync\.lock\.json$/.test(a.path)), `only the held source changed: ${JSON.stringify(changes(edited))}`);
+  assert.ok(
+    changes(edited).every((a) => /held|skills-sync\.lock\.json$/.test(a.path)),
+    `only the held source changed: ${JSON.stringify(changes(edited))}`,
+  );
 });
 
 test("sync with a config never moves a source upstream: after an upstream commit, sync with --no-pull, --pull or a due pull installs every source at the lock's commit and never rewrites the lock; without a config it behaves as 0.2.0", async () => {
@@ -219,13 +264,15 @@ test("sync with a config never moves a source upstream: after an upstream commit
   fs.rmSync(lib.agents, { recursive: true });
   fs.rmSync(lib.localFile, { force: true });
 
-  const sync = (...extra: string[]) => cli("--quiet", "--json", "--no-projects", "--no-wsl", "--agents", "claude-code,codex", ...extra);
+  const sync = (...extra: string[]) =>
+    cli("--quiet", "--json", "--no-projects", "--no-wsl", "--agents", "claude-code,codex", ...extra);
   const frozen = sync("--no-pull");
   assert.equal(frozen.status, 0, frozen.stderr);
   assert.ok(!body("a").includes("newer"), "--no-pull: restored at the commit in the lock, not the tip");
   assert.equal(fs.readFileSync(lib.lockFile, "utf8"), lockText, "the lock was not rewritten");
   assert.ok(fs.existsSync(path.join(lib.upstream, "up", "skills", "a", "SKILL.md")));
-  for (const n of ["a", "b", "own-one"]) assert.ok(isLink(path.join(claude.userSkills, n)), `${n} linked into the user folder`);
+  for (const n of ["a", "b", "own-one"])
+    assert.ok(isLink(path.join(claude.userSkills, n)), `${n} linked into the user folder`);
   assert.ok(isLink(path.join(lib.root, claude.projectSkills, "a")), "a in the Claude layer");
   assert.deepEqual(changes(sync("--no-pull")), [], "a second frozen sync changes nothing");
 
@@ -243,11 +290,42 @@ test("sync with a config never moves a source upstream: after an upstream commit
   const legacy = new Library(path.join(base, "dev", "legacy"));
   fs.mkdirSync(path.join(legacy.own, "mine"), { recursive: true });
   fs.writeFileSync(path.join(legacy.own, "mine", "SKILL.md"), "---\nname: mine\ndescription: mine\n---\nmine\n");
-  const legacyText = JSON.stringify({ version: 1, skills: { c: { source: up.dir, sourceUrl: up.dir, sourceType: "git", skillPath: "skills/c/SKILL.md", computedHash: "x" } } }, null, 2) + "\n";
+  const legacyText =
+    JSON.stringify(
+      {
+        version: 1,
+        skills: {
+          c: {
+            source: up.dir,
+            sourceUrl: up.dir,
+            sourceType: "git",
+            skillPath: "skills/c/SKILL.md",
+            computedHash: "x",
+          },
+        },
+      },
+      null,
+      2,
+    ) + "\n";
   fs.writeFileSync(legacy.npxLockFile, legacyText);
   const env: NodeJS.ProcessEnv = { ...process.env, HOME: homeDir, USERPROFILE: homeDir };
   for (const k of HARNESS_ENV) delete env[k];
-  const r = spawnSync(process.execPath, [CLI, "--quiet", "--json", "--pull", "--no-projects", "--no-wsl", "--agents", "claude-code,codex", "--repo", legacy.root], { encoding: "utf8", cwd: legacy.root, env });
+  const r = spawnSync(
+    process.execPath,
+    [
+      CLI,
+      "--quiet",
+      "--json",
+      "--pull",
+      "--no-projects",
+      "--no-wsl",
+      "--agents",
+      "claude-code,codex",
+      "--repo",
+      legacy.root,
+    ],
+    { encoding: "utf8", cwd: legacy.root, env },
+  );
   assert.equal(r.status, 0, r.stderr);
   assert.ok(fs.existsSync(path.join(legacy.agents, "c", "SKILL.md")), "restored from the lock");
   assert.ok(!isLink(path.join(legacy.agents, "c")));
@@ -266,17 +344,25 @@ test("sync on a clone of the library installs the committed lock: an upstream co
   const originLib = lib;
   const origin = new Upstream(lib.root);
   origin.git("init", "-q", "-b", "main");
-  fs.writeFileSync(path.join(lib.root, ".gitignore"), ".agents/\n.claude/\n.goose/\n.hermes/\nupstream/\nskills-sync.local.json\n");
+  fs.writeFileSync(
+    path.join(lib.root, ".gitignore"),
+    ".agents/\n.claude/\n.goose/\n.hermes/\nupstream/\nskills-sync.local.json\n",
+  );
   config({ up: source(up) });
   assert.equal(cli("refresh", "--quiet").status, 0);
   origin.commit("library");
   const ownSkill = (name: string) => {
     fs.mkdirSync(path.join(origin.dir, "skills", "oneezy", name), { recursive: true });
-    fs.writeFileSync(path.join(origin.dir, "skills", "oneezy", name, "SKILL.md"), `---\nname: ${name}\ndescription: mine\n---\nmine\n`);
+    fs.writeFileSync(
+      path.join(origin.dir, "skills", "oneezy", name, "SKILL.md"),
+      `---\nname: ${name}\ndescription: mine\n---\nmine\n`,
+    );
     origin.commit(name);
   };
   // another machine: a clone of the origin; from here on the CLI runs against the clone
-  const cloned = spawnSync("git", [...GIT, "clone", "-q", origin.dir, path.join(base, "dev", "clone")], { encoding: "utf8" });
+  const cloned = spawnSync("git", [...GIT, "clone", "-q", origin.dir, path.join(base, "dev", "clone")], {
+    encoding: "utf8",
+  });
   assert.equal(cloned.status, 0, cloned.stderr);
   lib = new Library(path.join(base, "dev", "clone"));
   const cloneLib = lib;
@@ -284,9 +370,14 @@ test("sync on a clone of the library installs the committed lock: an upstream co
   const lockName = path.basename(lib.lockFile);
   const originLock = () => fs.readFileSync(path.join(origin.dir, lockName), "utf8");
   const cloneLock = () => fs.readFileSync(lib.lockFile, "utf8");
-  const sync = (...extra: string[]) => cli("--quiet", "--json", "--no-projects", "--no-wsl", "--agents", "claude-code,codex", ...extra);
+  const sync = (...extra: string[]) =>
+    cli("--quiet", "--json", "--no-projects", "--no-wsl", "--agents", "claude-code,codex", ...extra);
   // porcelain lines kept whole: the leading space is the unstaged column, which Upstream.git would trim away
-  const dirty = () => spawnSync("git", ["-C", lib.root, "status", "--porcelain", "--untracked-files=no"], { encoding: "utf8" }).stdout.split("\n").filter(Boolean).sort();
+  const dirty = () =>
+    spawnSync("git", ["-C", lib.root, "status", "--porcelain", "--untracked-files=no"], { encoding: "utf8" })
+      .stdout.split("\n")
+      .filter(Boolean)
+      .sort();
   const due = () => fs.rmSync(path.join(lib.root, ".git", "skills-sync-pulled"), { force: true });
 
   const first = sync("--pull");
@@ -358,10 +449,18 @@ test("a rename (tdd -> pstack-tdd) yields .agents/skills/pstack-tdd with name: p
   assert.equal(body("pstack-tdd"), "---\nname: pstack-tdd\ndescription: tdd skill\n---\nred, green\n");
   assert.ok(!lexists(path.join(lib.agents, "tdd")));
   const snapshot = fs.readFileSync(path.join(lib.upstream, "up", "skills", "tdd", "SKILL.md"), "utf8");
-  assert.equal(snapshot, fs.readFileSync(path.join(up.dir, "skills", "tdd", "SKILL.md"), "utf8"), "the snapshot holds the bytes of upstream");
+  assert.equal(
+    snapshot,
+    fs.readFileSync(path.join(up.dir, "skills", "tdd", "SKILL.md"), "utf8"),
+    "the snapshot holds the bytes of upstream",
+  );
   const lock = json(lib.lockFile);
   assert.equal(lock.sources.up.skills["pstack-tdd"].path, "skills/tdd");
-  assert.equal(lock.sources.up.skills["pstack-tdd"].hash, recipeHash(path.join(up.dir, "skills", "tdd")), "the hash is the upstream one, not the renamed copy");
+  assert.equal(
+    lock.sources.up.skills["pstack-tdd"].hash,
+    recipeHash(path.join(up.dir, "skills", "tdd")),
+    "the hash is the upstream one, not the renamed copy",
+  );
   assert.ok(!("tdd" in lock.sources.up.skills));
   assert.deepEqual(changes(cli("refresh", "--json")), [], "settled");
   // frozen restores the renamed copy from the lock's path under the new name
@@ -391,13 +490,30 @@ test("the hash equals what npx skills 1.7.0 wrote for the same files (a literal 
 test("the config and the local file validate against the shipped schemas; the skills and plugins switches default to true; an invalid config stops refresh naming the path of each problem", async () => {
   const { shippedSchema, validate } = await import("../src/schema.js");
   const { readConfig } = await import("../src/sources.js");
-  config({ up: source(up, { skills: { a: "a", b: "renamed-b" }, pins: { a: up.head() } }) }, { library: { name: "skills", owner: "oneezy", homepage: "https://github.com/oneezy/skills" }, plugins: { up: { displayName: "Up", source: "up" }, oneezy: { displayName: "Oneezy", description: "mine", group: "oneezy" } } });
+  config(
+    { up: source(up, { skills: { a: "a", b: "renamed-b" }, pins: { a: up.head() } }) },
+    {
+      library: { name: "skills", owner: "oneezy", homepage: "https://github.com/oneezy/skills" },
+      plugins: {
+        up: { displayName: "Up", source: "up" },
+        oneezy: { displayName: "Oneezy", description: "mine", group: "oneezy" },
+      },
+    },
+  );
   assert.deepEqual(validate(shippedSchema("skills-sync"), json(lib.configFile)), []);
-  assert.deepEqual(readConfig(lib.configFile).generate, { skills: true, plugins: true }, "both switches default to true");
+  assert.deepEqual(
+    readConfig(lib.configFile).generate,
+    { skills: true, plugins: true },
+    "both switches default to true",
+  );
   assert.equal(cli("refresh", "--quiet").status, 0);
   const sync = cli("--quiet", "--no-pull", "--no-projects", "--no-wsl", "--agents", "claude-code,codex", "--no-global");
   assert.equal(sync.status, 0, sync.stderr);
-  assert.deepEqual(validate(shippedSchema("skills-sync.local"), json(lib.localFile)), [], "the sync wrote a valid local file");
+  assert.deepEqual(
+    validate(shippedSchema("skills-sync.local"), json(lib.localFile)),
+    [],
+    "the sync wrote a valid local file",
+  );
 
   const switched = { ...json(lib.configFile), generate: { skills: false, plugins: true } };
   fs.writeFileSync(lib.configFile, JSON.stringify(switched));
@@ -446,11 +562,17 @@ test("a selected skill missing upstream is reported once, remembered in skills-s
   config({ up: source(up, { skills: ["a", "zzz"] }) });
   const r = cli("refresh", "--json");
   assert.equal(r.status, 0, r.stderr);
-  assert.ok(changes(r).some((a) => a.kind === "delete" && a.path.endsWith(path.join(".agents", "skills", "b"))), "working-set copy of b deleted");
+  assert.ok(
+    changes(r).some((a) => a.kind === "delete" && a.path.endsWith(path.join(".agents", "skills", "b"))),
+    "working-set copy of b deleted",
+  );
   assert.ok(!lexists(path.join(lib.agents, "b")));
   assert.ok(!lexists(path.join(lib.upstream, "up", "skills", "b")), "snapshot of b deleted");
   assert.ok(fs.existsSync(path.join(lib.agents, "a", "SKILL.md")));
-  assert.ok(isLink(path.join(lib.agents, "own-one")) || !lexists(path.join(lib.agents, "own-one")), "own skills are not the business of refresh");
+  assert.ok(
+    isLink(path.join(lib.agents, "own-one")) || !lexists(path.join(lib.agents, "own-one")),
+    "own skills are not the business of refresh",
+  );
   assert.deepEqual(Object.keys(json(lib.lockFile).sources.up.skills), ["a", "zzz"]);
 });
 
@@ -462,8 +584,13 @@ function stagedClones(): string[] {
 test("add <path to the upstream> writes the config entry (default branch, all skills, no policy) and the plugin entry that packages it, and snapshots; --id, --root, --skills, --as, --plugin and --no-plugin are honoured; a plugin id already declared is refused before anything is written; nothing lands outside the library and the temp clone is gone", () => {
   const all = cli("add", up.dir, "--quiet");
   assert.equal(all.status, 0, all.stderr);
-  assert.deepEqual(json(lib.configFile), { version: 1, sources: { up: { repo: up.dir, ref: "main", root: "skills", skills: ["a", "b", "c"], attribution: ["LICENSE"] } }, plugins: { up: { displayName: "Up", source: "up" } } });
-  for (const n of ["a", "b", "c"]) assert.ok(fs.existsSync(path.join(lib.upstream, "up", "skills", n, "SKILL.md")), `${n} snapshotted`);
+  assert.deepEqual(json(lib.configFile), {
+    version: 1,
+    sources: { up: { repo: up.dir, ref: "main", root: "skills", skills: ["a", "b", "c"], attribution: ["LICENSE"] } },
+    plugins: { up: { displayName: "Up", source: "up" } },
+  });
+  for (const n of ["a", "b", "c"])
+    assert.ok(fs.existsSync(path.join(lib.upstream, "up", "skills", n, "SKILL.md")), `${n} snapshotted`);
   assert.deepEqual(Object.keys(json(lib.lockFile).sources.up.skills), ["a", "b", "c"]);
   assert.equal(json(lib.lockFile).sources.up.commit, up.head());
 
@@ -471,10 +598,32 @@ test("add <path to the upstream> writes the config entry (default branch, all sk
   assert.equal(again.status, 1);
   assert.match(again.stderr, /up is already declared/);
 
-  const picked = cli("add", up.dir, "--id", "picked", "--root", "skills", "--skills", "a,b", "--as", "b=x-b", "--quiet");
+  const picked = cli(
+    "add",
+    up.dir,
+    "--id",
+    "picked",
+    "--root",
+    "skills",
+    "--skills",
+    "a,b",
+    "--as",
+    "b=x-b",
+    "--quiet",
+  );
   assert.equal(picked.status, 0, picked.stderr);
-  assert.deepEqual(json(lib.configFile).sources.picked, { repo: up.dir, ref: "main", root: "skills", skills: { a: "a", b: "x-b" }, attribution: ["LICENSE"] });
-  assert.deepEqual(json(lib.configFile).plugins.picked, { displayName: "Picked", source: "picked" }, "the plugin id defaults to the source id");
+  assert.deepEqual(json(lib.configFile).sources.picked, {
+    repo: up.dir,
+    ref: "main",
+    root: "skills",
+    skills: { a: "a", b: "x-b" },
+    attribution: ["LICENSE"],
+  });
+  assert.deepEqual(
+    json(lib.configFile).plugins.picked,
+    { displayName: "Picked", source: "picked" },
+    "the plugin id defaults to the source id",
+  );
   assert.ok(fs.existsSync(path.join(lib.upstream, "picked", "skills", "b", "SKILL.md")));
   assert.ok(!fs.existsSync(path.join(lib.upstream, "picked", "skills", "c")));
   assert.ok(body("x-b").startsWith("---\nname: x-b\n"));
@@ -497,7 +646,12 @@ test("add <path to the upstream> writes the config entry (default branch, all sk
   const bare = cli("add", up.dir, "--id", "bare", "--skills", "a", "--no-plugin", "--quiet");
   assert.equal(bare.status, 0, bare.stderr);
   assert.ok("bare" in json(lib.configFile).sources);
-  assert.ok(!Object.values(json(lib.configFile).plugins as Record<string, { source?: string }>).some((p) => p.source === "bare"), "--no-plugin declares none");
+  assert.ok(
+    !Object.values(json(lib.configFile).plugins as Record<string, { source?: string }>).some(
+      (p) => p.source === "bare",
+    ),
+    "--no-plugin declares none",
+  );
 
   assert.deepEqual(fs.readdirSync(homeDir), [], "add writes nothing into the home folder or any harness");
   assert.deepEqual(stagedClones(), [], "temp clones deleted");

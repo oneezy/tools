@@ -70,7 +70,8 @@ export function parseRepoInput(input: string): RepoRef | null {
     if (segs.length < 2) return null;
     const [owner, rawRepo, kind, ...rest] = segs;
     const repo = rawRepo.replace(/\.git$/, "");
-    if ((kind === "tree" || kind === "blob") && rest.length) return valid({ owner, repo, refPath: rest.map(decodeURIComponent) });
+    if ((kind === "tree" || kind === "blob") && rest.length)
+      return valid({ owner, repo, refPath: rest.map(decodeURIComponent) });
     return valid({ owner, repo });
   }
   // owner/repo, optionally owner/repo@ref
@@ -108,7 +109,8 @@ export async function fetchGitHubFiles(input: string | RepoRef, opts: LoadOption
     try {
       const got = via === "tarball" ? await viaTarball(ref, c.ref, opts) : await viaTree(ref, c.ref, c.subpath, opts);
       const subpath = resolveSubpath(got.files.paths, c.subpath);
-      if (subpath && !got.files.paths.some((p) => p.startsWith(subpath + "/"))) throw new GitHubError(`no folder ${subpath} in ${ref.owner}/${ref.repo}@${c.ref}`, 404);
+      if (subpath && !got.files.paths.some((p) => p.startsWith(subpath + "/")))
+        throw new GitHubError(`no folder ${subpath} in ${ref.owner}/${ref.repo}@${c.ref}`, 404);
       const at = got.sha ?? c.ref;
       const source: FetchedRepo["source"] = {
         kind: "github",
@@ -141,7 +143,8 @@ function resolveSubpath(paths: string[], subpath?: string): string {
 function refCandidates(r: RepoRef): Array<{ ref: string; subpath?: string }> {
   if (!r.refPath) return [{ ref: r.ref ?? "HEAD", subpath: r.subpath }];
   const out: Array<{ ref: string; subpath?: string }> = [];
-  for (let i = 1; i <= Math.min(r.refPath.length, 4); i++) out.push({ ref: r.refPath.slice(0, i).join("/"), subpath: r.refPath.slice(i).join("/") });
+  for (let i = 1; i <= Math.min(r.refPath.length, 4); i++)
+    out.push({ ref: r.refPath.slice(0, i).join("/"), subpath: r.refPath.slice(i).join("/") });
   return out;
 }
 
@@ -155,11 +158,17 @@ async function viaTree(r: RepoRef, ref: string, subpath: string | undefined, opt
   const f = opts.fetch ?? fetch;
   const api = opts.apiBase ?? "https://api.github.com";
   const raw = opts.rawBase ?? "https://raw.githubusercontent.com";
-  const res = await f(`${api}/repos/${r.owner}/${r.repo}/git/trees/${encodePath(ref)}?recursive=1`, { headers: apiHeaders(opts.token) });
+  const res = await f(`${api}/repos/${r.owner}/${r.repo}/git/trees/${encodePath(ref)}?recursive=1`, {
+    headers: apiHeaders(opts.token),
+  });
   await check(res, r, ref);
   const json = (await res.json()) as { tree?: Array<{ path: string; type: string }>; truncated?: boolean };
   const paths = (json.tree ?? []).filter((e) => e.type === "blob").map((e) => e.path);
-  const warnings = json.truncated ? [`GitHub truncated the file list of ${r.owner}/${r.repo} (over 100,000 entries or 7 MB); some skills may be missing`] : [];
+  const warnings = json.truncated
+    ? [
+        `GitHub truncated the file list of ${r.owner}/${r.repo} (over 100,000 entries or 7 MB); some skills may be missing`,
+      ]
+    : [];
   const files = new Map<string, string>();
   const failed = new Set<string>();
   // a file that would not load reads as empty while planning, so the next round does not ask for it again
@@ -187,7 +196,10 @@ async function viaTree(r: RepoRef, ref: string, subpath: string | undefined, opt
 async function viaTarball(r: RepoRef, ref: string, opts: LoadOptions): Promise<Got> {
   const f = opts.fetch ?? fetch;
   const api = opts.apiBase ?? "https://api.github.com";
-  const res = await f(`${api}/repos/${r.owner}/${r.repo}/tarball/${encodePath(ref)}`, { headers: apiHeaders(opts.token), redirect: "follow" });
+  const res = await f(`${api}/repos/${r.owner}/${r.repo}/tarball/${encodePath(ref)}`, {
+    headers: apiHeaders(opts.token),
+    redirect: "follow",
+  });
   await check(res, r, ref);
   const gz = new Uint8Array(await res.arrayBuffer());
   const entries = untar(await gunzip(gz));
@@ -229,16 +241,24 @@ async function check(res: Response, r: RepoRef, ref: string): Promise<void> {
   const reset = Number(res.headers.get("x-ratelimit-reset")) || undefined;
   if ((res.status === 403 || res.status === 429) && remaining === "0") {
     const when = reset ? new Date(reset * 1000).toISOString() : "later";
-    throw new GitHubError(`GitHub rate limit reached (60 requests/hour without a token); resets at ${when}`, res.status, reset);
+    throw new GitHubError(
+      `GitHub rate limit reached (60 requests/hour without a token); resets at ${when}`,
+      res.status,
+      reset,
+    );
   }
-  if (res.status === 404 || res.status === 422) throw new GitHubError(`${r.owner}/${r.repo}@${ref} not found (or private)`, 404);
+  if (res.status === 404 || res.status === 422)
+    throw new GitHubError(`${r.owner}/${r.repo}@${ref} not found (or private)`, 404);
   let detail = "";
   try {
     detail = ((await res.json()) as { message?: string }).message ?? "";
   } catch {
     /* no body */
   }
-  throw new GitHubError(`GitHub answered ${res.status} for ${r.owner}/${r.repo}@${ref}${detail ? `: ${detail}` : ""}`, res.status);
+  throw new GitHubError(
+    `GitHub answered ${res.status} for ${r.owner}/${r.repo}@${ref}${detail ? `: ${detail}` : ""}`,
+    res.status,
+  );
 }
 
 function encodePath(p: string): string {

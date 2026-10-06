@@ -24,7 +24,9 @@ export function serveAndWatch(o: WatchOptions): http.Server {
       try {
         current = o.regenerate();
         version++;
-        o.log(`re-analyzed (${why}): ${current.graph.meta.skillCount} skills, ${current.graph.meta.edgeCount} edges, ${current.graph.meta.flowCount} flows`);
+        o.log(
+          `re-analyzed (${why}): ${current.graph.meta.skillCount} skills, ${current.graph.meta.edgeCount} edges, ${current.graph.meta.flowCount} flows`,
+        );
       } catch (e) {
         o.log(`re-analyze failed: ${(e as Error).message}`);
       }

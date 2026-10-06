@@ -3,11 +3,7 @@
   "title": "flow.yaml",
   "description": "What an own skill does today, beside its SKILL.md: the reference tokens its prose uses and its steps with stable ids. Authored by hand, read by people and a viewer, never by a harness. skills-sync check validates it against this schema and adds the rules a schema cannot say: skill is the folder's name, step ids are unique, and after, parallel and join name steps that exist.",
   "type": "object",
-  "required": [
-    "skill",
-    "purpose",
-    "steps"
-  ],
+  "required": ["skill", "purpose", "steps"],
   "additionalProperties": false,
   "properties": {
     "skill": {
@@ -44,9 +40,7 @@
     },
     "agents": {
       "type": "object",
-      "required": [
-        "max"
-      ],
+      "required": ["max"],
       "additionalProperties": false,
       "properties": {
         "max": {
@@ -72,12 +66,7 @@
     },
     "ref": {
       "type": "object",
-      "required": [
-        "token",
-        "kind",
-        "id",
-        "need"
-      ],
+      "required": ["token", "kind", "id", "need"],
       "additionalProperties": false,
       "properties": {
         "token": {
@@ -86,13 +75,7 @@
           "minLength": 1
         },
         "kind": {
-          "enum": [
-            "skill",
-            "plugin",
-            "app",
-            "file",
-            "url"
-          ]
+          "enum": ["skill", "plugin", "app", "file", "url"]
         },
         "id": {
           "description": "What the token names: a skill's name, a plugin or app id, a path from the library root, a URL.",
@@ -101,13 +84,7 @@
         },
         "need": {
           "description": "required: the skill cannot finish without it. optional: used when present. conditional: used when `when` holds. example: named only as an example. mention: named as a boundary, or as a thing never called.",
-          "enum": [
-            "required",
-            "optional",
-            "conditional",
-            "example",
-            "mention"
-          ]
+          "enum": ["required", "optional", "conditional", "example", "mention"]
         },
         "when": {
           "description": "The step or the condition under which it is used.",
@@ -118,10 +95,7 @@
     },
     "unresolved": {
       "type": "object",
-      "required": [
-        "token",
-        "note"
-      ],
+      "required": ["token", "note"],
       "additionalProperties": false,
       "properties": {
         "token": {
@@ -136,17 +110,11 @@
     },
     "step": {
       "type": "object",
-      "required": [
-        "id"
-      ],
+      "required": ["id"],
       "additionalProperties": false,
       "dependentRequired": {
-        "parallel": [
-          "join"
-        ],
-        "join": [
-          "parallel"
-        ]
+        "parallel": ["join"],
+        "join": ["parallel"]
       },
       "properties": {
         "id": {
@@ -194,9 +162,7 @@
         "loop": {
           "description": "The step repeats until `until` holds, `every` so often.",
           "type": "object",
-          "required": [
-            "until"
-          ],
+          "required": ["until"],
           "additionalProperties": false,
           "properties": {
             "until": {
@@ -223,19 +189,13 @@
           "additionalProperties": false,
           "anyOf": [
             {
-              "required": [
-                "skill"
-              ]
+              "required": ["skill"]
             },
             {
-              "required": [
-                "plugin"
-              ]
+              "required": ["plugin"]
             },
             {
-              "required": [
-                "app"
-              ]
+              "required": ["app"]
             }
           ],
           "properties": {
