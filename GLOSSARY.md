@@ -4,7 +4,7 @@ Glossary for the `tools` repo. Terms only; no implementation detail.
 
 ## Tool
 
-A program in `packages/` that Justin runs by double-clicking its `.cmd` file; `clis/<name>-cli/` keeps a shim per launcher, so old shortcuts and paths still work. It opens a terminal **picker**: an arrow-key list where space checks rows, enter acts on the checked rows, and q quits. The old `clis/` folder names keep the historical `-cli` suffix, but a tool is not a CLI in the sense below.
+A program in `packages/` that Justin runs by double-clicking its `.cmd` file. It opens a terminal **picker**: an arrow-key list where space checks rows, enter acts on the checked rows, and q quits. A tool is not a CLI in the sense below.
 
 ## CLI
 
