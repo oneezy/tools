@@ -31,7 +31,7 @@ export function moved(id: string, from: Position | null, to: Position, dir: stri
   if (!from) return none("new to the lock: no version to compare with");
   if (from.version === null || to.version === null) return none(`no upstream version for ${(from.version === null ? from : to).commit.slice(0, 7)}`);
   if (from.version === to.version) return none(`no release between them (both ${to.version})`);
-  const [low, high] = direction === "upgrade" ? [from, to] : [to, from];
+  const [low, high] = byDirection({ from, to, direction });
   if (!dir || !git(["cat-file", "-e", `${high.commit}^{commit}`], dir).ok) return none(`${high.commit.slice(0, 7)} is not in the checkout`);
   let text: string | null = null;
   for (const d of manifestDirs(root)) {
@@ -46,6 +46,11 @@ export function moved(id: string, from: Position | null, to: Position, dir: stri
   for (const v of [high.version!, low.version!]) if (!sections.some((s) => s.version === v)) return none(`${CHANGELOG} has no heading for ${v}`);
   const range = sections.filter((s) => compareVersions(s.version, low.version!) > 0 && compareVersions(s.version, high.version!) <= 0);
   return { id, from, to, direction, changelog: range.map((s) => s.text).join("\n") };
+}
+
+/** A move's two sides as lower and higher: an upgrade goes from low to high, a downgrade from high to low. */
+export function byDirection<T extends Pick<Moved, "from" | "to" | "direction">>(m: T): [T["from"], T["to"]] | [T["to"], T["from"]] {
+  return m.direction === "upgrade" ? [m.from, m.to] : [m.to, m.from];
 }
 
 /** A downgrade when the new version is lower, or, with no versions to tell, when the new commit is behind the old one; else an upgrade. */

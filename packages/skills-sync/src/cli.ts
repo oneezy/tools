@@ -12,7 +12,8 @@ import { gitExclude, isDir, isLink, lexists, linkMode, linkTarget, real, samePat
 import { detected, harnessTable, type Harness } from "./harnesses.js";
 import { cloneLibrary, DEFAULT_LIBRARY, findLibrary, homeLibrary, Library, looksLikeLibrary, pullLibrary } from "./library.js";
 import { apply, line, Report } from "./plan.js";
-import { refresh, type Position, type RefreshResult } from "./refresh.js";
+import { byDirection, type Moved, type Position } from "./changelog.js";
+import { refresh, type RefreshResult } from "./refresh.js";
 import { readLock } from "./lock.js";
 import { cloneUrl, cmp, configText, readConfig } from "./sources.js";
 import { discard } from "./stage.js";
@@ -47,7 +48,7 @@ Commands
   versions <source>
                    the versions a source has released, newest first, the one the lock is at marked (--json)
   add <source>     declare a source (owner/repo[#ref], a git URL or a path) and the plugin that packages it in
-                   skills-sync.json, then refresh
+                   skills-sync.json, then update that one source (every other one stays at the lock)
   build            write the plugin form into the library when skills-sync.json has generate.plugins on: --plugins and
                    --catalogs pick the committed outputs (both when neither is named), --artifacts writes the upload
                    archives; --check diffs instead of writing
@@ -374,17 +375,22 @@ function runUpdate(lib: Library, args: Args, log: (m: string) => void, report: R
   report.merge(r.report);
   printReport(report, args, { sources: r.sources, updated: r.updated, config: r.config, gone: r.gone, unlocked: r.unlocked, problems: r.problems });
   if (!args.json) {
-    const at = (x: Position) => `${x.version === null ? "" : `${x.ahead ? `${x.version} (+${x.ahead} commit${x.ahead === 1 ? "" : "s"})` : x.version} `}${x.commit.slice(0, 7)}`;
-    for (const u of r.updated) {
-      process.stdout.write(`updated ${u.id}: ${u.from ? at(u.from) : "(new)"} -> ${at(u.to)}\n`);
-      const [low, high] = u.direction === "upgrade" ? [u.from, u.to] : [u.to, u.from];
-      if (u.changelog === null) process.stdout.write(`  changelog: none (${u.changelogReason})\n`);
-      else process.stdout.write(`  ${u.direction === "upgrade" ? "changelog" : "undoes the changelog"} after ${low!.version} up to ${high!.version}:\n${u.changelog.replace(/\n$/, "").split("\n").map((l) => (l ? `    ${l}\n` : "\n")).join("")}`);
-    }
+    printUpdated(r.updated);
     const file = path.basename(lib.configFile);
     for (const c of r.config) process.stdout.write(c.version === null ? `${file}: remove sources.${c.source}.version (follow latest); land this change, skills-sync never writes it\n` : `${file}: sources.${c.source}.version = "${c.version}"; land this change, skills-sync never writes it\n`);
   }
   if (r.problems.length) process.exitCode = 1;
+}
+
+/** Per source a refresh moved: from and to (version, commits past it, commit), then the changelog range it brings or undoes, indented. */
+function printUpdated(updated: Moved[]): void {
+  const at = (x: Position) => `${x.version === null ? "" : `${versionLabel({ ...x, date: "" })} `}${x.commit.slice(0, 7)}`;
+  for (const u of updated) {
+    process.stdout.write(`updated ${u.id}: ${u.from ? at(u.from) : "(new)"} -> ${at(u.to)}\n`);
+    const [low, high] = byDirection(u);
+    if (u.changelog === null) process.stdout.write(`  changelog: none (${u.changelogReason})\n`);
+    else process.stdout.write(`  ${u.direction === "upgrade" ? "changelog" : "undoes the changelog"} after ${low!.version} up to ${high!.version}:\n${u.changelog.replace(/\n$/, "").split("\n").map((l) => (l ? `    ${l}\n` : "\n")).join("")}`);
+  }
 }
 
 /**
@@ -433,7 +439,10 @@ function runVersions(lib: Library, args: Args, log: (m: string) => void): void {
   if (current && !versions.some((v) => v.current)) process.stdout.write(`  the lock is at ${current.version ?? "no version"} ${current.commit.slice(0, 7)}\n`);
 }
 
-/** add: stage the source, write its config entry, then refresh with the staged clone. --plan shows the entry and writes nothing. */
+/**
+ * add: stage the source, write its config entry, then refresh that one source with the staged clone (every other source
+ * stays at the lock) and report it as update does. --plan shows the entry and writes nothing.
+ */
 function runAdd(lib: Library, args: Args, log: (m: string) => void, report: Report): void {
   const spec = args.positional[0];
   if (!spec) bail("add: which source? owner/repo[#ref], a git URL or a local path");
@@ -451,10 +460,12 @@ function runAdd(lib: Library, args: Args, log: (m: string) => void, report: Repo
   log(`wrote ${path.basename(lib.configFile)}${r.plugin ? `, with plugin ${r.plugin.id}; build --plugins --catalogs packages it` : ""}`);
   const local = readLocal(lib.root);
   const unavailable = args.retry ? [] : local.unavailable ?? [];
-  const res = refresh(lib, { frozen: false, plan: false, unavailable, log, prestaged: { [r.id]: r.staged } });
+  // only the new source resolves upstream: every other one stays at the lock, as update <source> leaves them
+  const res = refresh(lib, { frozen: false, only: [r.id], plan: false, unavailable, log, prestaged: { [r.id]: r.staged } });
   reportRefresh(lib, res, unavailable, args, log, !args.quiet);
   report.merge(res.report);
-  printReport(report, args, { sources: res.sources, gone: res.gone, unlocked: res.unlocked, problems: res.problems });
+  printReport(report, args, { sources: res.sources, updated: res.updated, gone: res.gone, unlocked: res.unlocked, problems: res.problems });
+  if (!args.json) printUpdated(res.updated);
   if (res.problems.length) process.exitCode = 1;
 }
 

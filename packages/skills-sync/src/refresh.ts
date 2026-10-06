@@ -51,8 +51,6 @@ export interface RefreshResult {
   refused?: string;
 }
 
-export type { Position } from "./changelog.js";
-
 /** What .snapshot.json records beside a source's snapshot. */
 interface SnapshotMeta {
   source: string;

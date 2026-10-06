@@ -432,3 +432,32 @@ test("the CHANGELOG.md nearest the source's root wins over one at the repo root"
   assert.equal(j.status, 0, j.stderr);
   assert.equal(JSON.parse(j.stdout).updated[0].changelog, UPGRADE);
 });
+
+test("add resolves only the source it declares: an unheld source with a new upstream commit keeps its lock entry byte for byte and its working copy; add reports the new source as updated, like update, in text and --json", () => {
+  const at = changelogReleases(up);
+  config({ up: source(up) });
+  assert.equal(cli("update", "--quiet").status, 0);
+  const entry = (lock: string) => JSON.stringify(JSON.parse(lock).sources.up, null, 2);
+  const before = entry(text(LOCK));
+  up.skill("a", "moved on upstream");
+  up.commit("past 1.3.1");
+
+  const other = new Upstream(path.join(base, "other"));
+  other.skill("x", "other one");
+  const head = other.commit("one");
+  const r = cli("add", other.dir, "--id", "other", "--no-plugin", "--json");
+  assert.equal(r.status, 0, r.stderr);
+  assert.equal(entry(text(LOCK)), before, "up did not move");
+  assert.equal(json(LOCK).sources.up.commit, at["1.3.1"]);
+  assert.ok(working("a").includes("release 1.3.1"));
+  assert.equal(json(LOCK).sources.other.commit, head);
+  assert.deepEqual(JSON.parse(r.stdout).updated, [{ id: "other", from: null, to: { version: null, commit: head, ahead: null }, direction: "upgrade", changelog: null, changelogReason: "new to the lock: no version to compare with" }]);
+
+  const third = new Upstream(path.join(base, "third"));
+  third.skill("y");
+  const h3 = third.commit("one");
+  const t = cli("add", third.dir, "--id", "third", "--no-plugin");
+  assert.equal(t.status, 0, t.stderr);
+  assert.equal(entry(text(LOCK)), before);
+  assert.ok(t.stdout.includes(`updated third: (new) -> ${h3.slice(0, 7)}\n  changelog: none (new to the lock: no version to compare with)\n`), t.stdout);
+});
