@@ -45,7 +45,7 @@ Commands
   check            is what is committed consistent? every own skill's frontmatter (name is its folder's name and a
                    valid id, description present), every flow.yaml beside one (schemas/flow.schema.json, unique step
                    ids, after/parallel/join naming steps that exist), and generated-file drift (what build --check
-                   computes, plus skills-lock.json against the snapshots). One line per problem, path then reason;
+                   computes, plus skills-sync.lock.json against the snapshots). One line per problem, path then reason;
                    exit 1 on any, 0 when clean. Reads only: no network, nothing written (CI, and before committing)
 
 Build
