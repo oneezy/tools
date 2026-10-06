@@ -549,3 +549,15 @@ test("resolving a version and listing versions takes as many git processes for a
   };
   for (const tagged of [true, false]) assert.deepEqual(calls(12, tagged), calls(3, tagged), tagged ? "by tags" : "by manifest");
 });
+
+test("a source committed in UTC is locked with its date spelled Z, whatever git printed (git before 2.45 prints +00:00), so check agrees across hosts", () => {
+  up.skill("a", "utc");
+  up.git("add", "-A");
+  const r = spawnSync("git", [...GIT, "-C", up.dir, "commit", "-q", "-m", "utc"], { encoding: "utf8", env: { ...process.env, GIT_COMMITTER_DATE: "2026-10-06T06:44:34+00:00" } });
+  assert.equal(r.status, 0, r.stderr);
+  config({ up: source(up) });
+  assert.equal(cli("update", "--quiet").status, 0);
+  assert.equal(json(LOCK).sources.up.date, "2026-10-06T06:44:34Z");
+  const check = cli("check");
+  assert.equal(check.status, 0, check.stdout + check.stderr);
+});

@@ -10,7 +10,9 @@ import { archives, type Built } from "./artifacts.js";
 import { isDir, isLink, isSkillDir, lexists } from "./fs.js";
 import { Library } from "./library.js";
 import { apply, Report } from "./plan.js";
-import { cmp, githubSlug, readConfig, selection, type Config, type Plugin, type Source } from "./sources.js";
+import { cmp, githubSlug, isoDate, readConfig, selection, type Config, type Plugin, type Source } from "./sources.js";
+
+export { isoDate };
 
 export interface BuildOptions {
   /** write plugins/<id>/ for every plugin in the config */
@@ -82,13 +84,6 @@ export function libraryHead(root: string): Head {
   return { version: `0.1.0+${short}`, commit: git(root, "rev-parse", "HEAD"), date: isoDate(git(root, "log", "-1", "--format=%cI")), checkout, shallow };
 }
 
-/**
- * A commit date as git's %cI gives it, in one spelling: git 2.45 and later write UTC as `Z`, older git as `+00:00`.
- * The NOTICE must not depend on which git built it, so `+00:00` is written `Z`, what CI's git prints.
- */
-export function isoDate<T extends string | null>(d: T): T {
-  return (d === null ? d : d.replace(/[+-]00:?00$/, "Z")) as T;
-}
 
 /**
  * The version a package whose files changed takes: the next minor after the one on disk (1 for a new package, or one

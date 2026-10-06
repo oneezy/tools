@@ -15,11 +15,11 @@ function cli(...args: string[]): { status: number | null; stdout: string; stderr
   return spawnSync(process.execPath, [CLI, ...args], { encoding: "utf8", cwd: PACKAGE });
 }
 
-test("the package is 0.5.0 and --help opens with that version: the banner and package.json never differ", () => {
-  assert.equal(manifest.version, "0.5.0");
+test("the package is 0.5.1 and --help opens with that version: the banner and package.json never differ", () => {
+  assert.equal(manifest.version, "0.5.1");
   const r = cli("--help");
   assert.equal(r.status, 0);
-  assert.equal(r.stdout.split("\n")[0], "skills-sync 0.5.0");
+  assert.equal(r.stdout.split("\n")[0], "skills-sync 0.5.1");
 });
 
 test("--help lists every command and every flag of build, check, update (refresh), versions and add beside the 0.2.0 ones; an unknown option exits 2 with the same help", () => {
