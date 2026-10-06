@@ -23,13 +23,13 @@ const HELP = `skills-sync ${VERSION}
 One skills library, every harness, every project on this machine. Run it anywhere; it works out the rest.
 
   no library on this machine   clone one into ~/.skills-sync (default: ${DEFAULT_LIBRARY}, or --library owner/repo)
-  library present              pull it, bring its third-party skills up to date, rebuild its layers, link the user folders
+  library present              pull it, install the third-party skills its lock records, rebuild its layers, link the user folders
 
 Usage: skills-sync [command] [options]
 
 Commands
-  sync (default)   everything above; with skills-sync.json the third-party skills are refreshed to latest under the
-                   pull's 30-minute window (--pull forces, --no-pull runs it frozen); without one, skills-lock.json is restored
+  sync (default)   everything above; nothing moves upstream: with skills-sync.json every third-party skill is installed
+                   at the commit the lock records (frozen, the lock never written); without one, skills-lock.json is restored
   status           what is linked and what is missing
   unlink           remove every link this tool made in the user folders
   projects         only the project step
@@ -81,7 +81,7 @@ Options
   --wsl <distros|*>      Windows: also sync the user folders inside these WSL distros; --no-wsl for none
   --symlinks             make directory symlinks only (default: a symlink, or a junction when Windows refuses one)
   --junctions            Windows: make junctions only; either flag is remembered in ${LOCAL_NAME}
-  --no-pull / --pull     skip, or force, the library pull and the refresh to latest (default: at most every 30 minutes)
+  --no-pull / --pull     skip, or force, the library pull (default: at most every 30 minutes)
   --no-restore           do not restore missing lock entries from their sources (skips the refresh too)
   --retry                look again for skills an earlier run reported gone upstream (sync and refresh)
   --sidecars             generate agents/openai.yaml for own skills that lack one (writes into skills/, so opt-in)
@@ -274,11 +274,9 @@ async function main(): Promise<void> {
   apply(remember, args.plan);
   setup.merge(remember);
 
-  // 3. keep the library current: the pull, and with a config the refresh to latest, share one 30-minute window.
-  //    --pull forces both; --no-pull skips the pull and runs the refresh frozen; a throttled, dirty or failed pull does too.
-  //    A config library's lock is written by that refresh on every machine, so a clone's tree is "dirty" by the lock
-  //    alone from its first latest refresh on: that never blocks the pull (the pull replaces it, the refresh writes it again)
-  let latest = false;
+  // 3. keep the library current: the pull, at most every 30 minutes; --pull forces it, --no-pull skips it. Nothing
+  //    moves upstream here: the refresh that follows is frozen at the lock the library commits. A lock moved on this
+  //    machine (a refresh run here, or an older version's sync) never blocks the pull: the pull puts it back at HEAD
   if (args.pull && args.command !== "status" && !args.plan) {
     if (args.pull === "force") {
       try {
@@ -290,7 +288,6 @@ async function main(): Promise<void> {
     const r = pullLibrary(lib.root, 30, log, lib.hasConfig() ? [path.basename(lib.lockFile)] : []);
     if (r === "pulled" && !args.quiet) log("library pulled");
     if (r === "dirty" && !args.quiet) log("library has local changes; pull skipped");
-    latest = args.pull === "force" || r === "pulled" || r === "skipped";
   }
 
   const table = harnessTable();
@@ -312,7 +309,7 @@ async function main(): Promise<void> {
   if (!args.plan) saveLocal(lib.root, choices);
 
   // 5. run
-  await runOnce(lib, choices, args, cwd, setup, latest);
+  await runOnce(lib, choices, args, cwd, setup);
   if (args.watch) {
     log(`watching ${lib.own}, ${path.basename(lib.configFile)} and ${path.basename(lib.lockFile)}; ctrl-c to stop`);
     let timer: NodeJS.Timeout | null = null;
@@ -320,7 +317,7 @@ async function main(): Promise<void> {
       if (timer) clearTimeout(timer);
       timer = setTimeout(() => {
         log(`change in ${why}`);
-        runOnce(lib, choices, { ...args, restore: false }, cwd, new Report(), false).catch((e) => log(String(e)));
+        runOnce(lib, choices, { ...args, restore: false }, cwd, new Report()).catch((e) => log(String(e)));
       }, 400);
     };
     fs.watch(lib.own, { recursive: true }, (_e, f) => trigger(String(f ?? "skills/")));
@@ -496,14 +493,14 @@ async function decide(args: Args, local: Local, lib: Library, table: Harness[], 
   return { agents, global, dev, projects: projectNames, mode, wsl, unavailable: args.retry ? [] : local.unavailable ?? [], links: args.links ?? local.links ?? "auto" };
 }
 
-/** One pass over the steps. `latest` moves the third-party skills to upstream's tip (a config library); otherwise the refresh is frozen. */
-async function runOnce(lib: Library, c: Choices, args: Args, cwd: string, report: Report, latest: boolean): Promise<void> {
+/** One pass over the steps. A config library's refresh is always frozen: every third-party skill at the lock's commit. */
+async function runOnce(lib: Library, c: Choices, args: Args, cwd: string, report: Report): Promise<void> {
   const log = (m: string) => (args.json ? undefined : process.stderr.write(m + "\n"));
 
   const missing = lib.missingFromLock().filter((n) => !c.unavailable.includes(n));
   if (lib.hasConfig() && args.restore && args.command !== "projects" && !args.plan) {
-    // a config library: the refresh rebuilds the working set, at the tip of every ref when due, else at the lock's commits
-    const r = refresh(lib, { frozen: !latest, plan: false, unavailable: c.unavailable, log });
+    // a config library: the frozen refresh rebuilds the working set at the lock's commits and never writes the lock
+    const r = refresh(lib, { frozen: true, plan: false, unavailable: c.unavailable, log });
     c.unavailable = reportRefresh(lib, r, c.unavailable, args, log, false);
     report.merge(r.report);
   } else if (lib.hasConfig() && missing.length) log(`${missing.length} lock entries are not installed yet (run without --plan or --no-restore for the refresh that restores them)`);
