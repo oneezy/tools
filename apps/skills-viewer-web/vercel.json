@@ -3,5 +3,5 @@
   "framework": "sveltekit",
   "installCommand": "corepack enable pnpm && pnpm install --frozen-lockfile",
   "buildCommand": "cd ../.. && pnpm --filter \"skills-viewer-web...\" run build",
-  "ignoreCommand": "npx turbo-ignore --fallback=HEAD^1"
+  "ignoreCommand": "git diff --quiet \"${VERCEL_GIT_PREVIOUS_SHA:-HEAD^}\" HEAD -- . ../../packages/skills-viewer ../../package.json ../../pnpm-lock.yaml ../../pnpm-workspace.yaml ../../vite.config.ts"
 }

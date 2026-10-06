@@ -4,10 +4,10 @@ Justin's tools, one pnpm workspace. Windows 11 with PowerShell 7 is the primary 
 
 ```
 pnpm install   # once, at the root
-pnpm build     # Turborepo: every package's build
+pnpm build     # Vite Plus (vp run -r): every package's build, in dependency order
 pnpm test      # every package's tests
 pnpm check     # static checks (PowerShell parse, bash -n, py_compile, tsc)
-pnpm dev       # the dev servers of the packages that have one
+pnpm dev       # vp dev: the skills viewer website
 ```
 
 | package | language | what it is |
