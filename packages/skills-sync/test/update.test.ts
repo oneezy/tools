@@ -1,7 +1,7 @@
 // update: move the named sources (all when none is named) to latest, to the version skills-sync.json holds them at, or
 // --to a version, previous or latest; every other source stays exactly where the lock has it. The tool never writes
 // skills-sync.json: a --to prints the config change the caller lands. versions lists what a source has released.
-// Upstreams are temp git repositories with release tags or a versioned manifest.
+// Upstreams are temp git repositories with release tags or a versioned manifest, and a CHANGELOG.md the update report reads.
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import fs from "node:fs";
@@ -187,7 +187,7 @@ test("update <source> --to: a version takes its tag's commit, previous the next 
   const exact = cli("update", "up", "--to", "1.0.0", "--json");
   assert.equal(exact.status, 0, exact.stderr);
   const out = JSON.parse(exact.stdout);
-  assert.deepEqual(out.updated, [{ id: "up", from: { version: "1.2.0", commit: at.tip, ahead: 1 }, to: { version: "1.0.0", commit: at["1.0.0"], ahead: 0 } }]);
+  assert.deepEqual(out.updated, [{ id: "up", from: { version: "1.2.0", commit: at.tip, ahead: 1 }, to: { version: "1.0.0", commit: at["1.0.0"], ahead: 0 }, direction: "downgrade", changelog: null, changelogReason: "no CHANGELOG.md upstream" }]);
   assert.deepEqual(out.config, [{ source: "up", version: "1.0.0" }]);
   assert.equal(json(LOCK).sources.up.commit, at["1.0.0"]);
   assert.equal(json(LOCK).sources.up.version, "1.0.0");
@@ -240,7 +240,7 @@ test("a source versioned by its manifest (no tags): --to a version takes the new
 
   const nine = cli("update", "pstack", "--to", "0.15.9", "--json");
   assert.equal(nine.status, 0, nine.stderr);
-  assert.deepEqual(JSON.parse(nine.stdout).updated, [{ id: "pstack", from: { version: "0.15.10", commit: at.tip, ahead: 1 }, to: { version: "0.15.9", commit: at["0.15.9"], ahead: 3 } }]);
+  assert.deepEqual(JSON.parse(nine.stdout).updated, [{ id: "pstack", from: { version: "0.15.10", commit: at.tip, ahead: 1 }, to: { version: "0.15.9", commit: at["0.15.9"], ahead: 3 }, direction: "downgrade", changelog: null, changelogReason: "no CHANGELOG.md upstream" }]);
   assert.deepEqual(JSON.parse(nine.stdout).config, [{ source: "pstack", version: "0.15.9" }]);
   assert.ok(working("a").includes("last of 0.15.9"));
 
@@ -322,4 +322,113 @@ test("update refuses, writing nothing and exiting non-zero: a version the source
   assert.equal(text(LOCK), lock);
   assert.equal(text("skills-sync.json"), cfg);
   assert.equal(working("a"), copy);
+});
+
+/** The stand-in upstream's CHANGELOG.md: a title, an Unreleased section, then one section per version newest first in the heading styles found in the wild, each with a line naming it. */
+function changelog(versions: string[]): string {
+  const heading = (v: string, i: number) => (i % 3 === 0 ? `## [${v}] - 2026-10-0${i + 1}` : i % 3 === 1 ? `## v${v}` : `## ${v}`);
+  const sections = versions.map((v, i) => `${heading(v, i)}\n\n### Minor Changes\n\n- change in ${v}\n- migration note for ${v}\n`);
+  return `# Changelog\n\nAll notable changes.\n\n## Unreleased\n\n- not released yet\n\n${sections.join("\n")}`;
+}
+
+/** Releases 1.2.0, 1.2.3, 1.3.0 and 1.3.1 (tagged vX.Y.Z), each with skill a naming it and a CHANGELOG.md (at `file`) listing every release up to it. */
+function changelogReleases(u: Upstream, file = "CHANGELOG.md"): Record<string, string> {
+  const at: Record<string, string> = {};
+  const all = ["1.2.0", "1.2.3", "1.3.0", "1.3.1"];
+  for (const [i, v] of all.entries()) {
+    u.skill("a", `release ${v}`);
+    u.file(file, changelog(all.slice(0, i + 1).reverse()));
+    at[v] = u.commit(v);
+    u.tag(`v${v}`);
+  }
+  return at;
+}
+
+const UPGRADE = "## [1.3.1] - 2026-10-01\n\n### Minor Changes\n\n- change in 1.3.1\n- migration note for 1.3.1\n\n## v1.3.0\n\n### Minor Changes\n\n- change in 1.3.0\n- migration note for 1.3.0\n";
+
+test("update from 1.2.3 to 1.3.1 reports the CHANGELOG.md sections between them (1.3.1 and 1.3.0, whole, subheadings included) and nothing outside: indented under the updated line in text, as changelog text with direction upgrade in --json", () => {
+  const at = changelogReleases(up);
+  config({ up: source(up) });
+  assert.equal(cli("update", "up", "--to", "1.2.3", "--quiet").status, 0);
+
+  const j = cli("update", "up", "--to", "latest", "--json", "--plan");
+  assert.equal(j.status, 0, j.stderr);
+  const [u] = JSON.parse(j.stdout).updated;
+  assert.deepEqual(u, { id: "up", from: { version: "1.2.3", commit: at["1.2.3"], ahead: 0 }, to: { version: "1.3.1", commit: at["1.3.1"], ahead: 0 }, direction: "upgrade", changelog: UPGRADE });
+
+  const r = cli("update", "up", "--to", "latest");
+  assert.equal(r.status, 0, r.stderr);
+  const block = r.stdout.slice(r.stdout.indexOf("updated up:"));
+  assert.ok(block.startsWith(`updated up: 1.2.3 ${at["1.2.3"].slice(0, 7)} -> 1.3.1 ${at["1.3.1"].slice(0, 7)}\n  changelog after 1.2.3 up to 1.3.1:\n    ## [1.3.1] - 2026-10-01\n\n    ### Minor Changes\n\n    - change in 1.3.1\n`), r.stdout);
+  assert.ok(block.includes("    - migration note for 1.3.0\n"), r.stdout);
+  for (const outside of ["change in 1.2.3", "change in 1.2.0", "Unreleased", "not released yet", "All notable"]) assert.ok(!block.includes(outside), `${outside}: ${r.stdout}`);
+});
+
+test("a downgrade from 1.3.1 to 1.2.3 reports the same range, read at 1.3.1, as what it undoes: direction downgrade in --json, the sections under an undoes line in text", () => {
+  const at = changelogReleases(up);
+  config({ up: source(up) });
+  assert.equal(cli("update", "--quiet").status, 0);
+  assert.equal(json(LOCK).sources.up.version, "1.3.1");
+
+  const j = cli("update", "up", "--to", "1.2.3", "--json", "--plan");
+  assert.equal(j.status, 0, j.stderr);
+  assert.deepEqual(JSON.parse(j.stdout).updated, [{ id: "up", from: { version: "1.3.1", commit: at["1.3.1"], ahead: 0 }, to: { version: "1.2.3", commit: at["1.2.3"], ahead: 0 }, direction: "downgrade", changelog: UPGRADE }]);
+
+  const r = cli("update", "up", "--to", "1.2.3");
+  assert.equal(r.status, 0, r.stderr);
+  const block = r.stdout.slice(r.stdout.indexOf("updated up:"));
+  assert.ok(block.startsWith(`updated up: 1.3.1 ${at["1.3.1"].slice(0, 7)} -> 1.2.3 ${at["1.2.3"].slice(0, 7)}\n  undoes the changelog after 1.2.3 up to 1.3.1:\n    ## [1.3.1] - 2026-10-01\n`), r.stdout);
+  assert.ok(block.includes("    - migration note for 1.3.0\n"), r.stdout);
+  assert.ok(!block.includes("change in 1.2.3"), r.stdout);
+});
+
+test("changelog null with the reason: no CHANGELOG.md upstream, a version without a heading in it, a side with no version; a source that did not move is not in the report", () => {
+  releases(up); // tags, no CHANGELOG.md
+  const stillUp = new Upstream(path.join(base, "still"));
+  const still = changelogReleases(stillUp);
+  const noHeading = new Upstream(path.join(base, "noheading"));
+  noHeading.skill("a", "one");
+  noHeading.file("CHANGELOG.md", changelog(["1.3.0"]));
+  noHeading.commit("1.2.3");
+  noHeading.tag("v1.2.3");
+  noHeading.skill("a", "two");
+  noHeading.commit("1.3.0");
+  noHeading.tag("v1.3.0");
+  const bare = new Upstream(path.join(base, "bare")); // no tag, no manifest: no version
+  bare.skill("a", "one");
+  bare.file("CHANGELOG.md", changelog(["1.0.0"]));
+  bare.commit("one");
+  config({ up: source(up, { version: "1.1.0" }), still: source(stillUp, { skills: { a: "still-a" } }), noheading: source(noHeading, { skills: { a: "nh-a" }, version: "1.2.3" }), bare: source(bare, { skills: { a: "bare-a" } }) });
+  assert.equal(cli("update", "--quiet").status, 0);
+  assert.equal(json(LOCK).sources.still.commit, still["1.3.1"]);
+
+  config({ up: source(up), still: source(stillUp, { skills: { a: "still-a" } }), noheading: source(noHeading, { skills: { a: "nh-a" } }), bare: source(bare, { skills: { a: "bare-a" } }) });
+  bare.skill("a", "two");
+  bare.commit("two");
+  const j = cli("update", "--json", "--plan");
+  assert.equal(j.status, 0, j.stderr);
+  const updated = JSON.parse(j.stdout).updated as Array<{ id: string; direction: string; changelog: string | null; changelogReason?: string }>;
+  assert.deepEqual(updated.map((u) => [u.id, u.direction, u.changelog, u.changelogReason]), [
+    ["bare", "upgrade", null, `no upstream version for ${json(LOCK).sources.bare.commit.slice(0, 7)}`],
+    ["noheading", "upgrade", null, "CHANGELOG.md has no heading for 1.2.3"],
+    ["up", "upgrade", null, "no CHANGELOG.md upstream"],
+  ], "still did not move: not reported");
+
+  const r = cli("update");
+  assert.equal(r.status, 0, r.stderr);
+  assert.match(r.stdout, /^updated up: 1\.1\.0 \w{7} -> 1\.2\.0 \(\+1 commit\) \w{7}\n  changelog: none \(no CHANGELOG\.md upstream\)\n/m);
+  assert.match(r.stdout, /^  changelog: none \(CHANGELOG\.md has no heading for 1\.2\.3\)$/m);
+  assert.ok(!r.stdout.includes("updated still"), r.stdout);
+});
+
+test("the CHANGELOG.md nearest the source's root wins over one at the repo root", () => {
+  changelogReleases(up, "skills/CHANGELOG.md");
+  up.file("CHANGELOG.md", "# Changelog\n\n## 9.9.9\n\n- the repo root's, not the source's\n");
+  up.commit("root changelog");
+  config({ up: source(up, { version: "1.2.3" }) });
+  assert.equal(cli("update", "--quiet").status, 0);
+  config({ up: source(up, { version: "1.3.1" }) });
+  const j = cli("update", "--json", "--plan");
+  assert.equal(j.status, 0, j.stderr);
+  assert.equal(JSON.parse(j.stdout).updated[0].changelog, UPGRADE);
 });

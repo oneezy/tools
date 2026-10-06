@@ -7,6 +7,7 @@
 // resolves to is not fetched again, so a refresh with nothing new is silent and needs no clone.
 import fs from "node:fs";
 import path from "node:path";
+import { moved, type Moved } from "./changelog.js";
 import { isDir, isLink, isSkillDir } from "./fs.js";
 import { RESERVED } from "./harnesses.js";
 import { Library } from "./library.js";
@@ -41,20 +42,16 @@ export interface RefreshResult {
   unlocked: string[];
   /** sources that could not be staged; their lock entries and snapshots are kept as they were */
   problems: string[];
-  /** per source whose commit is not the one the lock had: where it was (null for a source new to the lock) and where it is now */
-  updated: Array<{ id: string; from: Position | null; to: Position }>;
+  /** per source whose commit is not the one the lock had: where it was (null for a source new to the lock), where it is
+   *  now, and the upstream changelog sections between the two versions it brings or undoes (null with the reason) */
+  updated: Moved[];
   /** the version edits skills-sync.json needs for a --to to hold (null: remove the hold); the tool never makes them */
   config: Array<{ source: string; version: string | null }>;
   /** a version asked for that the source has not released, with the ones it has: nothing was written */
   refused?: string;
 }
 
-/** A source's place upstream: its version (null when it has none), its commit, and how many commits past that version it is (null when not known). */
-export interface Position {
-  version: string | null;
-  commit: string;
-  ahead: number | null;
-}
+export type { Position } from "./changelog.js";
 
 /** What .snapshot.json records beside a source's snapshot. */
 interface SnapshotMeta {
@@ -232,7 +229,11 @@ export function refresh(lib: Library, opts: RefreshOptions): RefreshResult {
       if (!frozen) {
         next[id] = { repo: src.repo, ref: src.ref, version: v!.version, commit, date, skills: {} };
         if (opts.to?.[id] === "latest" && src.version) result.config.push({ source: id, version: null });
-        if (prior?.commit !== commit) result.updated.push({ id, from: prior ? { version: prior.version, commit: prior.commit, ahead: aheadOf(prior, meta, co, src.root) } : null, to: { version: v?.version ?? null, commit, ahead: v?.ahead ?? null } });
+        if (prior?.commit !== commit) {
+          if (!co) co = checkout(commit) ?? undefined;
+          const from = prior ? { version: prior.version, commit: prior.commit, ahead: aheadOf(prior, meta, co, src.root) } : null;
+          result.updated.push(moved(id, from, { version: v?.version ?? null, commit, ahead: v?.ahead ?? null }, co?.dir ?? null, src.root));
+        }
       } else if (!opts.frozen) {
         // not named in an update: its lock entry as it is (a version 1 lock's gains the version and date it lacked)
         keep();

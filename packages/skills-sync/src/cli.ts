@@ -40,7 +40,8 @@ Commands
                    skills-sync.json holds them at (a pinned skill at its pin), and their upstream version (release tag,
                    else plugin or package manifest): snapshot under upstream/, rebuild the third-party working set, write
                    skills-sync.lock.json (a skills-lock.json from 0.4.0 is migrated). A source not named keeps its lock
-                   entry exactly. Reports each source that moved, from and to (version, commit, commits past it).
+                   entry exactly. Reports each source that moved, from and to (version, commit, commits past it), and
+                   the sections of its upstream CHANGELOG.md between the two versions (a downgrade: the ones it undoes).
                    Never writes skills-sync.json
   refresh          the same as update (kept for scripts and CI); refresh --frozen installs the lock as it is
   versions <source>
@@ -374,7 +375,12 @@ function runUpdate(lib: Library, args: Args, log: (m: string) => void, report: R
   printReport(report, args, { sources: r.sources, updated: r.updated, config: r.config, gone: r.gone, unlocked: r.unlocked, problems: r.problems });
   if (!args.json) {
     const at = (x: Position) => `${x.version === null ? "" : `${x.ahead ? `${x.version} (+${x.ahead} commit${x.ahead === 1 ? "" : "s"})` : x.version} `}${x.commit.slice(0, 7)}`;
-    for (const u of r.updated) process.stdout.write(`updated ${u.id}: ${u.from ? at(u.from) : "(new)"} -> ${at(u.to)}\n`);
+    for (const u of r.updated) {
+      process.stdout.write(`updated ${u.id}: ${u.from ? at(u.from) : "(new)"} -> ${at(u.to)}\n`);
+      const [low, high] = u.direction === "upgrade" ? [u.from, u.to] : [u.to, u.from];
+      if (u.changelog === null) process.stdout.write(`  changelog: none (${u.changelogReason})\n`);
+      else process.stdout.write(`  ${u.direction === "upgrade" ? "changelog" : "undoes the changelog"} after ${low!.version} up to ${high!.version}:\n${u.changelog.replace(/\n$/, "").split("\n").map((l) => (l ? `    ${l}\n` : "\n")).join("")}`);
+    }
     const file = path.basename(lib.configFile);
     for (const c of r.config) process.stdout.write(c.version === null ? `${file}: remove sources.${c.source}.version (follow latest); land this change, skills-sync never writes it\n` : `${file}: sources.${c.source}.version = "${c.version}"; land this change, skills-sync never writes it\n`);
   }
