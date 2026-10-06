@@ -33,6 +33,8 @@ export interface Source {
   repo: string;
   /** the branch or tag followed: its tip at every refresh, except skills held by a pin; a full commit holds the whole source */
   ref: string;
+  /** the upstream version held (plain semver): update resolves the release's commit instead of the tip; latest when omitted */
+  version?: string;
   /** where skill folders live in the repo; the repo root when omitted */
   root?: string;
   /** selected folder names, or a map upstream name -> working-set name */

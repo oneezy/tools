@@ -12,11 +12,12 @@ import { gitExclude, isDir, isLink, lexists, linkMode, linkTarget, real, samePat
 import { detected, harnessTable, type Harness } from "./harnesses.js";
 import { cloneLibrary, DEFAULT_LIBRARY, findLibrary, homeLibrary, Library, looksLikeLibrary, pullLibrary } from "./library.js";
 import { apply, line, Report } from "./plan.js";
-import { refresh, type RefreshResult } from "./refresh.js";
-import { configText } from "./sources.js";
+import { refresh, type Position, type RefreshResult } from "./refresh.js";
+import { readLock } from "./lock.js";
+import { cloneUrl, cmp, configText, readConfig } from "./sources.js";
 import { discard } from "./stage.js";
 import { findProjects, home, isRepo, layers, projects, status, unlink, type Status } from "./steps.js";
-import { versionLabel } from "./versions.js";
+import { releasesOf, versionLabel } from "./versions.js";
 import { runInWsl, wslDistros } from "./wsl.js";
 
 const VERSION = "0.4.0";
@@ -34,9 +35,16 @@ Commands
   status           what is linked and what is missing
   unlink           remove every link this tool made in the user folders
   projects         only the project step
-  refresh          resolve every source in skills-sync.json at the tip of its ref (a pinned skill at its pin) and its
-                   upstream version (release tag, else plugin or package manifest): snapshot under upstream/, rebuild
-                   the third-party working set, write skills-sync.lock.json (a skills-lock.json from 0.4.0 is migrated)
+  update [<source>...]
+                   resolve the named sources (every one when none is named) at the tip of their ref, or at the version
+                   skills-sync.json holds them at (a pinned skill at its pin), and their upstream version (release tag,
+                   else plugin or package manifest): snapshot under upstream/, rebuild the third-party working set, write
+                   skills-sync.lock.json (a skills-lock.json from 0.4.0 is migrated). A source not named keeps its lock
+                   entry exactly. Reports each source that moved, from and to (version, commit, commits past it).
+                   Never writes skills-sync.json
+  refresh          the same as update (kept for scripts and CI); refresh --frozen installs the lock as it is
+  versions <source>
+                   the versions a source has released, newest first, the one the lock is at marked (--json)
   add <source>     declare a source (owner/repo[#ref], a git URL or a path) and the plugin that packages it in
                    skills-sync.json, then refresh
   build            write the plugin form into the library when skills-sync.json has generate.plugins on: --plugins and
@@ -65,7 +73,13 @@ Build
                          exit 1 on drift or a package that cannot be built, 0 when clean (CI); never looks at artifacts/.
                          Needs no history: clean in a shallow clone, and after a squash merge left the build's commit behind
 
-Refresh and add
+Update, refresh and add
+  --to <version>|previous|latest
+                         update <source> only: take that one source at a release (plain semver, 1.3.0), previous (the
+                         highest stable release below the lock's version) or latest (the tip of ref, past a held version).
+                         Prints the skills-sync.json change that makes it stick (sources.<id>.version = "1.3.0", or its
+                         removal for latest) for the caller to land; never writes it. A version the source has not
+                         released is refused with the ones it has, and nothing is written
   --frozen               every skill at the commit skills-sync.lock.json records; nothing moves, the lock is not written (CI)
   --id <id>              add: the source id (default: owner-repo, or the repo's folder name)
   --root <path>          add: where the skill folders live in the repo (default: skills/ when it exists, else the root)
@@ -102,9 +116,11 @@ Answers for this machine (harnesses, projects, WSL distros, link mode) are kept 
 
 interface Args {
   command: string;
-  /** what follows the command: the source for add */
+  /** what follows the command: the source for add, the sources for update, the source for versions */
   positional: string[];
   frozen: boolean;
+  /** update: a plain version, previous or latest, for the one source named */
+  to?: string;
   id?: string;
   root?: string;
   skills?: string[] | "*";
@@ -151,6 +167,7 @@ function parseArgs(argv: string[]): Args {
       process.stdout.write(HELP);
       process.exit(0);
     } else if (x === "--frozen") a.frozen = true;
+    else if (x === "--to") a.to = next();
     else if (x === "--id") a.id = next();
     else if (x === "--root") a.root = next();
     else if (x === "--plugin") a.plugin = next();
@@ -262,7 +279,8 @@ async function main(): Promise<void> {
 
   // check reads the library it is pointed at; refresh, add and build edit it and nothing else: no pull, no ~/.skills-sync, no harness
   if (args.command === "check") return runCheck(lib, args);
-  if (args.command === "refresh") return runRefresh(lib, args, log, setup);
+  if (args.command === "update" || args.command === "refresh") return runUpdate(lib, args, log, setup);
+  if (args.command === "versions") return runVersions(lib, args, log);
   if (args.command === "add") return runAdd(lib, args, log, setup);
   if (args.command === "build") return runBuild(lib, args, log, setup);
 
@@ -329,15 +347,37 @@ async function main(): Promise<void> {
   }
 }
 
-/** refresh: every source at the tip of its ref, pins and --frozen excepted; gone-upstream skills are remembered like restore's. */
-function runRefresh(lib: Library, args: Args, log: (m: string) => void, report: Report): void {
+/**
+ * update (refresh is the same command): the named sources (every one when none is named) at the tip of their ref, pins
+ * and --frozen excepted; every other source stays at the lock. Gone-upstream skills are remembered like restore's.
+ */
+function runUpdate(lib: Library, args: Args, log: (m: string) => void, report: Report): void {
   if (!lib.hasConfig()) bail(`no ${path.basename(lib.configFile)} in ${lib.root}; add <source> writes one`);
+  const ids = Object.keys(readConfig(lib.configFile).sources).sort(cmp);
+  const unknown = args.positional.filter((n) => !ids.includes(n));
+  if (unknown.length) bail(`${args.command}: no source ${unknown.join(", ")} in ${path.basename(lib.configFile)} (sources: ${ids.join(", ") || "none"})`);
   const local = readLocal(lib.root);
   const unavailable = args.retry ? [] : local.unavailable ?? [];
-  const r = refresh(lib, { frozen: args.frozen, plan: args.plan, unavailable, log });
+  const only = args.positional.length ? [...new Set(args.positional)] : undefined;
+  if (args.to !== undefined && only?.length !== 1) bail(`${args.command} --to: name the one source it moves (${args.command} <source> --to ${args.to || "<version>|previous|latest"})`);
+  if (args.to !== undefined && args.frozen) bail(`${args.command}: --to and --frozen do not go together`);
+  const to = args.to !== undefined ? { [only![0]]: args.to } : undefined;
+  const r = refresh(lib, { frozen: args.frozen, only, to, plan: args.plan, unavailable, log });
+  if (r.refused) {
+    if (args.json) process.stdout.write(JSON.stringify({ plan: args.plan, refused: r.refused }, null, 2) + "\n");
+    else process.stderr.write(`${args.command}: ${r.refused}; nothing written\n`);
+    process.exitCode = 1;
+    return;
+  }
   reportRefresh(lib, r, unavailable, args, log, !args.quiet);
   report.merge(r.report);
-  printReport(report, args, { sources: r.sources, gone: r.gone, unlocked: r.unlocked, problems: r.problems });
+  printReport(report, args, { sources: r.sources, updated: r.updated, config: r.config, gone: r.gone, unlocked: r.unlocked, problems: r.problems });
+  if (!args.json) {
+    const at = (x: Position) => `${x.version === null ? "" : `${x.ahead ? `${x.version} (+${x.ahead} commit${x.ahead === 1 ? "" : "s"})` : x.version} `}${x.commit.slice(0, 7)}`;
+    for (const u of r.updated) process.stdout.write(`updated ${u.id}: ${u.from ? at(u.from) : "(new)"} -> ${at(u.to)}\n`);
+    const file = path.basename(lib.configFile);
+    for (const c of r.config) process.stdout.write(c.version === null ? `${file}: remove sources.${c.source}.version (follow latest); land this change, skills-sync never writes it\n` : `${file}: sources.${c.source}.version = "${c.version}"; land this change, skills-sync never writes it\n`);
+  }
   if (r.problems.length) process.exitCode = 1;
 }
 
@@ -349,7 +389,7 @@ function reportRefresh(lib: Library, r: RefreshResult, unavailable: string[], ar
   for (const [id, s] of Object.entries(r.sources)) if (s.moved || verbose) log(`${id}: ${versionLabel(s)}${s.moved ? ", moved" : ""}`);
   for (const g of r.gone) log(`  gone upstream: ${g}`);
   if (r.gone.length) log(`  (not in the lock; deselect it in ${path.basename(lib.configFile)}, or a copy in skills/ keeps it as your own; --retry checks again)`);
-  if (r.unlocked.length && !args.quiet) log(`${r.unlocked.length} selected skill(s) have no commit in ${path.basename(lib.lockFile)} (${r.unlocked.join(", ")}); run refresh to resolve them`);
+  if (r.unlocked.length && !args.quiet) log(`${r.unlocked.length} selected skill(s) have no commit in ${path.basename(lib.lockFile)} (${r.unlocked.join(", ")}); run update to resolve them`);
   for (const m of r.problems) log(`failed: ${m}`);
   const gone = r.gone.map((g) => g.split(":")[1]);
   const remembered = [...new Set([...unavailable, ...gone])];
@@ -361,6 +401,30 @@ function reportRefresh(lib: Library, r: RefreshResult, unavailable: string[], ar
     if (JSON.stringify(next) !== JSON.stringify(local)) writeLocal(lib.root, next);
   }
   return remembered;
+}
+
+/** versions: the releases of one source, highest first, the one the lock is at marked; reads only (a temp clone). */
+function runVersions(lib: Library, args: Args, log: (m: string) => void): void {
+  if (!lib.hasConfig()) bail(`no ${path.basename(lib.configFile)} in ${lib.root}; add <source> writes one`);
+  const config = readConfig(lib.configFile);
+  const ids = Object.keys(config.sources).sort(cmp);
+  const id = args.positional[0];
+  if (!id || !config.sources[id]) bail(`versions: ${id ? `no source ${id}` : "which source?"} in ${path.basename(lib.configFile)} (sources: ${ids.join(", ") || "none"})`);
+  const src = config.sources[id];
+  const locked = readLock(lib.root, config)?.sources[id];
+  const prior = locked?.repo === src.repo ? locked : undefined;
+  const r = releasesOf(cloneUrl(src.repo), src.ref, src.root, prior?.commit ?? null, log);
+  if (!r.ok) bail(`versions: ${id}: ${r.error}`);
+  const current: Position | null = prior ? { version: prior.version, commit: prior.commit, ahead: r.current?.version === prior.version ? r.current.ahead : null } : null;
+  const versions = r.releases.map((x) => ({ ...x, current: !!current && x.version === current.version }));
+  if (args.json) {
+    process.stdout.write(JSON.stringify({ source: id, repo: src.repo, ref: src.ref, current, versions }, null, 2) + "\n");
+    return;
+  }
+  process.stdout.write(`${id}: ${src.repo}@${src.ref}, ${versions.length} version${versions.length === 1 ? "" : "s"}, newest first${src.version ? `; held at ${src.version} in ${path.basename(lib.configFile)}` : ""}\n`);
+  for (const v of versions) process.stdout.write(`${v.current ? "*" : " "} ${v.version.padEnd(12)} ${v.commit.slice(0, 7)}  ${v.date.slice(0, 10)}${v.current ? `  current${current!.ahead ? ` (+${current!.ahead} commit${current!.ahead === 1 ? "" : "s"})` : ""}` : ""}\n`);
+  if (!versions.length) process.stdout.write("  no release tag and no manifest version\n");
+  if (current && !versions.some((v) => v.current)) process.stdout.write(`  the lock is at ${current.version ?? "no version"} ${current.commit.slice(0, 7)}\n`);
 }
 
 /** add: stage the source, write its config entry, then refresh with the staged clone. --plan shows the entry and writes nothing. */
