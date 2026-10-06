@@ -1,6 +1,6 @@
 # tools
 
-Justin's tools, one pnpm workspace. Windows 11 with PowerShell 7 is the primary host; Linux is a future target.
+Justin's tools, one pnpm workspace on Vite Plus. Windows 11 with PowerShell 7 is the primary host; Linux is a future target. Install Vite Plus once per machine (https://viteplus.dev/guide/); it brings the Node (`.node-version`) and pnpm (`packageManager`) this repo pins.
 
 ```
 pnpm install   # once, at the root
