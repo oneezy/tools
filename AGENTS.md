@@ -2,9 +2,10 @@
 
 ## Workspace
 
-`oneezy/tools` is one pnpm workspace (`pnpm-workspace.yaml`: `packages/*` and `apps/*`). Two tools, one job each:
+`oneezy/tools` is one pnpm workspace (`pnpm-workspace.yaml`: `packages/*` and `apps/*`). Vite Plus's global `vp` picks the runtime and the package manager, so there is no nvm and no corepack:
 
-- **pnpm** (`packageManager` in the root `package.json`) installs dependencies. `pnpm install` once at the root.
+- **Node** is the version in `.node-version` (the newest 24.x LTS). `vp env` installs and switches to it on its own.
+- **pnpm** is the version in `packageManager` in the root `package.json`, also through `vp env`. It installs dependencies: `pnpm install` (or `vp install`) once at the root.
 - **Vite Plus** (`vite-plus`, the `vp` CLI; docs in `node_modules/vite-plus/docs`) does everything else. At the root, `pnpm build`, `pnpm test` and `pnpm check` run `vp run -r <name>`: every package's script of that name, in workspace dependency order. `pnpm dev` runs `vp dev`, which serves `apps/skills-viewer-web` (`defaultPackage` in the root `vite.config.ts`). A package whose task needs another package built first says so in its own `vite.config.ts` (`run.tasks`, `dependsOn`), as `apps/skills-viewer-web` does for `test` and `check`. The `vite`/`vitest` overrides in `pnpm-workspace.yaml` keep every package on the copies Vite Plus bundles; bump them with `vite-plus`.
 
 Windows 11 with PowerShell 7 is the primary host: every script is run there first. Linux is a future target, so nothing in a `package.json` may be Windows-only: `scripts/python.mjs` runs Python (`py -3` on Windows, `python3` elsewhere) and `scripts/syntax-check.ps1` runs under pwsh on either.
