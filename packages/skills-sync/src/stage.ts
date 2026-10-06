@@ -77,6 +77,14 @@ export function stage(url: string, ref: string, log: (s: string) => void, tipOf?
   return { ok: true, staged: { dir, commit: commit.out, date: date.out } };
 }
 
+/** The same checkout moved to another commit of its history (a release below the tip); null when git cannot check it out. */
+export function moveTo(staged: Staged, commit: string): Staged | null {
+  if (staged.commit === commit) return staged;
+  if (!git(["checkout", "--quiet", commit], staged.dir).ok) return null;
+  const date = git(["log", "-1", "--format=%cI"], staged.dir);
+  return date.ok ? { dir: staged.dir, commit, date: date.out } : null;
+}
+
 export function discard(staged: Staged): void {
   fs.rmSync(staged.dir, { recursive: true, force: true, maxRetries: 3 });
 }

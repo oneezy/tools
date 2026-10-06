@@ -1,10 +1,11 @@
 // Which upstream version a source's commit is, in this order: the nearest release tag at or before it (a leading `v` or
 // `name@` stripped; pre-release tags only when no stable one is reachable); else the `version` of the nearest plugin or
 // package manifest at or above the source's root at that commit; else none. And how many commits past that version's
-// own commit (the tag's, or the one that set the manifest to it) the commit is. Git over a staged checkout that has the
-// history and tags (stage.ts fetches them); nothing here writes.
+// own commit (the tag's, or the one that set the manifest to it) the commit is. And the versions a source has released,
+// each at the commit update takes for it. Git over a staged checkout that has the history and tags (stage.ts fetches
+// them); nothing here writes.
 import path from "node:path";
-import { git } from "./stage.js";
+import { discard, git, stage } from "./stage.js";
 
 export interface SourceVersion {
   /** plain semver, or null when there is neither a release tag nor a manifest version */
@@ -145,6 +146,67 @@ export function resolveVersion(dir: string, commit: string, root: string | undef
     return { version: manifest.version, ahead: since ? countCommits(dir, since, commit) : null };
   }
   return { version: null, ahead: null };
+}
+
+/** A version a source has released, and the commit update takes for it. */
+export interface Release {
+  version: string;
+  commit: string;
+}
+
+/**
+ * The versions released on the history of `tip`, highest first, each at the commit it resolves to. By release tags when
+ * any is reachable (stable ones only while there are any; of two tags naming one version, a `v1.2.0` or `1.2.0` one wins
+ * over a `name@1.2.0` one); else by the manifest that versions the source at the tip, each distinct version at the
+ * newest commit that carried it (the first parent of the commit that changed it, or the tip); else none.
+ */
+export function listVersions(dir: string, tip: string, root: string | undefined): Release[] {
+  const tags = listTags(dir, tip);
+  if (tags.length) {
+    const stable = tags.filter((t) => !isPrerelease(t.version));
+    const byVersion = new Map<string, Tag>();
+    const plain = (t: Tag) => t.name === t.version || t.name === `v${t.version}`;
+    for (const t of stable.length ? stable : tags) {
+      const have = byVersion.get(t.version);
+      if (!have || (plain(t) && !plain(have))) byVersion.set(t.version, t);
+    }
+    return [...byVersion.values()].map((t) => ({ version: t.version, commit: t.commit })).sort((a, b) => compareVersions(b.version, a.version));
+  }
+  const manifest = manifestVersionAt(dir, tip, root);
+  if (!manifest) return [];
+  const r = git(["log", "--format=%H", tip, "--", manifest.file], dir);
+  if (!r.ok) return [];
+  const out = new Map<string, string>();
+  let newer: string | null = null; // the last commit seen (newer than this one) that touched the manifest
+  let last: string | null | undefined; // the version that commit carried
+  for (const c of r.out.split("\n").filter(Boolean)) {
+    const v = versionIn(dir, c, manifest.file);
+    if (v !== last && v && !out.has(v)) {
+      // the newest commit carrying v: the tip, or the first parent of the commit that changed v to the newer version
+      const parent = newer ? git(["rev-parse", `${newer}^`], dir) : null;
+      out.set(v, !newer ? tip : parent?.ok && versionIn(dir, parent.out, manifest.file) === v ? parent.out : c);
+    }
+    last = v;
+    newer = c;
+  }
+  return [...out].map(([version, commit]) => ({ version, commit })).sort((a, b) => compareVersions(b.version, a.version));
+}
+
+/**
+ * What `versions` lists: the releases on the history of `ref` (a clone staged and discarded here), highest first, each
+ * with its commit's date, and where `locked` (the lock's commit) stands among them when the clone has it.
+ */
+export function releasesOf(url: string, ref: string, root: string | undefined, locked: string | null, log: (s: string) => void): { ok: true; releases: Array<Release & { date: string }>; current: (SourceVersion & { commit: string }) | null } | { ok: false; error: string } {
+  const r = stage(url, ref, log);
+  if (!r.ok) return r;
+  try {
+    const dir = r.staged.dir;
+    const releases = listVersions(dir, r.staged.commit, root).map((x) => ({ ...x, date: git(["log", "-1", "--format=%cI", x.commit], dir).out }));
+    const current = locked && git(["cat-file", "-e", `${locked}^{commit}`], dir).ok ? { ...resolveVersion(dir, locked, root), commit: locked } : null;
+    return { ok: true, releases, current };
+  } finally {
+    discard(r.staged);
+  }
 }
 
 /** How a source's version reads in output: `1.3.1`, `1.3.1 (+4 commits)`, or `<date> <short commit>` without a version. */

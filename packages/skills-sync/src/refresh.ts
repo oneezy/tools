@@ -1,7 +1,9 @@
-// Refresh: resolve every source (the tip of its ref, except skills held by a pin) and its upstream version, snapshot the
-// selected skills under upstream/, rebuild the third-party working set, write skills-sync.lock.json (a version 1
-// skills-lock.json is migrated to it and removed). Frozen: each skill at the commit the lock records (a version 1 lock
-// read in memory), nothing moves, no lock is written. A skill whose snapshot already holds the content of the commit it
+// Refresh (the update command): resolve every source, or only the ones named (the rest frozen, their lock entries kept
+// as they are), at the tip of its ref, or at the release a held version or --to names (except skills held by a pin),
+// and its upstream version; snapshot the selected skills under upstream/, rebuild the third-party working set, write
+// skills-sync.lock.json (a version 1 skills-lock.json is migrated to it and removed). It never writes skills-sync.json:
+// the change a --to needs is returned for the caller to land. Frozen: each skill at the commit the lock records (a
+// version 1 lock read in memory), nothing moves, no lock is written. A skill whose snapshot already holds the content of the commit it
 // resolves to is not fetched again, so a refresh with nothing new is silent and needs no clone.
 import fs from "node:fs";
 import path from "node:path";
@@ -11,12 +13,16 @@ import { Library } from "./library.js";
 import { apply, Report } from "./plan.js";
 import { hasOldLock, LOCK_NAME, lockText, readLock, type LockedSkill, type LockedSource } from "./lock.js";
 import { cloneUrl, cmp, findSkills, isCommit, readConfig, selection, skillHash, withName, type Selected } from "./sources.js";
-import { discard, remoteTip, stage, type Staged } from "./stage.js";
-import { resolveVersion, type SourceVersion } from "./versions.js";
+import { discard, git, moveTo, remoteTip, stage, type Staged } from "./stage.js";
+import { compareVersions, isPrerelease, listVersions, plainVersion, resolveVersion, type Release, type SourceVersion } from "./versions.js";
 
 export interface RefreshOptions {
   /** every skill at the commit the lock records; a skill the lock does not know is left alone; the lock is not written */
   frozen: boolean;
+  /** the sources resolved upstream (all when absent); every other one resolves frozen and keeps its lock entry as it is */
+  only?: string[];
+  /** per source, where to resolve it instead of its held version (or the tip when none is held): a plain version, previous or latest */
+  to?: Record<string, string>;
   plan: boolean;
   /** skills an earlier refresh reported gone upstream; not looked for until --retry clears the list */
   unavailable: string[];
@@ -35,6 +41,19 @@ export interface RefreshResult {
   unlocked: string[];
   /** sources that could not be staged; their lock entries and snapshots are kept as they were */
   problems: string[];
+  /** per source whose commit is not the one the lock had: where it was (null for a source new to the lock) and where it is now */
+  updated: Array<{ id: string; from: Position | null; to: Position }>;
+  /** the version edits skills-sync.json needs for a --to to hold (null: remove the hold); the tool never makes them */
+  config: Array<{ source: string; version: string | null }>;
+  /** a version asked for that the source has not released, with the ones it has: nothing was written */
+  refused?: string;
+}
+
+/** A source's place upstream: its version (null when it has none), its commit, and how many commits past that version it is (null when not known). */
+export interface Position {
+  version: string | null;
+  commit: string;
+  ahead: number | null;
 }
 
 /** What .snapshot.json records beside a source's snapshot. */
@@ -69,7 +88,7 @@ export function refresh(lib: Library, opts: RefreshOptions): RefreshResult {
   const old = readLock(lib.root, config);
   const next: Record<string, LockedSource> = {};
   const lockSkills = new Map<string, Record<string, LockedSkill>>(); // per source, the skills it won in the working set
-  const result: RefreshResult = { report: new Report(), sources: {}, gone: [], unlocked: [], problems: [] };
+  const result: RefreshResult = { report: new Report(), sources: {}, gone: [], unlocked: [], problems: [], updated: [], config: [] };
   const report = result.report;
   const staged = new Map<string, Staged>(Object.entries(opts.prestaged ?? {}).map(([id, s]) => [`${id}@${s.commit}`, s]));
   const found = new Map<string, Map<string, string>>(); // skills discovered per checkout
@@ -78,6 +97,7 @@ export function refresh(lib: Library, opts: RefreshOptions): RefreshResult {
   try {
     for (const id of Object.keys(config.sources).sort(cmp)) {
       const src = config.sources[id];
+      const frozen = opts.frozen || (!!opts.only && !opts.only.includes(id));
       const sel = selection(src);
       for (const s of sel) selected.add(s.name);
       const wanted = sel.filter((s) => !opts.unavailable.includes(s.name));
@@ -109,15 +129,36 @@ export function refresh(lib: Library, opts: RefreshOptions): RefreshResult {
         next[id] = { ...prior, skills: Object.fromEntries(Object.entries(prior.skills).filter(([n]) => names.has(n))) };
       };
 
-      // 1. the source's commit: frozen takes the lock's; latest takes the tip of ref
+      // 1. the source's commit: frozen takes the lock's; a version (--to, else the held one) that release's commit, found
+      //    in a clone of ref's history; latest takes the tip of ref
+      const want = frozen ? undefined : opts.to?.[id] ?? src.version;
       let commit: string | null;
-      if (opts.frozen) {
+      if (frozen) {
         if (!prior || !wanted.some((s) => mine(s))) {
           result.unlocked.push(...wanted.map((s) => `${id}:${s.name}`));
           keep();
           continue;
         }
         commit = prior.commit;
+      } else if (want && want !== "latest") {
+        const r = stage(url, src.ref, opts.log);
+        if (!r.ok) {
+          result.problems.push(`${id}: ${r.error}`);
+          keep();
+          continue;
+        }
+        const releases = listVersions(r.staged.dir, r.staged.commit, src.root);
+        const pick = pickRelease(releases, want, prior?.version ?? null);
+        const at = typeof pick === "string" ? null : moveTo(r.staged, pick.commit);
+        if (!at) {
+          discard(r.staged);
+          const known = releases.length ? releases.map((x) => x.version).join(", ") : "none";
+          result.refused = `${id}: ${typeof pick === "string" ? pick : `cannot check out ${want}`} (versions: ${known})`;
+          return result;
+        }
+        staged.set(`${id}@${at.commit}`, at);
+        commit = at.commit;
+        if (opts.to?.[id] && src.version !== (pick as Release).version) result.config.push({ source: id, version: (pick as Release).version });
       } else if (isCommit(src.ref)) commit = src.ref;
       else {
         commit = remoteTip(url, src.ref);
@@ -134,11 +175,11 @@ export function refresh(lib: Library, opts: RefreshOptions): RefreshResult {
       let failed = false;
       for (const s of wanted) {
         const l = mine(s);
-        if (opts.frozen && !l) {
+        if (frozen && !l) {
           result.unlocked.push(`${id}:${s.name}`);
           continue;
         }
-        const at: string = opts.frozen ? l!.commit : src.pins?.[s.upstream] ?? commit;
+        const at: string = frozen ? l!.commit : src.pins?.[s.upstream] ?? commit;
         const snap = l && l.commit === at ? path.join(snapDir, l.path) : null;
         if (snap && l!.hash && isSkillDir(snap) && skillHash(snap) === l!.hash) {
           here.push({ ...s, source: id, dir: snap, rel: l!.path, snapshot: snap, fromSnapshot: true, locked: { ...l!, commit: at } });
@@ -176,8 +217,8 @@ export function refresh(lib: Library, opts: RefreshOptions): RefreshResult {
           ? { version: meta!.version!, ahead: meta!.ahead ?? null }
           : null;
       let co = staged.get(`${id}@${commit}`);
-      if (!co && (!sameCommit || snapshotLacks || (!known && !opts.frozen))) co = checkout(commit) ?? undefined;
-      if (!co && (!sameCommit || (!known && !opts.frozen))) {
+      if (!co && (!sameCommit || snapshotLacks || (!known && !frozen))) co = checkout(commit) ?? undefined;
+      if (!co && (!sameCommit || (!known && !frozen))) {
         keep();
         continue;
       }
@@ -186,9 +227,17 @@ export function refresh(lib: Library, opts: RefreshOptions): RefreshResult {
       const date = co ? co.date : meta!.date;
       // frozen holds the lock's version; otherwise a checkout says what the commit is now (a tag may have come since)
       const fresh = co ? resolveVersion(co.dir, commit, src.root) : null;
-      const v: SourceVersion | null = opts.frozen && fromLock ? { version: known!.version, ahead: fresh?.version === known!.version ? fresh.ahead : known!.ahead } : fresh ?? known;
+      const v: SourceVersion | null = frozen && fromLock ? { version: known!.version, ahead: fresh?.version === known!.version ? fresh.ahead : known!.ahead } : fresh ?? known;
       result.sources[id] = { version: v?.version ?? null, ahead: v?.ahead ?? null, commit, date, moved: !sameCommit };
-      if (!opts.frozen) next[id] = { repo: src.repo, ref: src.ref, version: v!.version, commit, date, skills: {} };
+      if (!frozen) {
+        next[id] = { repo: src.repo, ref: src.ref, version: v!.version, commit, date, skills: {} };
+        if (opts.to?.[id] === "latest" && src.version) result.config.push({ source: id, version: null });
+        if (prior?.commit !== commit) result.updated.push({ id, from: prior ? { version: prior.version, commit: prior.commit, ahead: aheadOf(prior, meta, co, src.root) } : null, to: { version: v?.version ?? null, commit, ahead: v?.ahead ?? null } });
+      } else if (!opts.frozen) {
+        // not named in an update: its lock entry as it is (a version 1 lock's gains the version and date it lacked)
+        keep();
+        if (next[id] && old!.migrated) next[id] = { ...next[id], version: v?.version ?? null, date };
+      }
 
       // 4. the snapshot: the selected folders and attribution files at their upstream paths, plus .snapshot.json
       for (const r of here) {
@@ -196,7 +245,7 @@ export function refresh(lib: Library, opts: RefreshOptions): RefreshResult {
         else report.add({ kind: "copy", path: r.snapshot, target: r.dir, note: `snapshot at ${r.locked.commit.slice(0, 7)}` });
       }
       const paths = new Set(here.map((r) => r.rel));
-      if (opts.frozen) for (const s of sel) if (mine(s)) paths.add(mine(s)!.path);
+      if (frozen) for (const s of sel) if (mine(s)) paths.add(mine(s)!.path);
       for (const rel of findSkills(snapDir, undefined, 6).values()) if (!paths.has(rel)) report.add({ kind: "delete", path: path.join(snapDir, rel), note: "no longer selected" });
       for (const f of copied) {
         const dst = path.join(snapDir, f);
@@ -241,7 +290,7 @@ export function refresh(lib: Library, opts: RefreshOptions): RefreshResult {
     // 7. the lock: what this refresh resolved (a pinned skill's commit only where it differs from its source's), and a
     //    version 1 lock goes; never when frozen
     if (!opts.frozen) {
-      for (const [id, skills] of lockSkills) if (next[id]) next[id].skills = skills;
+      for (const [id, skills] of lockSkills) if (next[id] && (!opts.only || opts.only.includes(id))) next[id].skills = skills;
       writeIfChanged(report, lib.lockFile, lockText(next), "what this refresh resolved");
       if (hasOldLock(lib.root)) report.add({ kind: "delete", path: lib.npxLockFile, note: `old lock format, migrated to ${LOCK_NAME}` });
     }
@@ -288,6 +337,27 @@ export function snapshotLock(lib: Library): Record<string, LockedSource> | null 
     for (const n of Object.keys(next[id].skills)) taken.add(n);
   }
   return snapshots ? next : null;
+}
+
+/**
+ * The release a --to (or a held version) names: a plain version (a leading v allowed), or previous, the highest stable
+ * release below the lock's version; the reason when there is none.
+ */
+function pickRelease(releases: Release[], want: string, current: string | null): Release | string {
+  if (want === "previous") {
+    if (!current) return "previous: the lock records no version to go below";
+    return releases.find((r) => !isPrerelease(r.version) && compareVersions(r.version, current) < 0) ?? `previous: no release below ${current}`;
+  }
+  const v = plainVersion(want) ?? want;
+  return releases.find((r) => r.version === v) ?? `${want} is not a release`;
+}
+
+/** How far past its version a source's locked commit was: what the snapshot recorded there, else counted in a checkout that has that commit. */
+function aheadOf(prior: LockedSource, meta: SnapshotMeta | null, co: Staged | undefined, root: string | undefined): number | null {
+  if (meta?.commit === prior.commit && meta.version === prior.version && meta.ahead !== undefined) return meta.ahead;
+  if (!co || prior.version === null || !git(["cat-file", "-e", `${prior.commit}^{commit}`], co.dir).ok) return null;
+  const v = resolveVersion(co.dir, prior.commit, root);
+  return v.version === prior.version ? v.ahead : null;
 }
 
 /** The working-set copy of one resolved skill; skipped when its files already equal the snapshot's with the rename applied. */

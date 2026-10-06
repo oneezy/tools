@@ -22,7 +22,7 @@ test("the package is 0.4.0 and --help opens with that version: the banner and pa
   assert.equal(r.stdout.split("\n")[0], "skills-sync 0.4.0");
 });
 
-test("--help lists every command and every flag of build, check, refresh and add beside the 0.2.0 ones; an unknown option exits 2 with the same help", () => {
+test("--help lists every command and every flag of build, check, update (refresh), versions and add beside the 0.2.0 ones; an unknown option exits 2 with the same help", () => {
   const help = cli("--help").stdout;
   // the commands as a library's CI reads them to know what this build can run: under Commands, up to the next heading,
   // the first word of each line indented by exactly two spaces
@@ -30,11 +30,11 @@ test("--help lists every command and every flag of build, check, refresh and add
   const from = lines.indexOf("Commands");
   const to = lines.findIndex((l, i) => i > from && /^[A-Z]/.test(l));
   const commands = lines.slice(from + 1, to).filter((l) => /^  [a-z]/.test(l)).map((l) => l.trim().split(/\s+/)[0]);
-  assert.deepEqual(commands, ["sync", "status", "unlink", "projects", "refresh", "add", "build", "check"]);
+  assert.deepEqual(commands, ["sync", "status", "unlink", "projects", "update", "refresh", "versions", "add", "build", "check"]);
   // a flag is named at the start of its line under its section
   const flags = [
     ["--plugins", "--catalogs", "--artifacts", "--check"],
-    ["--frozen", "--id <id>", "--root <path>", "--skills <names|*>", "--as <old=new,...>", "--plugin <id>"],
+    ["--to <version>|previous|latest", "--frozen", "--id <id>", "--root <path>", "--skills <names|*>", "--as <old=new,...>", "--plugin <id>"],
     ["--repo <path>", "--library <src>", "--agents <ids>", "--global / --no-global", "--projects <names|*>", "--dev <dir>", "--copy", "--wsl <distros|*>", "--symlinks", "--junctions", "--no-pull / --pull", "--no-restore", "--retry", "--sidecars", "--no-layers", "--watch", "--plan", "--quiet", "--json", "-y, --yes", "--ask", "-h, --help"],
   ].flat();
   for (const f of flags) assert.ok(help.split("\n").some((l) => l.startsWith(`  ${f}`)), `flag ${f}`);

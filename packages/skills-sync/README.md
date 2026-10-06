@@ -79,7 +79,8 @@ Third-party skills come from **sources** declared in `skills-sync.json`. The con
   "sources": {
     "matt-pocock": {
       "repo": "mattpocock/skills",          // owner/repo, a git URL, or a local path
-      "ref": "main",                        // the branch or tag followed: its tip at every refresh
+      "ref": "main",                        // the branch or tag followed: its tip at every update
+      "version": "1.3.0",                   // optional: hold the source at this upstream release; latest when omitted
       "root": "skills",                     // where the skill folders live (searched three levels deep, like npx skills)
       "skills": ["tdd", "writing-for-agents"],
       "pins": { "writing-for-agents": "321658273cb1d20b76026717d027d505790106d4" },   // one skill held at its own commit
@@ -98,11 +99,11 @@ Third-party skills come from **sources** declared in `skills-sync.json`. The con
 }
 ```
 
-**Latest is the default.** Every selected skill is taken at the tip of its source's `ref` on each `refresh`; `sync` never moves one. A **pin** is the exception: a skill listed in `pins` is taken at that commit while its siblings move; change the commit to move it, remove it to let it follow. A `ref` that is a full commit holds the whole source. The `generate` switches say which forms the library builds (the loose-skill layers, the plugin packages); `build` reads `generate.plugins`.
+**Latest is the default.** Every selected skill is taken at the tip of its source's `ref` on each `update`; `sync` never moves one. A **held version** is the first exception: a source with `"version": "1.3.0"` is taken at that release (the commit of its tag, or for a source versioned by its manifest the newest commit on `ref`'s history whose manifest carried that version) until the config changes; plain semver only, `v1.3.0` is refused by the schema. A **pin** is the second: a skill listed in `pins` is taken at that commit while its siblings move; change the commit to move it, remove it to let it follow. A `ref` that is a full commit holds the whole source. The tool never writes `version` (or anything else in `skills-sync.json` but what `add` declares): `update --to` prints the change and whoever lands it commits it. The `generate` switches say which forms the library builds (the loose-skill layers, the plugin packages); `build` reads `generate.plugins`.
 
-**`refresh`** resolves every source and makes the library match:
+**`update [<source>...]`** (`refresh` is the same command, kept for scripts and CI) resolves the named sources, every one when none is named, and makes the library match. A source not named resolves frozen, as `sync` does: its lock entry stays byte for byte and its working copies at the commits the lock records. For each named source:
 
-1. Each source's commit: the tip of `ref` (one `git ls-remote`), or `ref` itself when it is a commit. With `--frozen` every skill is taken at the commit `skills-sync.lock.json` records for it (a `skills-lock.json` from 0.4.0 is read in its place, unchanged), a skill the lock does not record is left alone and reported, and no lock is written; this is what CI runs, and what every `sync` runs.
+1. Each source's commit: the tip of `ref` (one `git ls-remote`), or `ref` itself when it is a commit; with a held `version` (or `--to`, below), that release's commit, found in a blobless clone of `ref` with its tags. With `--frozen` every skill is taken at the commit `skills-sync.lock.json` records for it (a `skills-lock.json` from 0.4.0 is read in its place, unchanged), a skill the lock does not record is left alone and reported, and no lock is written; this is what CI runs, and what every `sync` runs.
 2. Each selected skill is found under `root` by folder name, at its pin when it has one. When the snapshot already holds that commit's content (its hash matches the lock) nothing is fetched; otherwise a temp clone is staged (blobless, with the history and tags behind that commit) and deleted when done. A skill not found upstream is reported once as gone, remembered in `skills-sync.local.json`, and not looked for again until `--retry`.
 3. The snapshot `upstream/<source>/` gets the skill folders and attribution files at their upstream paths, and a `.snapshot.json` (source, repo, ref, commit, date, version and commits past it, skills with their path, hash and commit, attribution). Folders no longer selected are deleted. Snapshots are generated and never edited; gitignore `upstream/`.
 4. The working set: `.agents/skills/<name>` becomes a copy of the snapshot folder, under the new name with the frontmatter `name` rewritten when renamed. A copy whose files already match is skipped; a copy no longer selected is deleted. One name selected by two sources: the first source by id wins and owns the lock entry; the other is reported until the config renames it. An own skill with the same name keeps it.
@@ -131,7 +132,19 @@ Third-party skills come from **sources** declared in `skills-sync.json`. The con
 
 **Versions.** A source's version is plain semver (`1.3.1`, never `v1.3.1`), resolved at its commit in this order: the nearest release tag at or before it (a leading `v` or `name@` stripped; pre-release tags only when no stable one is reachable); else the `version` of the nearest of `.claude-plugin/plugin.json`, `.cursor-plugin/plugin.json`, `.codex-plugin/plugin.json` and `package.json`, looking in the source's `root` and then each parent up to the repo root; else none (`null`). Output names each source by its version and how far past it the commit is, `mattpocock: 1.3.1 (+4 commits)`, counted from the tag's commit or from the commit that set the manifest to that version; a source without a version shows its date and short commit. The lock stores only the version and the commit; `--json` carries `version` and `ahead` (the count) per source.
 
-The hash is the `npx skills` recipe (SHA-256 over every file's relative path then bytes, sorted by `localeCompare`), computed over bytes exactly as upstream committed them, so a lock written on one machine verifies on any other. `refresh --plan` shows the actions without touching the library (it still stages clones in the temp folder). `--json` adds `sources` (per source: `commit`, `date`, `version`, `ahead`, `moved`), `gone`, `unlocked` and `problems` to the usual actions. A source that cannot be reached keeps its lock entries and snapshot, and the exit code is 1.
+The hash is the `npx skills` recipe (SHA-256 over every file's relative path then bytes, sorted by `localeCompare`), computed over bytes exactly as upstream committed them, so a lock written on one machine verifies on any other. `refresh --plan` shows the actions without touching the library (it still stages clones in the temp folder). `--json` adds `sources` (per source: `commit`, `date`, `version`, `ahead`, `moved`), `updated`, `config` (both above), `gone`, `unlocked` and `problems` to the usual actions. A source that cannot be reached keeps its lock entries and snapshot, and the exit code is 1.
+
+Every source whose commit is not the one the lock had is reported, from and to, as `updated up: 1.2.0 (+1 commit) 4f2a9c1 -> 1.3.0 8d0e3b7` on stdout and in `--json` as `updated: [{ id, from: { version, commit, ahead }, to: { version, commit, ahead } }]` (`from` is null for a source new to the lock; `ahead` is null where it is not known).
+
+**`update <source> --to <version>|previous|latest`** moves one source (`--to` with no source, or with two, is refused):
+
+- `--to 1.3.0` takes that release, as a held version would; a leading `v` is accepted.
+- `--to previous` takes the highest stable release below the version the lock records: the next lower tag, or for a source versioned by its manifest the newest commit carrying the next lower distinct version.
+- `--to latest` takes the tip of `ref`, past any held version.
+
+The config is not written. The change that makes the move stick is printed for the caller to land, `skills-sync.json: sources.up.version = "1.3.0"`, or `remove sources.up.version` for `latest` when a version is held (nothing when the config already says so); `--json` carries it as `config: [{ source, version }]`, `version` null for a removal. Until it lands, the next plain `update` puts the source back where the config says. A version the source has not released, or `previous` below its lowest release, is refused with the versions it has, newest first, `up: 1.5.0 is not a release (versions: 1.3.1, 1.3.0, 1.2.3)`; nothing is written and the exit code is 1 (`--json`: `{ "refused": "..." }`).
+
+**`versions <source>`** lists what a source has released on `ref`'s history, highest first, each with its commit and date, the one the lock is at marked `*` with how far past it the lock is. Release tags when any is reachable (stable ones only, unless there are none; `v1.3.0` over `skills@1.3.0` when both name a version), else each distinct version of the manifest that versions it, at the newest commit carrying it. `--json`: `{ source, repo, ref, current: { version, commit, ahead }, versions: [{ version, commit, date, current }] }`. It stages a temp clone and writes nothing.
 
 **`add <source>`** declares a source and brings its skills in: `add mattpocock/skills`, `add cursor/plugins#main --root pstack/skills --as tdd=pstack-tdd,teach=pstack-teach`, `add ../some/repo --skills a,b`. It stages the repo in a temp clone, lists the skills under `--root` (default `skills/` when the repo has one, else the root), writes the config entry (`--id`, default `owner-repo`; the default branch unless `#ref`; every skill unless `--skills`; a map when `--as` renames; the nearest `LICENSE` and `README.md` as attribution) and the plugin entry that packages it (`--plugin <id>`, default the source id, display name from the id; `--no-plugin` for none; an id already in `plugins` is refused before anything is written), and runs `refresh` with that clone. `build --plugins --catalogs` then writes the package. Nothing is installed anywhere: no agent folder, no `~/.skills-sync`, no `npx skills` run against the library. `add --plan` prints the entries it would write and stops. Add a pin or drop a skill by editing the config, then `refresh`.
 
@@ -229,7 +242,8 @@ A library without a config has no generated files to check; its frontmatter and 
 - `synced/` (Claude's account skills) and `.system/` are never touched.
 - Third-party copies in `.agents/skills` are written only by `refresh` (config library) or by `npx skills` (legacy library); the link steps never edit them.
 - `refresh` and `add` touch nothing outside the library: no pull, no `~/.skills-sync`, no harness folder.
-- `refresh --frozen` and `sync` never write the lock and never move a source upstream; only an explicit `refresh` does.
+- `refresh --frozen` and `sync` never write the lock and never move a source upstream; only an explicit `update` (or `refresh`) does, and only the sources it names.
+- `update` never writes `skills-sync.json`; a hold is a config change the caller lands.
 - Inside WSL the library's own layers are left to Windows.
 
 ## Prompts and flags
@@ -247,13 +261,14 @@ Every answer is also a flag, so scripts and agents never see a prompt:
 --library owner/repo   --pull | --no-pull
 --no-restore  --retry  --sidecars  --no-layers
 --watch  --plan  --quiet  --json  -y  --ask
-refresh: --frozen  --retry
+update | refresh: [<source>...]  --to <version>|previous|latest  --frozen  --retry  --json
+versions <source>: --json
 add <source>: --id <id>  --root <path>  --skills a,b | --skills '*'  --as old=new,...  --plugin <id> | --no-plugin
 build: --plugins  --catalogs  --artifacts  --check
 check: --json  --quiet
 ```
 
-Commands: `sync` (default), `status`, `unlink` (remove every link this tool made in the user folders), `projects` (only step 6), `refresh` and `add <source>` (see [Third-party sources](#third-party-sources)), `build` (see [Plugins and catalogs](#plugins-and-catalogs) and [Artifacts](#artifacts)), `check` (see [Check](#check)).
+Commands: `sync` (default), `status`, `unlink` (remove every link this tool made in the user folders), `projects` (only step 6), `update` (alias `refresh`), `versions <source>` and `add <source>` (see [Third-party sources](#third-party-sources)), `build` (see [Plugins and catalogs](#plugins-and-catalogs) and [Artifacts](#artifacts)), `check` (see [Check](#check)).
 
 `--watch` keeps running and redoes layers and user folders when `skills/`, the config or the lock changes, so a skill you add is linked the moment its folder appears.
 
