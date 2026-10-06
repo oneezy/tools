@@ -58,17 +58,19 @@ jobs:
         with:
           persist-credentials: false
 
-      - uses: actions/setup-node@v5
+      # Vite Plus, then Node from .node-version and pnpm from packageManager (as vp env does on a PC).
+      # Dependencies are installed below, only when something will build.
+      - uses: voidzero-dev/setup-vp@v1.9.0
         with:
-          node-version: 24
+          version: 1.0.0
+          node-version-file: .node-version
           registry-url: https://registry.npmjs.org
-          # the root packageManager names pnpm, which is installed in the next step, not yet here
-          package-manager-cache: false
+          run-install: false
 
-      - name: npm 11.5.1 or later (trusted publishing) and pnpm
+      - name: npm 11.5.1 or later (trusted publishing)
         run: |
           node -e "const [a,b,c]=process.argv[1].split('.').map(Number);process.exit(a>11||(a===11&&(b>5||(b===5&&c>=1)))?0:1)" "$(npm --version)" || npm install -g npm@^11.5.1
-          npm install -g pnpm@12
+          node --version
           npm --version
           pnpm --version
 

@@ -51,17 +51,17 @@ jobs:
         with:
           persist-credentials: false
 
-      - uses: actions/setup-node@v5
+      # Vite Plus, then Node from .node-version and pnpm from packageManager (as vp env does on a PC)
+      - uses: voidzero-dev/setup-vp@v1.9.0
         with:
-          node-version: 24
-          package-manager-cache: false
-
-      - name: pnpm
-        run: npm install -g pnpm@12
+          version: 1.0.0
+          node-version-file: .node-version
+          cache: true
+          run-install: false
 
       - name: Check and test
         run: |
-          pnpm install --frozen-lockfile
+          vp install --frozen-lockfile
           pnpm check
           pnpm test
 
