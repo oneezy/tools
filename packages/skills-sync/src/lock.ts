@@ -116,6 +116,12 @@ export function fromV1(entries: Record<string, LockEntry>, config: Config): Lock
   return { version: 2, sources, migrated: true };
 }
 
+/** A source's entry in the lock, which counts only while it names the repo the config gives the source. */
+export function lockedSource(lock: Lock | null, id: string, src: { repo: string }): LockedSource | undefined {
+  const s = lock?.sources[id];
+  return s?.repo === src.repo ? s : undefined;
+}
+
 /** Every working-set name the lock records, sorted. */
 export function lockedNames(lock: Lock | null): string[] {
   return Object.values(lock?.sources ?? {})

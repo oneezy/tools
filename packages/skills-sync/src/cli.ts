@@ -55,7 +55,8 @@ Commands
   check            is what is committed consistent? every own skill's frontmatter (name is its folder's name and a
                    valid id, description present), every skill under skills/play/ named play-<name>, every flow.yaml
                    beside one (schemas/flow.schema.json, unique step ids, after/parallel/join naming steps that exist),
-                   and generated-file drift (what build --check computes, plus skills-sync.lock.json against the snapshots).
+                   and generated-file drift (what build --check computes, plus skills-sync.lock.json against the snapshots,
+                   and a version skills-sync.json holds a source at that the lock does not have).
                    One line per problem, path then reason; exit 1 on any, 0 when clean. Reads only: no network,
                    nothing written (CI, and before committing)
 

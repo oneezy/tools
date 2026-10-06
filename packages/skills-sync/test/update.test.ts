@@ -461,3 +461,22 @@ test("add resolves only the source it declares: an unheld source with a new upst
   assert.equal(entry(text(LOCK)), before);
   assert.ok(t.stdout.includes(`updated third: (new) -> ${h3.slice(0, 7)}\n  changelog: none (new to the lock: no version to compare with)\n`), t.stdout);
 });
+
+test("check reports a held version the lock is not at as one problem on skills-sync.json, naming the update that fixes it; clean once update takes the source there, and a source without a hold is never held to its lock's version", () => {
+  releases(up);
+  config({ up: source(up, { version: "1.1.0" }) });
+  assert.equal(cli("update", "--quiet").status, 0);
+  assert.equal(cli("check").status, 0, "held where the lock is");
+
+  config({ up: source(up, { version: "1.0.0" }) });
+  const r = cli("check");
+  assert.equal(r.status, 1);
+  assert.deepEqual(r.stdout.split("\n").filter((l) => l && !l.startsWith("check:")), ["skills-sync.json: sources.up.version holds 1.0.0 but the lock has 1.1.0; run update up"]);
+  const j = JSON.parse(cli("check", "--json").stdout);
+  assert.deepEqual(j.problems, [{ path: "skills-sync.json", reason: "sources.up.version holds 1.0.0 but the lock has 1.1.0; run update up" }]);
+
+  assert.equal(cli("update", "up", "--quiet").status, 0);
+  assert.equal(cli("check").status, 0, "update took it to the hold");
+  config({ up: source(up) });
+  assert.equal(cli("check").status, 0, "no hold: the lock may be at any version");
+});
