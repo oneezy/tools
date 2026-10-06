@@ -36,7 +36,7 @@ Default vocabulary: `needs-triage`, `needs-info`, `ready-for-agent`, `ready-for-
 
 ### Domain docs
 
-Single-context: `GLOSSARY.md` and `docs/adr/` at the repo root. See `docs/agents/domain.md`.
+Multi-context: `GLOSSARY-MAP.md` at the root lists each package's `GLOSSARY.md` (and its `docs/adr/`); the root `GLOSSARY.md` holds the words every package shares. See `docs/agents/domain.md`.
 
 ### Worktree names
 

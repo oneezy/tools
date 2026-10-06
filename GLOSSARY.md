@@ -1,71 +1,29 @@
-# Context
+# Tools workspace
 
-Glossary for the `tools` repo. Terms only; no implementation detail.
+The words every package in `oneezy/tools` shares: what Justin runs, what it runs against, and where. Each package's own words are in its `GLOSSARY.md`, listed in [`GLOSSARY-MAP.md`](./GLOSSARY-MAP.md).
 
-## Tool
+## Language
 
-A program in `packages/` that Justin runs by double-clicking its `.cmd` file. It opens a terminal **picker**: an arrow-key list where space checks rows, enter acts on the checked rows, and q quits. A tool is not a CLI in the sense below.
+**Tool**:
+A program in this workspace that Justin runs by double-clicking its `.cmd` file, which opens a **Picker**. A Tool is not a CLI.
+_Avoid_: app, script, CLI
 
-## CLI
+**CLI**:
+A command-line program driven by arguments, such as `claude`, `codex`, `gh`, `wsl`. Tools call CLIs.
+_Avoid_: tool
 
-A command-line program driven by arguments, such as `claude`, `codex`, `gh`, `wsl`. Tools call CLIs; tools are not themselves CLIs.
+**Picker**:
+The one-screen terminal interface every Tool opens: sections of rows, the same keys everywhere (up/down move, space toggle, a all/none, enter act, x stop or remove, r refresh, q quit).
+_Avoid_: menu, TUI
 
-## Harness
+**Harness**:
+An AI agent runtime with its own config folder and its own expected skill layout. In scope: Claude Code and Codex; out of scope for now: Hermes, Goose.
+_Avoid_: agent, client
 
-An AI agent runtime with its own config folder and its own expected skill layout. In scope: Claude Code and Codex. Out of scope for now: Hermes, Goose.
+**Surface**:
+A way of reaching a Harness: terminal, desktop app, VS Code extension, phone app, web or cloud. Surfaces of one Harness read the same config, so syncing a Harness syncs all of them; the set that must stay in step is the **sync layer**.
+_Avoid_: client, frontend
 
-## Surface
-
-A way of reaching a harness: terminal, desktop app, VS Code extension, phone app, web or cloud. One harness has many surfaces, and they read the same harness config, so syncing a harness syncs all of its surfaces. Justin calls the set of surfaces that must stay in step the **sync layer**.
-
-## Host
-
-A machine or container where a harness is installed: this Windows PC, the Ubuntu WSL distro, a remote machine over SSH, a cloud sandbox. Skills are synced per harness per host.
-
-## Picker
-
-The default user interface of a tool. One screen, sections of rows, the same key bindings in every tool: up/down move, space toggle, a all/none, enter act, x stop or remove, r refresh, q quit.
-
-## Project
-
-Ambiguous on its own. Said bare, Justin usually means a **client project**: a paying engagement and its repo. In task-manager talk, **GitHub project** (also "task manager") means a GitHub Projects v2 project attached to one repo. Its views have their own names: **board** or **kanban** is the board view, **backlog** is the table view, **roadmap** is the roadmap view.
-
-## Ticket
-
-Any issue on a repo that has a GitHub project. Justin also says feature, bug, task, issue, or card (the agile word) for the same thing; context picks the type, not the meaning. A wayfinder ticket is a ticket with a `wayfinder:*` label and a parent map; task-manager builds on wayfinder and never changes how wayfinder labels, links, or claims.
-
-## Status
-
-Where a ticket sits on the board: **Todo**, **Next Up**, **In Progress**, **Review**, **Done**, **Complete**. Next Up means someone owns it (assigned), never a hand-placed queue. In Progress means its branch exists on GitHub. Review means a pull request is ready for a human. Done means merged into `dev`. Complete means promoted to `main`, live in production. A staging branch changes nothing here.
-
-## Needs changes
-
-A Done ticket the client or Justin sent back. A red label on the reopened issue; the ticket returns to In Progress and the label drops when new work merges.
-
-## Phase
-
-A big chunk of work that gets the client to a point: an issue labelled `phase`, titled `Phase <n> — <title>` after a section of the repo's roadmap file, with a start and a due date once planned, the only ticket kind that carries dates. Tickets belong to a phase by taking its milestone, never as sub-issues (that slot is wayfinder's). A phase is a bar on the roadmap.
-
-## Milestone
-
-Two meanings. In a contract, a dated line the client pays against (Trident's Milestone 1 and 2); a phase heading may name the one it feeds. On GitHub, a GitHub Milestone with the same title as its phase, one per phase, made by the roadmap command with no due date: the link between a phase and the tickets that make it up, and a marker on the roadmap once dated.
-
-## Priority
-
-How urgent a ticket is: **Low** (green), **Medium** (yellow), **High** (orange), **Critical** (red). One value per ticket, kept as a project field so the backlog sorts by it. The older schemes (MoSCoW, WSJF, Kano, business value) are reference material, not retired, and may return for other kinds of board.
-
-## Blocked
-
-Waiting on another ticket. Wayfinder's word: a native dependency edge, cleared when the blocking ticket closes. Never a status column.
-
-## Waiting
-
-Waiting on something outside the tickets: a package release, a client answer, a payment. A label a ticket carries in any column; the board dims it.
-
-## Estimate
-
-A ticket's size in Fibonacci points, 1 to 13. No weekly capacity: agents work in parallel, so points size the work, they do not budget it.
-
-## Type
-
-What kind of ticket: bug, feature, tech debt, question, learning, reference. A ticket with no type is a task. A map is the epic.
+**Host**:
+A machine or container where a Harness is installed: this Windows PC, the Ubuntu WSL distro, a remote machine over SSH, a cloud sandbox. Skills are synced per Harness per Host.
+_Avoid_: machine, environment
