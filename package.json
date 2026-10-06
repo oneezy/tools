@@ -2,18 +2,18 @@
   "name": "@oneezy/tools",
   "private": true,
   "description": "Justin's tools as one pnpm workspace: Vite Plus runs build, test, check and dev across packages and serves the app that has a dev server.",
-  "packageManager": "pnpm@12.9.1",
-  "engines": {
-    "node": ">=24",
-    "pnpm": ">=12.9"
-  },
   "scripts": {
     "build": "vp run -r build",
     "test": "vp run -r test",
-    "check": "vp run -r check",
+    "check": "vp check && vp run -r check",
     "dev": "vp dev"
   },
   "devDependencies": {
     "vite-plus": "1.0.0"
-  }
+  },
+  "engines": {
+    "node": ">=24",
+    "pnpm": ">=12.9"
+  },
+  "packageManager": "pnpm@12.9.1"
 }

@@ -115,12 +115,23 @@ test("answers are written to skills-sync.local.json, never to skills-sync.json; 
   // the answers are read back: a run without --agents syncs the remembered ones
   const again = cli(...SYNC);
   assert.equal(again.status, 0, again.stderr);
-  assert.deepEqual((JSON.parse(again.stdout).actions as Array<{ kind: string }>).filter((a) => a.kind !== "skip"), []);
+  assert.deepEqual(
+    (JSON.parse(again.stdout).actions as Array<{ kind: string }>).filter((a) => a.kind !== "skip"),
+    [],
+  );
   assert.deepEqual(json(local()).agents, ["claude-code", "codex"]);
 });
 
 test("a legacy answers-only skills-sync.json is migrated once to skills-sync.local.json: the file is moved, one line reports it, the answers hold", () => {
-  const legacy = { agents: ["codex"], global: false, dev: path.dirname(lib.root), projects: [], mode: "link", wsl: [], unavailable: ["old"] };
+  const legacy = {
+    agents: ["codex"],
+    global: false,
+    dev: path.dirname(lib.root),
+    projects: [],
+    mode: "link",
+    wsl: [],
+    unavailable: ["old"],
+  };
   fs.writeFileSync(config(), JSON.stringify(legacy, null, 2) + "\n");
   const r = cli(...SYNC);
   assert.equal(r.status, 0, r.stderr);
@@ -131,13 +142,18 @@ test("a legacy answers-only skills-sync.json is migrated once to skills-sync.loc
   assert.deepEqual(l.unavailable, ["old"]);
   assert.equal(l.links, "auto");
   assert.ok(!fs.existsSync(claude.userSkills), "global: false was honoured, so no user-folder links");
-  const lines = (JSON.parse(r.stdout).actions as Array<{ kind: string; path: string; target?: string }>).filter((a) => samePath(a.path, config()) || (a.target && samePath(a.target, local())));
+  const lines = (JSON.parse(r.stdout).actions as Array<{ kind: string; path: string; target?: string }>).filter(
+    (a) => samePath(a.path, config()) || (a.target && samePath(a.target, local())),
+  );
   assert.equal(lines.length, 1, `one report line for the move: ${JSON.stringify(lines)}`);
   assert.equal(lines[0].kind, "move");
   assert.ok(samePath(lines[0].target!, local()));
   const again = cli(...SYNC);
   assert.equal(again.status, 0, again.stderr);
-  assert.ok(!(JSON.parse(again.stdout).actions as Array<{ kind: string }>).some((a) => a.kind === "move"), "migrated once");
+  assert.ok(
+    !(JSON.parse(again.stdout).actions as Array<{ kind: string }>).some((a) => a.kind === "move"),
+    "migrated once",
+  );
 });
 
 test("a skills-sync.json with a sources or plugins key is the committed config, never answers: it is left alone and the answers go to the local file", () => {

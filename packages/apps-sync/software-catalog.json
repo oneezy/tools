@@ -15,28 +15,20 @@
         "windows": {
           "provider": "native",
           "path": "%LOCALAPPDATA%/Programs/OpenAI/Codex/bin/codex.exe",
-          "updateArgs": [
-            "update"
-          ],
+          "updateArgs": ["update"],
           "installUrl": "https://chatgpt.com/codex/install.ps1",
           "channel": "stable",
           "versionFromPath": true,
-          "verifyArgs": [
-            "--version"
-          ]
+          "verifyArgs": ["--version"]
         },
         "wsl": {
           "provider": "native",
           "path": "~/.local/bin/codex",
-          "updateArgs": [
-            "update"
-          ],
+          "updateArgs": ["update"],
           "installUrl": "https://chatgpt.com/codex/install.sh",
           "channel": "stable",
           "versionFromPath": true,
-          "verifyArgs": [
-            "--version"
-          ]
+          "verifyArgs": ["--version"]
         }
       }
     },
@@ -53,35 +45,21 @@
         "windows": {
           "provider": "native",
           "path": "%USERPROFILE%/.local/bin/claude.exe",
-          "updateArgs": [
-            "install",
-            "{version}"
-          ],
+          "updateArgs": ["install", "{version}"],
           "installUrl": "https://claude.ai/install.ps1",
-          "installArgs": [
-            "latest"
-          ],
+          "installArgs": ["latest"],
           "channel": "stable",
-          "verifyArgs": [
-            "--version"
-          ]
+          "verifyArgs": ["--version"]
         },
         "wsl": {
           "provider": "native",
           "path": "~/.local/bin/claude",
-          "updateArgs": [
-            "install",
-            "{version}"
-          ],
+          "updateArgs": ["install", "{version}"],
           "installUrl": "https://claude.ai/install.sh",
-          "installArgs": [
-            "latest"
-          ],
+          "installArgs": ["latest"],
           "channel": "stable",
           "versionFromPath": true,
-          "verifyArgs": [
-            "--version"
-          ]
+          "verifyArgs": ["--version"]
         }
       }
     },
@@ -97,28 +75,18 @@
         "windows": {
           "provider": "native",
           "path": "%USERPROFILE%/.vite-plus/bin/vp.exe",
-          "updateArgs": [
-            "upgrade",
-            "{version}"
-          ],
+          "updateArgs": ["upgrade", "{version}"],
           "installUrl": "https://vite.plus/ps1",
           "channel": "stable",
-          "verifyArgs": [
-            "--version"
-          ]
+          "verifyArgs": ["--version"]
         },
         "wsl": {
           "provider": "native",
           "path": "~/.vite-plus/bin/vp",
-          "updateArgs": [
-            "upgrade",
-            "{version}"
-          ],
+          "updateArgs": ["upgrade", "{version}"],
           "installUrl": "https://vite.plus",
           "channel": "stable",
-          "verifyArgs": [
-            "--version"
-          ]
+          "verifyArgs": ["--version"]
         }
       }
     },
@@ -157,27 +125,19 @@
         "windows": {
           "provider": "native",
           "path": "%USERPROFILE%/.herdr/packages/standalone/current/herdr.exe",
-          "updateArgs": [
-            "update"
-          ],
+          "updateArgs": ["update"],
           "installUrl": "https://herdr.dev/install.ps1",
           "channel": "stable",
           "versionFromPath": true,
-          "verifyArgs": [
-            "--version"
-          ]
+          "verifyArgs": ["--version"]
         },
         "wsl": {
           "provider": "native",
           "path": "~/.local/bin/herdr",
-          "updateArgs": [
-            "update"
-          ],
+          "updateArgs": ["update"],
           "installUrl": "https://herdr.dev/install",
           "channel": "stable",
-          "verifyArgs": [
-            "--version"
-          ]
+          "verifyArgs": ["--version"]
         }
       }
     },
@@ -242,9 +202,7 @@
           "asset": "Git-[0-9.]+-64-bit\\.exe",
           "channel": "stable",
           "scope": "machine",
-          "installerArgs": [
-            "/NORESTART"
-          ]
+          "installerArgs": ["/NORESTART"]
         },
         "wsl": {
           "provider": "apt",
@@ -275,9 +233,7 @@
           "asset": "Zed-x86_64\\.exe",
           "channel": "stable",
           "scope": "user",
-          "installerArgs": [
-            "/NORESTART"
-          ]
+          "installerArgs": ["/NORESTART"]
         }
       }
     },
@@ -297,9 +253,7 @@
           "signer": "Anysphere",
           "channel": "stable",
           "scope": "user",
-          "installerArgs": [
-            "/NORESTART"
-          ]
+          "installerArgs": ["/NORESTART"]
         }
       }
     },
@@ -319,9 +273,7 @@
           "hashField": "sha256hash",
           "channel": "stable",
           "scope": "user",
-          "installerArgs": [
-            "/NORESTART"
-          ]
+          "installerArgs": ["/NORESTART"]
         }
       }
     },

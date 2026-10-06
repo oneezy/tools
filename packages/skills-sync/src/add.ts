@@ -20,7 +20,17 @@ export interface AddOptions {
   log: (s: string) => void;
 }
 
-export type AddResult = { ok: true; id: string; entry: Source; plugin: { id: string; entry: Plugin } | null; config: Record<string, unknown>; staged: Staged; found: Map<string, string> } | { ok: false; error: string };
+export type AddResult =
+  | {
+      ok: true;
+      id: string;
+      entry: Source;
+      plugin: { id: string; entry: Plugin } | null;
+      config: Record<string, unknown>;
+      staged: Staged;
+      found: Map<string, string>;
+    }
+  | { ok: false; error: string };
 
 /** owner/repo[#ref], a git URL[#ref], or a local path. */
 export function parseSpec(spec: string): { repo: string; ref?: string } {
@@ -34,7 +44,12 @@ export function parseSpec(spec: string): { repo: string; ref?: string } {
 export function defaultId(repo: string): string {
   const slug = githubSlug(repo);
   const raw = slug ? slug.replace("/", "-") : path.basename(repo.replace(/[\\/]+$/, "")).replace(/\.git$/, "");
-  return raw.toLowerCase().replace(/[^a-z0-9-]+/g, "-").replace(/^-+|-+$/g, "") || "source";
+  return (
+    raw
+      .toLowerCase()
+      .replace(/[^a-z0-9-]+/g, "-")
+      .replace(/^-+|-+$/g, "") || "source"
+  );
 }
 
 export function addSource(lib: Library, spec: string, opts: AddOptions): AddResult {
@@ -43,12 +58,22 @@ export function addSource(lib: Library, spec: string, opts: AddOptions): AddResu
   const config = lib.hasConfig() ? readConfigRaw(lib.configFile) : { version: 1, sources: {}, plugins: {} };
   const sources = (config.sources ?? {}) as Record<string, Source>;
   const id = opts.id ?? defaultId(repo);
-  if (!/^[a-z0-9][a-z0-9-]*$/.test(id)) return { ok: false, error: `source id ${id} must be lowercase letters, digits and dashes; pass --id` };
-  if (sources[id]) return { ok: false, error: `source ${id} is already declared in ${path.basename(lib.configFile)}; edit it there, or pass --id for a second entry` };
+  if (!/^[a-z0-9][a-z0-9-]*$/.test(id))
+    return { ok: false, error: `source id ${id} must be lowercase letters, digits and dashes; pass --id` };
+  if (sources[id])
+    return {
+      ok: false,
+      error: `source ${id} is already declared in ${path.basename(lib.configFile)}; edit it there, or pass --id for a second entry`,
+    };
   const plugins = (config.plugins ?? {}) as Record<string, Plugin>;
-  const pluginId = opts.plugin === false ? null : opts.plugin ?? id;
-  if (pluginId !== null && !/^[a-z0-9][a-z0-9-]*$/.test(pluginId)) return { ok: false, error: `plugin id ${pluginId} must be lowercase letters, digits and dashes; pass --plugin` };
-  if (pluginId !== null && plugins[pluginId]) return { ok: false, error: `plugin ${pluginId} is already declared in ${path.basename(lib.configFile)}; pass --plugin <id> for another name, or --no-plugin` };
+  const pluginId = opts.plugin === false ? null : (opts.plugin ?? id);
+  if (pluginId !== null && !/^[a-z0-9][a-z0-9-]*$/.test(pluginId))
+    return { ok: false, error: `plugin id ${pluginId} must be lowercase letters, digits and dashes; pass --plugin` };
+  if (pluginId !== null && plugins[pluginId])
+    return {
+      ok: false,
+      error: `plugin ${pluginId} is already declared in ${path.basename(lib.configFile)}; pass --plugin <id> for another name, or --no-plugin`,
+    };
   const url = cloneUrl(repo);
   const ref = askedRef ?? defaultBranch(url) ?? "main";
   const r = stage(url, ref, opts.log);
@@ -62,12 +87,21 @@ export function addSource(lib: Library, spec: string, opts: AddOptions): AddResu
   if (!found.size) return fail(`no skill folders under ${root ?? "the root"} of ${repo}; pass --root`);
   const names = !opts.skills || opts.skills === "*" ? [...found.keys()].sort(cmp) : opts.skills;
   const unknown = names.filter((n) => !found.has(n));
-  if (unknown.length) return fail(`not under ${root ?? "the root"} of ${repo}: ${unknown.join(", ")}; it has ${[...found.keys()].sort(cmp).join(", ")}`);
+  if (unknown.length)
+    return fail(
+      `not under ${root ?? "the root"} of ${repo}: ${unknown.join(", ")}; it has ${[...found.keys()].sort(cmp).join(", ")}`,
+    );
   const notSelected = Object.keys(opts.as).filter((n) => !names.includes(n));
   if (notSelected.length) return fail(`--as names skills that are not selected: ${notSelected.join(", ")}`);
   const skills = Object.keys(opts.as).length ? Object.fromEntries(names.map((n) => [n, opts.as[n] ?? n])) : names;
   const attribution = findAttribution(r.staged.dir, root);
-  const entry: Source = { repo, ref, ...(root ? { root } : {}), skills, ...(attribution.length ? { attribution } : {}) };
+  const entry: Source = {
+    repo,
+    ref,
+    ...(root ? { root } : {}),
+    skills,
+    ...(attribution.length ? { attribution } : {}),
+  };
   config.sources = { ...sources, [id]: entry };
   const plugin = pluginId === null ? null : { id: pluginId, entry: { displayName: displayName(pluginId), source: id } };
   if (plugin) config.plugins = { ...plugins, [plugin.id]: plugin.entry };
@@ -76,7 +110,11 @@ export function addSource(lib: Library, spec: string, opts: AddOptions): AddResu
 
 /** frontend-design -> Frontend Design: the plugin's display name until someone writes a better one in the config. */
 function displayName(id: string): string {
-  return id.split("-").filter(Boolean).map((w) => w[0].toUpperCase() + w.slice(1)).join(" ");
+  return id
+    .split("-")
+    .filter(Boolean)
+    .map((w) => w[0].toUpperCase() + w.slice(1))
+    .join(" ");
 }
 
 /**
@@ -89,7 +127,8 @@ function findAttribution(checkout: string, root: string | undefined): string[] {
     dirs.push(d === "." ? "" : d);
     if (d === "." || d === "/") break;
   }
-  const present = (dir: string, names: string[]) => names.map((n) => (dir ? `${dir}/${n}` : n)).filter((f) => fs.existsSync(path.join(checkout, f)));
+  const present = (dir: string, names: string[]) =>
+    names.map((n) => (dir ? `${dir}/${n}` : n)).filter((f) => fs.existsSync(path.join(checkout, f)));
   for (const dir of dirs) {
     const license = present(dir, ["LICENSE", "LICENSE.md", "LICENSE.txt"]);
     if (license.length) return [...license, ...present(dir, ["README.md"])];

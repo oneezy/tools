@@ -57,7 +57,10 @@ describe("toMapData", () => {
   it("groups by plugin, counts merged copies and drops edges to nothing", () => {
     const m = toMapData(
       graph(
-        [node("tdd", "skills/tdd", { copies: ["plugins/p/skills/tdd/SKILL.md"] }), node("ship", "plugins/p/skills/ship", { plugin: "plugin:p" })],
+        [
+          node("tdd", "skills/tdd", { copies: ["plugins/p/skills/tdd/SKILL.md"] }),
+          node("ship", "plugins/p/skills/ship", { plugin: "plugin:p" }),
+        ],
         [
           { source: "ship", target: "tdd", type: "calls", evidence: [] },
           { source: "ship", target: "tdd", type: "calls", evidence: [] },
@@ -77,7 +80,15 @@ describe("toMapData", () => {
 
   it("hangs a skill's files on the skill and counts plugin parts on the group", () => {
     const g = graph([node("ship", "plugins/p/skills/ship", { plugin: "plugin:p" })]);
-    const part = (id: string, kind: PartNode["kind"], extra: Partial<PartNode>): PartNode => ({ id, kind, name: id, description: "", file: id, details: {}, ...extra });
+    const part = (id: string, kind: PartNode["kind"], extra: Partial<PartNode>): PartNode => ({
+      id,
+      kind,
+      name: id,
+      description: "",
+      file: id,
+      details: {},
+      ...extra,
+    });
     g.parts = [
       part("check.sh", "script", { skill: "ship", plugin: "plugin:p" }),
       part("ship-cmd", "command", { plugin: "plugin:p" }),
@@ -92,6 +103,8 @@ describe("toMapData", () => {
   it("boxes a prefix family only when it is part of a bigger group", () => {
     const ws = ["a", "b", "c", "d"].map((x) => node(`writing-${x}`, `skills/w/writing-${x}`));
     expect(toMapData(graph(ws), "r").families).toEqual({});
-    expect(toMapData(graph([...ws, node("tdd", "skills/w/tdd")]), "r").families).toEqual({ "w:writing": { group: "w", prefix: "writing" } });
+    expect(toMapData(graph([...ws, node("tdd", "skills/w/tdd")]), "r").families).toEqual({
+      "w:writing": { group: "w", prefix: "writing" },
+    });
   });
 });

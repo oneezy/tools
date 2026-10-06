@@ -60,9 +60,17 @@ export function archives(lib: Library, config: Config, built: Built[], report: R
     const release = config.releases?.[b.id] ?? null;
     const names = [...entries.keys()].sort(cmp);
     expected.set(name, bytes);
-    plugins[b.id] = { archive: `${path.basename(dir)}/${name}`, sha256: createHash("sha256").update(bytes).digest("hex"), version: b.version, commit: b.commit, files: names, release };
+    plugins[b.id] = {
+      archive: `${path.basename(dir)}/${name}`,
+      sha256: createHash("sha256").update(bytes).digest("hex"),
+      version: b.version,
+      commit: b.commit,
+      files: names,
+      release,
+    };
     const gone = release ? lacking(b.id, release, names) : [];
-    if (gone.length) expected.set(`${b.id}.changes.md`, Buffer.from(changesText(b.id, release!, plugins[b.id], gone), "utf8"));
+    if (gone.length)
+      expected.set(`${b.id}.changes.md`, Buffer.from(changesText(b.id, release!, plugins[b.id], gone), "utf8"));
   }
   expected.set("releases.json", Buffer.from(JSON.stringify({ plugins }, null, 2) + "\n", "utf8"));
 
@@ -79,8 +87,14 @@ export function archives(lib: Library, config: Config, built: Built[], report: R
     const archive = ARCHIVE_RE.exec(n);
     const note = CHANGES_RE.exec(n);
     if (unbuilt.has((archive ?? note)?.[1] ?? "")) continue;
-    if (archive) report.add({ kind: "delete", path: path.join(dir, n), note: "an archive this build does not produce" });
-    else if (note) report.add({ kind: "delete", path: path.join(dir, n), note: "the recorded release holds no file the archive lacks" });
+    if (archive)
+      report.add({ kind: "delete", path: path.join(dir, n), note: "an archive this build does not produce" });
+    else if (note)
+      report.add({
+        kind: "delete",
+        path: path.join(dir, n),
+        note: "the recorded release holds no file the archive lacks",
+      });
   }
 }
 

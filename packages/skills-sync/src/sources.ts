@@ -80,7 +80,13 @@ export function selection(s: Source): Selected[] {
 /** The config, validated against the shipped schema, with the switches, sources and plugins filled in when absent; throws with every problem listed. */
 export function readConfig(file: string): Config {
   const parsed = readConfigRaw(file) as Partial<Config>;
-  return { ...parsed, version: 1, generate: { skills: true, plugins: true, ...parsed.generate }, sources: parsed.sources ?? {}, plugins: parsed.plugins ?? {} };
+  return {
+    ...parsed,
+    version: 1,
+    generate: { skills: true, plugins: true, ...parsed.generate },
+    sources: parsed.sources ?? {},
+    plugins: parsed.plugins ?? {},
+  };
 }
 
 /** The config exactly as the file holds it, validated; what add writes back with one more source. */
@@ -140,7 +146,9 @@ export function findSkills(checkout: string, root: string | undefined, depth = 3
     } catch {
       return;
     }
-    for (const e of entries.filter((x) => x.isDirectory() && x.name !== ".git" && x.name !== "node_modules").sort((a, b) => cmp(a.name, b.name))) {
+    for (const e of entries
+      .filter((x) => x.isDirectory() && x.name !== ".git" && x.name !== "node_modules")
+      .sort((a, b) => cmp(a.name, b.name))) {
       const full = path.join(dir, e.name);
       if (isSkillDir(full)) {
         if (!out.has(e.name)) out.set(e.name, path.relative(checkout, full).split("\\").join("/"));

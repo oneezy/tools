@@ -23,7 +23,12 @@ export interface Tag {
 }
 
 /** The manifests that carry a version, in the order they are looked for in each folder. */
-export const MANIFESTS = [".claude-plugin/plugin.json", ".cursor-plugin/plugin.json", ".codex-plugin/plugin.json", "package.json"];
+export const MANIFESTS = [
+  ".claude-plugin/plugin.json",
+  ".cursor-plugin/plugin.json",
+  ".codex-plugin/plugin.json",
+  "package.json",
+];
 
 const SEMVER = /^(\d+)\.(\d+)\.(\d+)(?:-([0-9A-Za-z.-]+))?(?:\+[0-9A-Za-z.-]+)?$/;
 
@@ -59,7 +64,15 @@ export function compareVersions(a: string, b: string): number {
 
 /** The release tags of a checkout (those naming a semver), each with its peeled commit; only those reachable from `at` when given. */
 export function listTags(dir: string, at?: string): Tag[] {
-  const r = git(["for-each-ref", ...(at ? [`--merged=${at}`] : []), "--format=%(refname:short) %(objectname) %(*objectname)", "refs/tags"], dir);
+  const r = git(
+    [
+      "for-each-ref",
+      ...(at ? [`--merged=${at}`] : []),
+      "--format=%(refname:short) %(objectname) %(*objectname)",
+      "refs/tags",
+    ],
+    dir,
+  );
   if (!r.ok || !r.out) return [];
   const out: Tag[] = [];
   for (const line of r.out.split("\n")) {
@@ -85,7 +98,9 @@ export function tagAt(dir: string, commit: string): (Tag & { ahead: number }) | 
   const stable = reachable.filter((t) => !isPrerelease(t.version));
   // newest first, so a tag whose commit is an ancestor of one already counted (and so strictly farther away) is passed over
   const order = new Map([...graph.keys()].map((c, i) => [c, i]));
-  const candidates = (stable.length ? stable : reachable).filter((t) => order.has(t.commit)).sort((a, b) => order.get(a.commit)! - order.get(b.commit)!);
+  const candidates = (stable.length ? stable : reachable)
+    .filter((t) => order.has(t.commit))
+    .sort((a, b) => order.get(a.commit)! - order.get(b.commit)!);
   const below = new Set<string>(); // proper ancestors of a counted tag's commit
   const counted = new Map<string, number>();
   let best: (Tag & { ahead: number }) | null = null;
@@ -99,7 +114,8 @@ export function tagAt(dir: string, commit: string): (Tag & { ahead: number }) | 
       ahead = graph.size - seen.size;
       counted.set(t.commit, ahead);
     }
-    if (!best || ahead < best.ahead || (ahead === best.ahead && compareVersions(t.version, best.version) > 0)) best = { ...t, ahead };
+    if (!best || ahead < best.ahead || (ahead === best.ahead && compareVersions(t.version, best.version) > 0))
+      best = { ...t, ahead };
   }
   return best;
 }
@@ -135,7 +151,11 @@ function ancestors(graph: Map<string, string[]>, from: string): Set<string> {
  * ("" is the root). The root is relative to the repo root even when written with a leading slash (or a drive).
  */
 export function manifestDirs(root: string | undefined): string[] {
-  const rel = (root ?? "").split("\\").join("/").replace(/^[A-Za-z]:/, "").replace(/^\/+/, "");
+  const rel = (root ?? "")
+    .split("\\")
+    .join("/")
+    .replace(/^[A-Za-z]:/, "")
+    .replace(/^\/+/, "");
   const dirs: string[] = [];
   for (let d = rel ? path.posix.normalize(rel).replace(/\/+$/, "") || "." : "."; ; d = path.posix.dirname(d)) {
     dirs.push(d === "." ? "" : d);
@@ -174,7 +194,22 @@ interface ManifestChange {
  * in one batch) instead of one git show per commit; a commit git shows no patch for (a merge) is read with git show.
  */
 function manifestHistory(dir: string, tip: string, file: string): ManifestChange[] | null {
-  const r = git(["log", "-p", "--unified=1000000", "--no-renames", "--no-color", "--no-ext-diff", "--no-textconv", "--format=%x00%H %P", tip, "--", file], dir);
+  const r = git(
+    [
+      "log",
+      "-p",
+      "--unified=1000000",
+      "--no-renames",
+      "--no-color",
+      "--no-ext-diff",
+      "--no-textconv",
+      "--format=%x00%H %P",
+      tip,
+      "--",
+      file,
+    ],
+    dir,
+  );
   if (!r.ok) return null;
   const out: ManifestChange[] = [];
   for (const entry of r.out.split("\0").slice(1)) {
@@ -185,7 +220,12 @@ function manifestHistory(dir: string, tip: string, file: string): ManifestChange
     if (!hunk) {
       // no patch: a merge, a mode change, or an empty file added; a new file has nothing before it
       const added = lines.some((l) => l.startsWith("new file mode"));
-      out.push({ commit, parent, before: added || !parent ? null : versionIn(dir, parent, file), after: versionIn(dir, commit, file) });
+      out.push({
+        commit,
+        parent,
+        before: added || !parent ? null : versionIn(dir, parent, file),
+        after: versionIn(dir, commit, file),
+      });
       continue;
     }
     // the hunk spans the whole file on both sides: context and - lines are the file before, context and + lines after
@@ -205,7 +245,11 @@ function manifestHistory(dir: string, tip: string, file: string): ManifestChange
 }
 
 /** The nearest manifest at or above `root` that carries a version at `commit`, with that version. */
-export function manifestVersionAt(dir: string, commit: string, root: string | undefined): { file: string; version: string } | null {
+export function manifestVersionAt(
+  dir: string,
+  commit: string,
+  root: string | undefined,
+): { file: string; version: string } | null {
   for (const d of manifestDirs(root)) {
     for (const m of MANIFESTS) {
       const file = d ? `${d}/${m}` : m;
@@ -264,7 +308,9 @@ export function listVersions(dir: string, tip: string, root: string | undefined)
       const have = byVersion.get(t.version);
       if (!have || (plain(t) && !plain(have))) byVersion.set(t.version, t);
     }
-    return [...byVersion.values()].map((t) => ({ version: t.version, commit: t.commit })).sort((a, b) => compareVersions(b.version, a.version));
+    return [...byVersion.values()]
+      .map((t) => ({ version: t.version, commit: t.commit }))
+      .sort((a, b) => compareVersions(b.version, a.version));
   }
   const manifest = manifestVersionAt(dir, tip, root);
   if (!manifest) return [];
@@ -282,22 +328,38 @@ export function listVersions(dir: string, tip: string, root: string | undefined)
     last = v;
     newer = c;
   }
-  return [...out].map(([version, commit]) => ({ version, commit })).sort((a, b) => compareVersions(b.version, a.version));
+  return [...out]
+    .map(([version, commit]) => ({ version, commit }))
+    .sort((a, b) => compareVersions(b.version, a.version));
 }
 
 /**
  * What `versions` lists: the releases on the history of `ref` (a clone staged and discarded here), highest first, each
  * with its commit's date, and where `locked` (the lock's commit) stands among them when the clone has it.
  */
-export function releasesOf(url: string, ref: string, root: string | undefined, locked: string | null, log: (s: string) => void): { ok: true; releases: Array<Release & { date: string }>; current: (SourceVersion & { commit: string }) | null } | { ok: false; error: string } {
+export function releasesOf(
+  url: string,
+  ref: string,
+  root: string | undefined,
+  locked: string | null,
+  log: (s: string) => void,
+):
+  | { ok: true; releases: Array<Release & { date: string }>; current: (SourceVersion & { commit: string }) | null }
+  | { ok: false; error: string } {
   const r = stage(url, ref, log);
   if (!r.ok) return r;
   try {
     const dir = r.staged.dir;
     const listed = listVersions(dir, r.staged.commit, root);
-    const dates = commitDates(dir, listed.map((x) => x.commit));
+    const dates = commitDates(
+      dir,
+      listed.map((x) => x.commit),
+    );
     const releases = listed.map((x) => ({ ...x, date: dates.get(x.commit) ?? "" }));
-    const current = locked && git(["cat-file", "-e", `${locked}^{commit}`], dir).ok ? { ...resolveVersion(dir, locked, root), commit: locked } : null;
+    const current =
+      locked && git(["cat-file", "-e", `${locked}^{commit}`], dir).ok
+        ? { ...resolveVersion(dir, locked, root), commit: locked }
+        : null;
     return { ok: true, releases, current };
   } finally {
     discard(r.staged);
@@ -308,11 +370,21 @@ export function releasesOf(url: string, ref: string, root: string | undefined, l
 function commitDates(dir: string, commits: string[]): Map<string, string> {
   if (!commits.length) return new Map();
   const r = git(["log", "--no-walk=unsorted", "--stdin", "--format=%H %cI"], dir, commits.join("\n") + "\n");
-  return new Map(r.out.split("\n").map((l) => { const [c, d] = l.trim().split(" "); return [c, isoDate(d ?? "")] as [string, string]; }));
+  return new Map(
+    r.out.split("\n").map((l) => {
+      const [c, d] = l.trim().split(" ");
+      return [c, isoDate(d ?? "")] as [string, string];
+    }),
+  );
 }
 
 /** How a source's version reads in output: `1.3.1`, `1.3.1 (+4 commits)`, or `<date> <short commit>` without a version. */
-export function versionLabel(v: { version: string | null; ahead: number | null; commit: string; date: string }): string {
+export function versionLabel(v: {
+  version: string | null;
+  ahead: number | null;
+  commit: string;
+  date: string;
+}): string {
   if (v.version === null) return `${v.date.slice(0, 10)} ${v.commit.slice(0, 7)}`;
   return `${v.version}${commitsPast(v.ahead)}`;
 }

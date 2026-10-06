@@ -79,7 +79,11 @@ export class Library {
     const taken = new Map<string, string>();
     const add = (name: string, dir: string, plugin: string | null) => {
       const first = taken.get(name);
-      if (first) out.ignored.push({ path: dir, note: `same name as ${path.relative(this.root, first).replace(/\\/g, "/")}, which wins; ignored` });
+      if (first)
+        out.ignored.push({
+          path: dir,
+          note: `same name as ${path.relative(this.root, first).replace(/\\/g, "/")}, which wins; ignored`,
+        });
       else {
         taken.set(name, dir);
         out.skills.push({ name, dir, plugin });
@@ -94,7 +98,11 @@ export class Library {
       for (const c of folders(dir)) {
         const child = path.join(dir, c);
         if (isSkillDir(child)) add(c, child, n);
-        else out.ignored.push({ path: child, note: "no SKILL.md: not a skill, and only folders directly under skills/ are groups; ignored" });
+        else
+          out.ignored.push({
+            path: child,
+            note: "no SKILL.md: not a skill, and only folders directly under skills/ are groups; ignored",
+          });
       }
     }
     out.skills.sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
@@ -223,7 +231,8 @@ export interface RestoreResult {
 }
 
 function cloneUrl(e: LockEntry): string | null {
-  if (e.sourceType === "github") return `https://github.com/${e.source.replace(/^https?:\/\/github\.com\//, "").replace(/\.git$/, "")}.git`;
+  if (e.sourceType === "github")
+    return `https://github.com/${e.source.replace(/^https?:\/\/github\.com\//, "").replace(/\.git$/, "")}.git`;
   if (e.sourceType === "git" || e.sourceType === "gitlab") return e.sourceUrl ?? null;
   return null;
 }
@@ -269,7 +278,11 @@ export function findLibrary(from: string, env = process.env, home = os.homedir()
 }
 
 /** Clone `owner/repo` (or a URL) into ~/.skills-sync. */
-export function cloneLibrary(source: string, home = os.homedir(), log: (s: string) => void = () => undefined): { ok: boolean; root: string; error?: string } {
+export function cloneLibrary(
+  source: string,
+  home = os.homedir(),
+  log: (s: string) => void = () => undefined,
+): { ok: boolean; root: string; error?: string } {
   const root = homeLibrary(home);
   const url = /^(https?:|git@|ssh:)/.test(source) ? source : `https://github.com/${source.replace(/\.git$/, "")}.git`;
   log(`no skills library here yet; cloning ${url} into ${root}`);
@@ -284,7 +297,12 @@ export function cloneLibrary(source: string, home = os.homedir(), log: (s: strin
  * them alone never counts as dirty. Each is put at HEAD so the pull can replace it, and put back as it was when
  * the pull fails: the refresh that follows a pull writes it again, and a frozen one reads it.
  */
-export function pullLibrary(root: string, minutes: number, log: (s: string) => void, regenerated: string[] = []): "pulled" | "skipped" | "dirty" | "failed" | "throttled" {
+export function pullLibrary(
+  root: string,
+  minutes: number,
+  log: (s: string) => void,
+  regenerated: string[] = [],
+): "pulled" | "skipped" | "dirty" | "failed" | "throttled" {
   const stamp = path.join(root, ".git", "skills-sync-pulled");
   try {
     const last = fs.statSync(stamp).mtimeMs;
@@ -296,9 +314,15 @@ export function pullLibrary(root: string, minutes: number, log: (s: string) => v
   const status = spawnSync("git", ["-C", root, "status", "--porcelain", "--untracked-files=no"], { encoding: "utf8" });
   if (status.status !== 0) return "skipped";
   // porcelain v1: two status letters, a space, the path (relative to the repository root, which the library is)
-  const changed = status.stdout.split("\n").filter(Boolean).map((l) => l.slice(3).trim());
+  const changed = status.stdout
+    .split("\n")
+    .filter(Boolean)
+    .map((l) => l.slice(3).trim());
   if (changed.some((f) => !regenerated.includes(f))) return "dirty";
-  const saved = changed.map((f) => [path.join(root, f), fs.existsSync(path.join(root, f)) ? fs.readFileSync(path.join(root, f)) : null] as const);
+  const saved = changed.map(
+    (f) =>
+      [path.join(root, f), fs.existsSync(path.join(root, f)) ? fs.readFileSync(path.join(root, f)) : null] as const,
+  );
   if (changed.length) spawnSync("git", ["-C", root, "checkout", "--", ...changed], { encoding: "utf8" });
   const r = spawnSync("git", ["-C", root, "pull", "--ff-only", "--quiet"], { encoding: "utf8", timeout: 20_000 });
   try {

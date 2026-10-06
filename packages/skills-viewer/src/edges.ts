@@ -15,27 +15,58 @@ export interface Mention {
 }
 
 const NAME = "[a-z](?:[a-z0-9-]*[a-z0-9])?";
-const STOP = new Set(["the","a","an","this","that","each","every","other","whole","same","any","one","engineering","new","first","next","right","own","wrong"]);
+const STOP = new Set([
+  "the",
+  "a",
+  "an",
+  "this",
+  "that",
+  "each",
+  "every",
+  "other",
+  "whole",
+  "same",
+  "any",
+  "one",
+  "engineering",
+  "new",
+  "first",
+  "next",
+  "right",
+  "own",
+  "wrong",
+]);
 
 /** Ordered: earlier detectors consume their span so later ones cannot double-count it. */
 const DETECTORS: Array<{ pattern: string; re: RegExp; group: number }> = [
   { pattern: "skill-tool", re: /Skill tool[^.\n]{0,160}/gi, group: 0 }, // handled specially: all "quoted" names inside
   { pattern: "link", re: new RegExp(`\\]\\([^)]*?(${NAME})/SKILL\\.md[^)]*\\)`, "gi"), group: 1 },
   { pattern: "skill-uri", re: new RegExp(`skill://(${NAME})`, "gi"), group: 1 },
-  { pattern: "prose", re: new RegExp(`\\b(?:the|call|calls|use|uses|invoke|invokes|run|runs|via|with|through)\\s+\`?/?(${NAME})\`?\\s+skill\\b`, "gi"), group: 1 },
+  {
+    pattern: "prose",
+    re: new RegExp(
+      `\\b(?:the|call|calls|use|uses|invoke|invokes|run|runs|via|with|through)\\s+\`?/?(${NAME})\`?\\s+skill\\b`,
+      "gi",
+    ),
+    group: 1,
+  },
   { pattern: "slash", re: new RegExp(`(?<![\\w/.:~\\\\-])/(${NAME})(?![\\w/.-])`, "g"), group: 1 },
   { pattern: "dollar", re: new RegExp(`(?<![\\w])\\$(${NAME})(?![\\w/.-])`, "g"), group: 1 },
   { pattern: "at", re: new RegExp(`(?<![\\w.@/])@(${NAME})(?![\\w/.@-])`, "g"), group: 1 },
   { pattern: "backtick", re: new RegExp(`\`(${NAME})\``, "g"), group: 1 },
 ];
 
-const PREREQ = /\b(if not,? (?:tell|ask|run)|if (?:it |that |this |they )?(?:has ?n[o']t|hasn't|isn't|is not|are not|aren't|have ?n[o']t|haven't)\b|not been (?:provided|run|set up|installed|done)|missing|prerequisite|prereq|before (?:you|we|your|any|the first|starting|continuing)|run .{0,25}\bfirst\b|requires? (?:running|that you run|you to run)|should have been|must (?:have|already|first)|already (?:run|ran|been))\b/i;
+const PREREQ =
+  /\b(if not,? (?:tell|ask|run)|if (?:it |that |this |they )?(?:has ?n[o']t|hasn't|isn't|is not|are not|aren't|have ?n[o']t|haven't)\b|not been (?:provided|run|set up|installed|done)|missing|prerequisite|prereq|before (?:you|we|your|any|the first|starting|continuing)|run .{0,25}\bfirst\b|requires? (?:running|that you run|you to run)|should have been|must (?:have|already|first)|already (?:run|ran|been))\b/i;
 const PREREQ_AFTER = /^\W{0,3}(?:first|before|beforehand)\b/i;
-const SUGGEST = /\b(tell the (?:user|human)|ask the (?:user|human)|suggest|recommend|user (?:can|may|should|might|will|then)|human (?:can|may|should)|offer|consider|optionally|may want|hand ?off to|hand-off to|when (?:done|finished)|afterwards|next step|follow ?up|the user (?:runs|invokes))\b/i;
+const SUGGEST =
+  /\b(tell the (?:user|human)|ask the (?:user|human)|suggest|recommend|user (?:can|may|should|might|will|then)|human (?:can|may|should)|offer|consider|optionally|may want|hand ?off to|hand-off to|when (?:done|finished)|afterwards|next step|follow ?up|the user (?:runs|invokes))\b/i;
 /** the mention is the subject of a sentence that describes it: "/x sharpens the idea", "/x is for ..." */
-const DESCRIBES = /^\W{0,6}(?:is|are|was|does|sharpens|works|comes|runs|moves|builds|turns|helps|handles|takes|learns|delegates|answers|makes|gives|lets|reads|writes|records|keeps|finds|sets|guides|walks|reviews|plans|charts|resolves|investigates|generates|creates|produces|migrates|scaffolds|grills|renders|drives|covers|reports|for\b|when\b|if\b|to\b|:)/i;
+const DESCRIBES =
+  /^\W{0,6}(?:is|are|was|does|sharpens|works|comes|runs|moves|builds|turns|helps|handles|takes|learns|delegates|answers|makes|gives|lets|reads|writes|records|keeps|finds|sets|guides|walks|reviews|plans|charts|resolves|investigates|generates|creates|produces|migrates|scaffolds|grills|renders|drives|covers|reports|for\b|when\b|if\b|to\b|:)/i;
 const ROUTES = /(?:→|->|=>|⇒)\s*\W{0,4}$/;
-const VERB_NEAR = /\b(call|calls|calling|invoke|invokes|invoking|run|runs|running|use|uses|using|dispatch|delegate|delegates|spin up|launch|launches|start|trigger|apply|follow|load|loads|execute|switch to|go to|enter|drive|driving|via|with|through)\b(?:\W{1,3}(?:the|a|an))?\W{0,25}$/i;
+const VERB_NEAR =
+  /\b(call|calls|calling|invoke|invokes|invoking|run|runs|running|use|uses|using|dispatch|delegate|delegates|spin up|launch|launches|start|trigger|apply|follow|load|loads|execute|switch to|go to|enter|drive|driving|via|with|through)\b(?:\W{1,3}(?:the|a|an))?\W{0,25}$/i;
 
 const RANK: Record<EdgeType, number> = { calls: 3, prerequisite: 2, suggests: 1, reference: 0 };
 
@@ -64,7 +95,13 @@ export function detect(skills: Doc[], modes: Map<string, Mode>): DetectResult {
   const hyphenated: Array<[string, string]> = [
     ...skills.filter((s) => !s.part && s.id.includes("-")).map((s): [string, string] => [s.id, s.id]),
     ...skills
-      .filter((s) => s.part && s.name.includes("-") && new RegExp(`^${NAME}$`).test(s.name) && byName.get(s.name.toLowerCase()) === s.id)
+      .filter(
+        (s) =>
+          s.part &&
+          s.name.includes("-") &&
+          new RegExp(`^${NAME}$`).test(s.name) &&
+          byName.get(s.name.toLowerCase()) === s.id,
+      )
       .map((s): [string, string] => [s.name, s.id]),
   ];
 
@@ -106,13 +143,18 @@ export function detect(skills: Doc[], modes: Map<string, Mode>): DetectResult {
   for (const e of edgeMap.values()) {
     if ((outDegree.get(e.source)?.size ?? 0) >= ROUTER_MIN) {
       for (const ev of e.evidence) if (ev.type === "calls" && ev.pattern !== "skill-tool") ev.type = "suggests";
-      e.type = e.evidence.reduce<EdgeType>((t, ev) => (RANK[ev.type ?? "reference"] > RANK[t] ? (ev.type as EdgeType) : t), "reference");
+      e.type = e.evidence.reduce<EdgeType>(
+        (t, ev) => (RANK[ev.type ?? "reference"] > RANK[t] ? (ev.type as EdgeType) : t),
+        "reference",
+      );
     }
     e.evidence.sort((a, b) => RANK[b.type ?? "reference"] - RANK[a.type ?? "reference"] || a.line - b.line);
     e.type = dominantType(e.evidence);
     if (e.type === "calls" && modes.get(e.target) === "manual") e.warning = "manual-target";
   }
-  const edges = [...edgeMap.values()].sort((a, b) => a.source.localeCompare(b.source) || a.target.localeCompare(b.target));
+  const edges = [...edgeMap.values()].sort(
+    (a, b) => a.source.localeCompare(b.source) || a.target.localeCompare(b.target),
+  );
   const unresolved = [...unresolvedMap.values()].sort((a, b) => b.count - a.count || a.name.localeCompare(b.name));
   return { edges, flows, unresolved, mentions };
 }
@@ -183,14 +225,32 @@ function mentionsIn(s: Doc, byName: Map<string, string>, hyphenated: Array<[stri
         const end = start + name.length;
         if (!free(start, end)) continue;
         consumed.push([start, end]);
-        out.push({ source: s.id, target: id, rawName: name, line: lineNo, col: start, end, pattern: "bare", type: classify(text, start, end, "bare") });
+        out.push({
+          source: s.id,
+          target: id,
+          rawName: name,
+          line: lineNo,
+          col: start,
+          end,
+          pattern: "bare",
+          type: classify(text, start, end, "bare"),
+        });
       }
     }
   });
   return out.sort((a, b) => a.line - b.line || a.col - b.col);
 }
 
-function make(source: string, raw: string, byName: Map<string, string>, line: number, col: number, end: number, pattern: string, type: EdgeType): Mention {
+function make(
+  source: string,
+  raw: string,
+  byName: Map<string, string>,
+  line: number,
+  col: number,
+  end: number,
+  pattern: string,
+  type: EdgeType,
+): Mention {
   return { source, target: byName.get(raw.toLowerCase()) ?? null, rawName: raw, line, col, end, pattern, type };
 }
 
@@ -229,8 +289,10 @@ interface Block {
   listId: number;
 }
 
-const PARALLEL = /\b(in parallel|parallel|concurrent(?:ly)?|simultaneous(?:ly)?|fans? out|fanned out|at once|at the same time)\b/i;
-const LOOP = /\b(until|loop|repeat(?:ed|s|edly)?|iterate|each round|every round|keep (?:going|asking|running)|one at a time)\b/i;
+const PARALLEL =
+  /\b(in parallel|parallel|concurrent(?:ly)?|simultaneous(?:ly)?|fans? out|fanned out|at once|at the same time)\b/i;
+const LOOP =
+  /\b(until|loop|repeat(?:ed|s|edly)?|iterate|each round|every round|keep (?:going|asking|running)|one at a time)\b/i;
 const UNTIL = /\buntil\s+([^.;:\n]{3,90})/i;
 
 /** Split a body into paragraphs and ordered-list items, tracking file line numbers. */
@@ -296,7 +358,10 @@ function blocksOf(s: Doc): Block[] {
 function flowsIn(s: Doc, mentions: Mention[]): Flow[] {
   const flows: Flow[] = [];
   const blocks = blocksOf(s);
-  const inBlock = (b: Block) => mentions.filter((m) => m.target && m.target !== s.id && m.line >= b.start && m.line <= b.end && m.type !== "reference");
+  const inBlock = (b: Block) =>
+    mentions.filter(
+      (m) => m.target && m.target !== s.id && m.line >= b.start && m.line <= b.end && m.type !== "reference",
+    );
   const seen = new Set<string>();
   const covered = (steps: string[]) => flows.some((f) => f.kind === "sequential" && isSubsequence(steps, f.steps));
   const add = (kind: FlowKind, steps: string[], label: string, ev: Evidence[], until?: string) => {
@@ -310,8 +375,12 @@ function flowsIn(s: Doc, mentions: Mention[]): Flow[] {
   };
   const evidence = (b: Block, ms: Mention[]): Evidence[] => {
     const firstLine = b.text.split("\n")[0].trim();
-    const ev: Evidence[] = [{ line: b.start, snippet: firstLine.length > 220 ? firstLine.slice(0, 217) + "..." : firstLine, pattern: "flow" }];
-    for (const m of ms) if (!ev.some((e) => e.line === m.line)) ev.push({ line: m.line, snippet: trimLine(s, m.line), pattern: m.pattern });
+    const ev: Evidence[] = [
+      { line: b.start, snippet: firstLine.length > 220 ? firstLine.slice(0, 217) + "..." : firstLine, pattern: "flow" },
+    ];
+    for (const m of ms)
+      if (!ev.some((e) => e.line === m.line))
+        ev.push({ line: m.line, snippet: trimLine(s, m.line), pattern: m.pattern });
     return ev;
   };
 
@@ -334,7 +403,10 @@ function flowsIn(s: Doc, mentions: Mention[]): Flow[] {
     const ms = inBlock(b);
     if (ms.length < 2) continue;
     const distinct = [...new Set(ms.map((m) => m.target as string))];
-    if (distinct.length >= 2 && /\b(then|after that|next|once .{3,40} (?:done|complete|resolved)|followed by)\b/i.test(b.text)) {
+    if (
+      distinct.length >= 2 &&
+      /\b(then|after that|next|once .{3,40} (?:done|complete|resolved)|followed by)\b/i.test(b.text)
+    ) {
       add("sequential", distinct, `${s.name}: then`, evidence(b, ms));
     }
   }
@@ -343,7 +415,8 @@ function flowsIn(s: Doc, mentions: Mention[]): Flow[] {
     const ms = inBlock(b);
     if (ms.length === 0) continue;
     // a menu entry ("- **Title** (**skill**). When to use it.") describes the skill, not a flow
-    if (/^\s*(?:[-*+]|\d+[.)])\s*\*\*[^*]{1,60}\*\*\s*[(:—–-]?\s*\*{0,2}`?[a-z][a-z0-9-]*`?\*{0,2}\)?\./.test(b.text)) continue;
+    if (/^\s*(?:[-*+]|\d+[.)])\s*\*\*[^*]{1,60}\*\*\s*[(:—–-]?\s*\*{0,2}`?[a-z][a-z0-9-]*`?\*{0,2}\)?\./.test(b.text))
+      continue;
     // only mentions within ~160 chars of the cue word belong to the flow
     const lines = b.text.split("\n");
     const offsetOf = (x: Mention) => lines.slice(0, x.line - b.start).reduce((n, l) => n + l.length + 1, 0) + x.col;
@@ -363,11 +436,18 @@ function flowsIn(s: Doc, mentions: Mention[]): Flow[] {
       return ms.filter((x) => offsetOf(x) - m.index <= 160).slice(0, 1);
     };
     const par = nearCue(PARALLEL);
-    if (par.length) add("parallel", [...new Set(par.map((m) => m.target as string))], `${s.name}: in parallel`, evidence(b, par));
+    if (par.length)
+      add("parallel", [...new Set(par.map((m) => m.target as string))], `${s.name}: in parallel`, evidence(b, par));
     const loop = subjectOf(LOOP);
     if (loop.length) {
       const u = UNTIL.exec(cueText)?.[1];
-      add("loop", [...new Set(loop.map((m) => m.target as string))], u ? `loop until ${u.trim()}` : `${s.name}: loop`, evidence(b, loop), u);
+      add(
+        "loop",
+        [...new Set(loop.map((m) => m.target as string))],
+        u ? `loop until ${u.trim()}` : `${s.name}: loop`,
+        evidence(b, loop),
+        u,
+      );
     }
   }
   return flows;

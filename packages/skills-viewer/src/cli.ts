@@ -45,7 +45,16 @@ interface Args {
 }
 
 function parseArgs(argv: string[]): Args {
-  const a: Args = { paths: [], out: "skills-graph", open: true, watch: false, host: false, port: 4173, json: false, via: "tarball" };
+  const a: Args = {
+    paths: [],
+    out: "skills-graph",
+    open: true,
+    watch: false,
+    host: false,
+    port: 4173,
+    json: false,
+    via: "tarball",
+  };
   for (let i = 0; i < argv.length; i++) {
     const x = argv[i];
     if (x === "-h" || x === "--help") {
@@ -115,7 +124,10 @@ async function mainGitHub(args: Args, remote: NonNullable<ReturnType<typeof pars
   }
   const html = renderHtml(graph, { title: args.title ?? `${remote.owner}/${remote.repo}` });
   const src = graph.meta.source;
-  const label = src.kind === "github" ? `${src.owner}/${src.repo}@${src.sha?.slice(0, 7) ?? src.ref}${src.subpath ? "/" + src.subpath : ""}` : "";
+  const label =
+    src.kind === "github"
+      ? `${src.owner}/${src.repo}@${src.sha?.slice(0, 7) ?? src.ref}${src.subpath ? "/" + src.subpath : ""}`
+      : "";
   const out = writeOutputs(args, graph, html, label);
   if (args.open) openInBrowser(path.join(out, "graph.html"));
 }
@@ -129,17 +141,31 @@ function writeOutputs(args: Args, graph: Graph, html: string, from: string): str
   fs.writeFileSync(path.join(out, "graph.html"), html);
   const entries = graph.nodes.filter((n) => n.entry).map((n) => n.name);
   const warnings = graph.edges.filter((e) => e.warning).length;
-  const plugins = graph.meta.pluginCount ? `, ${graph.meta.pluginCount} plugins, ${graph.meta.partCount} parts` : graph.meta.partCount ? `, ${graph.meta.partCount} parts` : "";
-  log(`${graph.meta.skillCount} skills, ${graph.meta.edgeCount} edges, ${graph.meta.flowCount} flows${plugins} from ${from}`);
-  log(`entry points: ${entries.join(", ") || "none"}${warnings ? ` · ${warnings} edge(s) call a manual-only skill ⚠` : ""}`);
+  const plugins = graph.meta.pluginCount
+    ? `, ${graph.meta.pluginCount} plugins, ${graph.meta.partCount} parts`
+    : graph.meta.partCount
+      ? `, ${graph.meta.partCount} parts`
+      : "";
+  log(
+    `${graph.meta.skillCount} skills, ${graph.meta.edgeCount} edges, ${graph.meta.flowCount} flows${plugins} from ${from}`,
+  );
+  log(
+    `entry points: ${entries.join(", ") || "none"}${warnings ? ` · ${warnings} edge(s) call a manual-only skill ⚠` : ""}`,
+  );
   for (const w of graph.meta.warnings) log(`warning: ${w}`);
-  log(`wrote ${relative(path.join(out, "graph.json"))}, ${relative(path.join(out, "graph.mmd"))}, ${relative(path.join(out, "graph.html"))}`);
+  log(
+    `wrote ${relative(path.join(out, "graph.json"))}, ${relative(path.join(out, "graph.mmd"))}, ${relative(path.join(out, "graph.html"))}`,
+  );
   return out;
 }
 
 function openInBrowser(target: string) {
   const [cmd, cmdArgs] =
-    process.platform === "win32" ? ["cmd", ["/c", "start", "", target]] : process.platform === "darwin" ? ["open", [target]] : ["xdg-open", [target]];
+    process.platform === "win32"
+      ? ["cmd", ["/c", "start", "", target]]
+      : process.platform === "darwin"
+        ? ["open", [target]]
+        : ["xdg-open", [target]];
   try {
     spawn(cmd, cmdArgs, { stdio: "ignore", detached: true }).unref();
   } catch {

@@ -34,7 +34,9 @@ export function crc32(bytes: Buffer): number {
  * the files alone, never on the order they were read in or the machine they were read on.
  */
 export function zip(files: Map<string, Buffer>): Buffer {
-  const entries = [...files].map(([name, data]) => ({ name: Buffer.from(name.split("\\").join("/"), "utf8"), data })).sort((a, b) => cmp(a.name.toString("utf8"), b.name.toString("utf8")));
+  const entries = [...files]
+    .map(([name, data]) => ({ name: Buffer.from(name.split("\\").join("/"), "utf8"), data }))
+    .sort((a, b) => cmp(a.name.toString("utf8"), b.name.toString("utf8")));
   if (entries.length > MAX_ENTRIES) throw new Error(`${entries.length} files are more than a ZIP holds without ZIP64`);
   const locals: Buffer[] = [];
   const central: Buffer[] = [];
