@@ -7,7 +7,7 @@ import { createHash } from "node:crypto";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { after, before, beforeEach, test } from "node:test";
+import { afterAll, beforeAll, beforeEach, test } from "vite-plus/test";
 import { isLink, lexists } from "../src/fs.js";
 import { Library } from "../src/library.js";
 
@@ -17,7 +17,7 @@ let homeDir: string;
 let tmpDir: string;
 let up: Upstream;
 
-const CLI = path.resolve(import.meta.dirname, "..", "src", "cli.js");
+const CLI = path.resolve(import.meta.dirname, "..", "dist", "src", "cli.js");
 const HARNESS_ENV = ["CLAUDE_CONFIG_DIR", "CODEX_HOME", "XDG_CONFIG_HOME", "HERMES_HOME"] as const;
 
 /**
@@ -103,10 +103,10 @@ function changes(r: { stdout: string }): Array<{ kind: string; path: string }> {
 
 const body = (name: string) => fs.readFileSync(path.join(lib.agents, name, "SKILL.md"), "utf8");
 
-before(() => {
+beforeAll(() => {
   base = fs.mkdtempSync(path.join(os.tmpdir(), "skills-sync-sources-"));
 });
-after(() => {
+afterAll(() => {
   fs.rmSync(base, { recursive: true, force: true });
 });
 beforeEach(() => {

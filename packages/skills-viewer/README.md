@@ -89,7 +89,7 @@ const graph = await loadGitHub("https://github.com/mattpocock/skills", { via: "t
 
 ```
 pnpm build      # tsc
-pnpm test       # node:test against fixtures/mattpocock-skills and fixtures/plugin-library
+pnpm test       # tsc, then vp test (Vitest) against fixtures/mattpocock-skills and fixtures/plugin-library
 pnpm fixture    # regenerate examples/mattpocock
 ```
 

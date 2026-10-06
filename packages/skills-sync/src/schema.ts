@@ -7,7 +7,15 @@ export type Schema = Record<string, any>;
 
 /** The schema files this package ships, by name (skills-sync for the config, skills-sync.local for this machine's answers, flow for flow.yaml). */
 export function shippedSchema(name: string): Schema {
-  return JSON.parse(fs.readFileSync(path.join(import.meta.dirname, "..", "..", "schemas", `${name}.schema.json`), "utf8")) as Schema;
+  return JSON.parse(fs.readFileSync(path.join(packageRoot(), "schemas", `${name}.schema.json`), "utf8")) as Schema;
+}
+
+/** This package's folder: the nearest one above this file with a package.json (dist/src when built, src under vp test). */
+function packageRoot(): string {
+  for (let dir = import.meta.dirname; ; dir = path.dirname(dir)) {
+    if (fs.existsSync(path.join(dir, "package.json"))) return dir;
+    if (path.dirname(dir) === dir) return path.resolve(import.meta.dirname, "..", "..");
+  }
 }
 
 /** Validate `value` against `schema`; the empty list means valid. */

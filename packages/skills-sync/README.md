@@ -278,7 +278,7 @@ Commands: `sync` (default), `status`, `unlink` (remove every link this tool made
 
 ```
 pnpm install && pnpm build
-pnpm test          # node:test on temp folders and temp git repos standing in for upstream; symlinks where the machine allows them, junctions otherwise
+pnpm test          # tsc, then vp test (Vitest) on temp folders and temp git repos standing in for upstream; symlinks where the machine allows them, junctions otherwise
 node dist/src/cli.js --repo <library> --plan
 ```
 

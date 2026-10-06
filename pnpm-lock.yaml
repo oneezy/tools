@@ -239,6 +239,9 @@ importers:
       typescript:
         specifier: ^5.9.0
         version: 5.9.3
+      vite-plus:
+        specifier: 1.0.0
+        version: 1.0.0(@types/node@24.19.0)(@vitest/ui@5.0.1)(svelte@5.57.1)(typescript@5.9.3)(yaml@2.9.1)
 
   packages/skills-viewer:
     dependencies:
@@ -252,6 +255,9 @@ importers:
       typescript:
         specifier: ^5.9.0
         version: 5.9.3
+      vite-plus:
+        specifier: 1.0.0
+        version: 1.0.0(@types/node@24.19.0)(@vitest/ui@5.0.1)(svelte@5.57.1)(typescript@5.9.3)(yaml@2.9.1)
 
   packages/task-manager: {}
 
@@ -2041,6 +2047,28 @@ snapshots:
       convert-source-map: 2.0.0
       tinyrainbow: 3.2.0
 
+  '@voidzero-dev/vite-plus-core@1.0.0(@types/node@24.19.0)(typescript@5.9.3)(yaml@2.9.1)':
+    dependencies:
+      '@oxc-project/runtime': 0.151.0
+      '@oxc-project/types': 0.151.0
+      lightningcss: 1.33.0
+      postcss: 8.5.28
+      yuku-codegen: 0.9.5
+      yuku-parser: 0.9.5
+    optionalDependencies:
+      '@types/node': 24.19.0
+      '@voidzero-dev/vite-plus-darwin-arm64': 1.0.0
+      '@voidzero-dev/vite-plus-darwin-x64': 1.0.0
+      '@voidzero-dev/vite-plus-linux-arm64-gnu': 1.0.0
+      '@voidzero-dev/vite-plus-linux-arm64-musl': 1.0.0
+      '@voidzero-dev/vite-plus-linux-x64-gnu': 1.0.0
+      '@voidzero-dev/vite-plus-linux-x64-musl': 1.0.0
+      '@voidzero-dev/vite-plus-win32-arm64-msvc': 1.0.0
+      '@voidzero-dev/vite-plus-win32-x64-msvc': 1.0.0
+      fsevents: 2.3.3
+      typescript: 5.9.3
+      yaml: 2.9.1
+
   '@voidzero-dev/vite-plus-core@1.0.0(@types/node@24.19.0)(typescript@6.0.3)(yaml@2.9.1)':
     dependencies:
       '@oxc-project/runtime': 0.151.0
@@ -2444,6 +2472,32 @@ snapshots:
 
   obug@2.2.1: {}
 
+  oxfmt@0.70.0(svelte@5.57.1)(vite-plus@1.0.0(@types/node@24.19.0)(@vitest/ui@5.0.1)(svelte@5.57.1)(typescript@5.9.3)(yaml@2.9.1)):
+    dependencies:
+      tinypool: 2.1.2
+    optionalDependencies:
+      '@oxfmt/binding-android-arm-eabi': 0.70.0
+      '@oxfmt/binding-android-arm64': 0.70.0
+      '@oxfmt/binding-darwin-arm64': 0.70.0
+      '@oxfmt/binding-darwin-x64': 0.70.0
+      '@oxfmt/binding-freebsd-x64': 0.70.0
+      '@oxfmt/binding-linux-arm-gnueabihf': 0.70.0
+      '@oxfmt/binding-linux-arm-musleabihf': 0.70.0
+      '@oxfmt/binding-linux-arm64-gnu': 0.70.0
+      '@oxfmt/binding-linux-arm64-musl': 0.70.0
+      '@oxfmt/binding-linux-ppc64-gnu': 0.70.0
+      '@oxfmt/binding-linux-riscv64-gnu': 0.70.0
+      '@oxfmt/binding-linux-riscv64-musl': 0.70.0
+      '@oxfmt/binding-linux-s390x-gnu': 0.70.0
+      '@oxfmt/binding-linux-x64-gnu': 0.70.0
+      '@oxfmt/binding-linux-x64-musl': 0.70.0
+      '@oxfmt/binding-openharmony-arm64': 0.70.0
+      '@oxfmt/binding-win32-arm64-msvc': 0.70.0
+      '@oxfmt/binding-win32-ia32-msvc': 0.70.0
+      '@oxfmt/binding-win32-x64-msvc': 0.70.0
+      svelte: 5.57.1
+      vite-plus: 1.0.0(@types/node@24.19.0)(@vitest/ui@5.0.1)(svelte@5.57.1)(typescript@5.9.3)(yaml@2.9.1)
+
   oxfmt@0.70.0(svelte@5.57.1)(vite-plus@1.0.0(@types/node@24.19.0)(@vitest/ui@5.0.1)(svelte@5.57.1)(typescript@6.0.3)(yaml@2.9.1)):
     dependencies:
       tinypool: 2.1.2
@@ -2478,6 +2532,30 @@ snapshots:
       '@oxlint-tsgolint/linux-x64': 7.0.2003
       '@oxlint-tsgolint/win32-arm64': 7.0.2003
       '@oxlint-tsgolint/win32-x64': 7.0.2003
+
+  oxlint@1.85.0(oxlint-tsgolint@7.0.2003)(vite-plus@1.0.0(@types/node@24.19.0)(@vitest/ui@5.0.1)(svelte@5.57.1)(typescript@5.9.3)(yaml@2.9.1)):
+    optionalDependencies:
+      '@oxlint/binding-android-arm-eabi': 1.85.0
+      '@oxlint/binding-android-arm64': 1.85.0
+      '@oxlint/binding-darwin-arm64': 1.85.0
+      '@oxlint/binding-darwin-x64': 1.85.0
+      '@oxlint/binding-freebsd-x64': 1.85.0
+      '@oxlint/binding-linux-arm-gnueabihf': 1.85.0
+      '@oxlint/binding-linux-arm-musleabihf': 1.85.0
+      '@oxlint/binding-linux-arm64-gnu': 1.85.0
+      '@oxlint/binding-linux-arm64-musl': 1.85.0
+      '@oxlint/binding-linux-ppc64-gnu': 1.85.0
+      '@oxlint/binding-linux-riscv64-gnu': 1.85.0
+      '@oxlint/binding-linux-riscv64-musl': 1.85.0
+      '@oxlint/binding-linux-s390x-gnu': 1.85.0
+      '@oxlint/binding-linux-x64-gnu': 1.85.0
+      '@oxlint/binding-linux-x64-musl': 1.85.0
+      '@oxlint/binding-openharmony-arm64': 1.85.0
+      '@oxlint/binding-win32-arm64-msvc': 1.85.0
+      '@oxlint/binding-win32-ia32-msvc': 1.85.0
+      '@oxlint/binding-win32-x64-msvc': 1.85.0
+      oxlint-tsgolint: 7.0.2003
+      vite-plus: 1.0.0(@types/node@24.19.0)(@vitest/ui@5.0.1)(svelte@5.57.1)(typescript@5.9.3)(yaml@2.9.1)
 
   oxlint@1.85.0(oxlint-tsgolint@7.0.2003)(vite-plus@1.0.0(@types/node@24.19.0)(@vitest/ui@5.0.1)(svelte@5.57.1)(typescript@6.0.3)(yaml@2.9.1)):
     optionalDependencies:
@@ -2619,6 +2697,61 @@ snapshots:
   typescript@6.0.3: {}
 
   undici-types@7.24.6: {}
+
+  vite-plus@1.0.0(@types/node@24.19.0)(@vitest/ui@5.0.1)(svelte@5.57.1)(typescript@5.9.3)(yaml@2.9.1):
+    dependencies:
+      '@oxc-project/types': 0.151.0
+      '@oxlint/plugins': 1.79.0
+      '@vitest/browser': 5.0.1(@voidzero-dev/vite-plus-core@1.0.0(@types/node@24.19.0)(typescript@6.0.3)(yaml@2.9.1))(vitest@5.0.1)
+      '@vitest/browser-preview': 5.0.1(@voidzero-dev/vite-plus-core@1.0.0(@types/node@24.19.0)(typescript@6.0.3)(yaml@2.9.1))(vitest@5.0.1)
+      '@vitest/mocker': 5.0.1(@voidzero-dev/vite-plus-core@1.0.0(@types/node@24.19.0)(typescript@6.0.3)(yaml@2.9.1))
+      '@vitest/pretty-format': 5.0.1
+      '@vitest/snapshot': 5.0.1
+      '@vitest/spy': 5.0.1
+      '@vitest/utils': 5.0.1
+      oxfmt: 0.70.0(svelte@5.57.1)(vite-plus@1.0.0(@types/node@24.19.0)(@vitest/ui@5.0.1)(svelte@5.57.1)(typescript@5.9.3)(yaml@2.9.1))
+      oxlint: 1.85.0(oxlint-tsgolint@7.0.2003)(vite-plus@1.0.0(@types/node@24.19.0)(@vitest/ui@5.0.1)(svelte@5.57.1)(typescript@5.9.3)(yaml@2.9.1))
+      oxlint-tsgolint: 7.0.2003
+      vite: '@voidzero-dev/vite-plus-core@1.0.0(@types/node@24.19.0)(typescript@5.9.3)(yaml@2.9.1)'
+      vitest: 5.0.1(@types/node@24.19.0)(@vitest/browser-preview@5.0.1)(@vitest/ui@5.0.1)(@voidzero-dev/vite-plus-core@1.0.0(@types/node@24.19.0)(typescript@6.0.3)(yaml@2.9.1))
+    optionalDependencies:
+      '@voidzero-dev/vite-plus-darwin-arm64': 1.0.0
+      '@voidzero-dev/vite-plus-darwin-x64': 1.0.0
+      '@voidzero-dev/vite-plus-linux-arm64-gnu': 1.0.0
+      '@voidzero-dev/vite-plus-linux-arm64-musl': 1.0.0
+      '@voidzero-dev/vite-plus-linux-x64-gnu': 1.0.0
+      '@voidzero-dev/vite-plus-linux-x64-musl': 1.0.0
+      '@voidzero-dev/vite-plus-win32-arm64-msvc': 1.0.0
+      '@voidzero-dev/vite-plus-win32-x64-msvc': 1.0.0
+    transitivePeerDependencies:
+      - '@arethetypeswrong/core'
+      - '@edge-runtime/vm'
+      - '@opentelemetry/api'
+      - '@types/node'
+      - '@vitejs/devtools'
+      - '@vitest/coverage-istanbul'
+      - '@vitest/coverage-v8'
+      - '@vitest/ui'
+      - bufferutil
+      - esbuild
+      - happy-dom
+      - jiti
+      - jsdom
+      - less
+      - msw
+      - publint
+      - sass
+      - sass-embedded
+      - stylus
+      - sugarss
+      - svelte
+      - terser
+      - tsx
+      - typescript
+      - unplugin-unused
+      - unrun
+      - utf-8-validate
+      - yaml
 
   vite-plus@1.0.0(@types/node@24.19.0)(@vitest/ui@5.0.1)(svelte@5.57.1)(typescript@6.0.3)(yaml@2.9.1):
     dependencies:

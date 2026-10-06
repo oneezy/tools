@@ -4,7 +4,7 @@ import { spawnSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { after, before, beforeEach, test } from "node:test";
+import { afterAll, beforeAll, beforeEach, test } from "vite-plus/test";
 import { isLink, lexists, linkTarget, real, samePath } from "../src/fs.js";
 import { harnessTable, type Harness } from "../src/harnesses.js";
 import { EMPTY_LOCK, findLibrary, Library, looksLikeLibrary } from "../src/library.js";
@@ -24,10 +24,10 @@ function skill(folder: string, name: string): string {
   return d;
 }
 
-before(() => {
+beforeAll(() => {
   base = fs.mkdtempSync(path.join(os.tmpdir(), "skills-sync-groups-"));
 });
-after(() => {
+afterAll(() => {
   fs.rmSync(base, { recursive: true, force: true });
 });
 beforeEach(() => {
@@ -87,7 +87,7 @@ test("grouped and flat own skills sync by folder name into .agents, every layer 
   assert.deepEqual(again.conflicts(), []);
 });
 
-const CLI = path.resolve(import.meta.dirname, "..", "src", "cli.js");
+const CLI = path.resolve(import.meta.dirname, "..", "dist", "src", "cli.js");
 
 /** The harness locations the CLI reads from its environment. The child must see the temp home only, whatever the session running the tests has set. */
 const HARNESS_ENV = ["CLAUDE_CONFIG_DIR", "CODEX_HOME", "XDG_CONFIG_HOME", "HERMES_HOME"] as const;

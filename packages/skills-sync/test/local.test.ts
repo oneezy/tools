@@ -5,7 +5,7 @@ import { spawnSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { after, before, beforeEach, test } from "node:test";
+import { afterAll, beforeAll, beforeEach, test } from "vite-plus/test";
 import { isLink, linkDeps, linkTarget, makeLink, samePath, setLinkMode } from "../src/fs.js";
 import { harnessTable, type Harness } from "../src/harnesses.js";
 import { EMPTY_LOCK, Library } from "../src/library.js";
@@ -18,7 +18,7 @@ let homeDir: string;
 let claude: Harness;
 let codex: Harness;
 
-const CLI = path.resolve(import.meta.dirname, "..", "src", "cli.js");
+const CLI = path.resolve(import.meta.dirname, "..", "dist", "src", "cli.js");
 const HARNESS_ENV = ["CLAUDE_CONFIG_DIR", "CODEX_HOME", "XDG_CONFIG_HOME", "HERMES_HOME"] as const;
 const SYNC = ["--quiet", "--json", "--no-pull", "--no-projects", "--no-wsl"];
 
@@ -69,10 +69,10 @@ function canSymlink(): boolean {
   }
 }
 
-before(() => {
+beforeAll(() => {
   base = fs.mkdtempSync(path.join(os.tmpdir(), "skills-sync-local-"));
 });
-after(() => {
+afterAll(() => {
   fs.rmSync(base, { recursive: true, force: true });
 });
 beforeEach(() => {

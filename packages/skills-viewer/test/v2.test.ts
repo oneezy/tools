@@ -2,14 +2,14 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { test } from "node:test";
+import { test } from "vite-plus/test";
 import { gzipSync } from "node:zlib";
 import { analyze, filesToRead, loadGitHub, memoryFileSet, parseRepoInput, untar, GitHubError } from "../src/index.js";
 import { buildGraph } from "../src/graph.js";
 import { readLocal } from "../src/local.js";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
-const PKG = path.resolve(here, "..", "..");
+const PKG = path.resolve(here, "..");
 const LIB = path.join(PKG, "fixtures", "plugin-library");
 const graph = buildGraph([LIB]);
 const part = (id: string) => graph.parts.find((p) => p.id === id);

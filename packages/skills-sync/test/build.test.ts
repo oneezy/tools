@@ -5,7 +5,7 @@ import { spawnSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { after, before, beforeEach, test } from "node:test";
+import { afterAll, beforeAll, beforeEach, test } from "vite-plus/test";
 import { pathToFileURL } from "node:url";
 
 let base: string;
@@ -13,7 +13,7 @@ let root: string;
 let homeDir: string;
 let up: Upstream;
 
-const CLI = path.resolve(import.meta.dirname, "..", "src", "cli.js");
+const CLI = path.resolve(import.meta.dirname, "..", "dist", "src", "cli.js");
 const HARNESS_ENV = ["CLAUDE_CONFIG_DIR", "CODEX_HOME", "XDG_CONFIG_HOME", "HERMES_HOME"] as const;
 const GIT = ["-c", "user.name=t", "-c", "user.email=t@example.com", "-c", "commit.gpgsign=false"];
 
@@ -123,10 +123,10 @@ function tree(dir: string): Record<string, string> {
 
 let library: Upstream;
 
-before(() => {
+beforeAll(() => {
   base = fs.mkdtempSync(path.join(os.tmpdir(), "skills-sync-build-"));
 });
-after(() => {
+afterAll(() => {
   fs.rmSync(base, { recursive: true, force: true });
 });
 beforeEach(() => {
@@ -703,7 +703,7 @@ function claudeBinary(): string | null {
   return first ?? null;
 }
 
-test("claude plugin validate passes on every built package and on the library root (its marketplace); warnings allowed, no errors", { skip: claudeBinary() ? false : "claude is not on PATH" }, () => {
+test.skipIf(!claudeBinary())("claude plugin validate passes on every built package and on the library root (its marketplace); warnings allowed, no errors", () => {
   assert.equal(cli("build", "--quiet").status, 0);
   const claudeHome = path.join(homeDir, ".claude");
   fs.mkdirSync(claudeHome, { recursive: true });

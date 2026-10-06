@@ -7,7 +7,7 @@ import { spawnSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { after, before, beforeEach, test } from "node:test";
+import { afterAll, beforeAll, beforeEach, test } from "vite-plus/test";
 
 let base: string;
 let root: string;
@@ -15,7 +15,7 @@ let homeDir: string;
 let tmpDir: string;
 let up: Upstream;
 
-const CLI = path.resolve(import.meta.dirname, "..", "src", "cli.js");
+const CLI = path.resolve(import.meta.dirname, "..", "dist", "src", "cli.js");
 const HARNESS_ENV = ["CLAUDE_CONFIG_DIR", "CODEX_HOME", "XDG_CONFIG_HOME", "HERMES_HOME"] as const;
 const GIT = ["-c", "user.name=t", "-c", "user.email=t@example.com", "-c", "commit.gpgsign=false"];
 const LOCK = "skills-sync.lock.json";
@@ -74,10 +74,10 @@ function source(u: Upstream, extra: Record<string, unknown> = {}): Record<string
   return { repo: u.dir, ref: "main", root: "skills", skills: ["a", "b"], ...extra };
 }
 
-before(() => {
+beforeAll(() => {
   base = fs.mkdtempSync(path.join(os.tmpdir(), "skills-sync-update-"));
 });
-after(() => {
+afterAll(() => {
   fs.rmSync(base, { recursive: true, force: true });
 });
 beforeEach(() => {
@@ -527,7 +527,8 @@ function gitCalls(...args: string[]): number {
   return fs.existsSync(count) ? fs.readFileSync(count, "utf8").split("\n").filter(Boolean).length : 0;
 }
 
-test("resolving a version and listing versions takes as many git processes for a long history as for a short one: by release tags, and by a manifest whose version changed many times", { skip: process.platform === "win32" && "counts git through a POSIX shell wrapper" }, () => {
+// not on Windows: it counts git through a POSIX shell wrapper
+test.skipIf(process.platform === "win32")("resolving a version and listing versions takes as many git processes for a long history as for a short one: by release tags, and by a manifest whose version changed many times", () => {
   const calls = (n: number, tagged: boolean): [number, number] => {
     for (const d of ["up", "dev", "bin"]) fs.rmSync(path.join(base, d), { recursive: true, force: true });
     fs.mkdirSync(path.join(root, "skills", "oneezy", "own-one"), { recursive: true });
