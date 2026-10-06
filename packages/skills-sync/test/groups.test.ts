@@ -137,7 +137,7 @@ test("a skill that moves from flat into a group keeps its name: every link is re
   assert.deepEqual(runAll().changes(), []);
 });
 
-test("a library is skills/ beside skills-sync.json or skills-lock.json; findLibrary order and the dot-folder rule hold", () => {
+test("a library is skills/ beside skills-sync.json, skills-lock.json or skills-sync.lock.json; findLibrary order and the dot-folder rule hold", () => {
   const mk = (name: string, marker: string | null, withSkills = true) => {
     const d = path.join(base, name);
     fs.mkdirSync(withSkills ? path.join(d, "skills") : d, { recursive: true });
@@ -146,6 +146,7 @@ test("a library is skills/ beside skills-sync.json or skills-lock.json; findLibr
   };
   assert.ok(looksLikeLibrary(mk("config-only", "skills-sync.json")), "config, no lock");
   assert.ok(looksLikeLibrary(mk("lock-only", "skills-lock.json")), "lock, no config");
+  assert.ok(looksLikeLibrary(mk("v2-lock-only", "skills-sync.lock.json")), "the skills-sync lock, no config");
   assert.ok(!looksLikeLibrary(mk("bare", null)), "skills/ alone is not a library");
   assert.ok(!looksLikeLibrary(mk("no-skills", "skills-sync.json", false)), "a config without skills/ is not a library");
   assert.ok(!looksLikeLibrary(mk("old-manifest", "skills-sources.json")), "the old manifest name is not a marker");
