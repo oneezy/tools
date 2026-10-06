@@ -41,7 +41,7 @@ beforeEach(() => {
   skill(lib.agents, "grilling"); // a third-party copy installed by npx skills
   fs.mkdirSync(path.join(lib.agents, "grilling", "agents"));
   fs.writeFileSync(path.join(lib.agents, "grilling", "agents", "openai.yaml"), "policy:\n  allow_implicit_invocation: true\n");
-  fs.writeFileSync(lib.lockFile, JSON.stringify({ version: 1, skills: { grilling: { source: "mattpocock/skills", sourceType: "github", computedHash: "x" } } }));
+  fs.writeFileSync(lib.npxLockFile, JSON.stringify({ version: 1, skills: { grilling: { source: "mattpocock/skills", sourceType: "github", computedHash: "x" } } }));
   table = harnessTable(homeDir, {});
   claude = table.find((h) => h.id === "claude-code")!;
   codex = table.find((h) => h.id === "codex")!;

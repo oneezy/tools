@@ -10,7 +10,7 @@ import { archives, type Built } from "./artifacts.js";
 import { isDir, isLink, isSkillDir } from "./fs.js";
 import { Library } from "./library.js";
 import { apply, Report } from "./plan.js";
-import { cmp, githubSlug, lockSource, readConfig, selection, type Config, type Plugin, type Source } from "./sources.js";
+import { cmp, githubSlug, readConfig, selection, type Config, type Plugin, type Source } from "./sources.js";
 
 export interface BuildOptions {
   /** write plugins/<id>/ for every plugin in the config */
@@ -203,18 +203,20 @@ function resolvePackage(lib: Library, config: Config, id: string, report: Report
     return null;
   }
   // the working-set copies of this source's selected skills, renames applied; the lock says which copy is this source's
-  const lock = lib.lockEntries();
+  const locked = lib.lock()?.sources[plugin.source!];
+  const lock = locked?.repo === src.repo ? locked : undefined;
   const skills = new Map<string, Map<string, Buffer>>();
   const perSkill: Record<string, string> = {};
   for (const s of selection(src)) {
     const copy = path.join(lib.agents, s.name);
-    const entry = lock[s.name];
-    if (!entry || entry.source !== lockSource(src) || isLink(copy) || !isSkillDir(copy)) {
+    const entry = lock?.skills[s.name];
+    if (!entry || isLink(copy) || !isSkillDir(copy)) {
       report.add({ kind: "note", path: path.join(where, "skills", s.name), note: `${s.name} is not in the working set from ${plugin.source}; run refresh; left out` });
       continue;
     }
     skills.set(s.name, skillCopy(copy, report));
-    if (entry.commit && entry.commit !== meta.commit) perSkill[s.name] = entry.commit;
+    const at = entry.commit ?? lock!.commit;
+    if (at !== meta.commit) perSkill[s.name] = at;
   }
   if (!skills.size) {
     report.add({ kind: "conflict", path: where, note: `none of ${plugin.source}'s skills is in the working set; run refresh; package not built` });

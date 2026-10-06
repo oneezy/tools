@@ -1,6 +1,7 @@
-// Refresh: resolve every source (the tip of its ref, except skills held by a pin), snapshot the selected skills under
-// upstream/, rebuild the third-party working set, write skills-lock.json. Frozen: each skill at the commit the lock
-// records, nothing moves, the lock is not written. A skill whose snapshot already holds the content of the commit it
+// Refresh: resolve every source (the tip of its ref, except skills held by a pin) and its upstream version, snapshot the
+// selected skills under upstream/, rebuild the third-party working set, write skills-sync.lock.json (a version 1
+// skills-lock.json is migrated to it and removed). Frozen: each skill at the commit the lock records (a version 1 lock
+// read in memory), nothing moves, no lock is written. A skill whose snapshot already holds the content of the commit it
 // resolves to is not fetched again, so a refresh with nothing new is silent and needs no clone.
 import fs from "node:fs";
 import path from "node:path";
@@ -8,8 +9,10 @@ import { isDir, isLink, isSkillDir } from "./fs.js";
 import { RESERVED } from "./harnesses.js";
 import { Library } from "./library.js";
 import { apply, Report } from "./plan.js";
-import { cloneUrl, cmp, findSkills, isCommit, lockEntry, lockSource, lockText, readConfig, selection, skillHash, withName, type LockEntry, type Selected } from "./sources.js";
+import { hasOldLock, LOCK_NAME, lockText, readLock, type LockedSkill, type LockedSource } from "./lock.js";
+import { cloneUrl, cmp, findSkills, isCommit, readConfig, selection, skillHash, withName, type Selected } from "./sources.js";
 import { discard, remoteTip, stage, type Staged } from "./stage.js";
+import { resolveVersion, type SourceVersion } from "./versions.js";
 
 export interface RefreshOptions {
   /** every skill at the commit the lock records; a skill the lock does not know is left alone; the lock is not written */
@@ -24,8 +27,8 @@ export interface RefreshOptions {
 
 export interface RefreshResult {
   report: Report;
-  /** per source that resolved: its commit and whether the snapshot was at another one */
-  sources: Record<string, { commit: string; date: string; moved: boolean }>;
+  /** per source that resolved: its commit, its version and how many commits past it, and whether the snapshot was at another commit */
+  sources: Record<string, SourceVersion & { commit: string; date: string; moved: boolean }>;
   /** selected skills not found upstream this run, as source:name */
   gone: string[];
   /** selected skills the lock records no commit for, in frozen mode, as source:name */
@@ -41,13 +44,16 @@ interface SnapshotMeta {
   ref: string;
   commit: string;
   date: string;
+  /** the source's version at commit, and how many commits past it; absent when not known (a frozen run from a version 1 lock) */
+  version?: string | null;
+  ahead?: number | null;
   skills: Record<string, { path: string; hash: string; commit: string }>;
   /** attribution files copied, and those the config lists that upstream lacks at this commit */
   attribution: string[];
   absent: string[];
 }
 
-/** One resolved skill: where its folder is right now (a checkout, or the snapshot when that already matches), its snapshot path and its lock entry. */
+/** One resolved skill: where its folder is right now (a checkout, or the snapshot when that already matches), its snapshot path and its lock entry (with its commit). */
 interface Resolved extends Selected {
   source: string;
   dir: string;
@@ -55,13 +61,14 @@ interface Resolved extends Selected {
   rel: string;
   snapshot: string;
   fromSnapshot: boolean;
-  locked: LockEntry;
+  locked: Required<LockedSkill>;
 }
 
 export function refresh(lib: Library, opts: RefreshOptions): RefreshResult {
   const config = readConfig(lib.configFile);
-  const old = lib.lockEntries();
-  const next: Record<string, LockEntry> = {};
+  const old = readLock(lib.root, config);
+  const next: Record<string, LockedSource> = {};
+  const lockSkills = new Map<string, Record<string, LockedSkill>>(); // per source, the skills it won in the working set
   const result: RefreshResult = { report: new Report(), sources: {}, gone: [], unlocked: [], problems: [] };
   const report = result.report;
   const staged = new Map<string, Staged>(Object.entries(opts.prestaged ?? {}).map(([id, s]) => [`${id}@${s.commit}`, s]));
@@ -77,10 +84,11 @@ export function refresh(lib: Library, opts: RefreshOptions): RefreshResult {
       const url = cloneUrl(src.repo);
       const snapDir = path.join(lib.upstream, id);
       const meta = readMeta(snapDir);
-      // this source's lock entries, by working-set name; an entry counts only when it names this source's repo
-      const mine = (s: Selected): LockEntry | undefined => {
-        const e = old[s.name];
-        return e && e.source === lockSource(src) ? e : undefined;
+      // this source in the lock, which counts only while it names the same repo; its skills by working-set name, each at its commit
+      const prior = old?.sources[id]?.repo === src.repo ? old.sources[id] : undefined;
+      const mine = (s: Selected): Required<LockedSkill> | undefined => {
+        const k = prior?.skills?.[s.name];
+        return k ? { path: k.path, hash: k.hash, commit: k.commit ?? prior!.commit } : undefined;
       };
       const checkout = (at: string): Staged | null => {
         const key = `${id}@${at}`;
@@ -96,22 +104,20 @@ export function refresh(lib: Library, opts: RefreshOptions): RefreshResult {
         return r.staged;
       };
       const keep = () => {
-        for (const s of sel) {
-          const e = mine(s);
-          if (e) next[s.name] = e;
-        }
+        if (!prior) return;
+        const names = new Set(sel.map((s) => s.name));
+        next[id] = { ...prior, skills: Object.fromEntries(Object.entries(prior.skills).filter(([n]) => names.has(n))) };
       };
 
-      // 1. the source's commit: frozen takes an unpinned entry's from the lock (else any entry's); latest takes the tip of ref
+      // 1. the source's commit: frozen takes the lock's; latest takes the tip of ref
       let commit: string | null;
       if (opts.frozen) {
-        const known = wanted.map((s) => [s, mine(s)] as const).filter(([, e]) => e?.commit);
-        if (!known.length) {
+        if (!prior || !wanted.some((s) => mine(s))) {
           result.unlocked.push(...wanted.map((s) => `${id}:${s.name}`));
           keep();
           continue;
         }
-        commit = (known.find(([s]) => !src.pins?.[s.upstream]) ?? known[0])[1]!.commit!;
+        commit = prior.commit;
       } else if (isCommit(src.ref)) commit = src.ref;
       else {
         commit = remoteTip(url, src.ref);
@@ -128,15 +134,14 @@ export function refresh(lib: Library, opts: RefreshOptions): RefreshResult {
       let failed = false;
       for (const s of wanted) {
         const l = mine(s);
-        if (opts.frozen && !l?.commit) {
+        if (opts.frozen && !l) {
           result.unlocked.push(`${id}:${s.name}`);
           continue;
         }
-        const at: string = opts.frozen ? l!.commit! : src.pins?.[s.upstream] ?? commit;
-        const lockedDir = l?.skillPath ? path.posix.dirname(l.skillPath) : null;
-        const snap = lockedDir && l!.commit === at ? path.join(snapDir, lockedDir) : null;
-        if (snap && l!.computedHash && isSkillDir(snap) && skillHash(snap) === l!.computedHash) {
-          here.push({ ...s, source: id, dir: snap, rel: lockedDir!, snapshot: snap, fromSnapshot: true, locked: lockEntry(src, lockedDir!, l!.computedHash, at) });
+        const at: string = opts.frozen ? l!.commit : src.pins?.[s.upstream] ?? commit;
+        const snap = l && l.commit === at ? path.join(snapDir, l.path) : null;
+        if (snap && l!.hash && isSkillDir(snap) && skillHash(snap) === l!.hash) {
+          here.push({ ...s, source: id, dir: snap, rel: l!.path, snapshot: snap, fromSnapshot: true, locked: { ...l!, commit: at } });
           continue;
         }
         const co = checkout(at);
@@ -150,36 +155,48 @@ export function refresh(lib: Library, opts: RefreshOptions): RefreshResult {
           result.gone.push(`${id}:${s.name}`);
           continue;
         }
-        here.push({ ...s, source: id, dir: path.join(co.dir, rel), rel, snapshot: path.join(snapDir, rel), fromSnapshot: false, locked: lockEntry(src, rel, skillHash(path.join(co.dir, rel)), at) });
+        here.push({ ...s, source: id, dir: path.join(co.dir, rel), rel, snapshot: path.join(snapDir, rel), fromSnapshot: false, locked: { path: rel, hash: skillHash(path.join(co.dir, rel)), commit: at } });
       }
       if (failed) {
         keep();
         continue;
       }
 
-      // 3. attribution files come from a checkout; the snapshot stands when it already has them at this commit
+      // 3. attribution files and the version come from a checkout of the source's commit; the snapshot stands when it
+      //    already has the files at this commit, and the version stands when the lock (or the snapshot) knows it there
       const attribution = src.attribution ?? [];
       const knownAbsent = (meta?.absent ?? []).filter((f) => attribution.includes(f));
       const snapshotLacks = attribution.some((f) => !knownAbsent.includes(f) && !fs.existsSync(path.join(snapDir, f)));
       const sameCommit = meta?.commit === commit;
+      const fromLock = !!prior && !old!.migrated && prior.commit === commit;
+      const fromMeta = sameCommit && meta!.version !== undefined;
+      const known: SourceVersion | null = fromLock
+        ? { version: prior!.version, ahead: fromMeta && meta!.version === prior!.version ? meta!.ahead ?? null : null }
+        : fromMeta
+          ? { version: meta!.version!, ahead: meta!.ahead ?? null }
+          : null;
       let co = staged.get(`${id}@${commit}`);
-      if (!co && (!sameCommit || snapshotLacks)) co = checkout(commit) ?? undefined;
-      if (!co && !sameCommit) {
+      if (!co && (!sameCommit || snapshotLacks || (!known && !opts.frozen))) co = checkout(commit) ?? undefined;
+      if (!co && (!sameCommit || (!known && !opts.frozen))) {
         keep();
         continue;
       }
       const absent = co ? attribution.filter((f) => !fs.existsSync(path.join(co!.dir, f))) : knownAbsent;
       const copied = attribution.filter((f) => !absent.includes(f));
       const date = co ? co.date : meta!.date;
-      result.sources[id] = { commit, date, moved: !sameCommit };
+      // frozen holds the lock's version; otherwise a checkout says what the commit is now (a tag may have come since)
+      const fresh = co ? resolveVersion(co.dir, commit, src.root) : null;
+      const v: SourceVersion | null = opts.frozen && fromLock ? { version: known!.version, ahead: fresh?.version === known!.version ? fresh.ahead : known!.ahead } : fresh ?? known;
+      result.sources[id] = { version: v?.version ?? null, ahead: v?.ahead ?? null, commit, date, moved: !sameCommit };
+      if (!opts.frozen) next[id] = { repo: src.repo, ref: src.ref, version: v!.version, commit, date, skills: {} };
 
       // 4. the snapshot: the selected folders and attribution files at their upstream paths, plus .snapshot.json
       for (const r of here) {
-        if (r.fromSnapshot || (isSkillDir(r.snapshot) && skillHash(r.snapshot) === r.locked.computedHash)) report.add({ kind: "skip", path: r.snapshot, note: "ok" });
-        else report.add({ kind: "copy", path: r.snapshot, target: r.dir, note: `snapshot at ${r.locked.commit!.slice(0, 7)}` });
+        if (r.fromSnapshot || (isSkillDir(r.snapshot) && skillHash(r.snapshot) === r.locked.hash)) report.add({ kind: "skip", path: r.snapshot, note: "ok" });
+        else report.add({ kind: "copy", path: r.snapshot, target: r.dir, note: `snapshot at ${r.locked.commit.slice(0, 7)}` });
       }
       const paths = new Set(here.map((r) => r.rel));
-      if (opts.frozen) for (const s of sel) if (mine(s)?.skillPath) paths.add(path.posix.dirname(mine(s)!.skillPath!));
+      if (opts.frozen) for (const s of sel) if (mine(s)) paths.add(mine(s)!.path);
       for (const rel of findSkills(snapDir, undefined, 6).values()) if (!paths.has(rel)) report.add({ kind: "delete", path: path.join(snapDir, rel), note: "no longer selected" });
       for (const f of copied) {
         const dst = path.join(snapDir, f);
@@ -189,8 +206,8 @@ export function refresh(lib: Library, opts: RefreshOptions): RefreshResult {
       }
       for (const f of meta?.attribution ?? []) if (!copied.includes(f) && fs.existsSync(path.join(snapDir, f))) report.add({ kind: "delete", path: path.join(snapDir, f), note: "no longer listed as attribution" });
       const skills: SnapshotMeta["skills"] = {};
-      for (const r of [...here].sort((a, b) => cmp(a.upstream, b.upstream))) skills[r.upstream] = { path: r.rel, hash: r.locked.computedHash!, commit: r.locked.commit! };
-      const metaNext: SnapshotMeta = { source: id, repo: src.repo, ref: src.ref, commit, date, skills, attribution: copied, absent };
+      for (const r of [...here].sort((a, b) => cmp(a.upstream, b.upstream))) skills[r.upstream] = { path: r.rel, hash: r.locked.hash, commit: r.locked.commit };
+      const metaNext: SnapshotMeta = { source: id, repo: src.repo, ref: src.ref, commit, date, version: v?.version, ahead: v ? v.ahead : undefined, skills, attribution: copied, absent };
       writeIfChanged(report, path.join(snapDir, ".snapshot.json"), JSON.stringify(metaNext, null, 2) + "\n", `${here.length} skills at ${commit.slice(0, 7)}`);
       resolved.push(...here);
     }
@@ -209,7 +226,7 @@ export function refresh(lib: Library, opts: RefreshOptions): RefreshResult {
       if (winner) report.add({ kind: "conflict", path: path.join(lib.agents, r.name), note: `${r.source} also selects ${r.upstream} as ${r.name}; ${winner} wins; rename one in skills-sync.json` });
       else {
         taken.set(r.name, r.source);
-        next[r.name] = r.locked;
+        lockSkills.set(r.source, { ...lockSkills.get(r.source), [r.name]: r.locked });
         workingCopy(lib, r, own, report);
       }
     }
@@ -221,8 +238,13 @@ export function refresh(lib: Library, opts: RefreshOptions): RefreshResult {
       }
     }
 
-    // 7. the lock: what this refresh resolved, in the npx skills format plus the commit; never when frozen
-    if (!opts.frozen) writeIfChanged(report, lib.lockFile, lockText(next), "what this refresh resolved");
+    // 7. the lock: what this refresh resolved (a pinned skill's commit only where it differs from its source's), and a
+    //    version 1 lock goes; never when frozen
+    if (!opts.frozen) {
+      for (const [id, skills] of lockSkills) if (next[id]) next[id].skills = skills;
+      writeIfChanged(report, lib.lockFile, lockText(next), "what this refresh resolved");
+      if (hasOldLock(lib.root)) report.add({ kind: "delete", path: lib.npxLockFile, note: `old lock format, migrated to ${LOCK_NAME}` });
+    }
 
     apply(report, opts.plan);
   } finally {
@@ -232,29 +254,38 @@ export function refresh(lib: Library, opts: RefreshOptions): RefreshResult {
 }
 
 /**
- * The lock a refresh would write from the snapshots as they are, with no network: per source that has a snapshot, one
- * entry per selected skill the snapshot holds, hashed from its folder there, at the commit the snapshot records; a
- * source without a snapshot keeps the entries the lock has for it, as a refresh that cannot reach it does. One name
- * from two sources goes to the first source by id, as in refresh. null when no source has a snapshot.
+ * The lock a refresh would write from the snapshots as they are, with no network: per source that has a snapshot, its
+ * version, commit and date as the snapshot records them and one entry per selected skill the snapshot holds, hashed
+ * from its folder there; a source without a snapshot keeps what the lock has for it, as a refresh that cannot reach it
+ * does. One name from two sources goes to the first source by id, as in refresh. null when no source has a snapshot.
  */
-export function snapshotLock(lib: Library): Record<string, LockEntry> | null {
+export function snapshotLock(lib: Library): Record<string, LockedSource> | null {
   const config = readConfig(lib.configFile);
-  const old = lib.lockEntries();
-  const next: Record<string, LockEntry> = {};
+  const old = readLock(lib.root, config);
+  const next: Record<string, LockedSource> = {};
+  const taken = new Set<string>();
   let snapshots = 0;
   for (const id of Object.keys(config.sources).sort(cmp)) {
     const src = config.sources[id];
     const snapDir = path.join(lib.upstream, id);
     const meta = readMeta(snapDir);
-    if (meta) snapshots++;
-    for (const s of selection(src)) {
-      if (next[s.name]) continue;
-      const snap = meta?.skills?.[s.upstream];
-      if (snap) {
+    const sel = selection(src).filter((s) => !taken.has(s.name));
+    if (!meta) {
+      const prior = old?.sources[id]?.repo === src.repo ? old.sources[id] : undefined;
+      if (!prior) continue;
+      next[id] = { ...prior, skills: Object.fromEntries(sel.filter((s) => prior.skills[s.name]).map((s) => [s.name, prior.skills[s.name]])) };
+    } else {
+      snapshots++;
+      const skills: Record<string, LockedSkill> = {};
+      for (const s of sel) {
+        const snap = meta.skills?.[s.upstream];
+        if (!snap) continue;
         const dir = path.join(snapDir, snap.path);
-        next[s.name] = lockEntry(src, snap.path, isSkillDir(dir) ? skillHash(dir) : snap.hash, snap.commit);
-      } else if (!meta && old[s.name]?.source === lockSource(src)) next[s.name] = old[s.name];
+        skills[s.name] = { path: snap.path, hash: isSkillDir(dir) ? skillHash(dir) : snap.hash, commit: snap.commit };
+      }
+      next[id] = { repo: src.repo, ref: src.ref, version: meta.version ?? null, commit: meta.commit, date: meta.date, skills };
     }
+    for (const n of Object.keys(next[id].skills)) taken.add(n);
   }
   return snapshots ? next : null;
 }

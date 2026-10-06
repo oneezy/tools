@@ -256,35 +256,35 @@ test("check fails on generated-file drift, the computation of build --check: a h
   assert.deepEqual(problems(invalid), ["skills-sync.json: $.surprise: not allowed"]);
 });
 
-test("check fails when skills-lock.json is not what refresh would write from the snapshots under upstream/: a hand-edited hash, an entry no source selects, a missing lock; a snapshot edited after the refresh is caught the same way; without snapshots (a clone before refresh) the lock is not checked; no network either way", () => {
-  const lockText = read("skills-lock.json");
+test("check fails when skills-sync.lock.json is not what refresh would write from the snapshots under upstream/: a hand-edited hash, an entry no source selects, a missing lock; a snapshot edited after the refresh is caught the same way; without snapshots (a clone before refresh) the lock is not checked; no network either way", () => {
+  const lockText = read("skills-sync.lock.json");
   const lock = JSON.parse(lockText);
-  lock.skills.a.computedHash = "0".repeat(64);
-  lock.skills.stale = { source: "someone/else", sourceType: "github", skillPath: "skills/stale/SKILL.md", computedHash: "1".repeat(64) };
-  write("skills-lock.json", JSON.stringify(lock, null, 2) + "\n");
+  lock.sources.up.skills.a.hash = "0".repeat(64);
+  lock.sources.up.skills.stale = { path: "skills/stale", hash: "1".repeat(64) };
+  write("skills-sync.lock.json", JSON.stringify(lock, null, 2) + "\n");
   const before = tree(root);
   const r = cli("check");
   assert.equal(r.status, 1);
-  assert.deepEqual(problems(r), ["skills-lock.json: differs from what refresh would write from the snapshots under upstream/ (a, stale)"]);
-  assert.match(r.stdout, /^check: 1 problem; refresh writes skills-lock\.json$/m);
+  assert.deepEqual(problems(r), ["skills-sync.lock.json: differs from what refresh would write from the snapshots under upstream/ (up:a, up:stale)"]);
+  assert.match(r.stdout, /^check: 1 problem; refresh writes skills-sync\.lock\.json$/m);
   assert.deepEqual(tree(root), before, "check wrote nothing");
 
   // without the lock nothing says which working-set copy is the source's, so its package cannot be built either
-  fs.rmSync(path.join(root, "skills-lock.json"));
+  fs.rmSync(path.join(root, "skills-sync.lock.json"));
   assert.deepEqual(problems(cli("check")), [
     "plugins/up: none of up's skills is in the working set; run refresh; package not built",
-    "skills-lock.json: missing; refresh would write it from the snapshots under upstream/ (a, b)",
+    "skills-sync.lock.json: missing; refresh would write it from the snapshots under upstream/ (up)",
   ]);
 
   // the committed lock back, a snapshot file edited: the lock no longer matches the snapshot it was written from
-  write("skills-lock.json", lockText);
+  write("skills-sync.lock.json", lockText);
   assert.equal(cli("check").status, 0);
   write("upstream/up/skills/b/SKILL.md", skillMd("b", "edited in the snapshot"));
-  assert.deepEqual(problems(cli("check")), ["skills-lock.json: differs from what refresh would write from the snapshots under upstream/ (b)"]);
+  assert.deepEqual(problems(cli("check")), ["skills-sync.lock.json: differs from what refresh would write from the snapshots under upstream/ (up:b)"]);
 
   // no snapshot at all, the plugin form off (a clone before refresh, where build --check could not run): the lock is left unchecked
   fs.rmSync(path.join(root, "upstream"), { recursive: true });
-  write("skills-lock.json", JSON.stringify(lock, null, 2) + "\n");
+  write("skills-sync.lock.json", JSON.stringify(lock, null, 2) + "\n");
   write("skills-sync.json", JSON.stringify({ ...CONFIG(), generate: { skills: true, plugins: false } }, null, 2) + "\n");
   // an unreachable source proves nothing is fetched: check never resolves a ref
   fs.rmSync(up.dir, { recursive: true, force: true });

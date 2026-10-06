@@ -38,7 +38,7 @@ beforeEach(() => {
   skill(path.join(lib.own, "oneezy"), "a");
   skill(path.join(lib.own, "oneezy"), "b");
   skill(lib.own, "c");
-  fs.writeFileSync(lib.lockFile, EMPTY_LOCK);
+  fs.writeFileSync(lib.npxLockFile, EMPTY_LOCK);
   const table = harnessTable(homeDir, {});
   claude = table.find((h) => h.id === "claude-code")!;
   codex = table.find((h) => h.id === "codex")!;
