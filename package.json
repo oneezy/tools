@@ -5,7 +5,7 @@
   "scripts": {
     "build": "vp run -r build",
     "test": "vp run -r test",
-    "check": "vp check && vp run -r check",
+    "check": "vp run --filter \"skills-viewer-web^...\" build && vp check && vp run -r check",
     "dev": "vp dev"
   },
   "devDependencies": {
