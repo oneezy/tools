@@ -275,3 +275,40 @@ test("a version 1 skills-lock.json (what 0.4.0 wrote) is read in memory by a fro
   assert.equal(fs.readFileSync(path.join(root, OLD_LOCK), "utf8"), npx);
   assert.equal(cli("check").status, 0, "and not a problem");
 });
+
+test("skills-lock.json counts as a version 1 lock only when it parses, has an entry and every entry has a commit: an npx skills lock with no skills, or a file with merge-conflict markers, in a config library is neither a check problem nor removed by update or refresh", () => {
+  config({ up: source(up) });
+  assert.equal(cli("refresh", "--quiet").status, 0);
+  const empty = JSON.stringify({ version: 1, skills: {} }, null, 2) + "\n";
+  const conflicted = `{\n<<<<<<< HEAD\n  "version": 1,\n=======\n  "version": 2,\n>>>>>>> other\n  "skills": {}\n}\n`;
+  for (const body of [empty, conflicted]) {
+    fs.writeFileSync(path.join(root, OLD_LOCK), body);
+    const checked = cli("check");
+    assert.equal(checked.status, 0, checked.stdout);
+    for (const cmd of ["refresh", "update"]) {
+      const r = cli(cmd, "--quiet");
+      assert.equal(r.status, 0, r.stderr);
+      assert.equal(fs.readFileSync(path.join(root, OLD_LOCK), "utf8"), body, `${cmd} leaves it`);
+    }
+  }
+});
+
+test("a lock checked out with CRLF line endings (core.autocrlf=true) that says what an update would write is not rewritten: its bytes stay, no write is reported, and check passes", () => {
+  config({ up: source(up) });
+  assert.equal(cli("refresh", "--quiet").status, 0);
+  const file = path.join(root, LOCK);
+  const crlf = fs.readFileSync(file, "utf8").replace(/\n/g, "\r\n");
+  fs.writeFileSync(file, crlf);
+  for (const cmd of ["update", "refresh"]) {
+    const r = cli(cmd, "--json");
+    assert.equal(r.status, 0, r.stderr);
+    assert.deepEqual(JSON.parse(r.stdout).actions.filter((a: { kind: string; path: string }) => a.kind !== "skip" && a.path === file), [], `${cmd} reports no write`);
+    assert.equal(fs.readFileSync(file, "utf8"), crlf, `${cmd} leaves the bytes`);
+  }
+  assert.equal(cli("check").status, 0);
+
+  up.skill("a", "two");
+  const two = up.commit("two");
+  assert.equal(cli("update", "--quiet").status, 0);
+  assert.equal(json(LOCK).sources.up.commit, two, "a real change is still written");
+});

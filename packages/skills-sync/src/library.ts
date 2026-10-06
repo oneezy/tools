@@ -10,7 +10,7 @@ import { CONFIG_NAME, configKind, LOCAL_NAME } from "./config.js";
 import { isDir, isSkillDir, real } from "./fs.js";
 import { RESERVED } from "./harnesses.js";
 import { LOCK_NAME, lockedNames, npxLockEntries, NPX_LOCK_NAME, readLock, type Lock } from "./lock.js";
-import { readConfig, type LockEntry } from "./sources.js";
+import { cmp, readConfig, type LockEntry } from "./sources.js";
 
 export class Library {
   constructor(public root: string) {}
@@ -115,7 +115,7 @@ export class Library {
 
   /** Working-set names the lock records: a config library's lock (a version 1 lock read in memory), else the npx skills lock. */
   lockedSkills(): string[] {
-    if (!this.hasConfig()) return Object.keys(this.npxLockEntries()).sort();
+    if (!this.hasConfig()) return Object.keys(this.npxLockEntries()).sort(cmp);
     return lockedNames(this.lock());
   }
 

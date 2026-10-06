@@ -7,10 +7,10 @@ import YAML from "yaml";
 import { asBuilt, build } from "./build.js";
 import { firstLine, flowProblems } from "./flow.js";
 import { Library } from "./library.js";
-import { hasOldLock, LOCK_NAME, lockText, readLockFile, type LockedSource } from "./lock.js";
+import { hasOldLock, LOCK_NAME, lockedSource, lockText, readLockFile, type LockedSource } from "./lock.js";
 import { snapshotLock } from "./refresh.js";
 import { shippedSchema, validate } from "./schema.js";
-import { cmp } from "./sources.js";
+import { cmp, readConfig } from "./sources.js";
 
 /** One thing that is wrong: the file (relative to the library, / separators) and why. */
 export interface Problem {
@@ -40,8 +40,7 @@ const PLAY = "play";
 
 export function check(lib: Library): CheckResult {
   const result: CheckResult = { problems: [], notes: [], skills: 0, flows: 0, generated: 0, fixes: [] };
-  const rel = (p: string) => path.relative(lib.root, p).split("\\").join("/");
-  const problem = (file: string, reason: string) => result.problems.push({ path: rel(file), reason });
+  const problem = (file: string, reason: string) => result.problems.push({ path: rel(lib, file), reason });
   for (const s of lib.scanOwn().skills) {
     const md = path.join(s.dir, "SKILL.md");
     result.skills++;
@@ -56,10 +55,16 @@ export function check(lib: Library): CheckResult {
   if (!lib.hasConfig() || !validConfig(lib, problem)) return result;
   pluginDrift(lib, result, problem);
   lockDrift(lib, result, problem);
+  heldVersions(lib, result, problem);
   return result;
 }
 
 type AddProblem = (file: string, reason: string) => void;
+
+/** A path as problems give it: relative to the library, / separators. */
+function rel(lib: Library, p: string): string {
+  return path.relative(lib.root, p).split("\\").join("/");
+}
 
 /** The config against its schema, one problem per rule broken; false when it is not valid, so nothing is computed from it. */
 function validConfig(lib: Library, problem: AddProblem): boolean {
@@ -84,7 +89,7 @@ function pluginDrift(lib: Library, result: CheckResult, problem: AddProblem): vo
   const before = result.problems.length;
   const skipped = new Set(r.skipped.map((id) => path.join(lib.plugins, id)));
   for (const a of r.report.actions) {
-    if (a.kind === "note" && skipped.has(a.path)) result.notes.push({ path: path.relative(lib.root, a.path).split("\\").join("/"), reason: a.note! });
+    if (a.kind === "note" && skipped.has(a.path)) result.notes.push({ path: rel(lib, a.path), reason: a.note! });
     else if (a.kind === "write") problem(a.path, a.note === "missing" ? "missing; build would write it" : "differs from what build would write");
     else if (a.kind === "delete") problem(a.path, `${a.note}; build would remove it`);
     else if (a.kind === "conflict") problem(a.path, a.note ?? "cannot be built");
@@ -117,6 +122,24 @@ function lockDrift(lib: Library, result: CheckResult, problem: AddProblem): void
   const which = names.length ? ` (${names.join(", ")})` : "";
   problem(lib.lockFile, have ? `differs from what refresh would write from the snapshots under upstream/${which}` : `missing; refresh would write it from the snapshots under upstream/${which}`);
   result.fixes.push(`refresh writes ${path.basename(lib.lockFile)}`);
+}
+
+/**
+ * Every source the config holds at a version the lock does not have it at: the hold was landed and the update that
+ * takes the source there was not run. A source the lock does not record (or records for another repo) is not compared.
+ */
+function heldVersions(lib: Library, result: CheckResult, problem: AddProblem): void {
+  const sources = readConfig(lib.configFile).sources;
+  const lock = readLockFile(lib.root);
+  const off: string[] = [];
+  for (const id of Object.keys(sources).sort(cmp)) {
+    const held = sources[id].version;
+    const locked = lockedSource(lock, id, sources[id]);
+    if (!held || !locked || locked.version === held) continue;
+    problem(lib.configFile, `sources.${id}.version holds ${held} but the lock has ${locked.version ?? "no version"}; run update ${id}`);
+    off.push(id);
+  }
+  if (off.length) result.fixes.push(`update ${off.join(" ")} takes ${off.length === 1 ? "it" : "them"} to the held version`);
 }
 
 /** What differs between two locks: a source id where the source itself does (its version, commit, or the whole of it), source:name per skill. */

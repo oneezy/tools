@@ -432,3 +432,120 @@ test("the CHANGELOG.md nearest the source's root wins over one at the repo root"
   assert.equal(j.status, 0, j.stderr);
   assert.equal(JSON.parse(j.stdout).updated[0].changelog, UPGRADE);
 });
+
+test("add resolves only the source it declares: an unheld source with a new upstream commit keeps its lock entry byte for byte and its working copy; add reports the new source as updated, like update, in text and --json", () => {
+  const at = changelogReleases(up);
+  config({ up: source(up) });
+  assert.equal(cli("update", "--quiet").status, 0);
+  const entry = (lock: string) => JSON.stringify(JSON.parse(lock).sources.up, null, 2);
+  const before = entry(text(LOCK));
+  up.skill("a", "moved on upstream");
+  up.commit("past 1.3.1");
+
+  const other = new Upstream(path.join(base, "other"));
+  other.skill("x", "other one");
+  const head = other.commit("one");
+  const r = cli("add", other.dir, "--id", "other", "--no-plugin", "--json");
+  assert.equal(r.status, 0, r.stderr);
+  assert.equal(entry(text(LOCK)), before, "up did not move");
+  assert.equal(json(LOCK).sources.up.commit, at["1.3.1"]);
+  assert.ok(working("a").includes("release 1.3.1"));
+  assert.equal(json(LOCK).sources.other.commit, head);
+  assert.deepEqual(JSON.parse(r.stdout).updated, [{ id: "other", from: null, to: { version: null, commit: head, ahead: null }, direction: "upgrade", changelog: null, changelogReason: "new to the lock: no version to compare with" }]);
+
+  const third = new Upstream(path.join(base, "third"));
+  third.skill("y");
+  const h3 = third.commit("one");
+  const t = cli("add", third.dir, "--id", "third", "--no-plugin");
+  assert.equal(t.status, 0, t.stderr);
+  assert.equal(entry(text(LOCK)), before);
+  assert.ok(t.stdout.includes(`updated third: (new) -> ${h3.slice(0, 7)}\n  changelog: none (new to the lock: no version to compare with)\n`), t.stdout);
+});
+
+test("check reports a held version the lock is not at as one problem on skills-sync.json, naming the update that fixes it; clean once update takes the source there, and a source without a hold is never held to its lock's version", () => {
+  releases(up);
+  config({ up: source(up, { version: "1.1.0" }) });
+  assert.equal(cli("update", "--quiet").status, 0);
+  assert.equal(cli("check").status, 0, "held where the lock is");
+
+  config({ up: source(up, { version: "1.0.0" }) });
+  const r = cli("check");
+  assert.equal(r.status, 1);
+  assert.deepEqual(r.stdout.split("\n").filter((l) => l && !l.startsWith("check:")), ["skills-sync.json: sources.up.version holds 1.0.0 but the lock has 1.1.0; run update up"]);
+  const j = JSON.parse(cli("check", "--json").stdout);
+  assert.deepEqual(j.problems, [{ path: "skills-sync.json", reason: "sources.up.version holds 1.0.0 but the lock has 1.1.0; run update up" }]);
+
+  assert.equal(cli("update", "up", "--quiet").status, 0);
+  assert.equal(cli("check").status, 0, "update took it to the hold");
+  config({ up: source(up) });
+  assert.equal(cli("check").status, 0, "no hold: the lock may be at any version");
+});
+
+test("an upstream that commits CHANGELOG.md and its manifest with CRLF line endings: the changelog sections between two versions still resolve (reported with LF), and so do the manifest's versions", () => {
+  const crlf = (s: string) => s.replace(/\n/g, "\r\n");
+  const last: Record<string, string> = {}; // per version, the newest commit carrying it
+  const all = ["1.2.0", "1.2.3", "1.3.0", "1.3.1"];
+  for (const [i, v] of all.entries()) {
+    up.skill("a", `release ${v}`);
+    up.file("CHANGELOG.md", crlf(changelog(all.slice(0, i + 1).reverse())));
+    up.file("skills/.claude-plugin/plugin.json", crlf(JSON.stringify({ name: "up", version: v }, null, 2) + "\n"));
+    up.commit(v);
+    up.skill("b", `past ${v}`);
+    last[v] = up.commit(`past ${v}`);
+  }
+  assert.ok(fs.readFileSync(path.join(up.dir, "CHANGELOG.md"), "utf8").includes("\r\n"), "committed with CRLF");
+  config({ up: source(up, { version: "1.2.3" }) });
+  const held = cli("update", "--json");
+  assert.equal(held.status, 0, held.stderr);
+  assert.equal(json(LOCK).sources.up.commit, last["1.2.3"], "the newest commit whose manifest carried the held version");
+  assert.equal(json(LOCK).sources.up.version, "1.2.3");
+
+  const j = cli("update", "up", "--to", "1.3.1", "--json", "--plan");
+  assert.equal(j.status, 0, j.stderr);
+  const [u] = JSON.parse(j.stdout).updated;
+  assert.deepEqual([u.from, u.to, u.direction], [{ version: "1.2.3", commit: last["1.2.3"], ahead: 1 }, { version: "1.3.1", commit: last["1.3.1"], ahead: 1 }, "upgrade"]);
+  assert.equal(u.changelog, UPGRADE);
+
+  const v = JSON.parse(cli("versions", "up", "--json").stdout);
+  assert.deepEqual(v.versions.map((x: { version: string }) => x.version), ["1.3.1", "1.3.0", "1.2.3", "1.2.0"]);
+});
+
+/** The git processes one CLI run spawns, counted by a wrapper put first on its PATH (POSIX only). */
+function gitCalls(...args: string[]): number {
+  const bin = path.join(base, "bin");
+  const count = path.join(base, "git-calls");
+  if (!fs.existsSync(bin)) {
+    const real = spawnSync("sh", ["-c", "command -v git"], { encoding: "utf8" }).stdout.trim();
+    fs.mkdirSync(bin);
+    fs.writeFileSync(path.join(bin, "git"), `#!/bin/sh\necho x >> "${count}"\nexec "${real}" "$@"\n`, { mode: 0o755 });
+  }
+  fs.rmSync(count, { force: true });
+  const env: NodeJS.ProcessEnv = { ...process.env, HOME: homeDir, USERPROFILE: homeDir, TMP: tmpDir, TEMP: tmpDir, TMPDIR: tmpDir, PATH: `${bin}${path.delimiter}${process.env.PATH}` };
+  for (const k of HARNESS_ENV) delete env[k];
+  const r = spawnSync(process.execPath, [CLI, ...args, "--repo", root], { encoding: "utf8", cwd: root, env });
+  assert.equal(r.status, 0, r.stderr);
+  return fs.existsSync(count) ? fs.readFileSync(count, "utf8").split("\n").filter(Boolean).length : 0;
+}
+
+test("resolving a version and listing versions takes as many git processes for a long history as for a short one: by release tags, and by a manifest whose version changed many times", { skip: process.platform === "win32" && "counts git through a POSIX shell wrapper" }, () => {
+  const calls = (n: number, tagged: boolean): [number, number] => {
+    for (const d of ["up", "dev", "bin"]) fs.rmSync(path.join(base, d), { recursive: true, force: true });
+    fs.mkdirSync(path.join(root, "skills", "oneezy", "own-one"), { recursive: true });
+    fs.writeFileSync(path.join(root, "skills", "oneezy", "own-one", "SKILL.md"), "---\nname: own-one\ndescription: mine\n---\nmine\n");
+    const u = new Upstream(path.join(base, "up"));
+    for (let i = 1; i <= n; i++) {
+      u.skill("a", `release ${i}`);
+      if (!tagged) u.file("skills/.claude-plugin/plugin.json", JSON.stringify({ name: "up", version: `1.${i}.0` }, null, 2) + "\n");
+      u.commit(`1.${i}.0`);
+      if (tagged) u.tag(`v1.${i}.0`);
+      u.skill("b", `past ${i}`);
+      u.commit(`past ${i}`);
+    }
+    config({ up: source(u) });
+    const update = gitCalls("update", "--json");
+    assert.equal(json(LOCK).sources.up.version, `1.${n}.0`);
+    const versions = gitCalls("versions", "up", "--json");
+    return [update, versions];
+  };
+  for (const tagged of [true, false]) assert.deepEqual(calls(12, tagged), calls(3, tagged), tagged ? "by tags" : "by manifest");
+});
