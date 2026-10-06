@@ -20,7 +20,7 @@ import { findProjects, home, isRepo, layers, projects, status, unlink, type Stat
 import { releasesOf, versionLabel } from "./versions.js";
 import { runInWsl, wslDistros } from "./wsl.js";
 
-const VERSION = "0.4.0";
+const VERSION = "0.5.0";
 const HELP = `skills-sync ${VERSION}
 One skills library, every harness, every project on this machine. Run it anywhere; it works out the rest.
 
