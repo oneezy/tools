@@ -1,5 +1,5 @@
-// The committed config (skills-sync.json), the lock (skills-lock.json: the npx skills format plus the resolved commit per
-// entry) and the skill hash recipe. Reading, hashing and shaping only; refresh.ts moves files.
+// The committed config (skills-sync.json), the npx skills lock entry (lock.ts has the lock itself) and the skill hash
+// recipe. Reading, hashing and shaping only; refresh.ts moves files.
 import { createHash } from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
@@ -33,6 +33,8 @@ export interface Source {
   repo: string;
   /** the branch or tag followed: its tip at every refresh, except skills held by a pin; a full commit holds the whole source */
   ref: string;
+  /** the upstream version held (plain semver): update resolves the release's commit instead of the tip; latest when omitted */
+  version?: string;
   /** where skill folders live in the repo; the repo root when omitted */
   root?: string;
   /** selected folder names, or a map upstream name -> working-set name */
@@ -51,9 +53,8 @@ export interface Plugin {
 }
 
 /**
- * An entry of skills-lock.json: the npx skills local lock (version 1), keyed by the working-set name, plus `commit`,
- * the resolved commit the skill was taken at. npx skills 1.7.0 reads an entry with that extra field (list, update) and
- * keeps it on entries it does not rewrite; probed 2026-10-01 against the cached CLI.
+ * An entry of skills-lock.json: the npx skills local lock (version 1), keyed by the working-set name. skills-sync 0.4.0
+ * wrote it for a config library with `commit`, the resolved commit the skill was taken at; lock.ts migrates that one.
  */
 export interface LockEntry {
   source: string;
@@ -166,30 +167,9 @@ export function githubSlug(repo: string): string | null {
   return m ? m[1] : null;
 }
 
-/** What the lock writes as `source` for a config source: owner/repo for GitHub, else the repo as given. */
+/** What a version 1 lock entry holds as `source` for a config source: owner/repo for GitHub, else the repo as given. */
 export function lockSource(src: Source): string {
   return githubSlug(src.repo) ?? src.repo;
-}
-
-/**
- * The lock entry for one skill of a source, keys in the order npx skills writes them, then `commit`. `ref` is written
- * only when it is a branch or tag: npx skills and older skills-sync versions clone with --branch, which a commit
- * cannot satisfy, so a source held at a commit restores from its ref's tip there.
- */
-export function lockEntry(src: Source, skillDir: string, hash: string, commit: string): LockEntry {
-  const slug = githubSlug(src.repo);
-  const entry: LockEntry = { source: slug ?? src.repo } as LockEntry;
-  if (!slug) entry.sourceUrl = cloneUrl(src.repo);
-  if (!isCommit(src.ref)) entry.ref = src.ref;
-  Object.assign(entry, { sourceType: slug ? "github" : "git", skillPath: `${skillDir}/SKILL.md`, computedHash: hash, commit });
-  return entry;
-}
-
-/** The lock as npx skills writes it: version 1, names sorted, two spaces, trailing newline. */
-export function lockText(entries: Record<string, LockEntry>): string {
-  const skills: Record<string, LockEntry> = {};
-  for (const n of Object.keys(entries).sort()) skills[n] = entries[n];
-  return JSON.stringify({ version: 1, skills }, null, 2) + "\n";
 }
 
 /** SKILL.md with its frontmatter `name` set to `name`; every other byte as upstream wrote it. */

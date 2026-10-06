@@ -1,4 +1,5 @@
-// Staging a source in a temp clone: the tip of a branch or tag, or one commit. Every clone is discarded by the caller.
+// Staging a source in a temp clone: the tip of a branch or tag, or one commit, with its history and tags (blobs fetched
+// as read) so versions.ts can tell which release it is. Every clone is discarded by the caller.
 import { spawnSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
@@ -18,8 +19,9 @@ export type StageResult = { ok: true; staged: Staged } | { ok: false; error: str
  * this machine's core.autocrlf says: the hash recipe runs over those bytes and must give the same value on every
  * machine, or a lock written on one could never verify on another.
  */
-function git(args: string[], cwd?: string): { ok: boolean; out: string; err: string } {
-  const r = spawnSync("git", ["-c", "core.autocrlf=false", ...args], { encoding: "utf8", cwd, timeout: 120_000 });
+export function git(args: string[], cwd?: string, input?: string): { ok: boolean; out: string; err: string } {
+  // a whole history's patches of a manifest can pass the default 1 MB of output
+  const r = spawnSync("git", ["-c", "core.autocrlf=false", ...args], { encoding: "utf8", cwd, input, timeout: 120_000, maxBuffer: 256 * 1024 * 1024 });
   return { ok: r.status === 0, out: (r.stdout ?? "").trim(), err: (r.stderr ?? "").trim().split("\n").filter(Boolean).pop() ?? "" };
 }
 
@@ -41,7 +43,8 @@ export function defaultBranch(url: string): string | null {
 }
 
 /**
- * A shallow clone at the tip of `ref` (a branch or tag), or a fetch of one commit when `ref` is one. A host that
+ * A blobless clone at the tip of `ref` (a branch or tag), or a blobless fetch of one commit when `ref` is one, with the
+ * history and tags behind it either way. A host that
  * refuses to serve a bare commit (GitHub and GitLab serve any reachable one) gets a clone of `tipOf` instead, taken
  * only when its HEAD is that commit: the tip observed a moment earlier, not whatever it has become since.
  */
@@ -53,7 +56,7 @@ export function stage(url: string, ref: string, log: (s: string) => void, tipOf?
   };
   if (isCommit(ref)) {
     log(`fetching ${url} at ${ref.slice(0, 7)}`);
-    for (const args of [["init", "--quiet"], ["remote", "add", "origin", url], ["fetch", "--quiet", "--depth", "1", "origin", ref], ["checkout", "--quiet", "FETCH_HEAD"]]) {
+    for (const args of [["init", "--quiet"], ["remote", "add", "origin", url], ["fetch", "--quiet", "--filter=blob:none", "--tags", "origin", ref], ["checkout", "--quiet", "FETCH_HEAD"]]) {
       const r = git(args, dir);
       if (r.ok) continue;
       if (!tipOf) return fail(`${url}: ${r.err || `git ${args[0]} failed`}`);
@@ -66,13 +69,21 @@ export function stage(url: string, ref: string, log: (s: string) => void, tipOf?
     }
   } else {
     log(`cloning ${url}@${ref}`);
-    const r = git(["clone", "--quiet", "--depth", "1", "--branch", ref, url, dir]);
+    const r = git(["clone", "--quiet", "--filter=blob:none", "--single-branch", "--branch", ref, url, dir]);
     if (!r.ok) return fail(`${url}: ${r.err || "clone failed"}`);
   }
   const commit = git(["rev-parse", "HEAD"], dir);
   const date = git(["log", "-1", "--format=%cI"], dir);
   if (!commit.ok || !date.ok) return fail(`${url}: not a git checkout after staging`);
   return { ok: true, staged: { dir, commit: commit.out, date: date.out } };
+}
+
+/** The same checkout moved to another commit of its history (a release below the tip); null when git cannot check it out. */
+export function moveTo(staged: Staged, commit: string): Staged | null {
+  if (staged.commit === commit) return staged;
+  if (!git(["checkout", "--quiet", commit], staged.dir).ok) return null;
+  const date = git(["log", "-1", "--format=%cI"], staged.dir);
+  return date.ok ? { dir: staged.dir, commit, date: date.out } : null;
 }
 
 export function discard(staged: Staged): void {

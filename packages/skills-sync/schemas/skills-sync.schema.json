@@ -150,6 +150,11 @@
           "type": "string",
           "minLength": 1
         },
+        "version": {
+          "description": "The upstream version the source is held at, plain semver (1.3.0, never v1.3.0): update takes the commit of that release tag, or for a source versioned by its manifest the newest commit carrying that version. Latest when omitted. skills-sync never writes it; update --to prints the change to land.",
+          "type": "string",
+          "pattern": "^\\d+\\.\\d+\\.\\d+(-[0-9A-Za-z.-]+)?(\\+[0-9A-Za-z.-]+)?$"
+        },
         "root": {
           "description": "Where skill folders live in the repo (skills, pstack/skills); the repo root when omitted.",
           "type": "string"
