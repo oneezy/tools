@@ -4,7 +4,7 @@ import { spawnSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { isCommit } from "./sources.js";
+import { isCommit, isoDate } from "./sources.js";
 
 export interface Staged {
   dir: string;
@@ -75,7 +75,7 @@ export function stage(url: string, ref: string, log: (s: string) => void, tipOf?
   const commit = git(["rev-parse", "HEAD"], dir);
   const date = git(["log", "-1", "--format=%cI"], dir);
   if (!commit.ok || !date.ok) return fail(`${url}: not a git checkout after staging`);
-  return { ok: true, staged: { dir, commit: commit.out, date: date.out } };
+  return { ok: true, staged: { dir, commit: commit.out, date: isoDate(date.out) } };
 }
 
 /** The same checkout moved to another commit of its history (a release below the tip); null when git cannot check it out. */
@@ -83,7 +83,7 @@ export function moveTo(staged: Staged, commit: string): Staged | null {
   if (staged.commit === commit) return staged;
   if (!git(["checkout", "--quiet", commit], staged.dir).ok) return null;
   const date = git(["log", "-1", "--format=%cI"], staged.dir);
-  return date.ok ? { dir: staged.dir, commit, date: date.out } : null;
+  return date.ok ? { dir: staged.dir, commit, date: isoDate(date.out) } : null;
 }
 
 export function discard(staged: Staged): void {

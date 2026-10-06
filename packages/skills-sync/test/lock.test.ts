@@ -55,8 +55,9 @@ class Upstream {
   head(): string {
     return this.git("rev-parse", "HEAD");
   }
+  /** The commit's date as the lock spells it: UTC as Z, whichever git printed it. */
   date(commit = "HEAD"): string {
-    return this.git("log", "-1", "--format=%cI", commit);
+    return this.git("log", "-1", "--format=%cI", commit).replace(/[+-]00:?00$/, "Z");
   }
   tag(name: string, annotated = false): void {
     if (annotated) this.git("tag", "-a", name, "-m", name);

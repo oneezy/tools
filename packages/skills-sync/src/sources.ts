@@ -185,3 +185,11 @@ export function withName(md: string, name: string): string {
 export function cmp(a: string, b: string): number {
   return a < b ? -1 : a > b ? 1 : 0;
 }
+
+/**
+ * A commit date as git's %cI gives it, in one spelling: git 2.45 and later write UTC as `Z`, older git as `+00:00`.
+ * A NOTICE or a lock must not depend on which git wrote it, so `+00:00` is written `Z`, what CI's git prints.
+ */
+export function isoDate<T extends string | null>(d: T): T {
+  return (d === null ? d : d.replace(/[+-]00:?00$/, "Z")) as T;
+}

@@ -5,7 +5,7 @@
 // each at the commit update takes for it. Git over a staged checkout that has the history and tags (stage.ts fetches
 // them); nothing here writes.
 import path from "node:path";
-import { cmp } from "./sources.js";
+import { cmp, isoDate } from "./sources.js";
 import { discard, git, stage } from "./stage.js";
 
 export interface SourceVersion {
@@ -308,7 +308,7 @@ export function releasesOf(url: string, ref: string, root: string | undefined, l
 function commitDates(dir: string, commits: string[]): Map<string, string> {
   if (!commits.length) return new Map();
   const r = git(["log", "--no-walk=unsorted", "--stdin", "--format=%H %cI"], dir, commits.join("\n") + "\n");
-  return new Map(r.out.split("\n").map((l) => l.trim().split(" ") as [string, string]));
+  return new Map(r.out.split("\n").map((l) => { const [c, d] = l.trim().split(" "); return [c, isoDate(d ?? "")] as [string, string]; }));
 }
 
 /** How a source's version reads in output: `1.3.1`, `1.3.1 (+4 commits)`, or `<date> <short commit>` without a version. */
