@@ -7,9 +7,10 @@ import YAML from "yaml";
 import { asBuilt, build } from "./build.js";
 import { firstLine, flowProblems } from "./flow.js";
 import { Library } from "./library.js";
+import { hasOldLock, LOCK_NAME, lockText, readLockFile, type LockedSource } from "./lock.js";
 import { snapshotLock } from "./refresh.js";
 import { shippedSchema, validate } from "./schema.js";
-import { lockText } from "./sources.js";
+import { cmp } from "./sources.js";
 
 /** One thing that is wrong: the file (relative to the library, / separators) and why. */
 export interface Problem {
@@ -95,9 +96,16 @@ function pluginDrift(lib: Library, result: CheckResult, problem: AddProblem): vo
 /**
  * The lock against the one a refresh would write from the snapshots as they are: an entry edited by hand, one no
  * source selects, a snapshot changed after the refresh. Without a snapshot there is nothing to compare with, so a
- * clone before its first refresh passes.
+ * clone before its first refresh passes. A version 1 lock is one problem, and alone it is the only one: refresh
+ * migrates it.
  */
 function lockDrift(lib: Library, result: CheckResult, problem: AddProblem): void {
+  const old = hasOldLock(lib.root);
+  if (old) {
+    problem(lib.npxLockFile, `old lock format; refresh migrates it to ${LOCK_NAME}`);
+    result.fixes.push(`refresh migrates ${path.basename(lib.npxLockFile)}`);
+    if (!fs.existsSync(lib.lockFile)) return;
+  }
   const expected = snapshotLock(lib);
   if (!expected) return;
   const have = fs.existsSync(lib.lockFile) ? fs.readFileSync(lib.lockFile) : null;
@@ -105,11 +113,24 @@ function lockDrift(lib: Library, result: CheckResult, problem: AddProblem): void
     result.generated++;
     return;
   }
-  const disk = lib.lockEntries();
-  const names = [...new Set([...Object.keys(expected), ...Object.keys(disk)])].filter((n) => JSON.stringify(expected[n]) !== JSON.stringify(disk[n])).sort();
+  const names = lockDiff(expected, readLockFile(lib.root)?.sources ?? {});
   const which = names.length ? ` (${names.join(", ")})` : "";
   problem(lib.lockFile, have ? `differs from what refresh would write from the snapshots under upstream/${which}` : `missing; refresh would write it from the snapshots under upstream/${which}`);
   result.fixes.push(`refresh writes ${path.basename(lib.lockFile)}`);
+}
+
+/** What differs between two locks: a source id where the source itself does (its version, commit, or the whole of it), source:name per skill. */
+function lockDiff(a: Record<string, LockedSource>, b: Record<string, LockedSource>): string[] {
+  const out: string[] = [];
+  for (const id of [...new Set([...Object.keys(a), ...Object.keys(b)])].sort(cmp)) {
+    const [x, y] = [a[id], b[id]];
+    const scalars = (s?: LockedSource) => (s ? JSON.stringify([s.repo, s.ref, s.version, s.commit, s.date]) : null);
+    if (!x || !y || scalars(x) !== scalars(y)) out.push(id);
+    if (!x || !y) continue;
+    const skill = (s: LockedSource, n: string) => (s.skills?.[n] ? JSON.stringify([s.skills[n].path, s.skills[n].hash, s.skills[n].commit === s.commit ? undefined : s.skills[n].commit]) : null);
+    for (const n of [...new Set([...Object.keys(x.skills ?? {}), ...Object.keys(y.skills ?? {})])].sort(cmp)) if (skill(x, n) !== skill(y, n)) out.push(`${id}:${n}`);
+  }
+  return out;
 }
 
 /**

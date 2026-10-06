@@ -16,6 +16,7 @@ import { refresh, type RefreshResult } from "./refresh.js";
 import { configText } from "./sources.js";
 import { discard } from "./stage.js";
 import { findProjects, home, isRepo, layers, projects, status, unlink, type Status } from "./steps.js";
+import { versionLabel } from "./versions.js";
 import { runInWsl, wslDistros } from "./wsl.js";
 
 const VERSION = "0.4.0";
@@ -33,8 +34,9 @@ Commands
   status           what is linked and what is missing
   unlink           remove every link this tool made in the user folders
   projects         only the project step
-  refresh          resolve every source in skills-sync.json at the tip of its ref (a pinned skill at its pin): snapshot
-                   under upstream/, rebuild the third-party working set, write skills-lock.json
+  refresh          resolve every source in skills-sync.json at the tip of its ref (a pinned skill at its pin) and its
+                   upstream version (release tag, else plugin or package manifest): snapshot under upstream/, rebuild
+                   the third-party working set, write skills-sync.lock.json (a skills-lock.json from 0.4.0 is migrated)
   add <source>     declare a source (owner/repo[#ref], a git URL or a path) and the plugin that packages it in
                    skills-sync.json, then refresh
   build            write the plugin form into the library when skills-sync.json has generate.plugins on: --plugins and
@@ -43,7 +45,7 @@ Commands
   check            is what is committed consistent? every own skill's frontmatter (name is its folder's name and a
                    valid id, description present), every skill under skills/play/ named play-<name>, every flow.yaml
                    beside one (schemas/flow.schema.json, unique step ids, after/parallel/join naming steps that exist),
-                   and generated-file drift (what build --check computes, plus skills-lock.json against the snapshots).
+                   and generated-file drift (what build --check computes, plus skills-sync.lock.json against the snapshots).
                    One line per problem, path then reason; exit 1 on any, 0 when clean. Reads only: no network,
                    nothing written (CI, and before committing)
 
@@ -64,7 +66,7 @@ Build
                          Needs no history: clean in a shallow clone, and after a squash merge left the build's commit behind
 
 Refresh and add
-  --frozen               every skill at the commit skills-lock.json records; nothing moves, the lock is not written (CI)
+  --frozen               every skill at the commit skills-sync.lock.json records; nothing moves, the lock is not written (CI)
   --id <id>              add: the source id (default: owner-repo, or the repo's folder name)
   --root <path>          add: where the skill folders live in the repo (default: skills/ when it exists, else the root)
   --skills <names|*>     add: which skills to take (default: all)
@@ -286,7 +288,7 @@ async function main(): Promise<void> {
         /* nothing to reset */
       }
     }
-    const r = pullLibrary(lib.root, 30, log, lib.hasConfig() ? [path.basename(lib.lockFile)] : []);
+    const r = pullLibrary(lib.root, 30, log, lib.hasConfig() ? [path.basename(lib.lockFile), path.basename(lib.npxLockFile)] : []);
     if (r === "pulled" && !args.quiet) log("library pulled");
     if (r === "dirty" && !args.quiet) log("library has local changes; pull skipped");
   }
@@ -322,7 +324,7 @@ async function main(): Promise<void> {
       }, 400);
     };
     fs.watch(lib.own, { recursive: true }, (_e, f) => trigger(String(f ?? "skills/")));
-    for (const f of [lib.lockFile, lib.configFile]) if (fs.existsSync(f)) fs.watch(f, () => trigger(path.basename(f)));
+    for (const f of [lib.lockFile, lib.npxLockFile, lib.configFile]) if (fs.existsSync(f)) fs.watch(f, () => trigger(path.basename(f)));
     await new Promise(() => undefined);
   }
 }
@@ -344,7 +346,7 @@ function runRefresh(lib: Library, args: Args, log: (m: string) => void, report: 
  * `verbose` names every source's commit; otherwise only one that moved, so a sync with nothing new says nothing.
  */
 function reportRefresh(lib: Library, r: RefreshResult, unavailable: string[], args: Args, log: (m: string) => void, verbose: boolean): string[] {
-  for (const [id, s] of Object.entries(r.sources)) if (s.moved || verbose) log(`${id}: ${s.commit.slice(0, 7)} (${s.date.slice(0, 10)})${s.moved ? ", moved" : ""}`);
+  for (const [id, s] of Object.entries(r.sources)) if (s.moved || verbose) log(`${id}: ${versionLabel(s)}${s.moved ? ", moved" : ""}`);
   for (const g of r.gone) log(`  gone upstream: ${g}`);
   if (r.gone.length) log(`  (not in the lock; deselect it in ${path.basename(lib.configFile)}, or a copy in skills/ keeps it as your own; --retry checks again)`);
   if (r.unlocked.length && !args.quiet) log(`${r.unlocked.length} selected skill(s) have no commit in ${path.basename(lib.lockFile)} (${r.unlocked.join(", ")}); run refresh to resolve them`);

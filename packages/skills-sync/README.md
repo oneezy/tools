@@ -19,14 +19,15 @@ Edit a skill in the library and every harness sees the change immediately: the u
 
 ## The library
 
-A skills library is a folder with `skills/` beside `skills-sync.json` or `skills-lock.json`:
+A skills library is a folder with `skills/` beside `skills-sync.json`, `skills-sync.lock.json` or `skills-lock.json`:
 
 | path | holds | written by |
 |---|---|---|
 | `skills/<name>/` | a flat own skill, bare Agent Skills form (`SKILL.md`, optional `scripts/`, `references/`, `agents/openai.yaml`) | you |
 | `skills/<group>/<name>/` | an own skill inside a group; the group's name is its plugin id | you |
 | `skills-sync.json` | the committed config: the library itself, the two generation switches, third-party sources with their selections, renames and pins, the plugins | you, and `add` |
-| `skills-lock.json` | what is installed: one entry per third-party skill in the `npx skills` format (source repo, upstream path, content hash) plus the commit it was taken at | `refresh`; or `npx skills add/update` in a library without a config |
+| `skills-sync.lock.json` | what a config library has installed, per source as in the config: repo, ref, upstream version, commit, date, and each skill's upstream path and content hash (plus a commit where a pin holds it elsewhere) | `refresh`, `add` |
+| `skills-lock.json` | what a library without a config has installed, in the `npx skills` format. In a config library it is the lock skills-sync 0.4.0 wrote, which `refresh` migrates to `skills-sync.lock.json` | `npx skills add/update` |
 | `plugins/<id>/` | the plugin form, one package per plugin in the config: skill copies, `plugin.json`, `.codex-plugin/plugin.json`, `.claude-plugin/plugin.json`, `LICENSE`, `NOTICE.md`. Committed. | `build` |
 | `.claude-plugin/marketplace.json`, `.agents/plugins/marketplace.json` | the two marketplace catalogs, each listing `./plugins/<id>`. Committed. | `build` |
 | `skills-sync.local.json` | this machine's answers: harnesses, user folders, projects, WSL distros, skills found gone upstream, link mode. Gitignore it. | the tool, after every run |
@@ -52,7 +53,7 @@ Everything else in it is generated and should be gitignored:
 
 ## What a run does
 
-1. **Find the library.** `--repo`, else `$SKILLS_REPO`, else `~/.skills-sync` (the clone, or a link to wherever the library really lives), else a library folder above the current one (`skills/` beside `skills-sync.json` or `skills-lock.json`; never a dot-folder). Found somewhere else than `~/.skills-sync`? A link is left there so the next run finds it from anywhere. Nothing found? Clone one.
+1. **Find the library.** `--repo`, else `$SKILLS_REPO`, else `~/.skills-sync` (the clone, or a link to wherever the library really lives), else a library folder above the current one (`skills/` beside `skills-sync.json`, `skills-sync.lock.json` or `skills-lock.json`; never a dot-folder). Found somewhere else than `~/.skills-sync`? A link is left there so the next run finds it from anywhere. Nothing found? Clone one.
 2. **Pull.** Fast-forward the library from its remote, at most every 30 minutes, only when its tree is clean (`--pull` forces, `--no-pull` skips). In a config library a change to the lock alone does not count: a lock moved on this machine (by a `refresh` run here, or by the sync of a version before 0.5.0) is put back at the library's committed one by the pull, or left as it was when the pull fails. The pull is the only way a new lock arrives: an update lands as a library commit, and the next pull brings it.
 3. **Restore.** With a config: a `refresh --frozen` (below), always, whatever the pull did: every third-party skill at the commit the lock records, nothing moves upstream, nothing written but the snapshots and the working set, never the lock. A plain sync (the default command, `--watch`, a setup script or session-start hook) therefore installs exactly what the library commits; only an explicit `refresh` moves a source. Without a config: lock entries with no folder in `.agents/skills` are fetched from `skills-lock.json`, one shallow clone per source, each skill copied from its recorded path, or found by folder name when upstream moved it, exactly as 0.2.0 did. Either way, skills upstream deleted are reported, remembered, and skipped until `--retry`.
 4. **Layers.** `.agents/skills/<name>` links to each own skill's folder (`skills/<name>` or `skills/<group>/<name>`), listed in a generated `.agents/skills/.gitignore`. Each selected harness that has its own project folder gets one link per working-set entry. With `--sidecars`, own skills that lack `agents/openai.yaml` get one generated from their frontmatter, so Codex sees the same policy; it writes into `skills/`, so it is opt-in.
@@ -101,13 +102,36 @@ Third-party skills come from **sources** declared in `skills-sync.json`. The con
 
 **`refresh`** resolves every source and makes the library match:
 
-1. Each source's commit: the tip of `ref` (one `git ls-remote`), or `ref` itself when it is a commit. With `--frozen` every skill is taken at the commit `skills-lock.json` records for it, a skill the lock has no commit for is left alone and reported, and the lock is not written; this is what CI runs, and what every `sync` runs.
-2. Each selected skill is found under `root` by folder name, at its pin when it has one. When the snapshot already holds that commit's content (its hash matches the lock) nothing is fetched; otherwise a temp clone is staged (shallow, at that commit) and deleted when done. A skill not found upstream is reported once as gone, remembered in `skills-sync.local.json`, and not looked for again until `--retry`.
-3. The snapshot `upstream/<source>/` gets the skill folders and attribution files at their upstream paths, and a `.snapshot.json` (source, repo, ref, commit, date, skills with their path, hash and commit, attribution). Folders no longer selected are deleted. Snapshots are generated and never edited; gitignore `upstream/`.
+1. Each source's commit: the tip of `ref` (one `git ls-remote`), or `ref` itself when it is a commit. With `--frozen` every skill is taken at the commit `skills-sync.lock.json` records for it (a `skills-lock.json` from 0.4.0 is read in its place, unchanged), a skill the lock does not record is left alone and reported, and no lock is written; this is what CI runs, and what every `sync` runs.
+2. Each selected skill is found under `root` by folder name, at its pin when it has one. When the snapshot already holds that commit's content (its hash matches the lock) nothing is fetched; otherwise a temp clone is staged (blobless, with the history and tags behind that commit) and deleted when done. A skill not found upstream is reported once as gone, remembered in `skills-sync.local.json`, and not looked for again until `--retry`.
+3. The snapshot `upstream/<source>/` gets the skill folders and attribution files at their upstream paths, and a `.snapshot.json` (source, repo, ref, commit, date, version and commits past it, skills with their path, hash and commit, attribution). Folders no longer selected are deleted. Snapshots are generated and never edited; gitignore `upstream/`.
 4. The working set: `.agents/skills/<name>` becomes a copy of the snapshot folder, under the new name with the frontmatter `name` rewritten when renamed. A copy whose files already match is skipped; a copy no longer selected is deleted. One name selected by two sources: the first source by id wins and owns the lock entry; the other is reported until the config renames it. An own skill with the same name keeps it.
-5. `skills-lock.json` is written (never with `--frozen`): one entry per working-set skill, keyed by its name, with exactly the fields `npx skills` writes (`source` as `owner/repo`, `ref` only when it is a branch or tag, `sourceType`, `skillPath` as the upstream path, `computedHash`) plus `commit`, the commit the skill was taken at. Older skills-sync versions and `npx skills` keep restoring from it without pins or renames: probed against `npx skills` 1.7.0, `list`, `list --json` and `update -p -y` read a lock with the extra field, and keep it on the entries they do not rewrite.
+5. `skills-sync.lock.json` is written (never with `--frozen`), version 2, grouped per source like the config, sources and skills sorted:
 
-The hash is the `npx skills` recipe (SHA-256 over every file's relative path then bytes, sorted by `localeCompare`), computed over bytes exactly as upstream committed them, so a lock written on one machine verifies on any other. `refresh --plan` shows the actions without touching the library (it still stages clones in the temp folder). `--json` adds `sources`, `gone`, `unlocked` and `problems` to the usual actions. A source that cannot be reached keeps its lock entries and snapshot, and the exit code is 1.
+   ```json
+   {
+     "version": 2,
+     "sources": {
+       "mattpocock": {
+         "repo": "mattpocock/skills",
+         "ref": "main",
+         "version": "1.3.1",
+         "commit": "<40-hex commit>",
+         "date": "<the commit's ISO date>",
+         "skills": {
+           "tdd": { "path": "skills/engineering/tdd", "hash": "<recipe sha256>" },
+           "writing-for-agents": { "path": "skills/writing-for-agents", "hash": "<recipe sha256>", "commit": "<its pin>" }
+         }
+       }
+     }
+   }
+   ```
+
+   Skills are keyed by their working-set name (a rename shows here) with their upstream path; a skill carries a `commit` only when a pin holds it at another commit than its source's. A `skills-lock.json` that skills-sync 0.4.0 wrote (every entry with a `commit`) is migrated once: the new lock is written, the old file removed, one line says so. An `npx skills` lock of its own is never touched.
+
+**Versions.** A source's version is plain semver (`1.3.1`, never `v1.3.1`), resolved at its commit in this order: the nearest release tag at or before it (a leading `v` or `name@` stripped; pre-release tags only when no stable one is reachable); else the `version` of the nearest of `.claude-plugin/plugin.json`, `.cursor-plugin/plugin.json`, `.codex-plugin/plugin.json` and `package.json`, looking in the source's `root` and then each parent up to the repo root; else none (`null`). Output names each source by its version and how far past it the commit is, `mattpocock: 1.3.1 (+4 commits)`, counted from the tag's commit or from the commit that set the manifest to that version; a source without a version shows its date and short commit. The lock stores only the version and the commit; `--json` carries `version` and `ahead` (the count) per source.
+
+The hash is the `npx skills` recipe (SHA-256 over every file's relative path then bytes, sorted by `localeCompare`), computed over bytes exactly as upstream committed them, so a lock written on one machine verifies on any other. `refresh --plan` shows the actions without touching the library (it still stages clones in the temp folder). `--json` adds `sources` (per source: `commit`, `date`, `version`, `ahead`, `moved`), `gone`, `unlocked` and `problems` to the usual actions. A source that cannot be reached keeps its lock entries and snapshot, and the exit code is 1.
 
 **`add <source>`** declares a source and brings its skills in: `add mattpocock/skills`, `add cursor/plugins#main --root pstack/skills --as tdd=pstack-tdd,teach=pstack-teach`, `add ../some/repo --skills a,b`. It stages the repo in a temp clone, lists the skills under `--root` (default `skills/` when the repo has one, else the root), writes the config entry (`--id`, default `owner-repo`; the default branch unless `#ref`; every skill unless `--skills`; a map when `--as` renames; the nearest `LICENSE` and `README.md` as attribution) and the plugin entry that packages it (`--plugin <id>`, default the source id, display name from the id; `--no-plugin` for none; an id already in `plugins` is refused before anything is written), and runs `refresh` with that clone. `build --plugins --catalogs` then writes the package. Nothing is installed anywhere: no agent folder, no `~/.skills-sync`, no `npx skills` run against the library. `add --plan` prints the entries it would write and stops. Add a pin or drop a skill by editing the config, then `refresh`.
 
@@ -193,7 +217,7 @@ The config's optional `releases` section is that record, one entry per plugin id
    | step `does`, `if`, `returns`, `needs[]`, `calls` | free text; `needs` a list; `calls` names a `skill`, `plugin` or `app` |
 
    Any other key is refused, so a typo is caught. A problem reads `skills/oneezy/x/flow.yaml: $.steps[2].after: no step has the id open-pr`.
-3. **Generated-file drift.** The plugin form, by the same computation as `build --check`: every file a build would write or remove, and every package it cannot build (nothing when `generate.plugins` is false). And `skills-lock.json`, against the lock a `refresh` would write from the snapshots under `upstream/` as they are: an entry edited by hand, an entry no source selects, a snapshot changed since. A library without snapshots (a clone before its first `refresh`) has nothing to compare the lock with, so CI runs `refresh --frozen` first. `artifacts/` is never drift. A `skills-sync.json` the schema refuses is reported rule by rule and nothing is computed from it. The summary line names the command that writes what drifted (`build --plugins --catalogs`, `refresh`).
+3. **Generated-file drift.** The plugin form, by the same computation as `build --check`: every file a build would write or remove, and every package it cannot build (nothing when `generate.plugins` is false). And `skills-sync.lock.json`, against the lock a `refresh` would write from the snapshots under `upstream/` as they are: an entry edited by hand, an entry no source selects, a snapshot changed since; differences are named `source` (its version, commit or date) and `source:skill`. A config library that still has only the 0.4.0 `skills-lock.json` gets one problem, `old lock format; refresh migrates it`. A library without snapshots (a clone before its first `refresh`) has nothing to compare the lock with, so CI runs `refresh --frozen` first. `artifacts/` is never drift. A `skills-sync.json` the schema refuses is reported rule by rule and nothing is computed from it. The summary line names the command that writes what drifted (`build --plugins --catalogs`, `refresh`).
 
 A library without a config has no generated files to check; its frontmatter and flows still are.
 
