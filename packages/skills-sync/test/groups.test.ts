@@ -38,7 +38,7 @@ beforeEach(() => {
   skill(path.join(lib.own, "oneezy"), "a");
   skill(path.join(lib.own, "oneezy"), "b");
   skill(lib.own, "c");
-  fs.writeFileSync(lib.lockFile, EMPTY_LOCK);
+  fs.writeFileSync(lib.npxLockFile, EMPTY_LOCK);
   const table = harnessTable(homeDir, {});
   claude = table.find((h) => h.id === "claude-code")!;
   codex = table.find((h) => h.id === "codex")!;
@@ -112,6 +112,18 @@ test("status --json names each own skill's plugin id: oneezy, oneezy, none", () 
   assert.ok(!lexists(path.join(os.homedir(), ".skills-sync")) || !samePath(real(path.join(os.homedir(), ".skills-sync")), lib.root), "the real home is untouched");
 });
 
+test("a play group links exactly like oneezy: skills/play/play-unslop is play-unslop in .agents, every layer and every user folder, by its folder name", () => {
+  const dir = skill(path.join(lib.own, "play"), "play-unslop");
+  const r = runAll();
+  assert.deepEqual(r.conflicts(), []);
+  assert.ok(samePath(real(path.join(lib.agents, "play-unslop")), dir));
+  assert.ok(isLink(path.join(lib.root, claude.projectSkills, "play-unslop")));
+  for (const h of [claude, codex]) assert.ok(samePath(linkTarget(path.join(h.userSkills, "play-unslop"))!, dir), h.userSkills);
+  assert.ok(!lexists(path.join(lib.agents, "play")), "the group itself is never linked");
+  assert.ok(fs.readFileSync(path.join(lib.agents, ".gitignore"), "utf8").includes("/play-unslop/\n"));
+  assert.deepEqual(lib.scanOwn().skills.map((s) => [s.name, s.plugin]), [["a", "oneezy"], ["b", "oneezy"], ["c", null], ["play-unslop", "play"]]);
+});
+
 test("removing a grouped skill drops its links everywhere; its siblings stay", () => {
   runAll();
   fs.rmSync(path.join(lib.own, "oneezy", "b"), { recursive: true });
@@ -137,7 +149,7 @@ test("a skill that moves from flat into a group keeps its name: every link is re
   assert.deepEqual(runAll().changes(), []);
 });
 
-test("a library is skills/ beside skills-sync.json or skills-lock.json; findLibrary order and the dot-folder rule hold", () => {
+test("a library is skills/ beside skills-sync.json, skills-lock.json or skills-sync.lock.json; findLibrary order and the dot-folder rule hold", () => {
   const mk = (name: string, marker: string | null, withSkills = true) => {
     const d = path.join(base, name);
     fs.mkdirSync(withSkills ? path.join(d, "skills") : d, { recursive: true });
@@ -146,6 +158,7 @@ test("a library is skills/ beside skills-sync.json or skills-lock.json; findLibr
   };
   assert.ok(looksLikeLibrary(mk("config-only", "skills-sync.json")), "config, no lock");
   assert.ok(looksLikeLibrary(mk("lock-only", "skills-lock.json")), "lock, no config");
+  assert.ok(looksLikeLibrary(mk("v2-lock-only", "skills-sync.lock.json")), "the skills-sync lock, no config");
   assert.ok(!looksLikeLibrary(mk("bare", null)), "skills/ alone is not a library");
   assert.ok(!looksLikeLibrary(mk("no-skills", "skills-sync.json", false)), "a config without skills/ is not a library");
   assert.ok(!looksLikeLibrary(mk("old-manifest", "skills-sources.json")), "the old manifest name is not a marker");

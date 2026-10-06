@@ -1,5 +1,6 @@
 // The skills library: a folder with skills/ (own skills, flat or grouped by plugin) beside the committed config
-// skills-sync.json (third-party sources, plugins) or the lock skills-lock.json (what is installed, in the npx skills format).
+// skills-sync.json (third-party sources, plugins; its lock is skills-sync.lock.json) or the npx skills lock
+// skills-lock.json alone (what is installed, in the npx skills format).
 import { spawnSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
@@ -8,7 +9,8 @@ import YAML from "yaml";
 import { CONFIG_NAME, configKind, LOCAL_NAME } from "./config.js";
 import { isDir, isSkillDir, real } from "./fs.js";
 import { RESERVED } from "./harnesses.js";
-import type { LockEntry } from "./sources.js";
+import { LOCK_NAME, lockedNames, npxLockEntries, NPX_LOCK_NAME, readLock, type Lock } from "./lock.js";
+import { cmp, readConfig, type LockEntry } from "./sources.js";
 
 export class Library {
   constructor(public root: string) {}
@@ -19,9 +21,13 @@ export class Library {
   get agents(): string {
     return path.join(this.root, ".agents", "skills");
   }
-  /** The lock in the npx skills format: what is installed; written by refresh when a config exists. */
+  /** A config library's lock: per source, the version, commit and skills refresh resolved; written by refresh. */
   get lockFile(): string {
-    return path.join(this.root, "skills-lock.json");
+    return path.join(this.root, LOCK_NAME);
+  }
+  /** The npx skills lock: what a library without a config has installed; in a config library, the version 1 lock refresh migrates. */
+  get npxLockFile(): string {
+    return path.join(this.root, NPX_LOCK_NAME);
   }
   /** The committed config: the hand-edited declaration of third-party sources, selections, renames, pins, plugins. */
   get configFile(): string {
@@ -107,12 +113,18 @@ export class Library {
     return out;
   }
 
+  /** Working-set names the lock records: a config library's lock (a version 1 lock read in memory), else the npx skills lock. */
   lockedSkills(): string[] {
+    if (!this.hasConfig()) return Object.keys(this.npxLockEntries()).sort(cmp);
+    return lockedNames(this.lock());
+  }
+
+  /** A config library's lock, a version 1 lock read in memory when there is no other; null without one, or when the config is invalid. */
+  lock(): Lock | null {
     try {
-      const lock = JSON.parse(fs.readFileSync(this.lockFile, "utf8")) as { skills?: Record<string, unknown> };
-      return Object.keys(lock.skills ?? {}).sort();
+      return readLock(this.root, readConfig(this.configFile));
     } catch {
-      return [];
+      return null;
     }
   }
 
@@ -121,12 +133,9 @@ export class Library {
     return this.lockedSkills().filter((n) => !isSkillDir(path.join(this.agents, n)));
   }
 
-  lockEntries(): Record<string, LockEntry> {
-    try {
-      return (JSON.parse(fs.readFileSync(this.lockFile, "utf8")) as { skills?: Record<string, LockEntry> }).skills ?? {};
-    } catch {
-      return {};
-    }
+  /** The npx skills lock's entries, which restore reads in a library without a config. */
+  npxLockEntries(): Record<string, LockEntry> {
+    return npxLockEntries(this.root);
   }
 
   /**
@@ -139,7 +148,7 @@ export class Library {
     const result: RestoreResult = { restored: [], moved: [], missing: [], failed: [] };
     const wanted = new Set(only ?? this.missingFromLock());
     const bySource = new Map<string, Array<[string, LockEntry]>>();
-    for (const [name, e] of Object.entries(this.lockEntries())) {
+    for (const [name, e] of Object.entries(this.npxLockEntries())) {
       if (!wanted.has(name)) continue;
       const url = cloneUrl(e);
       if (!url) {
@@ -308,8 +317,8 @@ export function pullLibrary(root: string, minutes: number, log: (s: string) => v
   return "pulled";
 }
 
-/** The files that mark a library, either one beside skills/: the committed config, or the lock. */
-export const LIBRARY_MARKERS = [CONFIG_NAME, "skills-lock.json"];
+/** The files that mark a library, any one beside skills/: the committed config, the npx skills lock, or the lock. */
+export const LIBRARY_MARKERS = [CONFIG_NAME, NPX_LOCK_NAME, LOCK_NAME];
 
 /**
  * A library has skills/ beside one of the marker files, and is never a dot-folder: a harness config dir
@@ -320,7 +329,7 @@ export function looksLikeLibrary(dir: string): boolean {
   return isDir(path.join(abs, "skills")) && LIBRARY_MARKERS.some((m) => fs.existsSync(path.join(abs, m)));
 }
 
-/** An empty lock, for a library that has no third-party skills yet. */
+/** An empty npx skills lock, for a library without a config that has no third-party skills yet. */
 export const EMPTY_LOCK = JSON.stringify({ version: 1, skills: {} }, null, 2) + "\n";
 
 /**

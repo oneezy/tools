@@ -7,9 +7,10 @@ import YAML from "yaml";
 import { asBuilt, build } from "./build.js";
 import { firstLine, flowProblems } from "./flow.js";
 import { Library } from "./library.js";
+import { hasOldLock, LOCK_NAME, lockedSource, lockText, readLockFile, type LockedSource } from "./lock.js";
 import { snapshotLock } from "./refresh.js";
 import { shippedSchema, validate } from "./schema.js";
-import { lockText } from "./sources.js";
+import { cmp, readConfig } from "./sources.js";
 
 /** One thing that is wrong: the file (relative to the library, / separators) and why. */
 export interface Problem {
@@ -19,6 +20,8 @@ export interface Problem {
 
 export interface CheckResult {
   problems: Problem[];
+  /** what was passed over and why, never a failure: a declared group with no skill yet */
+  notes: Problem[];
   /** own skills whose frontmatter was read */
   skills: number;
   /** flow.yaml files validated */
@@ -32,14 +35,16 @@ export interface CheckResult {
 /** A skill id by the Agent Skills rule: lowercase letters, digits and single hyphens. */
 const SKILL_ID = /^[a-z0-9]+(-[a-z0-9]+)*$/;
 const SKILL_ID_MAX = 64;
+/** The playground group: every skill in skills/play/ is named play-<name>, so it never clashes with a source's skill. */
+const PLAY = "play";
 
 export function check(lib: Library): CheckResult {
-  const result: CheckResult = { problems: [], skills: 0, flows: 0, generated: 0, fixes: [] };
-  const rel = (p: string) => path.relative(lib.root, p).split("\\").join("/");
-  const problem = (file: string, reason: string) => result.problems.push({ path: rel(file), reason });
+  const result: CheckResult = { problems: [], notes: [], skills: 0, flows: 0, generated: 0, fixes: [] };
+  const problem = (file: string, reason: string) => result.problems.push({ path: rel(lib, file), reason });
   for (const s of lib.scanOwn().skills) {
     const md = path.join(s.dir, "SKILL.md");
     result.skills++;
+    if (s.plugin === PLAY && !s.name.startsWith(`${PLAY}-`)) problem(s.dir, `a skill in the ${PLAY} group is named ${PLAY}-<name>; rename the folder (and its frontmatter name) to ${PLAY}-${s.name}`);
     for (const reason of frontmatterProblems(fs.readFileSync(md, "utf8"), s.name)) problem(md, reason);
     const flow = path.join(s.dir, "flow.yaml");
     if (!fs.existsSync(flow)) continue;
@@ -50,10 +55,16 @@ export function check(lib: Library): CheckResult {
   if (!lib.hasConfig() || !validConfig(lib, problem)) return result;
   pluginDrift(lib, result, problem);
   lockDrift(lib, result, problem);
+  heldVersions(lib, result, problem);
   return result;
 }
 
 type AddProblem = (file: string, reason: string) => void;
+
+/** A path as problems give it: relative to the library, / separators. */
+function rel(lib: Library, p: string): string {
+  return path.relative(lib.root, p).split("\\").join("/");
+}
 
 /** The config against its schema, one problem per rule broken; false when it is not valid, so nothing is computed from it. */
 function validConfig(lib: Library, problem: AddProblem): boolean {
@@ -76,8 +87,10 @@ function validConfig(lib: Library, problem: AddProblem): boolean {
 function pluginDrift(lib: Library, result: CheckResult, problem: AddProblem): void {
   const r = build(lib, { plugins: true, catalogs: true, artifacts: false, check: true, plan: false, log: () => undefined });
   const before = result.problems.length;
+  const skipped = new Set(r.skipped.map((id) => path.join(lib.plugins, id)));
   for (const a of r.report.actions) {
-    if (a.kind === "write") problem(a.path, a.note === "missing" ? "missing; build would write it" : "differs from what build would write");
+    if (a.kind === "note" && skipped.has(a.path)) result.notes.push({ path: rel(lib, a.path), reason: a.note! });
+    else if (a.kind === "write") problem(a.path, a.note === "missing" ? "missing; build would write it" : "differs from what build would write");
     else if (a.kind === "delete") problem(a.path, `${a.note}; build would remove it`);
     else if (a.kind === "conflict") problem(a.path, a.note ?? "cannot be built");
   }
@@ -88,9 +101,16 @@ function pluginDrift(lib: Library, result: CheckResult, problem: AddProblem): vo
 /**
  * The lock against the one a refresh would write from the snapshots as they are: an entry edited by hand, one no
  * source selects, a snapshot changed after the refresh. Without a snapshot there is nothing to compare with, so a
- * clone before its first refresh passes.
+ * clone before its first refresh passes. A version 1 lock is one problem, and alone it is the only one: refresh
+ * migrates it.
  */
 function lockDrift(lib: Library, result: CheckResult, problem: AddProblem): void {
+  const old = hasOldLock(lib.root);
+  if (old) {
+    problem(lib.npxLockFile, `old lock format; refresh migrates it to ${LOCK_NAME}`);
+    result.fixes.push(`refresh migrates ${path.basename(lib.npxLockFile)}`);
+    if (!fs.existsSync(lib.lockFile)) return;
+  }
   const expected = snapshotLock(lib);
   if (!expected) return;
   const have = fs.existsSync(lib.lockFile) ? fs.readFileSync(lib.lockFile) : null;
@@ -98,11 +118,42 @@ function lockDrift(lib: Library, result: CheckResult, problem: AddProblem): void
     result.generated++;
     return;
   }
-  const disk = lib.lockEntries();
-  const names = [...new Set([...Object.keys(expected), ...Object.keys(disk)])].filter((n) => JSON.stringify(expected[n]) !== JSON.stringify(disk[n])).sort();
+  const names = lockDiff(expected, readLockFile(lib.root)?.sources ?? {});
   const which = names.length ? ` (${names.join(", ")})` : "";
   problem(lib.lockFile, have ? `differs from what refresh would write from the snapshots under upstream/${which}` : `missing; refresh would write it from the snapshots under upstream/${which}`);
   result.fixes.push(`refresh writes ${path.basename(lib.lockFile)}`);
+}
+
+/**
+ * Every source the config holds at a version the lock does not have it at: the hold was landed and the update that
+ * takes the source there was not run. A source the lock does not record (or records for another repo) is not compared.
+ */
+function heldVersions(lib: Library, result: CheckResult, problem: AddProblem): void {
+  const sources = readConfig(lib.configFile).sources;
+  const lock = readLockFile(lib.root);
+  const off: string[] = [];
+  for (const id of Object.keys(sources).sort(cmp)) {
+    const held = sources[id].version;
+    const locked = lockedSource(lock, id, sources[id]);
+    if (!held || !locked || locked.version === held) continue;
+    problem(lib.configFile, `sources.${id}.version holds ${held} but the lock has ${locked.version ?? "no version"}; run update ${id}`);
+    off.push(id);
+  }
+  if (off.length) result.fixes.push(`update ${off.join(" ")} takes ${off.length === 1 ? "it" : "them"} to the held version`);
+}
+
+/** What differs between two locks: a source id where the source itself does (its version, commit, or the whole of it), source:name per skill. */
+function lockDiff(a: Record<string, LockedSource>, b: Record<string, LockedSource>): string[] {
+  const out: string[] = [];
+  for (const id of [...new Set([...Object.keys(a), ...Object.keys(b)])].sort(cmp)) {
+    const [x, y] = [a[id], b[id]];
+    const scalars = (s?: LockedSource) => (s ? JSON.stringify([s.repo, s.ref, s.version, s.commit, s.date]) : null);
+    if (!x || !y || scalars(x) !== scalars(y)) out.push(id);
+    if (!x || !y) continue;
+    const skill = (s: LockedSource, n: string) => (s.skills?.[n] ? JSON.stringify([s.skills[n].path, s.skills[n].hash, s.skills[n].commit === s.commit ? undefined : s.skills[n].commit]) : null);
+    for (const n of [...new Set([...Object.keys(x.skills ?? {}), ...Object.keys(y.skills ?? {})])].sort(cmp)) if (skill(x, n) !== skill(y, n)) out.push(`${id}:${n}`);
+  }
+  return out;
 }
 
 /**
