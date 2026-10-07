@@ -195,6 +195,11 @@ test("CLI plan/apply/status uses the same workflow and exits nonzero on an instr
   const status = run("status");
   assert.equal(status.status, 0, status.stderr);
   assert.ok(JSON.parse(status.stdout).entrypoints.every((item: { state: string }) => item.state === "current"));
+  const selectedStatus = spawnSync(process.execPath, [cli, "status", ...args, "--no-projects"], {
+    encoding: "utf8",
+  });
+  assert.equal(selectedStatus.status, 0, selectedStatus.stderr);
+  assert.deepEqual(JSON.parse(selectedStatus.stdout).entrypoints, []);
   write(path.join(project, "AGENTS.md"), start);
   const conflict = run();
   assert.equal(conflict.status, 1);

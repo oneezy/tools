@@ -375,7 +375,7 @@ async function main(): Promise<void> {
 
   if (args.command === "status") {
     const ids = args.agents ?? local.agents;
-    return printStatus(lib, ids ? table.filter((h) => ids.includes(h.id)) : detected(table), args.json, local);
+    return printStatus(lib, ids ? table.filter((h) => ids.includes(h.id)) : detected(table), args, local);
   }
   if (args.command === "unlink") {
     const r = new Report();
@@ -915,14 +915,21 @@ function linksLine(r: Report): string {
   return `links: ${symlink} made as symlinks${mode === "symlink" ? " (--symlinks)" : ""}`;
 }
 
-function printStatus(lib: Library, table: Harness[], json: boolean, local: Local): void {
+function printStatus(lib: Library, table: Harness[], args: Args, local: Local): void {
   const s = status(lib, table);
-  const instructionProjects = (local.projects ?? [])
-    .map((name) => path.join(local.dev ?? process.cwd(), name))
-    .filter(isDir);
-  const instructions = entrypoints(lib, table, local.global ?? true, instructionProjects, new Report(), true);
+  const dev = path.resolve(args.dev ?? local.dev ?? process.cwd());
+  const projectNames =
+    args.projects === false
+      ? []
+      : args.projects === "*"
+        ? findProjects(dev, lib).map((project) => path.basename(project))
+        : (args.projects ?? local.projects ?? []);
+  const instructionProjects = projectNames.map((name) => path.join(dev, name)).filter(isDir);
+  const instructions = args.entrypoints
+    ? entrypoints(lib, table, args.global ?? local.global ?? true, instructionProjects, new Report(), true)
+    : [];
   if (instructions.some((item) => item.state !== "current")) process.exitCode = 1;
-  if (json) {
+  if (args.json) {
     process.stdout.write(JSON.stringify({ ...s, entrypoints: instructions }, null, 2) + "\n");
     return;
   }
