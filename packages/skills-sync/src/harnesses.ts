@@ -15,6 +15,8 @@ export interface Harness {
   projectSkills: string;
   /** the harness reads .agents/skills itself, so no project link layer is needed */
   universal: boolean;
+  userInstructions?: string[];
+  projectInstructions?: string[];
   note?: string;
 }
 
@@ -31,6 +33,8 @@ export function harnessTable(home = os.homedir(), env = process.env): Harness[] 
       userSkills: path.join(claudeHome, "skills"),
       projectSkills: path.join(".claude", "skills"),
       universal: false,
+      userInstructions: ["CLAUDE.md"],
+      projectInstructions: ["CLAUDE.md", "CLAUDE.local.md", ".claude/CLAUDE.md"],
     },
     {
       id: "codex",
@@ -40,6 +44,8 @@ export function harnessTable(home = os.homedir(), env = process.env): Harness[] 
       userSkills: path.join(home, ".agents", "skills"),
       projectSkills: path.join(".agents", "skills"),
       universal: true,
+      userInstructions: ["AGENTS.md", "AGENTS.override.md"],
+      projectInstructions: ["AGENTS.md", "AGENTS.override.md"],
     },
     {
       id: "goose",

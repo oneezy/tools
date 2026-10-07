@@ -408,7 +408,7 @@ test("the archives do not depend on the checkout's line endings: a clone git con
   assert.equal(files("plugins/up").get("skills/a/windows.txt")!.toString("utf8"), "upstream\nwith CRLF\n");
 });
 
-test("artifacts/releases.json records per plugin its archive, sha256, version, source commit, entries and the last release the config records (null without one); artifacts/<id>.changes.md appears only when that release's files name a file the new archive lacks, lists them and says the upload must be a new plugin, not an overlay; it goes once the record names no such file", () => {
+test("artifacts/releases.json records per plugin its archive, sha256, version, source commit, entries and the last release the config records (null without one); artifacts/<id>.changes.md appears only when that release's files name a file the new archive lacks, lists them and requires explicit guarded deletion without replacing the plugin; it goes once the record names no such file", () => {
   const sha = "a".repeat(64);
   const recorded = {
     plugin_id: "plugin_up",
@@ -460,8 +460,11 @@ test("artifacts/releases.json records per plugin its archive, sha256, version, s
   assert.match(note, /plugin_up/);
   assert.match(note, /rel_7/);
   assert.ok(note.includes(`artifacts/up-${version}.zip`), "names the archive to upload");
-  assert.match(note, /new plugin/);
-  assert.match(note, /not as an update/);
+  assert.match(note, /explicit deletion authorization/);
+  assert.match(note, /expected_release_id/);
+  assert.match(note, /delete_paths/);
+  assert.match(note, /do not automatically create a replacement or uninstall/);
+  assert.doesNotMatch(note, /cannot delete|Upload .*new plugin/);
   assert.match(note, /overlay/);
   assert.ok(
     !fs.existsSync(path.join(root, "artifacts", "oneezy.changes.md")),
