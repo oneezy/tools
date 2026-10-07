@@ -77,19 +77,32 @@ export function entrypointProblems(lib: Library): string[] {
   }
 }
 
-function instruction_targets(root: string, names: string[], nested: boolean): string[] {
+function instruction_targets(
+  root: string,
+  names: string[],
+  nested: boolean,
+  failed: (dir: string, error: unknown) => void,
+): string[] {
   const targets = new Set([path.join(root, names[0])]);
   for (const name of names.slice(1)) if (lexists(path.join(root, name))) targets.add(path.join(root, name));
   if (nested && !hasLinkedParent(root)) {
     const filenames = new Set(names.map((name) => path.basename(name)));
-    const visit = (dir: string): void => {
-      for (const file of fs.readdirSync(dir, { withFileTypes: true })) {
+    const visit = (dir: string): boolean => {
+      let files: fs.Dirent[];
+      try {
+        files = fs.readdirSync(dir, { withFileTypes: true });
+      } catch (error) {
+        failed(dir, error);
+        return false;
+      }
+      for (const file of files) {
         const next = path.join(dir, file.name);
         if (file.isDirectory() && !ignored_dirs.has(file.name) && file.name !== "skills") visit(next);
         else if (filenames.has(file.name)) targets.add(next);
       }
+      return true;
     };
-    visit(root);
+    if (!visit(root)) return [];
   }
   return [...targets].sort();
 }
@@ -138,6 +151,11 @@ export function entrypoints(
       continue;
     }
     const targets = new Set<string>();
+    const failedDiscovery = (dir: string, error: unknown): void => {
+      const reason = `instruction discovery failed: ${error instanceof Error ? error.message : String(error)}; independent destinations continue`;
+      report.add({ kind: "conflict", path: dir, note: reason });
+      statuses.push({ path: dir, block: id, state: "conflict", reason });
+    };
     for (const harness of harnesses.filter((item) => entry.agents.includes(item.id))) {
       if (!harness.userInstructions || !harness.projectInstructions) {
         report.add({
@@ -181,9 +199,11 @@ export function entrypoints(
         }
       }
       if (global)
-        for (const file of instruction_targets(harness.configDir, harness.userInstructions, false)) targets.add(file);
+        for (const file of instruction_targets(harness.configDir, harness.userInstructions, false, failedDiscovery))
+          targets.add(file);
       for (const project of projects)
-        for (const file of instruction_targets(project, harness.projectInstructions, true)) targets.add(file);
+        for (const file of instruction_targets(project, harness.projectInstructions, true, failedDiscovery))
+          targets.add(file);
     }
     for (const file of targets) {
       try {

@@ -234,3 +234,16 @@ test("readback cannot claim a current route when installed Brain instructions ar
     statuses.some((item) => item.state === "conflict" && item.reason?.includes("installed instructions differ")),
   );
 });
+
+test("an unreadable project discovery reports its failure and still plans the independent project", () => {
+  const unavailable = path.join(base, "unavailable-project");
+  write(unavailable, "a file occupies this project path");
+  const report = new Report();
+  const statuses = entrypoints(lib, harnessTable(userDir, {}), false, [unavailable, project], report);
+  assert.ok(statuses.some((item) => item.path === unavailable && item.state === "conflict"));
+  assert.ok(report.conflicts().some((item) => item.note?.includes("instruction discovery failed")));
+  apply(report, false);
+  assert.equal(read(unavailable), "a file occupies this project path");
+  assert.ok(read(path.join(project, "AGENTS.md")).includes(body));
+  assert.ok(read(path.join(project, "CLAUDE.md")).includes(body));
+});
