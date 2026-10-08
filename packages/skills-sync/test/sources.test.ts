@@ -367,6 +367,7 @@ test("sync on a clone of the library installs the committed lock: an upstream co
   lib = new Library(path.join(base, "dev", "clone"));
   const cloneLib = lib;
   const clone = new Upstream(lib.root);
+  clone.git("config", "core.autocrlf", "true");
   const lockName = path.basename(lib.lockFile);
   const originLock = () => fs.readFileSync(path.join(origin.dir, lockName), "utf8");
   const cloneLock = () => fs.readFileSync(lib.lockFile, "utf8");

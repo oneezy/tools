@@ -12,6 +12,7 @@ import {
   under,
   hasLinkedParent,
   toHash,
+  real,
   type LinkKind,
 } from "./fs.js";
 
@@ -45,6 +46,7 @@ export interface Action {
   /** for write: the file body; for exclude: the entries */
   payload?: string | Buffer | string[];
   expectedHash?: string | null;
+  dependencies?: Array<{ path: string; target: string | null; files: Array<{ name: string; hash: string }> }>;
   failed?: boolean;
 }
 
@@ -142,6 +144,24 @@ export function apply(report: Report, plan: boolean, exclude?: (repo: string, en
           copyDir(a.target!, a.path);
           break;
         case "write":
+          for (const dependency of a.dependencies ?? []) {
+            const owned =
+              dependency.target === null
+                ? !isLink(dependency.path)
+                : isLink(dependency.path) && samePath(real(dependency.path), dependency.target);
+            if (
+              !owned ||
+              dependency.files.some((file) => {
+                const installed = path.join(dependency.path, file.name);
+                return (
+                  isLink(installed) ||
+                  !under(real(installed), real(dependency.path)) ||
+                  toHash(fs.readFileSync(installed)) !== file.hash
+                );
+              })
+            )
+              throw new Error(`${dependency.path}: instruction dependency changed since planning; left alone`);
+          }
           if (a.expectedHash !== undefined) {
             const current = !hasLinkedParent(a.path) && lexists(a.path) ? fs.readFileSync(a.path) : null;
             if (hasLinkedParent(a.path) || (current ? toHash(current) : null) !== a.expectedHash) {

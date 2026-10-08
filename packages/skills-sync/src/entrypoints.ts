@@ -1,10 +1,11 @@
 import fs from "node:fs";
 import path from "node:path";
-import { hasLinkedParent, toHash, lexists, real, under } from "./fs.js";
+import { hasLinkedParent, toHash, lexists, real, under, isLink, samePath } from "./fs.js";
 import type { Harness } from "./harnesses.js";
 import type { Library } from "./library.js";
-import { Report } from "./plan.js";
+import { Report, type Action } from "./plan.js";
 import { shippedSchema, validate } from "./schema.js";
+import { pluginDependency, nativePluginRoute } from "./install.js";
 
 export const ENTRYPOINTS_NAME = "skills-sync.entrypoints.json";
 
@@ -57,7 +58,7 @@ function read_source(lib: Library, entry: Entry): string {
   if (!lib.scanOwn().skills.some((skill) => skill.name === entry.skill))
     throw new Error(`${entry.skill}: required own skill is missing; entrypoints are not propagated`);
   const skill = lib.scanOwn().skills.find((item) => item.name === entry.skill)!;
-  for (const name of entry.requiredFiles ?? []) {
+  for (const name of ["SKILL.md", ...(entry.requiredFiles ?? [])]) {
     const file = path.resolve(skill.dir, name);
     if (path.isAbsolute(name) || !under(file, skill.dir) || hasLinkedParent(file) || !fs.statSync(file).isFile())
       throw new Error(`${entry.skill}/${name}: required skill file is unavailable; entrypoints are not propagated`);
@@ -75,6 +76,13 @@ export function entrypointProblems(lib: Library): string[] {
   } catch (error) {
     return [String(error instanceof Error ? error.message : error)];
   }
+}
+
+export function instructionDependencies(lib: Library): Array<{ skill: string; files: string[] }> {
+  return Object.values(read_entries(lib)).map((entry) => {
+    read_source(lib, entry);
+    return { skill: entry.skill, files: entry.requiredFiles ?? [] };
+  });
 }
 
 function instruction_targets(
@@ -132,6 +140,9 @@ export function entrypoints(
   projects: string[],
   report: Report,
   verifySkills = false,
+  planned?: Report,
+  projectCopies = false,
+  nativePlugins = false,
 ): EntryStatus[] {
   const statuses: EntryStatus[] = [];
   let entries: Record<string, Entry>;
@@ -150,7 +161,7 @@ export function entrypoints(
       statuses.push({ path: entry.source, block: id, state: "conflict", reason: String(error) });
       continue;
     }
-    const targets = new Set<string>();
+    const targets = new Map<string, NonNullable<Action["dependencies"]>>();
     const failedDiscovery = (dir: string, error: unknown): void => {
       const reason = `instruction discovery failed: ${error instanceof Error ? error.message : String(error)}; independent destinations continue`;
       report.add({ kind: "conflict", path: dir, note: reason });
@@ -171,41 +182,92 @@ export function entrypoints(
         });
         continue;
       }
-      if (verifySkills) {
-        const own = lib.scanOwn().skills.find((item) => item.name === entry.skill)!;
-        const installedRoots = [
-          ...(global ? [harness.userSkills] : []),
-          ...projects.map((project) => path.join(project, harness.projectSkills)),
-        ];
-        for (const installedRoot of installedRoots) {
-          const installed = path.join(installedRoot, entry.skill);
-          const files = ["SKILL.md", ...(entry.requiredFiles ?? [])];
+      const routes = [
+        ...(global
+          ? [{ root: harness.configDir, names: harness.userInstructions, nested: false, skills: harness.userSkills }]
+          : []),
+        ...projects.map((project) => ({
+          root: project,
+          names: harness.projectInstructions!,
+          nested: true,
+          skills: path.join(project, harness.projectSkills),
+        })),
+      ];
+      for (const route of routes) {
+        const dependencies: NonNullable<Action["dependencies"]> = [];
+        if (verifySkills) {
+          const own = lib.scanOwn().skills.find((item) => item.name === entry.skill)!;
+          const pluginRequested = !route.nested && nativePlugins && nativePluginRoute(lib, harness, entry.skill);
+          const pluginRoot = pluginRequested
+            ? pluginDependency(lib, harness, entry.skill, entry.requiredFiles ?? [], !!planned)
+            : null;
+          const installed = pluginRoot ?? path.join(route.skills, entry.skill);
+          const action = planned?.actions.find(
+            (item) =>
+              samePath(item.path, installed) &&
+              ["link", "relink", "copy"].includes(item.kind) &&
+              !item.failed &&
+              item.target &&
+              samePath(real(item.target), real(own.dir)),
+          );
+          const projected = action && !planned?.conflicts().some((item) => samePath(item.path, installed));
           let available = false;
           try {
-            available = files.every(
-              (name) =>
-                lexists(path.join(installed, name)) &&
-                fs.readFileSync(path.join(installed, name)).equals(fs.readFileSync(path.join(own.dir, name))),
-            );
+            const owned =
+              !!pluginRoot ||
+              (isLink(installed) && samePath(real(installed), real(own.dir))) ||
+              (route.nested && projectCopies && !isLink(installed));
+            available = pluginRequested
+              ? !!pluginRoot
+              : !!projected ||
+                (owned &&
+                  ["SKILL.md", ...(entry.requiredFiles ?? [])].every((name) => {
+                    const file = path.join(installed, name);
+                    return (
+                      lexists(file) &&
+                      !isLink(file) &&
+                      ((projectCopies && route.nested) || samePath(real(file), real(path.join(own.dir, name)))) &&
+                      fs.readFileSync(file).equals(fs.readFileSync(path.join(own.dir, name)))
+                    );
+                  }));
           } catch {
-            /* An unreadable installed dependency is a conflict; other destinations still verify. */
+            /* Independent destinations can continue when this installed dependency is unreadable. */
           }
-
           if (!available) {
-            const reason = `${entry.skill}: installed instructions differ from the reviewed library; repair its link conflict before claiming the route`;
+            const reason = `${entry.skill}: installed instructions differ from the reviewed library or are not canonically owned; repair its link conflict before claiming the route`;
             report.add({ kind: "conflict", path: installed, note: reason });
             statuses.push({ path: installed, block: id, state: "conflict", reason });
+            continue;
           }
+          dependencies.push({
+            path: installed,
+            target: pluginRoot || (route.nested && projectCopies) ? null : real(own.dir),
+            files: ["SKILL.md", ...(entry.requiredFiles ?? [])].map((name) => ({
+              name,
+              hash: toHash(fs.readFileSync(path.join(pluginRoot ?? own.dir, name))),
+            })),
+          });
+          if (pluginRoot || (route.nested && projectCopies))
+            dependencies.push({
+              path: own.dir,
+              target: null,
+              files: ["SKILL.md", ...(entry.requiredFiles ?? [])].map((name) => ({
+                name,
+                hash: toHash(fs.readFileSync(path.join(own.dir, name))),
+              })),
+            });
+          const template = path.resolve(lib.root, entry.source);
+          dependencies.push({
+            path: path.dirname(template),
+            target: null,
+            files: [{ name: path.basename(template), hash: toHash(fs.readFileSync(template)) }],
+          });
         }
+        for (const file of instruction_targets(route.root, route.names, route.nested, failedDiscovery))
+          targets.set(file, dependencies);
       }
-      if (global)
-        for (const file of instruction_targets(harness.configDir, harness.userInstructions, false, failedDiscovery))
-          targets.add(file);
-      for (const project of projects)
-        for (const file of instruction_targets(project, harness.projectInstructions, true, failedDiscovery))
-          targets.add(file);
     }
-    for (const file of targets) {
+    for (const [file, dependencies] of targets) {
       try {
         if (hasLinkedParent(file)) throw new Error("linked instruction file or parent; left alone");
         const exists = lexists(file);
@@ -224,14 +286,17 @@ export function entrypoints(
         const next = replace_block(prior ? String(prior.payload) : imports + text, id, body);
         const state = text === next ? "current" : exists ? "drift" : "missing";
         statuses.push({ path: file, block: id, state });
-        if (prior) prior.payload = next;
-        else if (state === "current") report.add({ kind: "skip", path: file, note: `${id} instructions current` });
+        if (prior) {
+          prior.payload = next;
+          prior.dependencies = [...(prior.dependencies ?? []), ...dependencies];
+        } else if (state === "current") report.add({ kind: "skip", path: file, note: `${id} instructions current` });
         else
           report.add({
             kind: "write",
             path: file,
             payload: next,
             expectedHash: bytes ? toHash(bytes) : null,
+            dependencies,
             note: `${id} managed instructions`,
           });
       } catch (error) {

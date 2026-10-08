@@ -109,6 +109,6 @@ if (args[0] === "plugin" && args.includes("--help")) {
   const lines = [];
   if (!has(process.env.FAKE_HARNESS_BROKEN, host))
     for (const [id, p] of Object.entries(state.plugins))
-      if (p.enabled) for (const s of skillsOf(p.dir)) lines.push(`- ${id.slice(0, id.lastIndexOf("@"))}:${s}: ${s} skill`);
+      if (p.enabled) for (const s of skillsOf(p.dir)) lines.push(`- ${id.slice(0, id.lastIndexOf("@"))}:${s}: ${s} skill (file: ${path.join(p.dir, "skills", s, "SKILL.md")})`);
   out(JSON.stringify([{ type: "message", content: [{ text: `### Available skills\n${lines.join("\n")}` }] }]));
 } else fail(`fake ${host}: unhandled ${args.join(" ")}`);
