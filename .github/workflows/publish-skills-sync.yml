@@ -108,10 +108,17 @@ jobs:
         working-directory: ${{ runner.temp }}
         run: |
           v="${{ steps.version.outputs.version }}"
-          # npm takes a few minutes to serve a new version ("being processed"); 0.4.0 took about three
+          # A version lookup can propagate before npm exec's packument. Verify the runnable package
+          # with a fresh manifest lookup on every retry, not only the version endpoint.
+          verified=false
           for i in $(seq 1 60); do
-            [ "$(npm view @oneezy/skills-sync@$v version 2>/dev/null)" = "$v" ] && break
+            if [ "$(npm view --prefer-online @oneezy/skills-sync@$v version 2>/dev/null)" = "$v" ] &&
+              npx --yes --prefer-online "@oneezy/skills-sync@$v" --help > skills-sync-help.txt; then
+              verified=true
+              break
+            fi
             sleep 10
           done
+          [ "$verified" = true ]
           npm view "@oneezy/skills-sync@$v" version
-          npx --yes "@oneezy/skills-sync@$v" --help | head -n 1
+          head -n 1 skills-sync-help.txt

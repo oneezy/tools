@@ -351,48 +351,74 @@ test("without built plugins, and in a cloud session, sync is the links-only sync
   for (const s of [...PLUGIN_SKILLS, "solo"]) assert.ok(linked(claudeSkills(), s) && linked(codexSkills(), s), s);
 });
 
-test("plugin Brain references are checked before instruction writes and owned-link removal", () => {
-  const own = path.join(root, "skills", "oneezy", "oneezy-brain");
-  skill(path.dirname(own), "oneezy-brain");
-  write(path.join(own, "references", "location.md"), "Observed Drive registry");
-  const built = path.join(root, "plugins", "oneezy", "skills", "oneezy-brain");
-  write(path.join(built, "SKILL.md"), withInternal(fs.readFileSync(path.join(own, "SKILL.md"), "utf8")));
-  write(path.join(built, "references", "location.md"), "Observed Drive registry");
-  write(path.join(root, "brain-routing.md"), "Load the current Brain registry.");
-  write(
-    path.join(root, ENTRYPOINTS_NAME),
-    JSON.stringify({
-      version: 1,
-      blocks: {
-        brain: {
-          source: "brain-routing.md",
-          skill: "oneezy-brain",
-          agents: ["codex", "claude-code"],
-          requiredFiles: ["references/location.md"],
+for (const compatibility of ["in-place", "cache-aliases"])
+  test(`plugin Brain references are checked before writes/unlink with ${compatibility} CLI inventory`, () => {
+    const extra: Record<string, string> =
+      compatibility === "cache-aliases" ? { FAKE_HARNESS_CACHE: "true", FAKE_HARNESS_ALIASES: "true" } : {};
+    const own = path.join(root, "skills", "oneezy", "oneezy-brain");
+    skill(path.dirname(own), "oneezy-brain");
+    write(path.join(own, "references", "location.md"), "Observed Drive registry");
+    const built = path.join(root, "plugins", "oneezy", "skills", "oneezy-brain");
+    write(path.join(built, "SKILL.md"), withInternal(fs.readFileSync(path.join(own, "SKILL.md"), "utf8")));
+    write(path.join(built, "references", "location.md"), "Observed Drive registry");
+    write(path.join(root, "brain-routing.md"), "Load the current Brain registry.");
+    write(
+      path.join(root, ENTRYPOINTS_NAME),
+      JSON.stringify({
+        version: 1,
+        blocks: {
+          brain: {
+            source: "brain-routing.md",
+            skill: "oneezy-brain",
+            agents: ["codex", "claude-code"],
+            requiredFiles: ["references/location.md"],
+          },
         },
-      },
-    }),
-  );
-  assert.equal(cli([], {}, true).status, 0);
-  const cache = path.join(base, "codex-cache");
-  fs.cpSync(path.join(root, "plugins", "oneezy"), cache, { recursive: true });
-  write(path.join(cache, "skills", "oneezy-brain", "references", "location.md"), "Stale registry");
-  const stateFile = path.join(codexHome, "fake-harness.json");
-  const state = JSON.parse(fs.readFileSync(stateFile, "utf8"));
-  state.plugins["oneezy@oneezy-skills"].dir = cache;
-  write(stateFile, JSON.stringify(state));
-  const affected = path.join(codexHome, "AGENTS.md");
-  write(affected, "Keep Codex rules\r\n");
-  write(path.join(claudeHome, "CLAUDE.md"), "Keep Claude rules\n");
-  makeLink(own, path.join(codexSkills(), "oneezy-brain"));
-  for (const args of [["--plan"], []]) {
-    const result = cli(args, {}, true);
-    assert.equal(result.status, 1, result.stderr);
-    assert.equal(fs.readFileSync(affected, "utf8"), "Keep Codex rules\r\n");
-    assert.ok(linked(codexSkills(), "oneezy-brain"));
-  }
-  assert.ok(fs.readFileSync(path.join(claudeHome, "CLAUDE.md"), "utf8").includes("skills-sync:brain:start"));
-  write(path.join(cache, "skills", "oneezy-brain", "references", "location.md"), "Observed Drive registry");
-  assert.equal(cli([], {}, true).status, 0);
-  assert.equal(fs.existsSync(path.join(codexSkills(), "oneezy-brain")), false);
-});
+      }),
+    );
+    if (compatibility === "cache-aliases") {
+      const git = (args: string[]) => {
+        const r = spawnSync(
+          "git",
+          [
+            "-c",
+            "user.name=t",
+            "-c",
+            "user.email=t@example.invalid",
+            "-c",
+            "commit.gpgsign=false",
+            "-C",
+            root,
+            ...args,
+          ],
+          { encoding: "utf8" },
+        );
+        assert.equal(r.status, 0, r.stderr);
+      };
+      git(["init", "-q"]);
+      git(["add", "."]);
+      git(["commit", "-q", "-m", "fixture"]);
+    }
+    assert.equal(cli([], extra, true).status, 0);
+    const cache = path.join(base, "codex-cache");
+    fs.cpSync(path.join(root, "plugins", "oneezy"), cache, { recursive: true });
+    write(path.join(cache, "skills", "oneezy-brain", "references", "location.md"), "Stale registry");
+    const stateFile = path.join(codexHome, "fake-harness.json");
+    const state = JSON.parse(fs.readFileSync(stateFile, "utf8"));
+    state.plugins["oneezy@oneezy-skills"].dir = cache;
+    write(stateFile, JSON.stringify(state));
+    const affected = path.join(codexHome, "AGENTS.md");
+    write(affected, "Keep Codex rules\r\n");
+    write(path.join(claudeHome, "CLAUDE.md"), "Keep Claude rules\n");
+    makeLink(own, path.join(codexSkills(), "oneezy-brain"));
+    for (const args of [["--plan"], []]) {
+      const result = cli(args, extra, true);
+      assert.equal(result.status, 1, result.stderr);
+      assert.equal(fs.readFileSync(affected, "utf8"), "Keep Codex rules\r\n");
+      assert.ok(linked(codexSkills(), "oneezy-brain"));
+    }
+    assert.ok(fs.readFileSync(path.join(claudeHome, "CLAUDE.md"), "utf8").includes("skills-sync:brain:start"));
+    write(path.join(cache, "skills", "oneezy-brain", "references", "location.md"), "Observed Drive registry");
+    assert.equal(cli([], extra, true).status, 0);
+    assert.equal(fs.existsSync(path.join(codexSkills(), "oneezy-brain")), false);
+  });
