@@ -39,6 +39,7 @@ interface Installed {
   enabled: boolean;
   /** where the harness reads the plugin from when it reads it in place (Claude Code's directory marketplaces) */
   folder: string | null;
+  readInPlace?: boolean;
 }
 
 interface Run {
@@ -124,7 +125,8 @@ const claude: Driver = {
         ...splitId(p.id),
         version: str(p.version),
         enabled: p.enabled === true,
-        folder: str(p.readFromFolder),
+        folder: str(p.readFromFolder) ?? str(p.installPath),
+        readInPlace: !!str(p.readFromFolder),
       }));
   },
   addMarketplace: (run, root) => run(["plugin", "marketplace", "add", root, "--json"]).ok,
@@ -143,7 +145,8 @@ const claude: Driver = {
   },
   built: (lib) => head(lib),
   // a directory marketplace's plugin is read in place: whatever is built is what loads next session
-  matches: (i, b, lib) => (i.folder ? samePath(i.folder, b.dir) : i.version !== null && i.version === head(lib)),
+  matches: (i, b, lib) =>
+    i.readInPlace ? !!i.folder && samePath(i.folder, b.dir) : i.version !== null && i.version === head(lib),
 };
 
 const codex: Driver = {
@@ -265,10 +268,24 @@ export function pluginDependency(
       else if (value && typeof value === "object") Object.values(value).forEach(visit);
     };
     visit(json(prompt.out) ?? prompt.out);
-    for (const line of texts.flatMap((text) => text.split(/\r?\n/))) {
+    const lines = texts.flatMap((text) => text.split(/\r?\n/));
+    const roots = new Map<string, string>();
+    for (const line of lines) {
+      const alias = /^\s*- `(r\d+)` = `(.+)`\s*$/.exec(line);
+      if (alias && path.isAbsolute(alias[2])) roots.set(alias[1], alias[2]);
+    }
+    for (const line of lines) {
       if (!line.trimStart().startsWith(`- ${b.name}:${skill}:`)) continue;
-      const located = /\(file:\s*(.+?)\)\s*$/.exec(line)?.[1];
-      if (!located || path.basename(located) !== "SKILL.md") continue;
+      let located = /\(file:\s*(.+?)\)\s*$/.exec(line)?.[1];
+      if (!located) continue;
+      if (!path.isAbsolute(located)) {
+        const alias = /^(r\d+)[/\\](.+)$/.exec(located);
+        const root = alias && roots.get(alias[1]);
+        if (!root || !alias) continue;
+        located = path.resolve(root, alias[2]);
+        if (!under(located, root)) continue;
+      }
+      if (path.basename(located) !== "SKILL.md") continue;
       const dir = path.dirname(located);
       if (matchesFiles(dir)) return dir;
     }
