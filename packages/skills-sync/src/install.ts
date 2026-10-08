@@ -8,7 +8,8 @@ import { spawnSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { isDir, isLink, linkTarget, samePath, under } from "./fs.js";
+import { isDir, isLink, linkTarget, samePath, under, real, hasLinkedParent } from "./fs.js";
+import { withInternal } from "./build.js";
 import type { Harness } from "./harnesses.js";
 import type { Library } from "./library.js";
 import type { Report } from "./plan.js";
@@ -202,6 +203,79 @@ const DRIVERS: Record<string, Driver> = { "claude-code": claude, codex };
 /** The harnesses this step can give plugins to. */
 export function pluginHarness(h: Harness): boolean {
   return h.id in DRIVERS;
+}
+
+export function nativePluginRoute(lib: Library, h: Harness, skill: string): boolean {
+  const d = DRIVERS[h.id],
+    catalog = readCatalog(lib, h);
+  const file = d && which(d.bin);
+  return !!file && !!catalog?.plugins.some((item) => item.skills.includes(skill)) && supportsPlugins(runner(file));
+}
+
+/** Resolve the exact installed skill, not merely any skill supplied by a matching plugin version. */
+export function pluginDependency(
+  lib: Library,
+  h: Harness,
+  skill: string,
+  required: string[],
+  plan: boolean,
+): string | null {
+  const d = DRIVERS[h.id];
+  const catalog = readCatalog(lib, h);
+  const b = catalog?.plugins.find((item) => item.skills.includes(skill));
+  const own = lib.scanOwn().skills.find((item) => item.name === skill);
+  const file = d && which(d.bin);
+  if (!d || !catalog || !b || !own || !file) return null;
+  const built = path.join(b.dir, "skills", skill);
+  const loose = path.join(h.userSkills, skill);
+  if (fs.existsSync(path.join(loose, "SKILL.md")) && !ownLink(lib, loose)) return null;
+  const matchesFiles = (dir: string) =>
+    ["SKILL.md", ...required].every((name) => {
+      const expected =
+        name === "SKILL.md"
+          ? Buffer.from(withInternal(fs.readFileSync(path.join(own.dir, name), "utf8")))
+          : fs.readFileSync(path.join(own.dir, name));
+      const target = path.join(dir, name);
+      return !isLink(target) && under(real(target), real(dir)) && fs.readFileSync(target).equals(expected);
+    });
+  try {
+    if (hasLinkedParent(built) || !matchesFiles(built)) return null;
+    const run = runner(file);
+    const market = d.marketplaces(run)?.find((item) => item.name === catalog.marketplace);
+    if (market && !samePath(market.path, lib.root)) return null;
+    const id = `${b.name}@${catalog.marketplace}`;
+    const installed = d.installed(run);
+    if (!installed || installed.some((item) => item.name === b.name && item.id !== id)) return null;
+    const current = installed.find((item) => item.id === id);
+    if (current && !current.enabled) return null;
+    if (plan && (!current || !d.matches(current, b, lib))) return built;
+    if (!market || !current || !d.matches(current, b, lib)) return null;
+    if (h.id === "claude-code") {
+      if (!current.folder || !d.resolving(run, [{ ...b, skills: [skill] }], catalog.marketplace).has(b.name))
+        return null;
+      const dir = path.join(current.folder, "skills", skill);
+      return matchesFiles(dir) ? dir : null;
+    }
+    const prompt = run(["debug", "prompt-input"]);
+    if (!prompt.ok) return null;
+    const texts: string[] = [];
+    const visit = (value: unknown): void => {
+      if (typeof value === "string") texts.push(value);
+      else if (Array.isArray(value)) value.forEach(visit);
+      else if (value && typeof value === "object") Object.values(value).forEach(visit);
+    };
+    visit(json(prompt.out) ?? prompt.out);
+    for (const line of texts.flatMap((text) => text.split(/\r?\n/))) {
+      if (!line.trimStart().startsWith(`- ${b.name}:${skill}:`)) continue;
+      const located = /\(file:\s*(.+?)\)\s*$/.exec(line)?.[1];
+      if (!located || path.basename(located) !== "SKILL.md") continue;
+      const dir = path.dirname(located);
+      if (matchesFiles(dir)) return dir;
+    }
+  } catch {
+    /* An unreadable cache or unsupported inventory is a dependency blocker. */
+  }
+  return null;
 }
 
 /** A harness's catalog: the marketplace name and each listed plugin that is built under plugins/, with its skill folders. */

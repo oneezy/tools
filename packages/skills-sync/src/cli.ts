@@ -7,11 +7,11 @@ import * as p from "@clack/prompts";
 import { addSource } from "./add.js";
 import { build } from "./build.js";
 import { check } from "./check.js";
-import { entrypoints } from "./entrypoints.js";
+import { entrypoints, instructionDependencies } from "./entrypoints.js";
 import { LOCAL_NAME, migrateAnswers, readLocal, writeLocal, type LinkMode, type Local } from "./config.js";
 import { gitExclude, isDir, isLink, lexists, linkMode, linkTarget, real, samePath, setLinkMode } from "./fs.js";
 import { detected, harnessTable, type Harness } from "./harnesses.js";
-import { pluginStatus, plugins, readCatalog, removeOwned, type Form, type Owned } from "./install.js";
+import { pluginStatus, plugins, readCatalog, removeOwned, pluginDependency, type Form, type Owned } from "./install.js";
 import {
   cloneLibrary,
   DEFAULT_LIBRARY,
@@ -20,6 +20,7 @@ import {
   Library,
   looksLikeLibrary,
   pullLibrary,
+  verifyLibraryRevision,
 } from "./library.js";
 import { apply, line, Report } from "./plan.js";
 import { byDirection, type Moved, type Position } from "./changelog.js";
@@ -31,7 +32,7 @@ import { findProjects, home, isRepo, layers, projects, status, unlink, type Stat
 import { commitsPast, releasesOf, versionLabel } from "./versions.js";
 import { runInWsl, wslDistros } from "./wsl.js";
 
-const VERSION = "0.7.0";
+const VERSION = "0.7.1";
 const HELP = `skills-sync ${VERSION}
 One skills library, every harness, every project on this machine. Run it anywhere; it works out the rest.
 
@@ -105,6 +106,8 @@ Update, refresh and add
 Options
   --repo <path>          the skills library (default: $SKILLS_REPO, ~/.skills-sync, a library folder above here)
   --library <src>        what to clone when there is no library yet (owner/repo or URL; default ${DEFAULT_LIBRARY})
+  --expect-revision <sha> verify library HEAD and origin's --remote-ref before any instruction rollout
+  --remote-ref <ref>     exact remote branch/tag for that verification (default refs/heads/main)
   --agents <ids>         harnesses: claude-code,codex,goose,hermes (default: detected)
   --global / --no-global link into the harnesses' user skills folders (default: yes)
   --plugins / --links    the user folders' form on Claude Code and Codex. plugin (the default, but links in a cloud
@@ -158,6 +161,8 @@ interface Args {
   check: boolean;
   repo?: string;
   library?: string;
+  expectRevision?: string;
+  remoteRef?: string;
   agents?: string[];
   global?: boolean;
   projects?: string[] | "*" | false;
@@ -243,6 +248,8 @@ function parseArgs(argv: string[]): Args {
     else if (x === "--check") a.check = true;
     else if (x === "--repo") a.repo = next();
     else if (x === "--library") a.library = next();
+    else if (x === "--expect-revision") a.expectRevision = next();
+    else if (x === "--remote-ref") a.remoteRef = next();
     else if (x === "--agents") a.agents = list(next());
     else if (x === "--global") a.global = true;
     else if (x === "--no-global") a.global = false;
@@ -837,8 +844,26 @@ async function decide(
 /** One pass over the steps. A config library's refresh is always frozen: every third-party skill at the lock's commit. */
 async function runOnce(lib: Library, c: Choices, args: Args, cwd: string, report: Report): Promise<void> {
   const log = (m: string) => (args.json ? undefined : process.stderr.write(m + "\n"));
+  if (args.expectRevision || args.remoteRef) {
+    const reason = verifyLibraryRevision(lib.root, args.expectRevision, args.remoteRef);
+    if (reason) {
+      report.add({ kind: "conflict", path: lib.root, note: reason });
+      process.exitCode = 1;
+      printReport(report, args, { entrypoints: [] });
+      return;
+    }
+  }
 
   const missing = lib.missingFromLock().filter((n) => !c.unavailable.includes(n));
+  let required: ReturnType<typeof instructionDependencies> = [];
+  try {
+    if (args.entrypoints) required = instructionDependencies(lib);
+  } catch (error) {
+    report.add({ kind: "conflict", path: lib.root, note: String(error) });
+    process.exitCode = 1;
+    printReport(report, args, { entrypoints: [] });
+    return;
+  }
   if (lib.hasConfig() && args.restore && args.command !== "projects" && !args.plan) {
     // a config library: the frozen refresh rebuilds the working set at the lock's commits and never writes the lock
     const r = refresh(lib, { frozen: true, plan: false, unavailable: c.unavailable, log });
@@ -878,6 +903,21 @@ async function runOnce(lib: Library, c: Choices, args: Args, cwd: string, report
       // plugins first: a skill's loose link goes only once a verified plugin carries it on that harness
       const pr = new Report();
       const installed = plugins(lib, c.agents, c.form, readLocal(lib.root).plugins ?? {}, pr, args.plan);
+      for (const h of c.agents)
+        for (const dependency of required) {
+          const covered = installed.covered.get(h.id);
+          if (
+            covered?.has(dependency.skill) &&
+            !pluginDependency(lib, h, dependency.skill, dependency.files, args.plan)
+          ) {
+            covered.delete(dependency.skill);
+            pr.add({
+              kind: "conflict",
+              path: path.join(h.userSkills, dependency.skill),
+              note: "required plugin skill or references are unverified; loose link retained",
+            });
+          }
+        }
       if (!args.plan) rememberPlugins(lib.root, installed.owned);
       report.merge(pr);
       const u = new Report();
@@ -898,12 +938,41 @@ async function runOnce(lib: Library, c: Choices, args: Args, cwd: string, report
   const instructionGlobal = c.global && args.command !== "projects";
   const instructions = new Report();
   if (args.entrypoints) {
-    entrypoints(lib, c.agents, instructionGlobal, instructionProjects, instructions);
+    if (args.expectRevision || args.remoteRef) {
+      const reason = verifyLibraryRevision(lib.root, args.expectRevision, args.remoteRef);
+      if (reason) {
+        report.add({ kind: "conflict", path: lib.root, note: reason });
+        process.exitCode = 1;
+        printReport(report, args, { entrypoints: [] });
+        return;
+      }
+    }
+    entrypoints(
+      lib,
+      c.agents,
+      instructionGlobal,
+      instructionProjects,
+      instructions,
+      true,
+      args.plan ? report : undefined,
+      c.mode === "copy",
+      c.form === "plugin",
+    );
     apply(instructions, args.plan);
     report.merge(instructions);
   }
   const verified = args.entrypoints
-    ? entrypoints(lib, c.agents, instructionGlobal, instructionProjects, new Report(), !args.plan)
+    ? entrypoints(
+        lib,
+        c.agents,
+        instructionGlobal,
+        instructionProjects,
+        new Report(),
+        true,
+        args.plan ? report : undefined,
+        c.mode === "copy",
+        c.form === "plugin",
+      )
     : [];
   if (instructions.conflicts().length || (!args.plan && verified.some((item) => item.state !== "current")))
     process.exitCode = 1;
@@ -917,6 +986,8 @@ async function runOnce(lib: Library, c: Choices, args: Args, cwd: string, report
           ...(!args.entrypoints ? ["--no-entrypoints"] : []),
           ...(!args.remember ? ["--no-remember"] : []),
           ...(args.form ? [args.form === "plugin" ? "--plugins" : "--links"] : []),
+          ...(args.expectRevision ? ["--expect-revision", args.expectRevision] : []),
+          ...(args.remoteRef ? ["--remote-ref", args.remoteRef] : []),
         ],
         args.plan,
       );
@@ -960,6 +1031,16 @@ function linksLine(r: Report): string {
 }
 
 function printStatus(lib: Library, table: Harness[], args: Args, local: Local): void {
+  if (args.expectRevision || args.remoteRef) {
+    const reason = verifyLibraryRevision(lib.root, args.expectRevision, args.remoteRef);
+    if (reason) {
+      const report = new Report();
+      report.add({ kind: "conflict", path: lib.root, note: reason });
+      process.exitCode = 1;
+      printReport(report, args, { entrypoints: [] });
+      return;
+    }
+  }
   const harnesses = pluginStatus(lib, table, local.plugins ?? {});
   // a skill an enabled plugin carries is not missing from that harness's user folder
   const carried = new Map<string, Set<string>>();
@@ -978,7 +1059,17 @@ function printStatus(lib: Library, table: Harness[], args: Args, local: Local): 
         : (args.projects ?? local.projects ?? []);
   const instructionProjects = projectNames.map((name) => path.join(dev, name)).filter(isDir);
   const instructions = args.entrypoints
-    ? entrypoints(lib, table, args.global ?? local.global ?? true, instructionProjects, new Report(), true)
+    ? entrypoints(
+        lib,
+        table,
+        args.global ?? local.global ?? true,
+        instructionProjects,
+        new Report(),
+        true,
+        undefined,
+        args.copy ?? local.mode === "copy",
+        (args.form ?? local.form ?? (process.env.CLAUDE_CODE_REMOTE === "true" ? "links" : "plugin")) === "plugin",
+      )
     : [];
   if (instructions.some((item) => item.state !== "current")) process.exitCode = 1;
   if (args.json) {

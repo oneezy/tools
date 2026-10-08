@@ -240,6 +240,77 @@ test("readback cannot claim a current route when installed Brain instructions ar
   );
 });
 
+for (const variant of ["stale", "identical-unowned"])
+  test(`CLI refuses ${variant} Brain before writing affected instructions; independent Claude completes`, () => {
+    const cli = path.resolve(import.meta.dirname, "..", "dist", "src", "cli.js");
+    const own = path.join(lib.own, "oneezy", "oneezy-brain");
+    const external = path.join(base, "unowned-brain");
+    fs.cpSync(own, external, { recursive: true });
+    if (variant === "stale") write(path.join(external, "SKILL.md"), "stale GitHub Brain");
+    makeLink(external, path.join(userDir, ".agents", "skills", "oneezy-brain"));
+    makeLink(own, path.join(userDir, ".claude", "skills", "oneezy-brain"));
+    const affected = path.join(userDir, ".codex", "AGENTS.md");
+    const healthy = path.join(userDir, ".claude", "CLAUDE.md");
+    write(affected, "# Preserve me\r\n@pinned.md\r\n");
+    write(healthy, "# Claude rules\n");
+    const before = fs.readFileSync(affected);
+    const args = [
+      "--repo",
+      lib.root,
+      "--agents",
+      "codex,claude-code",
+      "--global",
+      "--no-projects",
+      "--no-wsl",
+      "--no-pull",
+      "--no-remember",
+      "--no-restore",
+      "--no-layers",
+      "--json",
+      "-y",
+    ];
+    const env = {
+      ...process.env,
+      HOME: userDir,
+      USERPROFILE: userDir,
+      CODEX_HOME: path.join(userDir, ".codex"),
+      CLAUDE_CONFIG_DIR: path.join(userDir, ".claude"),
+    };
+    for (const extra of [["--plan"], []]) {
+      const result = spawnSync(process.execPath, [cli, ...extra, ...args], { encoding: "utf8", env });
+      assert.equal(result.status, 1, result.stderr);
+      const report = JSON.parse(result.stdout);
+      assert.ok(
+        report.actions.some(
+          (action: { kind: string; path: string }) =>
+            action.kind === "conflict" && action.path.includes("oneezy-brain"),
+        ),
+      );
+      assert.ok(
+        !report.actions.some(
+          (action: { kind: string; path: string }) => action.kind === "write" && action.path === affected,
+        ),
+      );
+      assert.deepEqual(fs.readFileSync(affected), before);
+    }
+    assert.ok(read(healthy).includes(start));
+  });
+
+test("required-reference edits after planning block instruction writes", () => {
+  const hosts = harnessTable(userDir, {}).filter((host) => ["codex", "claude-code"].includes(host.id));
+  const own = path.join(lib.own, "oneezy", "oneezy-brain");
+  for (const host of hosts) makeLink(own, path.join(host.userSkills, "oneezy-brain"));
+  const affected = path.join(userDir, ".codex", "AGENTS.md");
+  write(affected, "Original rules\r\n");
+  const report = new Report();
+  entrypoints(lib, hosts, true, [], report, true);
+  write(path.join(own, "references", "location.md"), "Concurrent required-reference edit");
+  apply(report, false);
+  assert.equal(read(affected), "Original rules\r\n");
+  assert.equal(fs.existsSync(path.join(userDir, ".claude", "CLAUDE.md")), false);
+  assert.equal(report.conflicts().length, 2);
+});
+
 test("an unreadable project discovery reports its failure and still plans the independent project", () => {
   const unavailable = path.join(base, "unavailable-project");
   write(unavailable, "a file occupies this project path");
