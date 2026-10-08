@@ -5,6 +5,7 @@ import os from "node:os";
 import path from "node:path";
 import * as p from "@clack/prompts";
 import { addSource } from "./add.js";
+import { adoptBrain, rollbackBrain, brainLinks } from "./adoption.js";
 import { build } from "./build.js";
 import { check } from "./check.js";
 import { entrypoints, instructionDependencies } from "./entrypoints.js";
@@ -48,6 +49,8 @@ Commands
   status           what is linked and what is missing, and per harness which form is active (plugin or links) and whether
                    each installed plugin is the built one
   unlink           remove every link this tool made in the user folders, and every plugin and marketplace it installed
+  adopt-brain      explicitly adopt only this host's two historical Brain links; propagate verified instructions only
+  rollback-brain   restore the exact preserved links in --receipt; refuse later destination edits
   projects         only the project step
   update [<source>...]
                    resolve the named sources (every one when none is named) at the tip of their ref, or at the version
@@ -105,6 +108,8 @@ Update, refresh and add
 
 Options
   --repo <path>          the skills library (default: $SKILLS_REPO, ~/.skills-sync, a library folder above here)
+  --adoption-file <json> version 1 manifest of exact historical Brain paths and expectedTarget values
+  --receipt <path>       durable adoption/rollback receipt (required for scoped Brain commands)
   --library <src>        what to clone when there is no library yet (owner/repo or URL; default ${DEFAULT_LIBRARY})
   --expect-revision <sha> verify library HEAD and origin's --remote-ref before any instruction rollout
   --remote-ref <ref>     exact remote branch/tag for that verification (default refs/heads/main)
@@ -161,6 +166,8 @@ interface Args {
   check: boolean;
   repo?: string;
   library?: string;
+  adoptionFile?: string;
+  receipt?: string;
   expectRevision?: string;
   remoteRef?: string;
   agents?: string[];
@@ -247,6 +254,8 @@ function parseArgs(argv: string[]): Args {
     else if (x === "--artifacts") a.artifacts = true;
     else if (x === "--check") a.check = true;
     else if (x === "--repo") a.repo = next();
+    else if (x === "--adoption-file") a.adoptionFile = next();
+    else if (x === "--receipt") a.receipt = next();
     else if (x === "--library") a.library = next();
     else if (x === "--expect-revision") a.expectRevision = next();
     else if (x === "--remote-ref") a.remoteRef = next();
@@ -343,6 +352,47 @@ async function main(): Promise<void> {
   if (!root || (!looksLikeLibrary(root) && !firstAdd))
     bail("no skills library found: run this inside one, or pass --repo <path> or --library owner/repo");
   const lib = new Library(root);
+  // Scoped recovery never enters broad sync, pulls, remembers a library or saves machine answers.
+  if (args.command === "adopt-brain" || args.command === "rollback-brain") {
+    const report = new Report();
+    if (!args.receipt) bail("Scoped Brain commands require --receipt");
+    if (args.command === "rollback-brain") {
+      rollbackBrain(path.resolve(args.receipt), brainLinks(process.platform), report, args.plan);
+      if (report.conflicts().length) process.exitCode = 1;
+      return printReport(report, args);
+    }
+    if (!args.adoptionFile) bail("adopt-brain requires --adoption-file");
+    const reason = verifyLibraryRevision(lib.root, args.expectRevision, args.remoteRef);
+    if (reason) {
+      report.add({ kind: "conflict", path: lib.root, note: reason });
+      process.exitCode = 1;
+      return printReport(report, args, { entrypoints: [] });
+    }
+    const manifest = JSON.parse(fs.readFileSync(path.resolve(args.adoptionFile), "utf8"));
+    adoptBrain(lib, manifest, brainLinks(process.platform), path.resolve(args.receipt), report, args.plan);
+    const selected = new Set<string>(manifest.links.map((item: { path: string }) => path.resolve(item.path)));
+    const hosts = harnessTable().filter(
+      (h) =>
+        selected.has(path.resolve(path.join(h.userSkills, "oneezy-brain"))) &&
+        !report.conflicts().some((a) => samePath(a.path, path.join(h.userSkills, "oneezy-brain"))),
+    );
+    const instructions = new Report();
+    if (args.entrypoints) {
+      const changedRevision = verifyLibraryRevision(lib.root, args.expectRevision, args.remoteRef);
+      if (changedRevision) report.add({ kind: "conflict", path: lib.root, note: changedRevision });
+      else {
+        entrypoints(lib, hosts, true, [], instructions, true, args.plan ? report : undefined);
+        apply(instructions, args.plan);
+        report.merge(instructions);
+      }
+    }
+    const verified = args.entrypoints
+      ? entrypoints(lib, hosts, true, [], new Report(), true, args.plan ? report : undefined)
+      : [];
+    if (report.conflicts().length || (!args.plan && verified.some((item) => item.state !== "current")))
+      process.exitCode = 1;
+    return printReport(report, args, { entrypoints: verified, receipt: path.resolve(args.receipt) });
+  }
 
   // 2. this machine's answers: the local file, after a 0.2.0 answers file is moved there once; status only reads
   if (!args.plan && args.command !== "status" && args.command !== "check") migrateAnswers(lib.root, setup);
@@ -374,9 +424,8 @@ async function main(): Promise<void> {
   apply(remember, args.plan);
   setup.merge(remember);
 
-  // 3. keep the library current: the pull, at most every 30 minutes; --pull forces it, --no-pull skips it. Nothing
-  //    moves upstream here: the refresh that follows is frozen at the lock the library commits. A lock moved on this
-  //    machine (a refresh run here, or an older version's sync) never blocks the pull: the pull puts it back at HEAD
+  // 3. Only clean compatible checkouts fast-forward. Dirty locks are preserved;
+  // the refresh that follows remains frozen at the committed source pins.
   if (args.pull && args.command !== "status" && !args.plan) {
     if (args.pull === "force") {
       try {

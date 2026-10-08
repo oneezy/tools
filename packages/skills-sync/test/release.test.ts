@@ -41,6 +41,8 @@ test("--help lists every command and every flag of build, check, update (refresh
     "sync",
     "status",
     "unlink",
+    "adopt-brain",
+    "rollback-brain",
     "projects",
     "update",
     "refresh",
@@ -63,6 +65,8 @@ test("--help lists every command and every flag of build, check, update (refresh
     ],
     [
       "--repo <path>",
+      "--adoption-file <json>",
+      "--receipt <path>",
       "--library <src>",
       "--agents <ids>",
       "--global / --no-global",
