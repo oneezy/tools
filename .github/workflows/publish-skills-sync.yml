@@ -101,8 +101,11 @@ jobs:
         if: steps.version.outputs.publish == 'true'
         run: npm publish --access public --provenance
 
+      # From the runner's temp folder: inside packages/skills-sync, npx resolves the package to this folder's own
+      # package.json, whose bin is never linked, and fails with "'skills-sync' is not recognized".
       - name: Verify
         if: steps.version.outputs.publish == 'true'
+        working-directory: ${{ runner.temp }}
         run: |
           v="${{ steps.version.outputs.version }}"
           # npm takes a few minutes to serve a new version ("being processed"); 0.4.0 took about three

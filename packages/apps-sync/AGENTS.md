@@ -1,8 +1,7 @@
 # App Updater
 
-Authoritative directory: V:\dev\tools\app-updater. Read README.md and GUIDE.md before changing behavior.
-Justin's dev-based Git workflow applies if a repository is established. Do not initialize Git,
-commit, push, or delete the old location without authorization.
+Directory: V:\dev\tools\packages\apps-sync (`packages/apps-sync` in the tools workspace). Read README.md and GUIDE.md before changing behavior.
+Changes go through pull requests into dev, like the rest of the tools workspace.
 
 ## Product invariants
 
@@ -22,7 +21,7 @@ commit, push, or delete the old location without authorization.
 updater_inventory.py owns passive evidence and shared caches.
 software_manager.py owns explicit discovery, plans, execution, WSL bridge, reports and CLI.
 updater_ui.py owns keyboard/detail/plain interfaces. software-catalog.json owns tool recipes.
-Manage-Software.ps1 and Manage Software.cmd launch the app.
+Apps Sync.ps1 and App Sync.cmd launch the app; Update-Tools.ps1 and Update CLI Tools.cmd are compatibility shims onto them.
 Run-Installer.ps1 executes only explicitly selected publisher plans.
 
 UI dependencies are isolated in .venv and requirements-ui.txt. Ubuntu's worker is standard-library
@@ -35,7 +34,6 @@ does not imply GUI installer coverage; report validation limits faithfully.
 ## Workspace
 
 This is `packages/apps-sync` in the tools workspace.
-`pnpm test` runs tests/test_software_manager.py and `pnpm check` syntax-checks the PowerShell and Python files.
-tests/test_launchers.py and tests/Test-Updater.ps1 expect `Manage Software.cmd` and `Manage-Software.ps1`, which this
-checkout names `App Sync.cmd` and `Apps Sync.ps1` (so do the launchers themselves, since ea0c5bc); reconcile the names
-before adding those two to the scripts.
+`pnpm test` runs tests/test_*.py (tests/test_launchers.py runs only on Windows) and `pnpm check` syntax-checks the
+PowerShell and Python files. tests/Test-Updater.ps1 runs the real launcher against this checkout's .venv, so it stays a
+manual check on the PC.

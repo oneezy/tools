@@ -1,6 +1,9 @@
 # Validation — 2026-09-21
 
 Implementation is in V:\dev\tools\app-updater. No Git operations were performed.
+
+> Historical record. The project now lives at V:\dev\tools\packages\apps-sync, and the launchers
+> named Manage Software.cmd and Manage-Software.ps1 below are now App Sync.cmd and Apps Sync.ps1.
 The only installed dependencies were prompt_toolkit 3.0.52 and wcwidth 0.2.13 in this project's
 Windows .venv. No installed applications or CLI packages were upgraded.
 

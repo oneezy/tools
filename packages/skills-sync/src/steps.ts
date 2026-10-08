@@ -74,20 +74,34 @@ export function layers(lib: Library, harnesses: Harness[], report: Report, sidec
   }
 }
 
-/** One link per skill in each harness's user skills folder. */
-export function home(lib: Library, harnesses: Harness[], report: Report): void {
+/**
+ * One link per skill in each harness's user skills folder. `plugins` names, per harness id, the skills a verified
+ * plugin carries there (skill -> plugin id): those get no link, and a link this tool made for one is removed.
+ */
+export function home(
+  lib: Library,
+  harnesses: Harness[],
+  report: Report,
+  plugins: Map<string, Map<string, string>> = new Map(),
+): void {
   const working = workingSetWithOwn(lib);
   for (const h of harnesses) {
+    const carried = plugins.get(h.id) ?? new Map<string, string>();
     for (const [n, target] of [...working].sort()) {
-      if (RESERVED.has(n)) continue;
+      if (RESERVED.has(n) || carried.has(n)) continue;
       ensureLink(report, path.join(h.userSkills, n), target, lib.root, `${h.name} user folder`);
     }
     if (isDir(h.userSkills)) {
       for (const n of fs.readdirSync(h.userSkills)) {
         const p = path.join(h.userSkills, n);
-        if (working.has(n) || !isLink(p)) continue;
+        if ((working.has(n) && !carried.has(n)) || !isLink(p)) continue;
         const t = linkTarget(p);
-        if (t && under(t, lib.root)) report.add({ kind: "remove", path: p, note: "skill no longer in the library" });
+        if (t && under(t, lib.root))
+          report.add({
+            kind: "remove",
+            path: p,
+            note: carried.has(n) ? `carried by plugin ${carried.get(n)}` : "skill no longer in the library",
+          });
       }
     }
   }
@@ -174,10 +188,11 @@ export interface Status {
   thirdParty: string[];
   missingFromLock: string[];
   layers: Record<string, { linked: number; missing: string[] }>;
-  user: Record<string, { linked: number; missing: string[] }>;
+  /** per user folder: links made, skills a verified plugin carries there instead (plugin form), skills that have neither */
+  user: Record<string, { linked: number; plugin: number; missing: string[] }>;
 }
 
-export function status(lib: Library, harnesses: Harness[]): Status {
+export function status(lib: Library, harnesses: Harness[], carried: Map<string, Set<string>> = new Map()): Status {
   const scan = lib.scanOwn().skills;
   const own = scan.map((s) => s.name);
   const working = lib.workingSet();
@@ -205,7 +220,13 @@ export function status(lib: Library, harnesses: Harness[]): Status {
   };
   for (const h of harnesses) {
     if (!h.universal) out.layers[h.projectSkills] = linkedInto(path.join(lib.root, h.projectSkills));
-    out.user[h.userSkills] = linkedInto(h.userSkills);
+    const u = linkedInto(h.userSkills);
+    const inPlugins = carried.get(h.id) ?? new Set<string>();
+    out.user[h.userSkills] = {
+      linked: u.linked,
+      plugin: names.filter((n) => inPlugins.has(n)).length,
+      missing: u.missing.filter((n) => !inPlugins.has(n)),
+    };
   }
   return out;
 }

@@ -9,9 +9,9 @@ npx @oneezy/skills-sync
 Run it anywhere and it works out the rest:
 
 - **No library on this machine?** It clones one into `~/.skills-sync` (default `oneezy/skills`; `--library owner/repo` for another) and asks nothing.
-- **Library present?** It pulls it, installs the third-party skills exactly as the committed lock records them (nothing moves upstream), rebuilds the library's harness layers, and links every skill into each harness's user folder. Every step is skipped when its result is already right, so a no-op run is silent and fast.
-- **On another machine?** Run the same command there (or ask the agent to run the `oneezy-skills` skill, which does exactly that). Nothing is installed into any harness's settings.
-- **In a cloud session?** The container starts with no library. Put `npx --yes @oneezy/skills-sync -y --agents claude-code --global --no-projects --no-wsl` in the cloud environment's setup script so the skills are linked before the session starts. Run mid-session instead, Claude Code lists them about a minute later.
+- **Library present?** It pulls it, installs the third-party skills exactly as the committed lock records them (nothing moves upstream), rebuilds the library's harness layers, installs its built plugins on Claude Code and Codex, and links every skill no plugin carries into each harness's user folder. Every step is skipped when its result is already right, so a no-op run is silent and fast.
+- **On another machine?** Run the same command there (or ask the agent to run the `oneezy-skills` skill, which does exactly that). The tool never edits a harness's settings: plugins go in through each harness's own plugin commands.
+- **In a cloud session?** The container starts with no library. Put `npx --yes @oneezy/skills-sync -y --agents claude-code --global --no-projects --no-wsl` in the cloud environment's setup script so the skills are linked before the session starts. Run mid-session instead, Claude Code lists them about a minute later. A cloud session (`CLAUDE_CODE_REMOTE=true`) keeps loose links unless `--plugins` asks: claude.ai already syncs its own plugins into the container.
 
 First run on a machine with a terminal asks which harnesses, whether to link the user folders, which projects (if any) should carry copies, and (on Windows) which WSL distros. Answers are remembered in `skills-sync.local.json` beside the config, gitignored, so the committed config is the same on every machine; `--ask` prompts again. Node 20+, git.
 
@@ -30,7 +30,7 @@ A skills library is a folder with `skills/` beside `skills-sync.json`, `skills-s
 | `skills-lock.json` | what a library without a config has installed, in the `npx skills` format. In a config library it is the lock skills-sync 0.4.0 wrote, which `refresh` migrates to `skills-sync.lock.json` | `npx skills add/update` |
 | `plugins/<id>/` | the plugin form, one package per plugin in the config: skill copies, `plugin.json`, `.codex-plugin/plugin.json`, `.claude-plugin/plugin.json`, `LICENSE`, `NOTICE.md`. Committed. | `build` |
 | `.claude-plugin/marketplace.json`, `.agents/plugins/marketplace.json` | the two marketplace catalogs, each listing `./plugins/<id>`. Committed. | `build` |
-| `skills-sync.local.json` | this machine's answers: harnesses, user folders, projects, WSL distros, skills found gone upstream, link mode. Gitignore it. | the tool, after every run |
+| `skills-sync.local.json` | this machine's answers: harnesses, user folders, projects, WSL distros, skills found gone upstream, link mode, the user folders' form when a flag chose one, and the plugins the tool installed per harness. Gitignore it. | the tool, after every run |
 
 A library with a config gets its third-party skills through `refresh` (see [Third-party sources](#third-party-sources)). A library with only `skills-lock.json` keeps working exactly as before: `sync` restores from that lock and `npx skills update` owns the copies.
 
@@ -57,9 +57,10 @@ Everything else in it is generated and should be gitignored:
 2. **Pull.** Fast-forward the library from its remote, at most every 30 minutes, only when its tree is clean (`--pull` forces, `--no-pull` skips). In a config library a change to the lock alone does not count: a lock moved on this machine (by a `refresh` run here, or by the sync of a version before 0.5.0) is put back at the library's committed one by the pull, or left as it was when the pull fails. The pull is the only way a new lock arrives: an update lands as a library commit, and the next pull brings it.
 3. **Restore.** With a config: a `refresh --frozen` (below), always, whatever the pull did: every third-party skill at the commit the lock records, nothing moves upstream, nothing written but the snapshots and the working set, never the lock. A plain sync (the default command, `--watch`, a setup script or session-start hook) therefore installs exactly what the library commits; only an explicit `refresh` moves a source. Without a config: lock entries with no folder in `.agents/skills` are fetched from `skills-lock.json`, one shallow clone per source, each skill copied from its recorded path, or found by folder name when upstream moved it, exactly as 0.2.0 did. Either way, skills upstream deleted are reported, remembered, and skipped until `--retry`.
 4. **Layers.** `.agents/skills/<name>` links to each own skill's folder (`skills/<name>` or `skills/<group>/<name>`), listed in a generated `.agents/skills/.gitignore`. Each selected harness that has its own project folder gets one link per working-set entry. With `--sidecars`, own skills that lack `agents/openai.yaml` get one generated from their frontmatter, so Codex sees the same policy; it writes into `skills/`, so it is opt-in.
-5. **User folders.** One link per skill in each selected harness's user skills folder (`~/.claude/skills`, `~/.agents/skills`, `~/.config/goose/skills`, `~/.hermes/skills`), pointing at the real folder. Every project on the machine now sees the set, and an edit in the library is live everywhere.
-6. **Projects.** Optional. Git repos under the dev folder that you check get their skills too: **link** mode makes the same links inside the repo and hides them from git through `.git/info/exclude`; **copy** mode writes real folders meant to be committed, for repos that must carry their own (cloud sessions, other people).
-7. **WSL.** Windows only, optional. Each checked distro runs the same sync for its own user folders through `/mnt/<drive>/…`. The distro needs Node.
+5. **Plugins.** On Claude Code and Codex, when the library has built plugins, each one its catalog lists is installed through the harness's own commands and verified; see [The plugin form](#the-plugin-form). Goose and Hermes have no plugins. `--links` turns this off.
+6. **User folders.** One link per skill in each selected harness's user skills folder (`~/.claude/skills`, `~/.agents/skills`, `~/.config/goose/skills`, `~/.hermes/skills`), pointing at the real folder, except the skills a verified plugin carries on that harness. Every project on the machine now sees the set, and an edit in the library is live everywhere.
+7. **Projects.** Optional. Git repos under the dev folder that you check get their skills too: **link** mode makes the same links inside the repo and hides them from git through `.git/info/exclude`; **copy** mode writes real folders meant to be committed, for repos that must carry their own (cloud sessions, other people).
+8. **WSL.** Windows only, optional. Each checked distro runs the same sync for its own user folders through `/mnt/<drive>/…`. The distro needs Node.
 
 Then it prints one line per change, a line saying how many links it made and of which kind, and a summary. `--plan` prints the same without touching anything.
 
@@ -192,6 +193,23 @@ A package holds LF line endings, whatever the checkout it was built in holds. A 
 
 Plugin skills run namespaced: `/oneezy:oneezy-status` in Claude Code, `$oneezy:oneezy-status` in Codex; their folder names do not change. Each package passes `claude plugin validate` (the only warning is the missing Claude version, by design) and the root passes it as a marketplace.
 
+## The plugin form
+
+Claude Code and Codex can take the library's skills as plugins rather than loose links. When the library has built plugins (a catalog listing `./plugins/<id>`, see [Plugins and catalogs](#plugins-and-catalogs)), a sync gives each of those harnesses the plugin form; Goose and Hermes, which have no plugins, and projects (`--projects`, link or copy) keep links exactly as before. A library with no `plugins/` syncs exactly as 0.6.0 did, and asks no harness anything.
+
+For each harness, in order:
+
+1. **Can it?** The CLI (`claude`, `codex`) must be on PATH, else a note and links. Its `plugin --help` must list a `marketplace` command (asked through `--help` only, so an old CLI never starts a session); one that has none could only take plugins through an edit to its settings file, which the tool never makes: reported as blocked, naming that file (`~/.claude/settings.json`, `~/.codex/config.toml`, or under `CLAUDE_CONFIG_DIR` / `CODEX_HOME`), and links kept.
+2. **Marketplace.** The library folder is registered under its catalog's name (`claude plugin marketplace add <library>`, `codex plugin marketplace add <library>`). A marketplace of that name registered from somewhere else is a conflict: left alone, links kept.
+3. **Install.** Each catalog plugin not installed yet: `claude plugin install <id>@<marketplace> --scope user`, `codex plugin add <id>@<marketplace>`. Claude Code reads a directory marketplace's plugin in place, so a rebuild needs nothing; Codex runs a cache copy keyed by the manifest's version, so a plugin whose built `.codex-plugin` version differs is added again. A plugin of the same name installed from another marketplace, or one installed but disabled, is left alone and its skills keep their links. A plugin this tool installed that the catalog no longer lists is uninstalled.
+4. **Verify, then unlink.** A plugin counts only when the harness lists it enabled (`plugin list --json`) and one of its skills resolves: `claude plugin details <id>@<marketplace>` names it, or `codex debug prompt-input` lists `<plugin>:<skill>`. Neither starts a session or spends tokens. Only then are the links this tool made for that plugin's skills removed from that harness's user folder (`~/.claude/skills`, `~/.agents/skills`); a link it did not make is never touched. A plugin that fails is a conflict line naming it, and its skills keep their links on that harness; the other harness carries on. A plugin already in place whose skills hold no link of the tool's is not asked again, so a sync with nothing new runs three quick listings per harness.
+
+The harnesses write their own settings while they install (Claude Code's `extraKnownMarketplaces` and `enabledPlugins`, Codex's `[marketplaces.*]` and `[plugins.*]`); that is the harness's doing through its supported command, not an edit by this tool. What the tool installed is recorded under `plugins` in `skills-sync.local.json`, keyed by the harness's config folder (Windows and each WSL distro apart), so nothing else is ever removed.
+
+**Rollback.** `sync --links` uninstalls the plugins the tool installed (`claude plugin uninstall --scope user`, `codex plugin remove`), keeps the marketplace registered, and restores the loose links; a second `--links` changes nothing. `--plugins` goes back. Either flag is remembered as `form` in `skills-sync.local.json`; with neither, the form is `plugin`, or `links` in a cloud session (`CLAUDE_CODE_REMOTE=true`), where claude.ai already syncs plugins of the same names into the container and the repos' instructions read `~/.claude/skills/<name>/SKILL.md`. `unlink` removes both forms the tool owns: its links, its plugins, then its marketplace (Codex's marketplace remove does not take its plugins with it, so they go first).
+
+**status** adds, per harness, `form: plugin | links` (with why, for links) and per built plugin its installed and built versions and a `match` flag; `status --json` puts it under `harnesses`. Claude Code's plugin matches when it is read in place from the built package; Codex's when its version is the built one.
+
 ## Artifacts
 
 ChatGPT takes a plugin as an uploaded archive, by hand. **`build --artifacts`** writes what that upload needs into `artifacts/` (generated, gitignored, never part of a check):
@@ -246,6 +264,7 @@ A library without a config has no generated files to check; its frontmatter and 
 - `refresh` and `add` touch nothing outside the library: no pull, no `~/.skills-sync`, no harness folder.
 - `refresh --frozen` and `sync` never write the lock and never move a source upstream; only an explicit `update` (or `refresh`) does, and only the sources it names.
 - `update` never writes `skills-sync.json`; a hold is a config change the caller lands.
+- No settings file of any harness is ever edited by the tool. A plugin is installed, reinstalled or removed only through the harness's own command, and removed only when the tool installed it; a skill's loose link goes only after its plugin is verified on that harness.
 - Inside WSL the library's own layers are left to Windows.
 
 ## Prompts and flags
@@ -260,6 +279,7 @@ Every answer is also a flag, so scripts and agents never see a prompt:
 --projects a,b | --projects '*' | --no-projects     --dev <dir>     --copy
 --wsl Ubuntu | --wsl '*' | --no-wsl
 --symlinks | --junctions
+--plugins | --links
 --library owner/repo   --pull | --no-pull
 --no-restore  --retry  --sidecars  --no-layers
 --watch  --plan  --quiet  --json  -y  --ask
@@ -270,7 +290,7 @@ build: --plugins  --catalogs  --artifacts  --check
 check: --json  --quiet
 ```
 
-Commands: `sync` (default), `status`, `unlink` (remove every link this tool made in the user folders), `projects` (only step 6), `update` (alias `refresh`), `versions <source>` and `add <source>` (see [Third-party sources](#third-party-sources)), `build` (see [Plugins and catalogs](#plugins-and-catalogs) and [Artifacts](#artifacts)), `check` (see [Check](#check)).
+Commands: `sync` (default), `status`, `unlink` (remove every link this tool made in the user folders, then every plugin and marketplace it installed), `projects` (only step 7), `update` (alias `refresh`), `versions <source>` and `add <source>` (see [Third-party sources](#third-party-sources)), `build` (see [Plugins and catalogs](#plugins-and-catalogs) and [Artifacts](#artifacts)), `check` (see [Check](#check)).
 
 `--watch` keeps running and redoes layers and user folders when `skills/`, the config or the lock changes, so a skill you add is linked the moment its folder appears.
 
@@ -292,4 +312,6 @@ An optional `skills-sync.entrypoints.json` version-1 manifest declares named blo
 
 Codex targets the configured CODEX_HOME’s AGENTS.md and an existing AGENTS.override.md, plus selected projects’ existing nested AGENTS/override files. Claude targets the configured CLAUDE_CONFIG_DIR’s CLAUDE.md, plus selected projects’ existing CLAUDE.md, CLAUDE.local.md and .claude/CLAUDE.md. A new project CLAUDE.md imports existing AGENTS fallbacks to preserve their instructions. Symlinked files/parents, malformed markers, changed-after-plan targets and nontext instructions are conflicts left alone. Additional host-managed policies and instruction imports require actual host inspection; this is not proof of every future session’s loading.
 
-`--plan` writes nothing; apply checks the original content hash and reads back writes. JSON includes entrypoint status. Successful sync verifies the required installed skill files against the reviewed source; stale/conflicting skill links prevent a verified route claim. `status` inspects without writing. `--no-entrypoints` opts out; `--no-remember` avoids changing per-machine answers during a development handoff. An I/O failure is reported per action; dependent actions stay blocked and independent destinations continue, with nonzero CLI exit. No hook, setting, scheduled brief, cloud upload or host plugin installation is added.
+`--plan` writes nothing. Both plan and apply gate each instruction destination on its required installed skill and references before planning a write. Links must resolve to the canonical own skill (explicit project-copy mode verifies the copy); native plugins must match the registered library, enabled identity/version, exact resolved skill and packaged bytes. A stale plugin dependency also retains that skill's owned loose link. A blocked destination exits nonzero while independent valid destinations continue. Apply rechecks dependency, source-template and destination hashes immediately before writing, then reads back. `status` inspects without writing. `--no-entrypoints` opts out; `--no-remember` avoids changing per-machine answers during a development handoff. No hook, schedule or cloud upload is added.
+
+For a pinned rollout, pass `--expect-revision <full-commit-sha> --remote-ref refs/tags/<release-tag>` with `--no-pull`. The default remote ref is `refs/heads/main`. The selected HEAD, clean authored/generated library files, and origin's exact ref (peeled for annotated tags) must all agree before rollout. Missing access or a mismatch refuses the rollout; it never changes Git configuration or replaces dirty work. Development checkouts omit this flag until their source changes are committed and reviewed.

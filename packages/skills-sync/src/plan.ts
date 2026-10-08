@@ -12,13 +12,15 @@ import {
   under,
   hasLinkedParent,
   toHash,
+  real,
   type LinkKind,
 } from "./fs.js";
 
 /**
  * remove drops a link; delete drops a real folder or file (only ever a generated one: a snapshot, a working-set copy or
  * a built package); move renames a file this tool wrote (path -> target). note says something about a path without
- * touching it (a package built without a LICENSE): printed, and neither a change nor a conflict.
+ * touching it (a package built without a LICENSE): printed, and neither a change nor a conflict. install and uninstall
+ * record a host plugin command the plugin step already ran (or would run, on plan); apply() never runs them.
  */
 export type Kind =
   | "link"
@@ -30,6 +32,8 @@ export type Kind =
   | "write"
   | "move"
   | "exclude"
+  | "install"
+  | "uninstall"
   | "skip"
   | "conflict"
   | "note";
@@ -42,6 +46,7 @@ export interface Action {
   /** for write: the file body; for exclude: the entries */
   payload?: string | Buffer | string[];
   expectedHash?: string | null;
+  dependencies?: Array<{ path: string; target: string | null; files: Array<{ name: string; hash: string }> }>;
   failed?: boolean;
 }
 
@@ -79,6 +84,8 @@ const MARK: Record<Kind, string> = {
   write: "+",
   move: "~",
   exclude: "+",
+  install: "+",
+  uninstall: "-",
   skip: "=",
   conflict: "!",
   note: ".",
@@ -97,7 +104,14 @@ export function apply(report: Report, plan: boolean, exclude?: (repo: string, en
   };
   const failedPaths: string[] = [];
   for (const a of report.actions) {
-    if (a.kind === "skip" || a.kind === "conflict" || a.kind === "note") continue;
+    if (
+      a.kind === "skip" ||
+      a.kind === "conflict" ||
+      a.kind === "note" ||
+      a.kind === "install" ||
+      a.kind === "uninstall"
+    )
+      continue;
     const dependency = failedPaths.find((file) => under(a.path, file) || (a.target && under(a.target, file)));
     if (dependency) {
       a.kind = "conflict";
@@ -130,6 +144,24 @@ export function apply(report: Report, plan: boolean, exclude?: (repo: string, en
           copyDir(a.target!, a.path);
           break;
         case "write":
+          for (const dependency of a.dependencies ?? []) {
+            const owned =
+              dependency.target === null
+                ? !isLink(dependency.path)
+                : isLink(dependency.path) && samePath(real(dependency.path), dependency.target);
+            if (
+              !owned ||
+              dependency.files.some((file) => {
+                const installed = path.join(dependency.path, file.name);
+                return (
+                  isLink(installed) ||
+                  !under(real(installed), real(dependency.path)) ||
+                  toHash(fs.readFileSync(installed)) !== file.hash
+                );
+              })
+            )
+              throw new Error(`${dependency.path}: instruction dependency changed since planning; left alone`);
+          }
           if (a.expectedHash !== undefined) {
             const current = !hasLinkedParent(a.path) && lexists(a.path) ? fs.readFileSync(a.path) : null;
             if (hasLinkedParent(a.path) || (current ? toHash(current) : null) !== a.expectedHash) {

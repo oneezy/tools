@@ -7,10 +7,11 @@ import * as p from "@clack/prompts";
 import { addSource } from "./add.js";
 import { build } from "./build.js";
 import { check } from "./check.js";
-import { entrypoints } from "./entrypoints.js";
+import { entrypoints, instructionDependencies } from "./entrypoints.js";
 import { LOCAL_NAME, migrateAnswers, readLocal, writeLocal, type LinkMode, type Local } from "./config.js";
 import { gitExclude, isDir, isLink, lexists, linkMode, linkTarget, real, samePath, setLinkMode } from "./fs.js";
 import { detected, harnessTable, type Harness } from "./harnesses.js";
+import { pluginStatus, plugins, readCatalog, removeOwned, pluginDependency, type Form, type Owned } from "./install.js";
 import {
   cloneLibrary,
   DEFAULT_LIBRARY,
@@ -19,6 +20,7 @@ import {
   Library,
   looksLikeLibrary,
   pullLibrary,
+  verifyLibraryRevision,
 } from "./library.js";
 import { apply, line, Report } from "./plan.js";
 import { byDirection, type Moved, type Position } from "./changelog.js";
@@ -30,20 +32,22 @@ import { findProjects, home, isRepo, layers, projects, status, unlink, type Stat
 import { commitsPast, releasesOf, versionLabel } from "./versions.js";
 import { runInWsl, wslDistros } from "./wsl.js";
 
-const VERSION = "0.6.0";
+const VERSION = "0.7.1";
 const HELP = `skills-sync ${VERSION}
 One skills library, every harness, every project on this machine. Run it anywhere; it works out the rest.
 
   no library on this machine   clone one into ~/.skills-sync (default: ${DEFAULT_LIBRARY}, or --library owner/repo)
-  library present              pull it, install the third-party skills its lock records, rebuild its layers, link the user folders
+  library present              pull it, install the third-party skills its lock records, rebuild its layers, install its
+                               built plugins on Claude Code and Codex, link the user folders
 
 Usage: skills-sync [command] [options]
 
 Commands
   sync (default)   everything above; nothing moves upstream: with skills-sync.json every third-party skill is installed
                    at the commit the lock records (frozen, the lock never written); without one, skills-lock.json is restored
-  status           what is linked and what is missing
-  unlink           remove every link this tool made in the user folders
+  status           what is linked and what is missing, and per harness which form is active (plugin or links) and whether
+                   each installed plugin is the built one
+  unlink           remove every link this tool made in the user folders, and every plugin and marketplace it installed
   projects         only the project step
   update [<source>...]
                    resolve the named sources (every one when none is named) at the tip of their ref, or at the version
@@ -102,8 +106,16 @@ Update, refresh and add
 Options
   --repo <path>          the skills library (default: $SKILLS_REPO, ~/.skills-sync, a library folder above here)
   --library <src>        what to clone when there is no library yet (owner/repo or URL; default ${DEFAULT_LIBRARY})
+  --expect-revision <sha> verify library HEAD and origin's --remote-ref before any instruction rollout
+  --remote-ref <ref>     exact remote branch/tag for that verification (default refs/heads/main)
   --agents <ids>         harnesses: claude-code,codex,goose,hermes (default: detected)
   --global / --no-global link into the harnesses' user skills folders (default: yes)
+  --plugins / --links    the user folders' form on Claude Code and Codex. plugin (the default, but links in a cloud
+                         session): the library's built plugins installed through the harness's own commands (never a
+                         settings edit by this tool), verified (listed, and a skill resolving), and only then the loose
+                         links of their skills removed. links: one loose link per skill, and the plugins this tool
+                         installed uninstalled. Goose, Hermes and projects always get links. Either flag is
+                         remembered in ${LOCAL_NAME}
   --projects <names|*>   repos under --dev to sync; "*" for all; --no-projects for none
   --dev <dir>            folder whose git repos are offered (default: here, or the parent when here is a repo)
   --copy                 projects get real copies instead of links
@@ -149,6 +161,8 @@ interface Args {
   check: boolean;
   repo?: string;
   library?: string;
+  expectRevision?: string;
+  remoteRef?: string;
   agents?: string[];
   global?: boolean;
   projects?: string[] | "*" | false;
@@ -157,6 +171,8 @@ interface Args {
   wsl?: string[] | "*" | false;
   /** --symlinks or --junctions; remembered in the local file */
   links?: LinkMode;
+  /** --plugins or --links: the user folders' form on harnesses with plugins; remembered in the local file */
+  form?: Form;
   pull: boolean | "force";
   restore: boolean;
   retry: boolean;
@@ -223,12 +239,17 @@ function parseArgs(argv: string[]): Args {
         if (!from || !to) bail(`--as takes old=new pairs, not ${pair}`);
         a.as[from] = to;
       }
-    } else if (x === "--plugins") a.plugins = true;
+    } else if (x === "--plugins") {
+      a.plugins = true;
+      a.form = "plugin";
+    } else if (x === "--links") a.form = "links";
     else if (x === "--catalogs") a.catalogs = true;
     else if (x === "--artifacts") a.artifacts = true;
     else if (x === "--check") a.check = true;
     else if (x === "--repo") a.repo = next();
     else if (x === "--library") a.library = next();
+    else if (x === "--expect-revision") a.expectRevision = next();
+    else if (x === "--remote-ref") a.remoteRef = next();
     else if (x === "--agents") a.agents = list(next());
     else if (x === "--global") a.global = true;
     else if (x === "--no-global") a.global = false;
@@ -277,6 +298,9 @@ interface Choices {
   wsl: string[];
   unavailable: string[];
   links: LinkMode;
+  form: Form;
+  /** the form came from --plugins/--links or the local file, so it is remembered; otherwise the default applies */
+  formChosen: boolean;
 }
 
 function bail(msg: string): never {
@@ -381,6 +405,8 @@ async function main(): Promise<void> {
     const r = new Report();
     unlink(lib, table, r);
     apply(r, args.plan);
+    const owned = removeOwned(table, local.plugins ?? {}, r, args.plan);
+    if (!args.plan) rememberPlugins(lib.root, owned);
     return printReport(r, args);
   }
 
@@ -694,7 +720,19 @@ function saveLocal(root: string, c: Choices): void {
     links: c.links,
   };
   if (c.unavailable.length) saved.unavailable = c.unavailable;
+  if (c.formChosen) saved.form = c.form;
+  // the plugin step's record of what it installed is not an answer: it survives every save
+  const owned = readLocal(root).plugins;
+  if (owned && Object.keys(owned).length) saved.plugins = owned;
   writeLocal(root, saved);
+}
+
+/** The plugin step's ownership record, written into the local file beside the answers. */
+function rememberPlugins(root: string, owned: Record<string, Owned>): void {
+  const local = readLocal(root);
+  const next: Local = { ...local, plugins: owned };
+  if (!Object.keys(owned).length) delete next.plugins;
+  if (JSON.stringify(next) !== JSON.stringify(local)) writeLocal(root, next);
 }
 
 async function decide(
@@ -796,14 +834,36 @@ async function decide(
     wsl,
     unavailable: args.retry ? [] : (local.unavailable ?? []),
     links: args.links ?? local.links ?? "auto",
+    // a cloud session keeps loose links unless told: claude.ai syncs its own plugins into the container, and the
+    // repos' instructions read a skill from ~/.claude/skills/<name>
+    form: args.form ?? local.form ?? (process.env.CLAUDE_CODE_REMOTE === "true" ? "links" : "plugin"),
+    formChosen: !!(args.form ?? local.form),
   };
 }
 
 /** One pass over the steps. A config library's refresh is always frozen: every third-party skill at the lock's commit. */
 async function runOnce(lib: Library, c: Choices, args: Args, cwd: string, report: Report): Promise<void> {
   const log = (m: string) => (args.json ? undefined : process.stderr.write(m + "\n"));
+  if (args.expectRevision || args.remoteRef) {
+    const reason = verifyLibraryRevision(lib.root, args.expectRevision, args.remoteRef);
+    if (reason) {
+      report.add({ kind: "conflict", path: lib.root, note: reason });
+      process.exitCode = 1;
+      printReport(report, args, { entrypoints: [] });
+      return;
+    }
+  }
 
   const missing = lib.missingFromLock().filter((n) => !c.unavailable.includes(n));
+  let required: ReturnType<typeof instructionDependencies> = [];
+  try {
+    if (args.entrypoints) required = instructionDependencies(lib);
+  } catch (error) {
+    report.add({ kind: "conflict", path: lib.root, note: String(error) });
+    process.exitCode = 1;
+    printReport(report, args, { entrypoints: [] });
+    return;
+  }
   if (lib.hasConfig() && args.restore && args.command !== "projects" && !args.plan) {
     // a config library: the frozen refresh rebuilds the working set at the lock's commits and never writes the lock
     const r = refresh(lib, { frozen: true, plan: false, unavailable: c.unavailable, log });
@@ -840,8 +900,28 @@ async function runOnce(lib: Library, c: Choices, args: Args, cwd: string, report
       report.merge(s);
     }
     if (c.global) {
+      // plugins first: a skill's loose link goes only once a verified plugin carries it on that harness
+      const pr = new Report();
+      const installed = plugins(lib, c.agents, c.form, readLocal(lib.root).plugins ?? {}, pr, args.plan);
+      for (const h of c.agents)
+        for (const dependency of required) {
+          const covered = installed.covered.get(h.id);
+          if (
+            covered?.has(dependency.skill) &&
+            !pluginDependency(lib, h, dependency.skill, dependency.files, args.plan)
+          ) {
+            covered.delete(dependency.skill);
+            pr.add({
+              kind: "conflict",
+              path: path.join(h.userSkills, dependency.skill),
+              note: "required plugin skill or references are unverified; loose link retained",
+            });
+          }
+        }
+      if (!args.plan) rememberPlugins(lib.root, installed.owned);
+      report.merge(pr);
       const u = new Report();
-      home(lib, c.agents, u);
+      home(lib, c.agents, u, installed.covered);
       apply(u, args.plan);
       report.merge(u);
     }
@@ -858,12 +938,41 @@ async function runOnce(lib: Library, c: Choices, args: Args, cwd: string, report
   const instructionGlobal = c.global && args.command !== "projects";
   const instructions = new Report();
   if (args.entrypoints) {
-    entrypoints(lib, c.agents, instructionGlobal, instructionProjects, instructions);
+    if (args.expectRevision || args.remoteRef) {
+      const reason = verifyLibraryRevision(lib.root, args.expectRevision, args.remoteRef);
+      if (reason) {
+        report.add({ kind: "conflict", path: lib.root, note: reason });
+        process.exitCode = 1;
+        printReport(report, args, { entrypoints: [] });
+        return;
+      }
+    }
+    entrypoints(
+      lib,
+      c.agents,
+      instructionGlobal,
+      instructionProjects,
+      instructions,
+      true,
+      args.plan ? report : undefined,
+      c.mode === "copy",
+      c.form === "plugin",
+    );
     apply(instructions, args.plan);
     report.merge(instructions);
   }
   const verified = args.entrypoints
-    ? entrypoints(lib, c.agents, instructionGlobal, instructionProjects, new Report(), !args.plan)
+    ? entrypoints(
+        lib,
+        c.agents,
+        instructionGlobal,
+        instructionProjects,
+        new Report(),
+        true,
+        args.plan ? report : undefined,
+        c.mode === "copy",
+        c.form === "plugin",
+      )
     : [];
   if (instructions.conflicts().length || (!args.plan && verified.some((item) => item.state !== "current")))
     process.exitCode = 1;
@@ -873,7 +982,13 @@ async function runOnce(lib: Library, c: Choices, args: Args, cwd: string, report
       const r = runInWsl(
         d,
         lib.root,
-        [...(!args.entrypoints ? ["--no-entrypoints"] : []), ...(!args.remember ? ["--no-remember"] : [])],
+        [
+          ...(!args.entrypoints ? ["--no-entrypoints"] : []),
+          ...(!args.remember ? ["--no-remember"] : []),
+          ...(args.form ? [args.form === "plugin" ? "--plugins" : "--links"] : []),
+          ...(args.expectRevision ? ["--expect-revision", args.expectRevision] : []),
+          ...(args.remoteRef ? ["--remote-ref", args.remoteRef] : []),
+        ],
         args.plan,
       );
       if (!r.ok) process.exitCode = 1;
@@ -916,7 +1031,25 @@ function linksLine(r: Report): string {
 }
 
 function printStatus(lib: Library, table: Harness[], args: Args, local: Local): void {
-  const s = status(lib, table);
+  if (args.expectRevision || args.remoteRef) {
+    const reason = verifyLibraryRevision(lib.root, args.expectRevision, args.remoteRef);
+    if (reason) {
+      const report = new Report();
+      report.add({ kind: "conflict", path: lib.root, note: reason });
+      process.exitCode = 1;
+      printReport(report, args, { entrypoints: [] });
+      return;
+    }
+  }
+  const harnesses = pluginStatus(lib, table, local.plugins ?? {});
+  // a skill an enabled plugin carries is not missing from that harness's user folder
+  const carried = new Map<string, Set<string>>();
+  for (const h of table) {
+    const on = new Set(harnesses[h.id].plugins.filter((x) => x.enabled).map((x) => x.name));
+    const built = on.size ? (readCatalog(lib, h)?.plugins ?? []) : [];
+    carried.set(h.id, new Set(built.filter((b) => on.has(b.name)).flatMap((b) => b.skills)));
+  }
+  const s = status(lib, table, carried);
   const dev = path.resolve(args.dev ?? local.dev ?? process.cwd());
   const projectNames =
     args.projects === false
@@ -926,11 +1059,21 @@ function printStatus(lib: Library, table: Harness[], args: Args, local: Local): 
         : (args.projects ?? local.projects ?? []);
   const instructionProjects = projectNames.map((name) => path.join(dev, name)).filter(isDir);
   const instructions = args.entrypoints
-    ? entrypoints(lib, table, args.global ?? local.global ?? true, instructionProjects, new Report(), true)
+    ? entrypoints(
+        lib,
+        table,
+        args.global ?? local.global ?? true,
+        instructionProjects,
+        new Report(),
+        true,
+        undefined,
+        args.copy ?? local.mode === "copy",
+        (args.form ?? local.form ?? (process.env.CLAUDE_CODE_REMOTE === "true" ? "links" : "plugin")) === "plugin",
+      )
     : [];
   if (instructions.some((item) => item.state !== "current")) process.exitCode = 1;
   if (args.json) {
-    process.stdout.write(JSON.stringify({ ...s, entrypoints: instructions }, null, 2) + "\n");
+    process.stdout.write(JSON.stringify({ ...s, harnesses, entrypoints: instructions }, null, 2) + "\n");
     return;
   }
   process.stdout.write(
@@ -939,7 +1082,21 @@ function printStatus(lib: Library, table: Harness[], args: Args, local: Local): 
   for (const [layer, v] of Object.entries(s.layers))
     process.stdout.write(`${layer}: ${v.linked} linked, ${v.missing.length} missing\n`);
   for (const [dir, v] of Object.entries(s.user))
-    process.stdout.write(`${dir}: ${v.linked} linked, ${v.missing.length} missing\n`);
+    process.stdout.write(
+      `${dir}: ${v.linked} linked, ${v.plugin ? `${v.plugin} in plugins, ` : ""}${v.missing.length} missing\n`,
+    );
+  for (const h of table) {
+    const x = harnesses[h.id];
+    if (x.form === "links") {
+      process.stdout.write(`${h.name}: links${x.note ? ` (${x.note})` : ""}\n`);
+      continue;
+    }
+    const on = x.plugins.filter((p) => p.enabled);
+    const stale = on.filter((p) => !p.match).map((p) => `${p.name} ${p.installed || "?"} != ${p.built ?? "?"}`);
+    process.stdout.write(
+      `${h.name}: plugin, ${on.length} of ${x.plugins.length} installed${stale.length ? `, not the built version: ${stale.join(", ")}` : ", each the built version"}\n`,
+    );
+  }
   for (const item of instructions)
     process.stdout.write(`${item.path}: ${item.block} ${item.state}${item.reason ? ` (${item.reason})` : ""}\n`);
 }
