@@ -8,6 +8,13 @@
     "url": "https://github.com/oneezy/tools.git",
     "directory": "packages/skills-viewer"
   },
+  "bin": {
+    "skills-viewer": "dist/src/cli.js"
+  },
+  "files": [
+    "dist",
+    "README.md"
+  ],
   "type": "module",
   "exports": {
     ".": {
@@ -20,27 +27,21 @@
     },
     "./package.json": "./package.json"
   },
-  "bin": {
-    "skills-viewer": "dist/src/cli.js"
-  },
-  "files": [
-    "dist",
-    "README.md"
-  ],
   "scripts": {
     "build": "tsc -p tsconfig.json",
-    "test": "tsc -p tsconfig.json && node --test \"dist/test/*.test.js\"",
+    "test": "tsc -p tsconfig.json && vp test run",
     "start": "node dist/src/cli.js",
     "fixture": "node dist/src/cli.js fixtures/mattpocock-skills --out examples/mattpocock --no-open"
-  },
-  "engines": {
-    "node": ">=20"
   },
   "dependencies": {
     "yaml": "^2.8.0"
   },
   "devDependencies": {
     "@types/node": "^24.0.0",
-    "typescript": "^5.9.0"
+    "typescript": "^5.9.0",
+    "vite-plus": "1.0.0"
+  },
+  "engines": {
+    "node": ">=20"
   }
 }

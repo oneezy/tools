@@ -4,22 +4,26 @@ import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
-import { test } from "node:test";
+import { test } from "vite-plus/test";
 
-const CLI = path.resolve(import.meta.dirname, "..", "src", "cli.js");
+const CLI = path.resolve(import.meta.dirname, "..", "dist", "src", "cli.js");
 /** The package's own folder, wherever the workspace keeps it: two levels above the compiled tests. */
-const PACKAGE = path.resolve(import.meta.dirname, "..", "..");
-const manifest = JSON.parse(fs.readFileSync(path.join(PACKAGE, "package.json"), "utf8")) as { version: string; files: string[]; bin: Record<string, string> };
+const PACKAGE = path.resolve(import.meta.dirname, "..");
+const manifest = JSON.parse(fs.readFileSync(path.join(PACKAGE, "package.json"), "utf8")) as {
+  version: string;
+  files: string[];
+  bin: Record<string, string>;
+};
 
 function cli(...args: string[]): { status: number | null; stdout: string; stderr: string } {
   return spawnSync(process.execPath, [CLI, ...args], { encoding: "utf8", cwd: PACKAGE });
 }
 
-test("the package is 0.5.0 and --help opens with that version: the banner and package.json never differ", () => {
-  assert.equal(manifest.version, "0.5.0");
+test("the package is 0.5.1 and --help opens with that version: the banner and package.json never differ", () => {
+  assert.equal(manifest.version, "0.5.1");
   const r = cli("--help");
   assert.equal(r.status, 0);
-  assert.equal(r.stdout.split("\n")[0], "skills-sync 0.5.0");
+  assert.equal(r.stdout.split("\n")[0], "skills-sync 0.5.1");
 });
 
 test("--help lists every command and every flag of build, check, update (refresh), versions and add beside the 0.2.0 ones; an unknown option exits 2 with the same help", () => {
@@ -29,15 +33,64 @@ test("--help lists every command and every flag of build, check, update (refresh
   const lines = help.split("\n");
   const from = lines.indexOf("Commands");
   const to = lines.findIndex((l, i) => i > from && /^[A-Z]/.test(l));
-  const commands = lines.slice(from + 1, to).filter((l) => /^  [a-z]/.test(l)).map((l) => l.trim().split(/\s+/)[0]);
-  assert.deepEqual(commands, ["sync", "status", "unlink", "projects", "update", "refresh", "versions", "add", "build", "check"]);
+  const commands = lines
+    .slice(from + 1, to)
+    .filter((l) => /^  [a-z]/.test(l))
+    .map((l) => l.trim().split(/\s+/)[0]);
+  assert.deepEqual(commands, [
+    "sync",
+    "status",
+    "unlink",
+    "projects",
+    "update",
+    "refresh",
+    "versions",
+    "add",
+    "build",
+    "check",
+  ]);
   // a flag is named at the start of its line under its section
   const flags = [
     ["--plugins", "--catalogs", "--artifacts", "--check"],
-    ["--to <version>|previous|latest", "--frozen", "--id <id>", "--root <path>", "--skills <names|*>", "--as <old=new,...>", "--plugin <id>"],
-    ["--repo <path>", "--library <src>", "--agents <ids>", "--global / --no-global", "--projects <names|*>", "--dev <dir>", "--copy", "--wsl <distros|*>", "--symlinks", "--junctions", "--no-pull / --pull", "--no-restore", "--retry", "--sidecars", "--no-layers", "--watch", "--plan", "--quiet", "--json", "-y, --yes", "--ask", "-h, --help"],
+    [
+      "--to <version>|previous|latest",
+      "--frozen",
+      "--id <id>",
+      "--root <path>",
+      "--skills <names|*>",
+      "--as <old=new,...>",
+      "--plugin <id>",
+    ],
+    [
+      "--repo <path>",
+      "--library <src>",
+      "--agents <ids>",
+      "--global / --no-global",
+      "--projects <names|*>",
+      "--dev <dir>",
+      "--copy",
+      "--wsl <distros|*>",
+      "--symlinks",
+      "--junctions",
+      "--no-pull / --pull",
+      "--no-restore",
+      "--retry",
+      "--sidecars",
+      "--no-layers",
+      "--watch",
+      "--plan",
+      "--quiet",
+      "--json",
+      "-y, --yes",
+      "--ask",
+      "-h, --help",
+    ],
   ].flat();
-  for (const f of flags) assert.ok(help.split("\n").some((l) => l.startsWith(`  ${f}`)), `flag ${f}`);
+  for (const f of flags)
+    assert.ok(
+      help.split("\n").some((l) => l.startsWith(`  ${f}`)),
+      `flag ${f}`,
+    );
   // what the new commands promise: the internal marker and its escape, the version rule, check's exit codes
   assert.match(help, /metadata\.internal: true/);
   assert.match(help, /INSTALL_INTERNAL_SKILLS=1/);
@@ -57,8 +110,13 @@ test("--help lists every command and every flag of build, check, update (refresh
 test("the package ships the built CLI, the three schemas (the flow schema among them) and the README, and its bin is the built CLI", () => {
   assert.deepEqual(manifest.files, ["dist/src", "schemas", "README.md"]);
   assert.deepEqual(manifest.bin, { "skills-sync": "dist/src/cli.js" });
-  assert.deepEqual(fs.readdirSync(path.join(PACKAGE, "schemas")).sort(), ["flow.schema.json", "skills-sync.local.schema.json", "skills-sync.schema.json"]);
-  for (const n of fs.readdirSync(path.join(PACKAGE, "schemas"))) assert.doesNotThrow(() => JSON.parse(fs.readFileSync(path.join(PACKAGE, "schemas", n), "utf8")), n);
+  assert.deepEqual(fs.readdirSync(path.join(PACKAGE, "schemas")).sort(), [
+    "flow.schema.json",
+    "skills-sync.local.schema.json",
+    "skills-sync.schema.json",
+  ]);
+  for (const n of fs.readdirSync(path.join(PACKAGE, "schemas")))
+    assert.doesNotThrow(() => JSON.parse(fs.readFileSync(path.join(PACKAGE, "schemas", n), "utf8")), n);
   assert.ok(fs.existsSync(path.join(PACKAGE, "README.md")));
   assert.ok(fs.existsSync(path.join(PACKAGE, manifest.bin["skills-sync"])));
 });

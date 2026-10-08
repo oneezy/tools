@@ -1,26 +1,41 @@
 {
   "name": "@oneezy/skills-sync",
-  "publishConfig": { "access": "public" },
-  "version": "0.5.0",
+  "version": "0.5.1",
   "description": "One skills library, every agent harness, every project on the machine. Declares third-party sources in skills-sync.json, locks each at an upstream version in skills-sync.lock.json and moves them only on update, links every skill into Claude Code, Codex, Goose and Hermes, and into the projects you pick.",
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/oneezy/tools.git",
+    "directory": "packages/skills-sync"
+  },
+  "bin": {
+    "skills-sync": "dist/src/cli.js"
+  },
+  "files": [
+    "dist/src",
+    "schemas",
+    "README.md"
+  ],
   "type": "module",
-  "bin": { "skills-sync": "dist/src/cli.js" },
-  "files": ["dist/src", "schemas", "README.md"],
-  "repository": { "type": "git", "url": "git+https://github.com/oneezy/tools.git", "directory": "packages/skills-sync" },
+  "publishConfig": {
+    "access": "public"
+  },
   "scripts": {
     "build": "tsc -p tsconfig.json",
-    "test": "tsc -p tsconfig.json && node --test \"dist/test/*.test.js\"",
+    "test": "tsc -p tsconfig.json && vp test run",
     "start": "node dist/src/cli.js",
-    "prepublishOnly": "npm run build && node --test \"dist/test/*.test.js\""
+    "prepublishOnly": "npm run build && vp test run"
   },
-  "engines": { "node": ">=20" },
   "dependencies": {
     "@clack/prompts": "^1.8.1",
     "yaml": "^2.8.0"
   },
   "devDependencies": {
     "@types/node": "^24.0.0",
-    "typescript": "^5.9.0"
+    "typescript": "^5.9.0",
+    "vite-plus": "1.0.0"
+  },
+  "engines": {
+    "node": ">=20"
   }
 }

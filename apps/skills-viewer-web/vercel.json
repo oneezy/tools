@@ -3,5 +3,5 @@
   "framework": "sveltekit",
   "installCommand": "corepack enable pnpm && pnpm install --frozen-lockfile",
   "buildCommand": "cd ../.. && pnpm --filter \"skills-viewer-web...\" run build",
-  "ignoreCommand": "npx turbo-ignore --fallback=HEAD^1"
+  "ignoreCommand": "bash ../../scripts/vercel-ignore.sh"
 }

@@ -2,7 +2,19 @@
 
 import { detect, type Doc } from "./edges.js";
 import { asStringArray, claudeMode, parseMarkdown, parseSkillFile, unionMode, type ParsedSkill } from "./parse.js";
-import type { Edge, Evidence, Graph, LinkType, Marketplace, Mode, PartKind, PartNode, PluginNode, SkillNode, Source } from "./types.js";
+import type {
+  Edge,
+  Evidence,
+  Graph,
+  LinkType,
+  Marketplace,
+  Mode,
+  PartKind,
+  PartNode,
+  PluginNode,
+  SkillNode,
+  Source,
+} from "./types.js";
 import { basename, dirname, join, normalize, relativeTo, type FileSet } from "./vfs.js";
 
 export const VERSION = "0.2.0";
@@ -62,7 +74,8 @@ export function analyze(fs: FileSet, opts: AnalyzeOptions = {}): Graph {
     let root: string | null = null;
     if (basename(d) === ".claude-plugin" || basename(d) === ".codex-plugin") root = dirname(d);
     // the neutral agent-plugins manifest sits in the plugin root, next to a harness manifest
-    else if (has.has(join(d, ".claude-plugin", "plugin.json")) || has.has(join(d, ".codex-plugin", "plugin.json"))) root = d;
+    else if (has.has(join(d, ".claude-plugin", "plugin.json")) || has.has(join(d, ".codex-plugin", "plugin.json")))
+      root = d;
     if (root === null) continue;
     const plugin = pluginAt(root);
     const json = readJson(p);
@@ -82,11 +95,20 @@ export function analyze(fs: FileSet, opts: AnalyzeOptions = {}): Graph {
     const meta = (json.metadata as Record<string, unknown> | undefined) ?? {};
     const pluginRoot = typeof meta.pluginRoot === "string" ? meta.pluginRoot : "";
     const listed = Array.isArray(json.plugins) ? (json.plugins as Array<Record<string, unknown>>) : [];
-    const market: Marketplace = { name: str(json.name) || basename(base) || "marketplace", description: str(json.description) || str(meta.description), file: p, plugins: [] };
+    const market: Marketplace = {
+      name: str(json.name) || basename(base) || "marketplace",
+      description: str(json.description) || str(meta.description),
+      file: p,
+      plugins: [],
+    };
     for (const entry of listed) {
       const name = str(entry.name);
       const src = entry.source;
-      const item: Marketplace["plugins"][number] = { name, description: str(entry.description), source: typeof src === "string" ? src : sourceLabel(src) };
+      const item: Marketplace["plugins"][number] = {
+        name,
+        description: str(entry.description),
+        source: typeof src === "string" ? src : sourceLabel(src),
+      };
       if (typeof src === "string") {
         const dir = /^\.{1,2}\//.test(src) || !pluginRoot ? join(base, src) : join(base, pluginRoot, src);
         if (paths.some((x) => x.startsWith(dir === "" ? "" : dir + "/"))) {
@@ -120,7 +142,8 @@ export function analyze(fs: FileSet, opts: AnalyzeOptions = {}): Graph {
     const version = str(field("version"));
     if (version) pl.node.version = version;
   }
-  for (const m of marketplaces) for (const item of m.plugins) if (item.pluginId !== undefined) item.pluginId = plugins.get(item.pluginId)?.node?.id;
+  for (const m of marketplaces)
+    for (const item of m.plugins) if (item.pluginId !== undefined) item.pluginId = plugins.get(item.pluginId)?.node?.id;
   const byDepth = [...pluginList].sort((a, b) => b.dir.length - a.dir.length);
   const ownerPlugin = (p: string): Plugin | undefined => byDepth.find((pl) => relativeTo(pl.dir, p) !== null);
 
@@ -134,7 +157,10 @@ export function analyze(fs: FileSet, opts: AnalyzeOptions = {}): Graph {
   for (const group of groups.values()) {
     // the authored copy (outside any plugin) wins over a built plugin copy, then the shortest path
     const ranked = [...group].sort(
-      (a, b) => Number(!!ownerPlugin(a.dir)) - Number(!!ownerPlugin(b.dir)) || a.file.length - b.file.length || a.file.localeCompare(b.file),
+      (a, b) =>
+        Number(!!ownerPlugin(a.dir)) - Number(!!ownerPlugin(b.dir)) ||
+        a.file.length - b.file.length ||
+        a.file.localeCompare(b.file),
     );
     canonical.push({ skill: ranked[0], copies: ranked.slice(1) });
   }
@@ -146,14 +172,26 @@ export function analyze(fs: FileSet, opts: AnalyzeOptions = {}): Graph {
 
   const parts: PartDoc[] = [];
   const usedPartIds = new Set<string>();
-  const addPart = (kind: PartKind, scope: string, name: string, fields: Omit<PartNode, "id" | "kind" | "name">, doc?: Omit<Doc, "id">): PartNode => {
+  const addPart = (
+    kind: PartKind,
+    scope: string,
+    name: string,
+    fields: Omit<PartNode, "id" | "kind" | "name">,
+    doc?: Omit<Doc, "id">,
+  ): PartNode => {
     const part: PartNode = { id: unique(`${kind}:${scope}/${name}`, usedPartIds), kind, name, ...fields };
     parts.push({ part, doc: doc ? { ...doc, id: part.id, part: true } : undefined });
     return part;
   };
   const inSkill = (p: string) => allSkillDirs.some((d) => relativeTo(d, p) !== null);
 
-  const markdownParts = (kind: "command" | "agent", files: string[], scope: string, plugin: PluginNode | undefined, base: string) => {
+  const markdownParts = (
+    kind: "command" | "agent",
+    files: string[],
+    scope: string,
+    plugin: PluginNode | undefined,
+    base: string,
+  ) => {
     for (const f of files) {
       const raw = read(f) ?? "";
       const md = parseMarkdown(raw);
@@ -164,7 +202,13 @@ export function analyze(fs: FileSet, opts: AnalyzeOptions = {}): Graph {
       const details: Record<string, unknown> = { ...fm };
       if (ns) details.namespace = ns.split("/").join(":");
       const description = str(fm.description) || firstLine(md.body);
-      addPart(kind, scope, name, { description, ...(plugin ? { plugin: plugin.id } : {}), file: f, details }, { name, body: md.body, bodyStart: md.bodyStart });
+      addPart(
+        kind,
+        scope,
+        name,
+        { description, ...(plugin ? { plugin: plugin.id } : {}), file: f, details },
+        { name, body: md.body, bodyStart: md.bodyStart },
+      );
     }
   };
   const mdUnder = (dirOrFile: string) =>
@@ -190,7 +234,14 @@ export function analyze(fs: FileSet, opts: AnalyzeOptions = {}): Graph {
           if (typeof h.timeout === "number") details.timeout = h.timeout;
           details.line = lineIn(text, command || prompt || event);
           const name = matcher ? `${event} (${matcher})` : event;
-          out.push(addPart("hook", scope, name, { description: clip(command || prompt), ...(plugin ? { plugin: plugin.id } : {}), file, details }));
+          out.push(
+            addPart("hook", scope, name, {
+              description: clip(command || prompt),
+              ...(plugin ? { plugin: plugin.id } : {}),
+              file,
+              details,
+            }),
+          );
         }
       }
     }
@@ -217,7 +268,14 @@ export function analyze(fs: FileSet, opts: AnalyzeOptions = {}): Graph {
       if (cfg.headers && typeof cfg.headers === "object") details.headerKeys = Object.keys(cfg.headers);
       details.line = lineIn(text, `"${name}"`);
       const description = url || [details.command, ...((details.args as string[]) ?? [])].filter(Boolean).join(" ");
-      out.push(addPart("mcp", scope, name, { description: clip(description), ...(plugin ? { plugin: plugin.id } : {}), file, details }));
+      out.push(
+        addPart("mcp", scope, name, {
+          description: clip(description),
+          ...(plugin ? { plugin: plugin.id } : {}),
+          file,
+          details,
+        }),
+      );
     }
     return out;
   };
@@ -228,8 +286,10 @@ export function analyze(fs: FileSet, opts: AnalyzeOptions = {}): Graph {
   for (const pl of pluginList) {
     const node = pl.node!;
     const scope = node.name;
-    const field = (k: string) => pl.manifests.map((m) => ({ file: m.file, v: m.json[k] })).find((x) => x.v !== undefined);
-    const extraPaths = (k: string) => (asStringArray(field(k)?.v) ?? []).filter((x) => typeof x === "string").map((x) => join(pl.dir, x));
+    const field = (k: string) =>
+      pl.manifests.map((m) => ({ file: m.file, v: m.json[k] })).find((x) => x.v !== undefined);
+    const extraPaths = (k: string) =>
+      (asStringArray(field(k)?.v) ?? []).filter((x) => typeof x === "string").map((x) => join(pl.dir, x));
     const own = (p: string) => ownerPlugin(p) === pl;
 
     const commandDirs = [join(pl.dir, "commands"), ...extraPaths("commands")];
@@ -238,16 +298,28 @@ export function analyze(fs: FileSet, opts: AnalyzeOptions = {}): Graph {
     markdownParts("agent", unique2(agentDirs.flatMap(mdUnder)).filter(own), scope, node, join(pl.dir, "agents"));
 
     const hooks = field("hooks");
-    const hookFiles = [join(pl.dir, "hooks", "hooks.json"), ...(typeof hooks?.v === "string" || Array.isArray(hooks?.v) ? extraPaths("hooks") : [])];
-    for (const f of unique2(hookFiles)) if (has.has(f)) for (const h of hookParts(f, readJson(f), scope, node)) runners.push({ part: h, text: str(h.details.command) });
+    const hookFiles = [
+      join(pl.dir, "hooks", "hooks.json"),
+      ...(typeof hooks?.v === "string" || Array.isArray(hooks?.v) ? extraPaths("hooks") : []),
+    ];
+    for (const f of unique2(hookFiles))
+      if (has.has(f))
+        for (const h of hookParts(f, readJson(f), scope, node)) runners.push({ part: h, text: str(h.details.command) });
     if (hooks && typeof hooks.v === "object" && !Array.isArray(hooks.v))
-      for (const h of hookParts(hooks.file, hooks.v, scope, node)) runners.push({ part: h, text: str(h.details.command) });
+      for (const h of hookParts(hooks.file, hooks.v, scope, node))
+        runners.push({ part: h, text: str(h.details.command) });
 
     const mcp = field("mcpServers");
-    const mcpFiles = [join(pl.dir, ".mcp.json"), ...(typeof mcp?.v === "string" || Array.isArray(mcp?.v) ? extraPaths("mcpServers") : [])];
-    for (const f of unique2(mcpFiles)) if (has.has(f)) for (const m of mcpParts(f, readJson(f), scope, node)) runners.push({ part: m, text: mcpCommandLine(m) });
+    const mcpFiles = [
+      join(pl.dir, ".mcp.json"),
+      ...(typeof mcp?.v === "string" || Array.isArray(mcp?.v) ? extraPaths("mcpServers") : []),
+    ];
+    for (const f of unique2(mcpFiles))
+      if (has.has(f))
+        for (const m of mcpParts(f, readJson(f), scope, node)) runners.push({ part: m, text: mcpCommandLine(m) });
     if (mcp && typeof mcp.v === "object" && !Array.isArray(mcp.v))
-      for (const m of mcpParts(mcp.file, { mcpServers: mcp.v }, scope, node)) runners.push({ part: m, text: mcpCommandLine(m) });
+      for (const m of mcpParts(mcp.file, { mcpServers: mcp.v }, scope, node))
+        runners.push({ part: m, text: mcpCommandLine(m) });
 
     const scripts: PartNode[] = [];
     for (const p of paths) {
@@ -262,12 +334,23 @@ export function analyze(fs: FileSet, opts: AnalyzeOptions = {}): Graph {
   const projectMd = (kind: "command" | "agent") =>
     paths.filter((p) => /\.md$/i.test(p) && !ownerPlugin(p) && new RegExp(`(^|/)\\.claude/${kind}s/`).test(p));
   for (const kind of ["command", "agent"] as const) {
-    for (const f of projectMd(kind)) markdownParts(kind, [f], "project", undefined, f.slice(0, f.indexOf(`.claude/${kind}s/`) + `.claude/${kind}s`.length));
+    for (const f of projectMd(kind))
+      markdownParts(
+        kind,
+        [f],
+        "project",
+        undefined,
+        f.slice(0, f.indexOf(`.claude/${kind}s/`) + `.claude/${kind}s`.length),
+      );
   }
   for (const p of paths) {
     if (ownerPlugin(p)) continue;
-    if (/(^|\/)\.claude\/settings(\.local)?\.json$/.test(p)) for (const h of hookParts(p, readJson(p), "project", undefined)) runners.push({ part: h, text: str(h.details.command) });
-    else if (basename(p) === ".mcp.json") for (const m of mcpParts(p, readJson(p), "project", undefined)) runners.push({ part: m, text: mcpCommandLine(m) });
+    if (/(^|\/)\.claude\/settings(\.local)?\.json$/.test(p))
+      for (const h of hookParts(p, readJson(p), "project", undefined))
+        runners.push({ part: h, text: str(h.details.command) });
+    else if (basename(p) === ".mcp.json")
+      for (const m of mcpParts(p, readJson(p), "project", undefined))
+        runners.push({ part: m, text: mcpCommandLine(m) });
   }
 
   // files next to each skill: scripts, references (context), assets
@@ -279,7 +362,12 @@ export function analyze(fs: FileSet, opts: AnalyzeOptions = {}): Graph {
       const rel = relativeTo(skill.dir, p);
       if (!rel || rel === "SKILL.md" || /^agents\/[^/]+\.ya?ml$/.test(rel)) continue;
       if (nested.some((d) => relativeTo(d, p) !== null)) continue;
-      const kind: PartKind = /^(scripts|bin)\//.test(rel) || SCRIPT_EXT.test(rel) ? "script" : /^references\//.test(rel) || TEXT_EXT.test(rel) ? "reference" : "asset";
+      const kind: PartKind =
+        /^(scripts|bin)\//.test(rel) || SCRIPT_EXT.test(rel)
+          ? "script"
+          : /^references\//.test(rel) || TEXT_EXT.test(rel)
+            ? "reference"
+            : "asset";
       list.push(addPart(kind, skill.id, rel, { description: "", skill: skill.id, file: p, details: {} }));
     }
     skillFileParts.set(skill.id, list);
@@ -308,7 +396,8 @@ export function analyze(fs: FileSet, opts: AnalyzeOptions = {}): Graph {
       references: s.references,
       frontmatter: s.frontmatter,
     };
-    if (typeof s.frontmatter["argument-hint"] === "string") node.argumentHint = s.frontmatter["argument-hint"] as string;
+    if (typeof s.frontmatter["argument-hint"] === "string")
+      node.argumentHint = s.frontmatter["argument-hint"] as string;
     const tools = asStringArray(s.frontmatter["allowed-tools"]);
     if (tools) node.allowedTools = tools;
     if (typeof s.frontmatter.context === "string") node.context = s.frontmatter.context;
@@ -321,7 +410,8 @@ export function analyze(fs: FileSet, opts: AnalyzeOptions = {}): Graph {
     if (copies.length) node.copies = copies.map((c) => c.file);
     return node;
   });
-  for (const { part } of parts) if (part.plugin) pluginList.find((p) => p.node!.id === part.plugin)!.node!.parts.push(part.id);
+  for (const { part } of parts)
+    if (part.plugin) pluginList.find((p) => p.node!.id === part.plugin)!.node!.parts.push(part.id);
 
   /* ---------- relations ---------- */
 
@@ -340,9 +430,11 @@ export function analyze(fs: FileSet, opts: AnalyzeOptions = {}): Graph {
       const needles = [rel, ...(base !== rel && base.includes(".") && base.length >= 5 ? [base] : [])];
       const evidence: Evidence[] = [];
       skill.body.forEach((text, i) => {
-        if (evidence.length < 5 && needles.some((n) => text.includes(n))) evidence.push({ line: skill.bodyStart + i, snippet: clip(text.trim(), 220), pattern: "file" });
+        if (evidence.length < 5 && needles.some((n) => text.includes(n)))
+          evidence.push({ line: skill.bodyStart + i, snippet: clip(text.trim(), 220), pattern: "file" });
       });
-      if (evidence.length) links.push({ source: skill.id, target: part.id, type: part.kind === "script" ? "runs" : "reads", evidence });
+      if (evidence.length)
+        links.push({ source: skill.id, target: part.id, type: part.kind === "script" ? "runs" : "reads", evidence });
     }
   }
   // hooks and MCP servers that start a plugin script
@@ -350,8 +442,16 @@ export function analyze(fs: FileSet, opts: AnalyzeOptions = {}): Graph {
     if (!text || !part.plugin) continue;
     for (const script of pluginScripts.get(part.plugin) ?? []) {
       const base = basename(script.name);
-      if (text.includes(script.name) || (base.includes(".") && new RegExp(`[/\\\\\\s"']${escapeRe(base)}\\b`).test(text))) {
-        links.push({ source: part.id, target: script.id, type: "runs", evidence: [{ line: Number(part.details.line) || 1, snippet: clip(text, 220), pattern: "file" }] });
+      if (
+        text.includes(script.name) ||
+        (base.includes(".") && new RegExp(`[/\\\\\\s"']${escapeRe(base)}\\b`).test(text))
+      ) {
+        links.push({
+          source: part.id,
+          target: script.id,
+          type: "runs",
+          evidence: [{ line: Number(part.details.line) || 1, snippet: clip(text, 220), pattern: "file" }],
+        });
       }
     }
   }
@@ -362,8 +462,10 @@ export function analyze(fs: FileSet, opts: AnalyzeOptions = {}): Graph {
   const incomingCalls = new Map<string, number>();
   for (const e of [...edges, ...links]) {
     if (!skillIds.has(e.target)) continue;
-    if (e.evidence.some((v) => v.type === "calls" || v.type === "suggests")) incomingAny.set(e.target, (incomingAny.get(e.target) ?? 0) + 1);
-    if (e.type === "calls" || e.type === "prerequisite") incomingCalls.set(e.target, (incomingCalls.get(e.target) ?? 0) + 1);
+    if (e.evidence.some((v) => v.type === "calls" || v.type === "suggests"))
+      incomingAny.set(e.target, (incomingAny.get(e.target) ?? 0) + 1);
+    if (e.type === "calls" || e.type === "prerequisite")
+      incomingCalls.set(e.target, (incomingCalls.get(e.target) ?? 0) + 1);
   }
   for (const n of nodes) {
     n.entry = n.mode === "manual" && (incomingAny.get(n.id) ?? 0) === 0;
@@ -375,7 +477,11 @@ export function analyze(fs: FileSet, opts: AnalyzeOptions = {}): Graph {
   return {
     meta: {
       generatedAt: new Date().toISOString(),
-      roots: opts.roots ?? (source.kind === "local" ? source.roots : [`${source.owner}/${source.repo}${source.subpath ? "/" + source.subpath : ""}`]),
+      roots:
+        opts.roots ??
+        (source.kind === "local"
+          ? source.roots
+          : [`${source.owner}/${source.repo}${source.subpath ? "/" + source.subpath : ""}`]),
       skillCount: nodes.length,
       edgeCount: edges.length,
       flowCount: flows.length,

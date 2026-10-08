@@ -1,19 +1,19 @@
 {
   "name": "@oneezy/tools",
   "private": true,
-  "description": "Justin's tools as one pnpm workspace: Turborepo runs build, test, check and dev across packages; Vite Plus serves the packages that have a dev server.",
-  "packageManager": "pnpm@12.5.1",
-  "engines": {
-    "node": ">=20",
-    "pnpm": ">=12"
-  },
+  "description": "Justin's tools as one pnpm workspace: Vite Plus runs build, test, check and dev across packages and serves the app that has a dev server.",
   "scripts": {
-    "build": "turbo run build",
-    "test": "turbo run test",
-    "check": "turbo run check",
-    "dev": "turbo run dev"
+    "build": "vp run -r build",
+    "test": "vp run -r test",
+    "check": "vp run --filter \"skills-viewer-web^...\" build && vp check && vp run -r check",
+    "dev": "vp dev"
   },
   "devDependencies": {
-    "turbo": "2.11.5"
-  }
+    "vite-plus": "1.0.0"
+  },
+  "engines": {
+    "node": ">=24",
+    "pnpm": ">=12.9"
+  },
+  "packageManager": "pnpm@12.9.1"
 }

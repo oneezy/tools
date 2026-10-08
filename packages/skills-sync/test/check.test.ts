@@ -6,7 +6,7 @@ import { spawnSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { after, before, beforeEach, test } from "node:test";
+import { afterAll, beforeAll, beforeEach, test } from "vite-plus/test";
 
 let base: string;
 let root: string;
@@ -14,9 +14,9 @@ let homeDir: string;
 let up: Repo;
 let library: Repo;
 
-const CLI = path.resolve(import.meta.dirname, "..", "src", "cli.js");
+const CLI = path.resolve(import.meta.dirname, "..", "dist", "src", "cli.js");
 /** The eight flow.yaml files of oneezy/skills (feature/skills-sync-migration at 69c0434), copied as they are. */
-const FLOWS = path.resolve(import.meta.dirname, "..", "..", "test", "fixtures", "flows");
+const FLOWS = path.resolve(import.meta.dirname, "fixtures", "flows");
 const HARNESS_ENV = ["CLAUDE_CONFIG_DIR", "CODEX_HOME", "XDG_CONFIG_HOME", "HERMES_HOME"] as const;
 const GIT = ["-c", "user.name=t", "-c", "user.email=t@example.com", "-c", "commit.gpgsign=false"];
 
@@ -78,7 +78,8 @@ function problems(r: { stdout: string }): string[] {
   return r.stdout.split("\n").filter((l) => l && !l.startsWith("check:"));
 }
 
-const FLOW = (skill: string, steps: string) => `skill: ${skill}\npurpose: Do one thing.\nruntime: [git]\nrefs: []\nunresolved: []\nagents:\n  max: 0\nsteps:\n${steps}`;
+const FLOW = (skill: string, steps: string) =>
+  `skill: ${skill}\npurpose: Do one thing.\nruntime: [git]\nrefs: []\nunresolved: []\nagents:\n  max: 0\nsteps:\n${steps}`;
 
 const CONFIG = () => ({
   version: 1,
@@ -90,10 +91,10 @@ const CONFIG = () => ({
   },
 });
 
-before(() => {
+beforeAll(() => {
   base = fs.mkdtempSync(path.join(os.tmpdir(), "skills-sync-check-"));
 });
-after(() => {
+afterAll(() => {
   fs.rmSync(base, { recursive: true, force: true });
 });
 beforeEach(() => {
@@ -106,14 +107,23 @@ beforeEach(() => {
     fs.mkdirSync(path.join(up.dir, "skills", n), { recursive: true });
     fs.writeFileSync(path.join(up.dir, "skills", n, "SKILL.md"), skillMd(n));
   }
-  fs.writeFileSync(path.join(up.dir, "LICENSE"), "MIT License\n\nPermission is hereby granted, free of charge, to any person\n");
+  fs.writeFileSync(
+    path.join(up.dir, "LICENSE"),
+    "MIT License\n\nPermission is hereby granted, free of charge, to any person\n",
+  );
   up.commit("one");
 
   // a clean library: a group of two own skills (one with a flow), a flat one, a refreshed source, the plugin form built
   library = new Repo(root);
   write(".gitignore", ".agents/skills/\n.claude/skills/\nupstream/\nartifacts/\nskills-sync.local.json\n");
   write("skills/oneezy/own-one/SKILL.md", skillMd("own-one"));
-  write("skills/oneezy/own-one/flow.yaml", FLOW("own-one", "  - id: first\n    does: the first thing\n    outcome: { done: it is done }\n  - id: second\n    after: first\n    does: the second thing\n"));
+  write(
+    "skills/oneezy/own-one/flow.yaml",
+    FLOW(
+      "own-one",
+      "  - id: first\n    does: the first thing\n    outcome: { done: it is done }\n  - id: second\n    after: first\n    does: the second thing\n",
+    ),
+  );
   write("skills/oneezy/own-two/SKILL.md", skillMd("own-two"));
   write("skills/flat-one/SKILL.md", skillMd("flat-one"));
   write("skills-sync.json", JSON.stringify(CONFIG(), null, 2) + "\n");
@@ -177,15 +187,47 @@ test("a flow.yaml that breaks a rule fails with its path and the rule: a duplica
   };
   const step = (id: string, rest = "") => `  - id: ${id}\n    does: ${id}\n${rest}`;
   flow("dup", FLOW("dup", step("one") + step("two", "    after: one\n") + step("one", "    after: two\n")));
-  flow("after", FLOW("after", step("one") + step("two", "    after: nope\n") + step("three", "    after: [one, gone]\n")));
+  flow(
+    "after",
+    FLOW("after", step("one") + step("two", "    after: nope\n") + step("three", "    after: [one, gone]\n")),
+  );
   flow("loop", FLOW("loop", step("one", "    loop: { every: 90s }\n")));
   flow("folder", FLOW("another", step("one")));
   flow("outcome", FLOW("outcome", step("one", "    outcome: { done: yes it is, maybe: who knows }\n")));
-  flow("refs", FLOW("refs", step("one")).replace("refs: []", "refs:\n  - { token: /x, kind: skill, id: x, need: sometimes }\n  - { token: y, kind: thing, id: y, need: required }\n  - { token: /z, kind: skill, need: optional }"));
-  flow("fan", FLOW("fan", step("one", "    parallel: [two, three]\n") + step("two") + step("four", "    parallel: [two, nope]\n    join: gone\n")));
-  flow("extra", FLOW("extra", step("one", "    retries: 3\n")).replace("purpose: Do one thing.\n", "") + "notes: free\n");
+  flow(
+    "refs",
+    FLOW("refs", step("one")).replace(
+      "refs: []",
+      "refs:\n  - { token: /x, kind: skill, id: x, need: sometimes }\n  - { token: y, kind: thing, id: y, need: required }\n  - { token: /z, kind: skill, need: optional }",
+    ),
+  );
+  flow(
+    "fan",
+    FLOW(
+      "fan",
+      step("one", "    parallel: [two, three]\n") +
+        step("two") +
+        step("four", "    parallel: [two, nope]\n    join: gone\n"),
+    ),
+  );
+  flow(
+    "extra",
+    FLOW("extra", step("one", "    retries: 3\n")).replace("purpose: Do one thing.\n", "") + "notes: free\n",
+  );
   flow("broken", "skill: broken\nsteps: [\n");
-  flow("good", FLOW("good", step("fan", "    parallel: [left, right]\n    join: meet\n") + step("left", "    after: fan\n") + step("right", "    after: fan\n") + step("meet", "    after: [left, right]\n    loop: { until: both are in, every: 90s }\n    calls: { skill: own-one }\n    returns: the two results\n    needs: [git]\n    if: there is something to wait for\n    outcome: { done: met, fail: one never came → stop, input: a human picks one }\n")).replace("refs: []", "refs:\n  - { token: /own-one, kind: skill, id: own-one, need: mention, when: named only }"));
+  flow(
+    "good",
+    FLOW(
+      "good",
+      step("fan", "    parallel: [left, right]\n    join: meet\n") +
+        step("left", "    after: fan\n") +
+        step("right", "    after: fan\n") +
+        step(
+          "meet",
+          "    after: [left, right]\n    loop: { until: both are in, every: 90s }\n    calls: { skill: own-one }\n    returns: the two results\n    needs: [git]\n    if: there is something to wait for\n    outcome: { done: met, fail: one never came → stop, input: a human picks one }\n",
+        ),
+    ).replace("refs: []", "refs:\n  - { token: /own-one, kind: skill, id: own-one, need: mention, when: named only }"),
+  );
 
   const r = cli("check");
   assert.equal(r.status, 1);
@@ -212,7 +254,13 @@ test("a flow.yaml that breaks a rule fails with its path and the rule: a duplica
   assert.ok(!r.stdout.includes("skills/oneezy/good/flow.yaml"), "the good flow has no line");
   const asJson = JSON.parse(cli("check", "--json").stdout);
   assert.equal(asJson.flows, 11);
-  assert.ok(asJson.problems.some((p: { path: string; reason: string }) => p.path === "skills/oneezy/loop/flow.yaml" && p.reason === "$.steps[0].loop: missing until"), "--json carries the same problems as path and reason");
+  assert.ok(
+    asJson.problems.some(
+      (p: { path: string; reason: string }) =>
+        p.path === "skills/oneezy/loop/flow.yaml" && p.reason === "$.steps[0].loop: missing until",
+    ),
+    "--json carries the same problems as path and reason",
+  );
 });
 
 test("check fails on generated-file drift, the computation of build --check: a hand-edited plugin copy, a missing catalog, a stale package, a package that cannot be built, each with its path and reason; artifacts/ is never drift; with generate.plugins false the plugin form is ignored", () => {
@@ -220,11 +268,21 @@ test("check fails on generated-file drift, the computation of build --check: a h
   assert.equal(cli("check").status, 0, "artifacts/ is not part of the drift");
   assert.match(cli("check").stdout, /^check: clean, 3 own skills, 1 flow, 17 generated files as built$/m);
 
-  write("plugins/up/skills/a/SKILL.md", "---\nname: a\ndescription: a skill\nmetadata:\n  internal: true\n---\nhand edited\n");
+  write(
+    "plugins/up/skills/a/SKILL.md",
+    "---\nname: a\ndescription: a skill\nmetadata:\n  internal: true\n---\nhand edited\n",
+  );
   fs.rmSync(path.join(root, ".agents", "plugins", "marketplace.json"));
   write("plugins/old/plugin.json", "{}\n");
   const config = CONFIG();
-  write("skills-sync.json", JSON.stringify({ ...config, plugins: { ...config.plugins, ghost: { displayName: "Ghost", source: "nosrc" } } }, null, 2) + "\n");
+  write(
+    "skills-sync.json",
+    JSON.stringify(
+      { ...config, plugins: { ...config.plugins, ghost: { displayName: "Ghost", source: "nosrc" } } },
+      null,
+      2,
+    ) + "\n",
+  );
   const before = tree(root);
   const r = cli("check");
   assert.equal(r.status, 1);
@@ -241,7 +299,12 @@ test("check fails on generated-file drift, the computation of build --check: a h
   assert.deepEqual(tree(root), before, "check wrote nothing");
   // the same paths build --check lists
   const drift = (JSON.parse(cli("build", "--check", "--json").stdout).drift as string[]).sort();
-  assert.deepEqual(problems(r).map((l) => l.split(": ")[0]).sort(), drift);
+  assert.deepEqual(
+    problems(r)
+      .map((l) => l.split(": ")[0])
+      .sort(),
+    drift,
+  );
 
   // the plugin form switched off: none of it is checked
   write("skills-sync.json", JSON.stringify({ ...config, generate: { skills: true, plugins: false } }, null, 2) + "\n");
@@ -265,7 +328,9 @@ test("check fails when skills-sync.lock.json is not what refresh would write fro
   const before = tree(root);
   const r = cli("check");
   assert.equal(r.status, 1);
-  assert.deepEqual(problems(r), ["skills-sync.lock.json: differs from what refresh would write from the snapshots under upstream/ (up:a, up:stale)"]);
+  assert.deepEqual(problems(r), [
+    "skills-sync.lock.json: differs from what refresh would write from the snapshots under upstream/ (up:a, up:stale)",
+  ]);
   assert.match(r.stdout, /^check: 1 problem; refresh writes skills-sync\.lock\.json$/m);
   assert.deepEqual(tree(root), before, "check wrote nothing");
 
@@ -280,12 +345,17 @@ test("check fails when skills-sync.lock.json is not what refresh would write fro
   write("skills-sync.lock.json", lockText);
   assert.equal(cli("check").status, 0);
   write("upstream/up/skills/b/SKILL.md", skillMd("b", "edited in the snapshot"));
-  assert.deepEqual(problems(cli("check")), ["skills-sync.lock.json: differs from what refresh would write from the snapshots under upstream/ (up:b)"]);
+  assert.deepEqual(problems(cli("check")), [
+    "skills-sync.lock.json: differs from what refresh would write from the snapshots under upstream/ (up:b)",
+  ]);
 
   // no snapshot at all, the plugin form off (a clone before refresh, where build --check could not run): the lock is left unchecked
   fs.rmSync(path.join(root, "upstream"), { recursive: true });
   write("skills-sync.lock.json", JSON.stringify(lock, null, 2) + "\n");
-  write("skills-sync.json", JSON.stringify({ ...CONFIG(), generate: { skills: true, plugins: false } }, null, 2) + "\n");
+  write(
+    "skills-sync.json",
+    JSON.stringify({ ...CONFIG(), generate: { skills: true, plugins: false } }, null, 2) + "\n",
+  );
   // an unreachable source proves nothing is fetched: check never resolves a ref
   fs.rmSync(up.dir, { recursive: true, force: true });
   const clone = cli("check");
@@ -295,12 +365,26 @@ test("check fails when skills-sync.lock.json is not what refresh would write fro
 
 test("a skill folder in the play group must be named play-<name>: skills/play/unslop fails with its path and the reason, skills/play/play-unslop passes; the same name in another group or flat is not held to it", () => {
   const config = CONFIG();
-  write("skills-sync.json", JSON.stringify({ ...config, plugins: { ...config.plugins, play: { displayName: "Play", description: "Justin's playground.", group: "play" } } }, null, 2) + "\n");
+  write(
+    "skills-sync.json",
+    JSON.stringify(
+      {
+        ...config,
+        plugins: {
+          ...config.plugins,
+          play: { displayName: "Play", description: "Justin's playground.", group: "play" },
+        },
+      },
+      null,
+      2,
+    ) + "\n",
+  );
   write("skills/play/unslop/SKILL.md", skillMd("unslop"));
   write("skills/oneezy/plain/SKILL.md", skillMd("plain"));
   write("skills/plain-flat/SKILL.md", skillMd("plain-flat"));
   assert.equal(cli("build", "--quiet").status, 0);
-  const reason = "a skill in the play group is named play-<name>; rename the folder (and its frontmatter name) to play-unslop";
+  const reason =
+    "a skill in the play group is named play-<name>; rename the folder (and its frontmatter name) to play-unslop";
   const bad = cli("check");
   assert.equal(bad.status, 1, bad.stdout);
   assert.deepEqual(problems(bad), [`skills/play/unslop: ${reason}`]);

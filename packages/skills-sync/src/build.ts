@@ -10,7 +10,9 @@ import { archives, type Built } from "./artifacts.js";
 import { isDir, isLink, isSkillDir, lexists } from "./fs.js";
 import { Library } from "./library.js";
 import { apply, Report } from "./plan.js";
-import { cmp, githubSlug, readConfig, selection, type Config, type Plugin, type Source } from "./sources.js";
+import { cmp, githubSlug, isoDate, readConfig, selection, type Config, type Plugin, type Source } from "./sources.js";
+
+export { isoDate };
 
 export interface BuildOptions {
   /** write plugins/<id>/ for every plugin in the config */
@@ -69,7 +71,10 @@ const NOGIT = "0.0.0+nogit";
  * for a commit it does not hold would otherwise go to its remote for it.
  */
 function git(root: string, ...args: string[]): string | null {
-  const r = spawnSync("git", ["-C", root, ...args], { encoding: "utf8", env: { ...process.env, GIT_NO_LAZY_FETCH: "1" } });
+  const r = spawnSync("git", ["-C", root, ...args], {
+    encoding: "utf8",
+    env: { ...process.env, GIT_NO_LAZY_FETCH: "1" },
+  });
   return r.status === 0 ? r.stdout.trim() : null;
 }
 
@@ -79,15 +84,13 @@ export function libraryHead(root: string): Head {
   const short = checkout ? git(root, "rev-parse", "--short=12", "HEAD") : null;
   const shallow = checkout && git(root, "rev-parse", "--is-shallow-repository") === "true";
   if (!short) return { version: NOGIT, commit: null, date: null, checkout, shallow };
-  return { version: `0.1.0+${short}`, commit: git(root, "rev-parse", "HEAD"), date: isoDate(git(root, "log", "-1", "--format=%cI")), checkout, shallow };
-}
-
-/**
- * A commit date as git's %cI gives it, in one spelling: git 2.45 and later write UTC as `Z`, older git as `+00:00`.
- * The NOTICE must not depend on which git built it, so `+00:00` is written `Z`, what CI's git prints.
- */
-export function isoDate<T extends string | null>(d: T): T {
-  return (d === null ? d : d.replace(/[+-]00:?00$/, "Z")) as T;
+  return {
+    version: `0.1.0+${short}`,
+    commit: git(root, "rev-parse", "HEAD"),
+    date: isoDate(git(root, "log", "-1", "--format=%cI")),
+    checkout,
+    shallow,
+  };
 }
 
 /**
@@ -101,7 +104,9 @@ export function bump(diskVersion: unknown, head: Head): string {
 }
 
 /** Where a package's skills came from, for its NOTICE. */
-type Origin = { kind: "own"; group: string } | { kind: "source"; id: string; src: Source; commit: string; date: string; perSkill: Record<string, string> };
+type Origin =
+  | { kind: "own"; group: string }
+  | { kind: "source"; id: string; src: Source; commit: string; date: string; perSkill: Record<string, string> };
 
 /** One package, resolved: its skills with every transform applied, its license, its origin. */
 interface Package {
@@ -132,7 +137,12 @@ export function build(lib: Library, opts: BuildOptions): BuildResult {
     for (const [id, note] of empty) {
       const dir = path.join(lib.plugins, id);
       if (!opts.plugins || !lexists(dir)) changes.add({ kind: "note", path: dir, note });
-      else changes.add(isLink(dir) ? { kind: "conflict", path: dir, note: `${note}; a link, not a package built here; left alone` } : { kind: "delete", path: dir, note });
+      else
+        changes.add(
+          isLink(dir)
+            ? { kind: "conflict", path: dir, note: `${note}; a link, not a package built here; left alone` }
+            : { kind: "delete", path: dir, note },
+        );
     }
     for (const id of ids) {
       const dir = path.join(lib.plugins, id);
@@ -141,7 +151,12 @@ export function build(lib: Library, opts: BuildOptions): BuildResult {
       const disk = diskFiles(dir);
       if (disk.links.length) {
         // never followed, never written through: a link inside the package is a conflict and the package is left alone
-        for (const l of disk.links) changes.add({ kind: "conflict", path: path.join(dir, l), note: `a link inside plugins/${id}; build never follows or writes through one; package left alone` });
+        for (const l of disk.links)
+          changes.add({
+            kind: "conflict",
+            path: path.join(dir, l),
+            note: `a link inside plugins/${id}; build never follows or writes through one; package left alone`,
+          });
         continue;
       }
       // a package whose files are unchanged keeps the version and commit it was built with: the HEAD moves with every
@@ -154,7 +169,12 @@ export function build(lib: Library, opts: BuildOptions): BuildResult {
       result.versions[id] = at.version;
       if (opts.plugins) reconcile(changes, dir, disk.files, files, opts.check);
       // the archive is made from the same files, so it is the package build writes, at the version its manifests carry
-      built.push({ id, version: at.version, commit: pkg.origin.kind === "source" ? pkg.origin.commit : at.commit, files });
+      built.push({
+        id,
+        version: at.version,
+        commit: pkg.origin.kind === "source" ? pkg.origin.commit : at.commit,
+        files,
+      });
     }
   }
   if (opts.plugins) {
@@ -173,13 +193,22 @@ export function build(lib: Library, opts: BuildOptions): BuildResult {
     for (const [file, bytes] of files) {
       const have = fs.existsSync(file) ? fs.readFileSync(file) : null;
       if (have && asBuilt(have, bytes)) changes.add({ kind: "skip", path: file, note: "ok" });
-      else changes.add({ kind: "write", path: file, payload: bytes, note: have ? (opts.check ? "differs" : "changed") : opts.check ? "missing" : "new" });
+      else
+        changes.add({
+          kind: "write",
+          path: file,
+          payload: bytes,
+          note: have ? (opts.check ? "differs" : "changed") : opts.check ? "missing" : "new",
+        });
     }
   }
   if (artifacts) archives(lib, config, built, changes);
   report.merge(changes);
   // --check: every write and delete is drift, and so is every package that cannot be built (a conflict)
-  if (opts.check) result.drift = changes.actions.filter((a) => a.kind !== "skip" && a.kind !== "note").map((a) => path.relative(lib.root, a.path).split("\\").join("/"));
+  if (opts.check)
+    result.drift = changes.actions
+      .filter((a) => a.kind !== "skip" && a.kind !== "note")
+      .map((a) => path.relative(lib.root, a.path).split("\\").join("/"));
   else apply(changes, opts.plan);
   return result;
 }
@@ -189,7 +218,8 @@ function emptyGroups(lib: Library, config: Config): Map<string, string> {
   const own = lib.scanOwn().skills;
   const out = new Map<string, string>();
   for (const [id, p] of Object.entries(config.plugins)) {
-    if (p.group && !own.some((s) => s.plugin === p.group)) out.set(id, `no skills under skills/${p.group} yet; not built, not cataloged`);
+    if (p.group && !own.some((s) => s.plugin === p.group))
+      out.set(id, `no skills under skills/${p.group} yet; not built, not cataloged`);
   }
   return out;
 }
@@ -202,20 +232,38 @@ function resolvePackage(lib: Library, config: Config, id: string, report: Report
     const own = lib.scanOwn().skills.filter((s) => s.plugin === plugin.group);
     const skills = new Map<string, Map<string, Buffer>>();
     for (const s of own) skills.set(s.name, skillCopy(s.dir, report));
-    const licenseFile = ["LICENSE", "LICENSE.md", "LICENSE.txt"].map((n) => path.join(lib.root, n)).find((f) => fs.existsSync(f));
-    if (!licenseFile) report.add({ kind: "note", path: where, note: "no LICENSE in the library; the package carries none" });
+    const licenseFile = ["LICENSE", "LICENSE.md", "LICENSE.txt"]
+      .map((n) => path.join(lib.root, n))
+      .find((f) => fs.existsSync(f));
+    if (!licenseFile)
+      report.add({ kind: "note", path: where, note: "no LICENSE in the library; the package carries none" });
     const license = licenseFile ? lf(fs.readFileSync(licenseFile)) : null;
-    return { id, plugin, skills, license, spdx: license ? spdx(license.toString("utf8")) : null, origin: { kind: "own", group: plugin.group } };
+    return {
+      id,
+      plugin,
+      skills,
+      license,
+      spdx: license ? spdx(license.toString("utf8")) : null,
+      origin: { kind: "own", group: plugin.group },
+    };
   }
   const src = config.sources[plugin.source!];
   if (!src) {
-    report.add({ kind: "conflict", path: where, note: `source ${plugin.source} is not in skills-sync.json; package not built` });
+    report.add({
+      kind: "conflict",
+      path: where,
+      note: `source ${plugin.source} is not in skills-sync.json; package not built`,
+    });
     return null;
   }
   const snapDir = path.join(lib.upstream, plugin.source!);
   const meta = readSnapshot(snapDir);
   if (!meta) {
-    report.add({ kind: "conflict", path: where, note: `no snapshot under upstream/${plugin.source}; run refresh first; package not built` });
+    report.add({
+      kind: "conflict",
+      path: where,
+      note: `no snapshot under upstream/${plugin.source}; run refresh first; package not built`,
+    });
     return null;
   }
   // the working-set copies of this source's selected skills, renames applied; the lock says which copy is this source's
@@ -227,7 +275,11 @@ function resolvePackage(lib: Library, config: Config, id: string, report: Report
     const copy = path.join(lib.agents, s.name);
     const entry = lock?.skills[s.name];
     if (!entry || isLink(copy) || !isSkillDir(copy)) {
-      report.add({ kind: "note", path: path.join(where, "skills", s.name), note: `${s.name} is not in the working set from ${plugin.source}; run refresh; left out` });
+      report.add({
+        kind: "note",
+        path: path.join(where, "skills", s.name),
+        note: `${s.name} is not in the working set from ${plugin.source}; run refresh; left out`,
+      });
       continue;
     }
     skills.set(s.name, skillCopy(copy, report));
@@ -235,14 +287,30 @@ function resolvePackage(lib: Library, config: Config, id: string, report: Report
     if (at !== meta.commit) perSkill[s.name] = at;
   }
   if (!skills.size) {
-    report.add({ kind: "conflict", path: where, note: `none of ${plugin.source}'s skills is in the working set; run refresh; package not built` });
+    report.add({
+      kind: "conflict",
+      path: where,
+      note: `none of ${plugin.source}'s skills is in the working set; run refresh; package not built`,
+    });
     return null;
   }
   const licenseRel = (meta.attribution ?? []).find((f) => /^LICENSE(\.|$)/i.test(path.posix.basename(f)));
   const licenseFile = licenseRel ? path.join(snapDir, licenseRel) : null;
-  if (!licenseFile || !fs.existsSync(licenseFile)) report.add({ kind: "note", path: where, note: `no LICENSE among the attribution files of ${plugin.source}; the package carries none` });
+  if (!licenseFile || !fs.existsSync(licenseFile))
+    report.add({
+      kind: "note",
+      path: where,
+      note: `no LICENSE among the attribution files of ${plugin.source}; the package carries none`,
+    });
   const license = licenseFile && fs.existsSync(licenseFile) ? lf(fs.readFileSync(licenseFile)) : null;
-  return { id, plugin, skills, license, spdx: license ? spdx(license.toString("utf8")) : null, origin: { kind: "source", id: plugin.source!, src, commit: meta.commit, date: meta.date, perSkill } };
+  return {
+    id,
+    plugin,
+    skills,
+    license,
+    spdx: license ? spdx(license.toString("utf8")) : null,
+    origin: { kind: "source", id: plugin.source!, src, commit: meta.commit, date: meta.date, perSkill },
+  };
 }
 
 /** Every file of the package, relative path (/ separators) -> bytes, for the given version and library commit. */
@@ -263,14 +331,28 @@ function render(pkg: Package, config: Config, head: Head): Map<string, Buffer> {
  * The three manifests. The portable one is Agent Plugins 1.0 with the ChatGPT interface under extensions; the legacy
  * .codex-plugin one is its flat form; the Claude one carries no version, so Claude Code tracks the library's commits.
  */
-function manifests(pkg: Package, config: Config, version: string): { portable: Record<string, unknown>; legacy: Record<string, unknown>; claude: Record<string, unknown> } {
+function manifests(
+  pkg: Package,
+  config: Config,
+  version: string,
+): { portable: Record<string, unknown>; legacy: Record<string, unknown>; claude: Record<string, unknown> } {
   const lib = config.library ?? {};
   const homepage = lib.homepage && /^https?:\/\//.test(lib.homepage) ? lib.homepage : undefined;
-  const ownerUrl = homepage && lib.owner && new RegExp(`^(https?://github\\.com/${lib.owner})(/|$)`).exec(homepage)?.[1];
+  const ownerUrl =
+    homepage && lib.owner && new RegExp(`^(https?://github\\.com/${lib.owner})(/|$)`).exec(homepage)?.[1];
   const o = pkg.origin;
   const slug = o.kind === "source" ? githubSlug(o.src.repo) : null;
-  const description = pkg.plugin.description ?? (o.kind === "own" ? `Skills from skills/${o.group} of ${lib.owner ? `${lib.owner}/` : ""}${lib.name ?? path.basename(pkg.id)}.` : `Skills from ${slug ?? o.src.repo}, following ${o.src.ref}.`);
-  const author = o.kind === "own" ? compact({ name: lib.owner ?? pkg.id, url: ownerUrl }) : slug ? { name: slug.split("/")[0], url: `https://github.com/${slug.split("/")[0]}` } : { name: o.id };
+  const description =
+    pkg.plugin.description ??
+    (o.kind === "own"
+      ? `Skills from skills/${o.group} of ${lib.owner ? `${lib.owner}/` : ""}${lib.name ?? path.basename(pkg.id)}.`
+      : `Skills from ${slug ?? o.src.repo}, following ${o.src.ref}.`);
+  const author =
+    o.kind === "own"
+      ? compact({ name: lib.owner ?? pkg.id, url: ownerUrl })
+      : slug
+        ? { name: slug.split("/")[0], url: `https://github.com/${slug.split("/")[0]}` }
+        : { name: o.id };
   const repository = o.kind === "own" ? homepage : slug ? `https://github.com/${slug}` : o.src.repo;
   const keywords = [...new Set(["skills", pkg.id, o.kind === "own" ? o.group : o.id])];
   const iface = {
@@ -283,9 +365,24 @@ function manifests(pkg: Package, config: Config, version: string): { portable: R
   };
   const common = compact({ description, author, homepage, repository, license: pkg.spdx ?? undefined, keywords });
   return {
-    portable: { $schema: PLUGIN_SCHEMA, name: pkg.id, version, ...common, extensions: { "com.openai": { interface: iface } } },
+    portable: {
+      $schema: PLUGIN_SCHEMA,
+      name: pkg.id,
+      version,
+      ...common,
+      extensions: { "com.openai": { interface: iface } },
+    },
     legacy: { name: pkg.id, version, ...common, skills: "./skills/", interface: iface },
-    claude: compact({ name: pkg.id, displayName: pkg.plugin.displayName, description, author, license: pkg.spdx ?? undefined, homepage, repository, keywords }),
+    claude: compact({
+      name: pkg.id,
+      displayName: pkg.plugin.displayName,
+      description,
+      author,
+      license: pkg.spdx ?? undefined,
+      homepage,
+      repository,
+      keywords,
+    }),
   };
 }
 
@@ -293,13 +390,37 @@ function manifests(pkg: Package, config: Config, version: string): { portable: R
 function notice(pkg: Package, config: Config, head: Head): string {
   const lib = config.library ?? {};
   const o = pkg.origin;
-  const libraryName = lib.owner && lib.name ? `${lib.owner}/${lib.name}` : lib.name ?? "the skills library";
-  const commitLine = o.kind === "source" ? `${o.commit} (${isoDate(o.date)})` : head.commit ? `${head.commit} (${isoDate(head.date)})` : head.checkout ? "a git checkout without a commit yet" : "not a git checkout";
-  const source = o.kind === "own" ? `\`skills/${o.group}\` of ${libraryName}${lib.homepage ? ` (${lib.homepage})` : ""}` : `${o.src.repo} (ref \`${o.src.ref}\`${o.src.root ? `, skills under \`${o.src.root}\`` : ""})`;
-  const license = pkg.license ? `${pkg.spdx ?? "see LICENSE"}${pkg.spdx ? ", see LICENSE" : ""}` : o.kind === "own" ? "no LICENSE file in the library" : "no LICENSE among the source's attribution files";
-  const renamed = o.kind === "source" ? new Map(selection(o.src).filter((s) => s.upstream !== s.name).map((s) => [s.name, s.upstream])) : new Map<string, string>();
+  const libraryName = lib.owner && lib.name ? `${lib.owner}/${lib.name}` : (lib.name ?? "the skills library");
+  const commitLine =
+    o.kind === "source"
+      ? `${o.commit} (${isoDate(o.date)})`
+      : head.commit
+        ? `${head.commit} (${isoDate(head.date)})`
+        : head.checkout
+          ? "a git checkout without a commit yet"
+          : "not a git checkout";
+  const source =
+    o.kind === "own"
+      ? `\`skills/${o.group}\` of ${libraryName}${lib.homepage ? ` (${lib.homepage})` : ""}`
+      : `${o.src.repo} (ref \`${o.src.ref}\`${o.src.root ? `, skills under \`${o.src.root}\`` : ""})`;
+  const license = pkg.license
+    ? `${pkg.spdx ?? "see LICENSE"}${pkg.spdx ? ", see LICENSE" : ""}`
+    : o.kind === "own"
+      ? "no LICENSE file in the library"
+      : "no LICENSE among the source's attribution files";
+  const renamed =
+    o.kind === "source"
+      ? new Map(
+          selection(o.src)
+            .filter((s) => s.upstream !== s.name)
+            .map((s) => [s.name, s.upstream]),
+        )
+      : new Map<string, string>();
   const skills = [...pkg.skills.keys()].map((n) => {
-    const notes = [renamed.has(n) ? `renamed from ${renamed.get(n)}` : "", o.kind === "source" && o.perSkill[n] ? `at ${o.perSkill[n]}` : ""].filter(Boolean);
+    const notes = [
+      renamed.has(n) ? `renamed from ${renamed.get(n)}` : "",
+      o.kind === "source" && o.perSkill[n] ? `at ${o.perSkill[n]}` : "",
+    ].filter(Boolean);
     return notes.length ? `${n} (${notes.join(", ")})` : n;
   });
   return [
@@ -332,7 +453,15 @@ function catalogs(config: Config, lib: Library, ids: string[]): Map<string, Buff
   const codex = {
     name: marketplace,
     interface: { displayName: l.owner ? `${l.owner}/${name}` : name },
-    plugins: ids.map((id) => compact({ name: id, source: `./plugins/${id}`, description: description(id), policy: { installation: "AVAILABLE", authentication: "ON_USE" }, category: CATEGORY })),
+    plugins: ids.map((id) =>
+      compact({
+        name: id,
+        source: `./plugins/${id}`,
+        description: description(id),
+        policy: { installation: "AVAILABLE", authentication: "ON_USE" },
+        category: CATEGORY,
+      }),
+    ),
   };
   return new Map([
     [lib.claudeCatalog, Buffer.from(jsonText(claude), "utf8")],
@@ -357,7 +486,9 @@ export function withInternal(md: string): string {
     const rest = lines[i].slice("metadata:".length).trim();
     if (rest && !rest.startsWith("#") && rest !== "{}") {
       // a flow map on one line: {a: b} -> {a: b, internal: true}
-      const flow = /internal:/.test(rest) ? rest.replace(/internal:\s*[^,}]*/, "internal: true") : rest.replace(/\s*}$/, (m) => `, internal: true${m}`);
+      const flow = /internal:/.test(rest)
+        ? rest.replace(/internal:\s*[^,}]*/, "internal: true")
+        : rest.replace(/\s*}$/, (m) => `, internal: true${m}`);
       next = [...lines.slice(0, i), `metadata: ${flow}`, ...lines.slice(i + 1)];
     } else {
       let j = i + 1;
@@ -379,7 +510,8 @@ export function withInternal(md: string): string {
  */
 function skillCopy(dir: string, report: Report): Map<string, Buffer> {
   const { files, links } = folderFiles(dir);
-  for (const l of links) report.add({ kind: "note", path: path.join(dir, l), note: "a link; not copied into the package" });
+  for (const l of links)
+    report.add({ kind: "note", path: path.join(dir, l), note: "a link; not copied into the package" });
   const out = new Map([...files].map(([rel, bytes]) => [rel, lf(bytes)]));
   const md = out.get("SKILL.md");
   if (md) out.set("SKILL.md", Buffer.from(withInternal(md.toString("utf8")), "utf8"));
@@ -436,12 +568,24 @@ function priorHead(root: string, disk: Map<string, Buffer>, head: Head, own: boo
 }
 
 /** Writes for files that differ or are missing, deletes for files no longer part of the package (a whole skill folder as one), skips for the rest. */
-function reconcile(report: Report, dir: string, disk: Map<string, Buffer>, expected: Map<string, Buffer>, check: boolean): void {
+function reconcile(
+  report: Report,
+  dir: string,
+  disk: Map<string, Buffer>,
+  expected: Map<string, Buffer>,
+  check: boolean,
+): void {
   for (const rel of [...expected.keys()].sort(cmp)) {
     const file = path.join(dir, rel);
     const have = disk.get(rel);
     if (have && asBuilt(have, expected.get(rel)!)) report.add({ kind: "skip", path: file, note: "ok" });
-    else report.add({ kind: "write", path: file, payload: expected.get(rel), note: have ? (check ? "differs" : "changed") : check ? "missing" : "new" });
+    else
+      report.add({
+        kind: "write",
+        path: file,
+        payload: expected.get(rel),
+        note: have ? (check ? "differs" : "changed") : check ? "missing" : "new",
+      });
   }
   const gone = new Set<string>();
   for (const rel of [...disk.keys()].sort(cmp)) {
@@ -450,7 +594,11 @@ function reconcile(report: Report, dir: string, disk: Map<string, Buffer>, expec
     const folder = m && ![...expected.keys()].some((k) => k.startsWith(`skills/${m[1]}/`)) ? `skills/${m[1]}` : rel;
     if (gone.has(folder)) continue;
     gone.add(folder);
-    report.add({ kind: "delete", path: path.join(dir, folder), note: folder === rel ? "not part of the package" : "skill no longer in the package" });
+    report.add({
+      kind: "delete",
+      path: path.join(dir, folder),
+      note: folder === rel ? "not part of the package" : "skill no longer in the package",
+    });
   }
 }
 

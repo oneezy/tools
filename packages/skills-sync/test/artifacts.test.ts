@@ -7,7 +7,7 @@ import { createHash } from "node:crypto";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { after, before, beforeEach, test } from "node:test";
+import { afterAll, beforeAll, beforeEach, test } from "vite-plus/test";
 import zlib from "node:zlib";
 
 let base: string;
@@ -16,7 +16,7 @@ let homeDir: string;
 let up: Repo;
 let library: Repo;
 
-const CLI = path.resolve(import.meta.dirname, "..", "src", "cli.js");
+const CLI = path.resolve(import.meta.dirname, "..", "dist", "src", "cli.js");
 const HARNESS_ENV = ["CLAUDE_CONFIG_DIR", "CODEX_HOME", "XDG_CONFIG_HOME", "HERMES_HOME"] as const;
 const GIT = ["-c", "user.name=t", "-c", "user.email=t@example.com", "-c", "commit.gpgsign=false"];
 
@@ -34,7 +34,10 @@ function cliIn(repo: string, ...args: string[]): { status: number | null; stdout
 
 /** A temp git repository: the library itself, a source standing in for upstream, or (init false) a clone already there. */
 class Repo {
-  constructor(public dir: string, init = true) {
+  constructor(
+    public dir: string,
+    init = true,
+  ) {
     if (!init) return;
     fs.mkdirSync(dir, { recursive: true });
     this.git("init", "-q", "-b", "main");
@@ -122,8 +125,16 @@ function unzip(buf: Buffer): Entry[] {
     const name = buf.toString("utf8", at + 46, at + 46 + nameLen);
     assert.equal(local, expectLocal, `${name}: local headers follow one another with no gap`);
     assert.equal(buf.readUInt32LE(local), 0x04034b50, `${name}: local file header`);
-    assert.deepEqual([6, 8, 10, 12].map((o) => buf.readUInt16LE(local + o)), [flags, method, time, date], `${name}: local header agrees`);
-    assert.deepEqual([14, 18, 22].map((o) => buf.readUInt32LE(local + o)), [crc, csize, size], `${name}: local sizes and crc agree`);
+    assert.deepEqual(
+      [6, 8, 10, 12].map((o) => buf.readUInt16LE(local + o)),
+      [flags, method, time, date],
+      `${name}: local header agrees`,
+    );
+    assert.deepEqual(
+      [14, 18, 22].map((o) => buf.readUInt32LE(local + o)),
+      [crc, csize, size],
+      `${name}: local sizes and crc agree`,
+    );
     const [localNameLen, localExtraLen] = [26, 28].map((o) => buf.readUInt16LE(local + o));
     assert.equal(buf.toString("utf8", local + 30, local + 30 + localNameLen), name);
     assert.equal(csize, size, `${name}: stored, not compressed`);
@@ -151,10 +162,10 @@ function config(extra: Record<string, unknown> = {}): void {
   write("skills-sync.json", JSON.stringify(CONFIG(extra), null, 2) + "\n");
 }
 
-before(() => {
+beforeAll(() => {
   base = fs.mkdtempSync(path.join(os.tmpdir(), "skills-sync-artifacts-"));
 });
-after(() => {
+afterAll(() => {
   fs.rmSync(base, { recursive: true, force: true });
 });
 beforeEach(() => {
@@ -167,7 +178,10 @@ beforeEach(() => {
     fs.mkdirSync(path.join(up.dir, "skills", n), { recursive: true });
     fs.writeFileSync(path.join(up.dir, "skills", n, "SKILL.md"), skillMd(n));
   }
-  fs.writeFileSync(path.join(up.dir, "LICENSE"), "MIT License\n\nPermission is hereby granted, free of charge, to any person\n");
+  fs.writeFileSync(
+    path.join(up.dir, "LICENSE"),
+    "MIT License\n\nPermission is hereby granted, free of charge, to any person\n",
+  );
   up.commit("one");
 
   library = new Repo(root);
@@ -190,8 +204,15 @@ test("build --artifacts writes artifacts/<id>-<version>.zip for each built plugi
     const entries = unzip(fs.readFileSync(path.join(root, "artifacts", `${id}-${version}.zip`)));
     const pkg = files(`plugins/${id}`);
     const names = entries.map((e) => e.name);
-    assert.deepEqual(names, [...pkg.keys()].map((k) => `${id}/${k}`).sort((a, b) => (a < b ? -1 : a > b ? 1 : 0)), "every package file, under <id>/, sorted by path");
-    assert.ok(names.every((n) => !n.includes("\\") && !n.endsWith("/")), "forward slashes, directories implicit");
+    assert.deepEqual(
+      names,
+      [...pkg.keys()].map((k) => `${id}/${k}`).sort((a, b) => (a < b ? -1 : a > b ? 1 : 0)),
+      "every package file, under <id>/, sorted by path",
+    );
+    assert.ok(
+      names.every((n) => !n.includes("\\") && !n.endsWith("/")),
+      "forward slashes, directories implicit",
+    );
     for (const e of entries) {
       assert.equal(e.method, 0, `${e.name}: stored`);
       assert.equal(e.time, 0, `${e.name}: 00:00:00`);
@@ -201,7 +222,12 @@ test("build --artifacts writes artifacts/<id>-<version>.zip for each built plugi
       assert.equal(e.crc, zlib.crc32(e.data), `${e.name}: CRC-32`);
     }
   }
-  assert.ok(unzip(fs.readFileSync(path.join(root, "artifacts", `oneezy-${version}.zip`))).some((e) => e.name === "oneezy/skills/own-one/assets/dot.bin"), "a binary file travels as it is");
+  assert.ok(
+    unzip(fs.readFileSync(path.join(root, "artifacts", `oneezy-${version}.zip`))).some(
+      (e) => e.name === "oneezy/skills/own-one/assets/dot.bin",
+    ),
+    "a binary file travels as it is",
+  );
   assert.deepEqual(fs.readdirSync(homeDir), [], "nothing written outside the library");
 });
 
@@ -209,7 +235,9 @@ const ALL = ["build", "--plugins", "--catalogs", "--artifacts"];
 
 /** The actions of a --json run that touch a file: neither a skip, a note nor a conflict. */
 function changes(r: { stdout: string }): Array<{ kind: string; path: string; note?: string }> {
-  return (JSON.parse(r.stdout).actions as Array<{ kind: string; path: string; note?: string }>).filter((a) => a.kind !== "skip" && a.kind !== "note" && a.kind !== "conflict");
+  return (JSON.parse(r.stdout).actions as Array<{ kind: string; path: string; note?: string }>).filter(
+    (a) => a.kind !== "skip" && a.kind !== "note" && a.kind !== "conflict",
+  );
 }
 
 function same(a: Map<string, Buffer>, b: Map<string, Buffer>): boolean {
@@ -223,7 +251,8 @@ test("two builds of the same input give byte-identical archives and record, from
   assert.deepEqual([...first.keys()].sort(), [`oneezy-${v1}.zip`, "releases.json", `up-${v1}.zip`]);
 
   // the same input, built again with no output of the first build left
-  for (const d of ["artifacts", "plugins", ".claude-plugin", ".agents/plugins"]) fs.rmSync(path.join(root, d), { recursive: true });
+  for (const d of ["artifacts", "plugins", ".claude-plugin", ".agents/plugins"])
+    fs.rmSync(path.join(root, d), { recursive: true });
   assert.equal(cli(...ALL, "--quiet").status, 0);
   assert.ok(same(files("artifacts"), first), "byte-identical archives and releases.json");
   // and the archives alone, from the packages on disk
@@ -248,11 +277,20 @@ test("two builds of the same input give byte-identical archives and record, from
   assert.equal(edited.status, 0, edited.stderr);
   const v3 = `0.2.0+${library.git("rev-parse", "--short=12", "HEAD")}`;
   const after = files("artifacts");
-  assert.deepEqual([...after.keys()].sort(), [`oneezy-${v3}.zip`, "releases.json", `up-${v1}.zip`], "the older oneezy archive is gone");
-  assert.ok(after.get(`up-${v1}.zip`)!.equals(first.get(`up-${v1}.zip`)!), "the untouched plugin's archive: same name, same bytes");
+  assert.deepEqual(
+    [...after.keys()].sort(),
+    [`oneezy-${v3}.zip`, "releases.json", `up-${v1}.zip`],
+    "the older oneezy archive is gone",
+  );
+  assert.ok(
+    after.get(`up-${v1}.zip`)!.equals(first.get(`up-${v1}.zip`)!),
+    "the untouched plugin's archive: same name, same bytes",
+  );
   assert.ok(same(files("plugins/up"), upPackage), "and its package");
   assert.ok(!after.get(`oneezy-${v3}.zip`)!.equals(first.get(`oneezy-${v1}.zip`)!));
-  const touched = changes(edited).map((a) => `${a.kind} ${path.relative(root, a.path).split("\\").join("/")}`).sort();
+  const touched = changes(edited)
+    .map((a) => `${a.kind} ${path.relative(root, a.path).split("\\").join("/")}`)
+    .sort();
   assert.deepEqual(touched, [
     `delete artifacts/oneezy-${v1}.zip`,
     `write artifacts/oneezy-${v3}.zip`,
@@ -269,7 +307,8 @@ test("two builds of the same input give byte-identical archives and record, from
   assert.equal(now.oneezy.version, v3);
 });
 
-const MIT = "MIT License\n\nCopyright (c) 2026 oneezy\n\nPermission is hereby granted, free of charge, to any person obtaining a copy\n";
+const MIT =
+  "MIT License\n\nCopyright (c) 2026 oneezy\n\nPermission is hereby granted, free of charge, to any person obtaining a copy\n";
 
 test("the archives do not depend on the checkout's line endings: a clone git converts to CRLF (core.autocrlf=true) and one it leaves as committed (core.autocrlf=false) give the archives and the record of the library they were cloned from, byte for byte; every text file is archived with LF, a shell script and the library's LICENSE among them, and so is one committed with CRLF, in the library or upstream; a binary file and a file with mixed line endings travel as they are; the working set keeps upstream's bytes", () => {
   // both repositories commit byte for byte here, whatever this machine's git settings say, so a CRLF file can be committed as one
@@ -290,17 +329,31 @@ test("the archives do not depend on the checkout's line endings: a clone git con
   const version = json("plugins/oneezy/plugin.json").version;
   const first = files("artifacts");
   assert.deepEqual([...first.keys()].sort(), [`oneezy-${version}.zip`, "releases.json", `up-${version}.zip`]);
-  assert.equal(fs.readFileSync(path.join(root, ".agents", "skills", "a", "windows.txt"), "utf8"), "upstream\r\nwith CRLF\r\n", "the working set is upstream's bytes");
+  assert.equal(
+    fs.readFileSync(path.join(root, ".agents", "skills", "a", "windows.txt"), "utf8"),
+    "upstream\r\nwith CRLF\r\n",
+    "the working set is upstream's bytes",
+  );
 
   for (const autocrlf of ["true", "false"]) {
     const clone = path.join(base, `clone-${autocrlf}`);
     library.git("clone", "-q", "-c", `core.autocrlf=${autocrlf}`, root, clone);
     const at = new Repo(clone, false);
-    const eol = new Map(at.git("ls-files", "--eol").split(/\r?\n/).map((l) => [l.split("\t")[1], l.split(/\s+/).slice(0, 2).join(" ")]));
+    const eol = new Map(
+      at
+        .git("ls-files", "--eol")
+        .split(/\r?\n/)
+        .map((l) => [l.split("\t")[1], l.split(/\s+/).slice(0, 2).join(" ")]),
+    );
     const converted = autocrlf === "true" ? "i/lf w/crlf" : "i/lf w/lf";
-    for (const f of ["LICENSE", "skills/oneezy/own-one/SKILL.md", "skills/oneezy/own-one/scripts/run.sh"]) assert.equal(eol.get(f), converted, `${f} in the core.autocrlf=${autocrlf} clone`);
+    for (const f of ["LICENSE", "skills/oneezy/own-one/SKILL.md", "skills/oneezy/own-one/scripts/run.sh"])
+      assert.equal(eol.get(f), converted, `${f} in the core.autocrlf=${autocrlf} clone`);
     assert.equal(eol.get("skills/oneezy/own-one/notes/crlf.txt"), "i/crlf w/crlf");
-    assert.equal(cliIn(clone, "refresh", "--frozen", "--quiet").status, 0, "the snapshot and working set from the lock");
+    assert.equal(
+      cliIn(clone, "refresh", "--frozen", "--quiet").status,
+      0,
+      "the snapshot and working set from the lock",
+    );
     const r = cliIn(clone, "build", "--artifacts", "--json");
     assert.equal(r.status, 0, r.stderr);
     const built = filesIn(path.join(clone, "artifacts"));
@@ -308,7 +361,9 @@ test("the archives do not depend on the checkout's line endings: a clone git con
       const name = `${id}-${version}.zip`;
       assert.ok(built.has(name), `core.autocrlf=${autocrlf}: ${name} among ${[...built.keys()].join(", ")}`);
       const want = new Map(unzip(first.get(name)!).map((e) => [e.name, e.data]));
-      const differ = unzip(built.get(name)!).filter((e) => !want.get(e.name)?.equals(e.data)).map((e) => e.name);
+      const differ = unzip(built.get(name)!)
+        .filter((e) => !want.get(e.name)?.equals(e.data))
+        .map((e) => e.name);
       assert.deepEqual(differ, [], `core.autocrlf=${autocrlf}: entries of ${name} that differ from the first build's`);
     }
     assert.ok(same(built, first), `core.autocrlf=${autocrlf}: the same archives and releases.json, byte for byte`);
@@ -316,15 +371,37 @@ test("the archives do not depend on the checkout's line endings: a clone git con
     assert.equal(at.git("status", "--porcelain"), "");
 
     const own = new Map(unzip(built.get(`oneezy-${version}.zip`)!).map((e) => [e.name, e.data]));
-    assert.equal(own.get("oneezy/skills/own-one/scripts/run.sh")!.toString("utf8"), "#!/bin/sh\necho ünïcode\n", "a script reaches Linux with LF");
-    assert.equal(own.get("oneezy/skills/own-one/SKILL.md")!.toString("utf8"), "---\nname: own-one\ndescription: own-one skill\nmetadata:\n  internal: true\n---\nbody\n");
+    assert.equal(
+      own.get("oneezy/skills/own-one/scripts/run.sh")!.toString("utf8"),
+      "#!/bin/sh\necho ünïcode\n",
+      "a script reaches Linux with LF",
+    );
+    assert.equal(
+      own.get("oneezy/skills/own-one/SKILL.md")!.toString("utf8"),
+      "---\nname: own-one\ndescription: own-one skill\nmetadata:\n  internal: true\n---\nbody\n",
+    );
     assert.equal(own.get("oneezy/LICENSE")!.toString("utf8"), MIT);
-    assert.equal(own.get("oneezy/skills/own-one/notes/crlf.txt")!.toString("utf8"), "one\ntwo\n", "committed with CRLF: LF in the package");
-    assert.equal(own.get("oneezy/skills/own-one/notes/mixed.txt")!.toString("utf8"), "one\r\ntwo\nthree\r\n", "mixed line endings: as it is");
-    assert.ok(own.get("oneezy/skills/own-one/assets/dot.bin")!.equals(bin), "a binary file: as it is, its CR LF pair too");
+    assert.equal(
+      own.get("oneezy/skills/own-one/notes/crlf.txt")!.toString("utf8"),
+      "one\ntwo\n",
+      "committed with CRLF: LF in the package",
+    );
+    assert.equal(
+      own.get("oneezy/skills/own-one/notes/mixed.txt")!.toString("utf8"),
+      "one\r\ntwo\nthree\r\n",
+      "mixed line endings: as it is",
+    );
+    assert.ok(
+      own.get("oneezy/skills/own-one/assets/dot.bin")!.equals(bin),
+      "a binary file: as it is, its CR LF pair too",
+    );
     assert.ok(own.get("oneezy/skills/own-one/assets/controls.bin")!.equals(controls), "and one without a NUL byte");
     const source = new Map(unzip(built.get(`up-${version}.zip`)!).map((e) => [e.name, e.data]));
-    assert.equal(source.get("up/skills/a/windows.txt")!.toString("utf8"), "upstream\nwith CRLF\n", "a third-party file committed with CRLF: LF in the package");
+    assert.equal(
+      source.get("up/skills/a/windows.txt")!.toString("utf8"),
+      "upstream\nwith CRLF\n",
+      "a third-party file committed with CRLF: LF in the package",
+    );
   }
   // the committed package is the same form: what an archive holds is what plugins/<id> holds
   assert.equal(files("plugins/oneezy").get("skills/own-one/notes/crlf.txt")!.toString("utf8"), "one\ntwo\n");
@@ -333,7 +410,20 @@ test("the archives do not depend on the checkout's line endings: a clone git con
 
 test("artifacts/releases.json records per plugin its archive, sha256, version, source commit, entries and the last release the config records (null without one); artifacts/<id>.changes.md appears only when that release's files name a file the new archive lacks, lists them and says the upload must be a new plugin, not an overlay; it goes once the record names no such file", () => {
   const sha = "a".repeat(64);
-  const recorded = { plugin_id: "plugin_up", release_id: "rel_7", sha256: sha, scope: "personal", date: "2026-09-30", files: ["up/plugin.json", "up/skills/a/SKILL.md", "up/skills/old-name/SKILL.md", "skills/b/SKILL.md", "skills/removed/notes.md"] };
+  const recorded = {
+    plugin_id: "plugin_up",
+    release_id: "rel_7",
+    sha256: sha,
+    scope: "personal",
+    date: "2026-09-30",
+    files: [
+      "up/plugin.json",
+      "up/skills/a/SKILL.md",
+      "up/skills/old-name/SKILL.md",
+      "skills/b/SKILL.md",
+      "skills/removed/notes.md",
+    ],
+  };
   const own = { plugin_id: "plugin_own", release_id: "rel_1", sha256: sha, scope: "personal", date: "2026-09-30" };
   config({ releases: { up: recorded, oneezy: own } });
   const head = library.commit("releases");
@@ -351,7 +441,10 @@ test("artifacts/releases.json records per plugin its archive, sha256, version, s
     const bytes = fs.readFileSync(path.join(root, r.archive));
     assert.equal(r.sha256, sha256(bytes));
     assert.equal(r.version, json(`plugins/${id}/plugin.json`).version);
-    assert.deepEqual(r.files, unzip(bytes).map((e) => e.name));
+    assert.deepEqual(
+      r.files,
+      unzip(bytes).map((e) => e.name),
+    );
   }
   assert.equal(record.plugins.up.commit, up.git("rev-parse", "HEAD"), "a source plugin: the upstream commit");
   assert.equal(record.plugins.oneezy.commit, head, "an own plugin: the library commit it was built at");
@@ -359,21 +452,33 @@ test("artifacts/releases.json records per plugin its archive, sha256, version, s
   assert.deepEqual(record.plugins.oneezy.release, own);
 
   const note = fs.readFileSync(path.join(root, "artifacts", "up.changes.md"), "utf8");
-  assert.deepEqual(note.split("\n").filter((l) => l.startsWith("- ")), ["- `skills/removed/notes.md`", "- `up/skills/old-name/SKILL.md`"], "only the files the archive lacks; a recorded path counts with or without the <id>/ folder");
+  assert.deepEqual(
+    note.split("\n").filter((l) => l.startsWith("- ")),
+    ["- `skills/removed/notes.md`", "- `up/skills/old-name/SKILL.md`"],
+    "only the files the archive lacks; a recorded path counts with or without the <id>/ folder",
+  );
   assert.match(note, /plugin_up/);
   assert.match(note, /rel_7/);
   assert.ok(note.includes(`artifacts/up-${version}.zip`), "names the archive to upload");
   assert.match(note, /new plugin/);
   assert.match(note, /not as an update/);
   assert.match(note, /overlay/);
-  assert.ok(!fs.existsSync(path.join(root, "artifacts", "oneezy.changes.md")), "a release without files, or with every file still there, gets no note");
+  assert.ok(
+    !fs.existsSync(path.join(root, "artifacts", "oneezy.changes.md")),
+    "a release without files, or with every file still there, gets no note",
+  );
 
   // the record corrected: nothing lacking, the note goes; a plugin without a recorded release says null
   config({ releases: { up: { ...recorded, files: ["up/plugin.json", "skills/a/SKILL.md"] } } });
   const fixed = cli("build", "--artifacts", "--json");
   assert.equal(fixed.status, 0, fixed.stderr);
   assert.deepEqual(artifacts(), [`oneezy-${version}.zip`, "releases.json", `up-${version}.zip`]);
-  assert.deepEqual(changes(fixed).map((a) => `${a.kind} ${path.basename(a.path)}`).sort(), ["delete up.changes.md", "write releases.json"]);
+  assert.deepEqual(
+    changes(fixed)
+      .map((a) => `${a.kind} ${path.basename(a.path)}`)
+      .sort(),
+    ["delete up.changes.md", "write releases.json"],
+  );
   assert.equal(json("artifacts/releases.json").plugins.oneezy.release, null);
 });
 
@@ -384,8 +489,12 @@ test("artifacts are upload material, apart from the committed form: --artifacts 
   assert.deepEqual(artifacts(), [`oneezy-${version}.zip`, "releases.json", `up-${version}.zip`]);
   assert.ok(!fs.existsSync(path.join(root, "plugins")), "--artifacts alone builds no package");
   assert.ok(!fs.existsSync(path.join(root, ".claude-plugin")), "and no catalog");
-  const archive = () => unzip(fs.readFileSync(path.join(root, "artifacts", `oneezy-${version}.zip`))).map((e) => e.name);
-  assert.ok(archive().includes("oneezy/plugin.json") && archive().includes("oneezy/skills/own-one/scripts/run.sh"), "the archive holds the package build would write");
+  const archive = () =>
+    unzip(fs.readFileSync(path.join(root, "artifacts", `oneezy-${version}.zip`))).map((e) => e.name);
+  assert.ok(
+    archive().includes("oneezy/plugin.json") && archive().includes("oneezy/skills/own-one/scripts/run.sh"),
+    "the archive holds the package build would write",
+  );
 
   // a check: artifacts/ is neither drift nor touched, whatever it holds
   assert.equal(cli("build", "--quiet").status, 0);
@@ -419,8 +528,16 @@ test("artifacts are upload material, apart from the committed form: --artifacts 
   fs.symlinkSync(path.join(root, "skills", "oneezy", "own-one", "scripts"), link, "junction");
   const linked = cli("build", "--artifacts", "--json");
   assert.equal(linked.status, 0, linked.stderr);
-  assert.ok((JSON.parse(linked.stdout).actions as Array<{ kind: string; path: string; note?: string }>).some((a) => a.kind === "note" && a.path === link && /a link; not copied/.test(a.note ?? "")), linked.stdout);
-  assert.ok(!archive().some((n) => n.startsWith("oneezy/skills/own-two/linked")), "the link's files are not in the archive");
+  assert.ok(
+    (JSON.parse(linked.stdout).actions as Array<{ kind: string; path: string; note?: string }>).some(
+      (a) => a.kind === "note" && a.path === link && /a link; not copied/.test(a.note ?? ""),
+    ),
+    linked.stdout,
+  );
+  assert.ok(
+    !archive().some((n) => n.startsWith("oneezy/skills/own-two/linked")),
+    "the link's files are not in the archive",
+  );
   assert.ok(archive().includes("oneezy/skills/own-two/SKILL.md"));
   fs.rmSync(link);
 
@@ -432,13 +549,35 @@ test("artifacts are upload material, apart from the committed form: --artifacts 
   write("artifacts/backup.zip", "not an archive of the rule");
   const pruned = cli("build", "--artifacts", "--json");
   assert.equal(pruned.status, 0, pruned.stderr);
-  assert.deepEqual(artifacts(), ["backup.zip", "notes.txt", `oneezy-${version}.zip`, "releases.json", `up-${version}.zip`]);
-  assert.deepEqual(changes(pruned).filter((a) => a.kind === "delete").map((a) => path.basename(a.path)).sort(), ["gone-0.7.0+0123456789ab.zip", "gone.changes.md", "oneezy-0.0.0+nogit.zip"]);
+  assert.deepEqual(artifacts(), [
+    "backup.zip",
+    "notes.txt",
+    `oneezy-${version}.zip`,
+    "releases.json",
+    `up-${version}.zip`,
+  ]);
+  assert.deepEqual(
+    changes(pruned)
+      .filter((a) => a.kind === "delete")
+      .map((a) => path.basename(a.path))
+      .sort(),
+    ["gone-0.7.0+0123456789ab.zip", "gone.changes.md", "oneezy-0.0.0+nogit.zip"],
+  );
 
   // a plugin of the config that cannot be built this run (its snapshot is not there) keeps the archive it has, as its package is kept
   fs.rmSync(path.join(root, "upstream"), { recursive: true });
   const partial = cli("build", "--artifacts", "--json");
   assert.equal(partial.status, 1, "a package that cannot be built fails the run");
-  assert.deepEqual(artifacts(), ["backup.zip", "notes.txt", `oneezy-${version}.zip`, "releases.json", `up-${version}.zip`]);
-  assert.deepEqual(Object.keys(json("artifacts/releases.json").plugins), ["oneezy"], "the record names what this run built");
+  assert.deepEqual(artifacts(), [
+    "backup.zip",
+    "notes.txt",
+    `oneezy-${version}.zip`,
+    "releases.json",
+    `up-${version}.zip`,
+  ]);
+  assert.deepEqual(
+    Object.keys(json("artifacts/releases.json").plugins),
+    ["oneezy"],
+    "the record names what this run built",
+  );
 });

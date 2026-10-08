@@ -34,10 +34,7 @@
     },
     "mode": {
       "description": "How projects get their skills: links hidden from git, or committed copies.",
-      "enum": [
-        "link",
-        "copy"
-      ]
+      "enum": ["link", "copy"]
     },
     "wsl": {
       "description": "WSL distro names whose user folders are synced too (Windows).",
@@ -59,11 +56,7 @@
     },
     "links": {
       "description": "auto: a directory symlink, or a junction when Windows refuses one. symlink or junction: that kind only (--symlinks, --junctions).",
-      "enum": [
-        "auto",
-        "symlink",
-        "junction"
-      ]
+      "enum": ["auto", "symlink", "junction"]
     }
   }
 }

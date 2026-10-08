@@ -4,9 +4,16 @@
 // Package scripts use it so `pnpm test` is not tied to one platform's launcher.
 import { spawnSync } from "node:child_process";
 
-const candidates = process.platform === "win32"
-  ? [["py", ["-3"]], ["python", []]]
-  : [["python3", []], ["python", []]];
+const candidates =
+  process.platform === "win32"
+    ? [
+        ["py", ["-3"]],
+        ["python", []],
+      ]
+    : [
+        ["python3", []],
+        ["python", []],
+      ];
 
 for (const [command, prefix] of candidates) {
   const result = spawnSync(command, [...prefix, ...process.argv.slice(2)], { stdio: "inherit" });

@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { after, before, beforeEach, test } from "node:test";
+import { afterAll, beforeAll, beforeEach, test } from "vite-plus/test";
 import { gitExclude, isLink, lexists, linkTarget, real, samePath, under } from "../src/fs.js";
 import { harnessTable, type Harness } from "../src/harnesses.js";
 import { findLibrary, Library, sidecarFor } from "../src/library.js";
@@ -20,14 +20,17 @@ let codex: Harness;
 function skill(folder: string, name: string, body = "do the thing", extraFm = ""): string {
   const d = path.join(folder, name);
   fs.mkdirSync(d, { recursive: true });
-  fs.writeFileSync(path.join(d, "SKILL.md"), `---\nname: ${name}\ndescription: ${name} skill\n${extraFm}---\n${body}\n`);
+  fs.writeFileSync(
+    path.join(d, "SKILL.md"),
+    `---\nname: ${name}\ndescription: ${name} skill\n${extraFm}---\n${body}\n`,
+  );
   return d;
 }
 
-before(() => {
+beforeAll(() => {
   base = fs.mkdtempSync(path.join(os.tmpdir(), "skills-sync-"));
 });
-after(() => {
+afterAll(() => {
   fs.rmSync(base, { recursive: true, force: true });
 });
 beforeEach(() => {
@@ -40,8 +43,17 @@ beforeEach(() => {
   skill(lib.own, "oneezy-status");
   skill(lib.agents, "grilling"); // a third-party copy installed by npx skills
   fs.mkdirSync(path.join(lib.agents, "grilling", "agents"));
-  fs.writeFileSync(path.join(lib.agents, "grilling", "agents", "openai.yaml"), "policy:\n  allow_implicit_invocation: true\n");
-  fs.writeFileSync(lib.npxLockFile, JSON.stringify({ version: 1, skills: { grilling: { source: "mattpocock/skills", sourceType: "github", computedHash: "x" } } }));
+  fs.writeFileSync(
+    path.join(lib.agents, "grilling", "agents", "openai.yaml"),
+    "policy:\n  allow_implicit_invocation: true\n",
+  );
+  fs.writeFileSync(
+    lib.npxLockFile,
+    JSON.stringify({
+      version: 1,
+      skills: { grilling: { source: "mattpocock/skills", sourceType: "github", computedHash: "x" } },
+    }),
+  );
   table = harnessTable(homeDir, {});
   claude = table.find((h) => h.id === "claude-code")!;
   codex = table.find((h) => h.id === "codex")!;
@@ -159,7 +171,10 @@ test("projects: link mode links each layer and excludes them from git; copy mode
   const proj = path.join(dev, "app");
   fs.mkdirSync(path.join(proj, ".git", "info"), { recursive: true });
   fs.mkdirSync(path.join(dev, "notes"));
-  assert.deepEqual(findProjects(dev, lib).map((x) => path.basename(x)), ["app"]);
+  assert.deepEqual(
+    findProjects(dev, lib).map((x) => path.basename(x)),
+    ["app"],
+  );
 
   const r = new Report();
   projects(lib, [claude, codex], [proj], null, "link", r);

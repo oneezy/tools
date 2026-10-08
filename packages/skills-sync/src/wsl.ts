@@ -31,7 +31,19 @@ export interface WslRun {
 export function runInWsl(distro: string, libraryRoot: string, extraArgs: string[], plan: boolean): WslRun {
   const lib = toWslPath(libraryRoot);
   const bin = process.env.SKILLS_SYNC_WSL_BIN?.trim() || "npx --yes @oneezy/skills-sync";
-  const args = [bin, "--repo", `'${lib}'`, "--global", "--no-projects", "--no-wsl", "--no-layers", "--no-restore", "-y", ...(plan ? ["--plan"] : []), ...extraArgs].join(" ");
+  const args = [
+    bin,
+    "--repo",
+    `'${lib}'`,
+    "--global",
+    "--no-projects",
+    "--no-wsl",
+    "--no-layers",
+    "--no-restore",
+    "-y",
+    ...(plan ? ["--plan"] : []),
+    ...extraArgs,
+  ].join(" ");
   // -i: node is often only on PATH through the interactive profile (nvm, vite-plus); -l for login vars
   const r = spawnSync("wsl.exe", ["-d", distro, "--", "bash", "-lic", args], { encoding: "utf8" });
   return { distro, ok: r.status === 0, output: ((r.stdout ?? "") + (r.stderr ?? "")).trim() };

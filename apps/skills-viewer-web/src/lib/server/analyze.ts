@@ -22,14 +22,24 @@ export async function analyzeRepo(r: RepoRef, token?: string): Promise<AnalyzeRe
   } catch (err) {
     if (err instanceof GitHubError) {
       if (err.rateLimitReset !== undefined) {
-        throw new AnalyzeError("GitHub's hourly limit for this server is used up. Try again later.", 429, err.rateLimitReset);
+        throw new AnalyzeError(
+          "GitHub's hourly limit for this server is used up. Try again later.",
+          429,
+          err.rateLimitReset,
+        );
       }
       if (err.status === 404) {
         const ref = r.ref ?? r.refPath?.[0];
         const what = ref ? `${r.owner}/${r.repo} at "${ref}"` : `${r.owner}/${r.repo}`;
-        throw new AnalyzeError(/^no folder/.test(err.message) ? capitalize(err.message) : `Could not find ${what}. Is it public?`, 404);
+        throw new AnalyzeError(
+          /^no folder/.test(err.message) ? capitalize(err.message) : `Could not find ${what}. Is it public?`,
+          404,
+        );
       }
-      throw new AnalyzeError(`GitHub answered ${err.status} for ${r.owner}/${r.repo}.`, err.status >= 500 ? 502 : err.status);
+      throw new AnalyzeError(
+        `GitHub answered ${err.status} for ${r.owner}/${r.repo}.`,
+        err.status >= 500 ? 502 : err.status,
+      );
     }
     throw err;
   }

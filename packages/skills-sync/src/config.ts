@@ -67,7 +67,8 @@ export function readLocal(libraryRoot: string): Local {
     if (errors.length) throw new Error(`${file} is not a valid answers file:\n  ${errors.join("\n  ")}`);
     return parsed as Local;
   }
-  if (configKind(libraryRoot) === "answers") return JSON.parse(fs.readFileSync(path.join(libraryRoot, CONFIG_NAME), "utf8")) as Local;
+  if (configKind(libraryRoot) === "answers")
+    return JSON.parse(fs.readFileSync(path.join(libraryRoot, CONFIG_NAME), "utf8")) as Local;
   return {};
 }
 
@@ -81,7 +82,11 @@ export function migrateAnswers(libraryRoot: string, report: Report): void {
   const from = path.join(libraryRoot, CONFIG_NAME);
   const to = path.join(libraryRoot, LOCAL_NAME);
   if (fs.existsSync(to)) {
-    report.add({ kind: "conflict", path: from, note: `holds this machine's answers from an older version, but ${LOCAL_NAME} already exists; delete it, or make it the committed config` });
+    report.add({
+      kind: "conflict",
+      path: from,
+      note: `holds this machine's answers from an older version, but ${LOCAL_NAME} already exists; delete it, or make it the committed config`,
+    });
     return;
   }
   report.add({ kind: "move", path: from, target: to, note: "per-machine answers now live in the local file" });

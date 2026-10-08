@@ -4,7 +4,7 @@ import { spawnSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { after, before, beforeEach, test } from "node:test";
+import { afterAll, beforeAll, beforeEach, test } from "vite-plus/test";
 import { isLink, lexists, linkTarget, real, samePath } from "../src/fs.js";
 import { harnessTable, type Harness } from "../src/harnesses.js";
 import { EMPTY_LOCK, findLibrary, Library, looksLikeLibrary } from "../src/library.js";
@@ -24,10 +24,10 @@ function skill(folder: string, name: string): string {
   return d;
 }
 
-before(() => {
+beforeAll(() => {
   base = fs.mkdtempSync(path.join(os.tmpdir(), "skills-sync-groups-"));
 });
-after(() => {
+afterAll(() => {
   fs.rmSync(base, { recursive: true, force: true });
 });
 beforeEach(() => {
@@ -87,7 +87,7 @@ test("grouped and flat own skills sync by folder name into .agents, every layer 
   assert.deepEqual(again.conflicts(), []);
 });
 
-const CLI = path.resolve(import.meta.dirname, "..", "src", "cli.js");
+const CLI = path.resolve(import.meta.dirname, "..", "dist", "src", "cli.js");
 
 /** The harness locations the CLI reads from its environment. The child must see the temp home only, whatever the session running the tests has set. */
 const HARNESS_ENV = ["CLAUDE_CONFIG_DIR", "CODEX_HOME", "XDG_CONFIG_HOME", "HERMES_HOME"] as const;
@@ -96,7 +96,11 @@ const HARNESS_ENV = ["CLAUDE_CONFIG_DIR", "CODEX_HOME", "XDG_CONFIG_HOME", "HERM
 function cli(...args: string[]): { status: number | null; stdout: string; stderr: string } {
   const env: NodeJS.ProcessEnv = { ...process.env, HOME: homeDir, USERPROFILE: homeDir };
   for (const k of HARNESS_ENV) delete env[k];
-  return spawnSync(process.execPath, [CLI, ...args, "--repo", lib.root, "--agents", "claude-code,codex"], { encoding: "utf8", cwd: lib.root, env });
+  return spawnSync(process.execPath, [CLI, ...args, "--repo", lib.root, "--agents", "claude-code,codex"], {
+    encoding: "utf8",
+    cwd: lib.root,
+    env,
+  });
 }
 
 test("status --json names each own skill's plugin id: oneezy, oneezy, none", () => {
@@ -109,7 +113,11 @@ test("status --json names each own skill's plugin id: oneezy, oneezy, none", () 
     { name: "b", plugin: "oneezy", path: "skills/oneezy/b" },
     { name: "c", plugin: null, path: "skills/c" },
   ]);
-  assert.ok(!lexists(path.join(os.homedir(), ".skills-sync")) || !samePath(real(path.join(os.homedir(), ".skills-sync")), lib.root), "the real home is untouched");
+  assert.ok(
+    !lexists(path.join(os.homedir(), ".skills-sync")) ||
+      !samePath(real(path.join(os.homedir(), ".skills-sync")), lib.root),
+    "the real home is untouched",
+  );
 });
 
 test("a play group links exactly like oneezy: skills/play/play-unslop is play-unslop in .agents, every layer and every user folder, by its folder name", () => {
@@ -118,10 +126,19 @@ test("a play group links exactly like oneezy: skills/play/play-unslop is play-un
   assert.deepEqual(r.conflicts(), []);
   assert.ok(samePath(real(path.join(lib.agents, "play-unslop")), dir));
   assert.ok(isLink(path.join(lib.root, claude.projectSkills, "play-unslop")));
-  for (const h of [claude, codex]) assert.ok(samePath(linkTarget(path.join(h.userSkills, "play-unslop"))!, dir), h.userSkills);
+  for (const h of [claude, codex])
+    assert.ok(samePath(linkTarget(path.join(h.userSkills, "play-unslop"))!, dir), h.userSkills);
   assert.ok(!lexists(path.join(lib.agents, "play")), "the group itself is never linked");
   assert.ok(fs.readFileSync(path.join(lib.agents, ".gitignore"), "utf8").includes("/play-unslop/\n"));
-  assert.deepEqual(lib.scanOwn().skills.map((s) => [s.name, s.plugin]), [["a", "oneezy"], ["b", "oneezy"], ["c", null], ["play-unslop", "play"]]);
+  assert.deepEqual(
+    lib.scanOwn().skills.map((s) => [s.name, s.plugin]),
+    [
+      ["a", "oneezy"],
+      ["b", "oneezy"],
+      ["c", null],
+      ["play-unslop", "play"],
+    ],
+  );
 });
 
 test("removing a grouped skill drops its links everywhere; its siblings stay", () => {
@@ -142,7 +159,10 @@ test("a skill that moves from flat into a group keeps its name: every link is re
   fs.renameSync(path.join(lib.own, "c"), path.join(lib.own, "oneezy", "c"));
   const r = runAll();
   assert.ok(!r.actions.some((a) => a.kind === "remove"), "nothing removed");
-  assert.ok(r.actions.some((a) => a.kind === "relink" && a.path.endsWith("c")), ".agents link retargeted");
+  assert.ok(
+    r.actions.some((a) => a.kind === "relink" && a.path.endsWith("c")),
+    ".agents link retargeted",
+  );
   const moved = path.join(lib.own, "oneezy", "c");
   assert.ok(samePath(real(path.join(lib.agents, "c")), moved));
   for (const h of [claude, codex]) assert.ok(samePath(linkTarget(path.join(h.userSkills, "c"))!, moved), h.userSkills);
@@ -162,7 +182,10 @@ test("a library is skills/ beside skills-sync.json, skills-lock.json or skills-s
   assert.ok(!looksLikeLibrary(mk("bare", null)), "skills/ alone is not a library");
   assert.ok(!looksLikeLibrary(mk("no-skills", "skills-sync.json", false)), "a config without skills/ is not a library");
   assert.ok(!looksLikeLibrary(mk("old-manifest", "skills-sources.json")), "the old manifest name is not a marker");
-  assert.ok(!looksLikeLibrary(mk("old-sources-lock", "skills-sources-lock.json")), "the old sources lock is not a marker");
+  assert.ok(
+    !looksLikeLibrary(mk("old-sources-lock", "skills-sources-lock.json")),
+    "the old sources lock is not a marker",
+  );
 
   // the walk-up skips a dot-folder that looks like a library and finds the real one above it
   const dot = mk(path.join("dev", "skills", ".claude"), "skills-sync.json");
@@ -182,14 +205,24 @@ test("a SKILL.md two levels below a group is ignored with one reported line and 
   assert.equal(reported.length, 1, "exactly one line for skills/x/y");
   assert.equal(reported[0].kind, "conflict");
   assert.ok(reported[0].note?.includes("ignored"), reported[0].note);
-  assert.deepEqual(r.changes().map((a) => path.basename(a.path)).filter((n) => ["x", "y", "z"].includes(n)), []);
+  assert.deepEqual(
+    r
+      .changes()
+      .map((a) => path.basename(a.path))
+      .filter((n) => ["x", "y", "z"].includes(n)),
+    [],
+  );
   for (const n of ["x", "y", "z"]) {
     assert.ok(!lexists(path.join(lib.agents, n)), n);
     assert.ok(!lexists(path.join(lib.root, claude.projectSkills, n)), n);
     for (const h of [claude, codex]) assert.ok(!lexists(path.join(h.userSkills, n)), n);
   }
   assert.ok(!fs.readFileSync(path.join(lib.agents, ".gitignore"), "utf8").includes("/z/"));
-  assert.equal(runAll().actions.filter((a) => samePath(a.path, path.join(lib.own, "x", "y"))).length, 1, "reported again next run, still once");
+  assert.equal(
+    runAll().actions.filter((a) => samePath(a.path, path.join(lib.own, "x", "y"))).length,
+    1,
+    "reported again next run, still once",
+  );
 });
 
 test("two own skills with one folder name: the first by path wins, the other is ignored with one reported line", () => {
@@ -207,15 +240,27 @@ test("two own skills with one folder name: the first by path wins, the other is 
 test("sync through the CLI links grouped and flat skills alike; the second run reports no changes", () => {
   const first = cli("--quiet", "--json", "--no-pull", "--no-projects", "--no-wsl");
   assert.equal(first.status, 0, first.stderr);
-  const linked = (JSON.parse(first.stdout).actions as Array<{ kind: string; path: string }>).filter((a) => a.kind === "link").map((a) => a.path);
+  const linked = (JSON.parse(first.stdout).actions as Array<{ kind: string; path: string }>)
+    .filter((a) => a.kind === "link")
+    .map((a) => a.path);
   for (const [n, dir] of expected()) {
-    assert.ok(linked.some((p) => samePath(p, path.join(lib.agents, n))), `${n} linked into .agents`);
+    assert.ok(
+      linked.some((p) => samePath(p, path.join(lib.agents, n))),
+      `${n} linked into .agents`,
+    );
     assert.ok(samePath(real(path.join(lib.agents, n)), dir), `${n} resolves to its real folder`);
-    for (const h of [claude, codex]) assert.ok(linked.some((p) => samePath(p, path.join(h.userSkills, n))), `${n} in ${h.userSkills}`);
+    for (const h of [claude, codex])
+      assert.ok(
+        linked.some((p) => samePath(p, path.join(h.userSkills, n))),
+        `${n} in ${h.userSkills}`,
+      );
   }
   const second = cli("--quiet", "--json", "--no-pull", "--no-projects", "--no-wsl");
   assert.equal(second.status, 0, second.stderr);
-  assert.deepEqual((JSON.parse(second.stdout).actions as Array<{ kind: string }>).filter((a) => a.kind !== "skip"), []);
+  assert.deepEqual(
+    (JSON.parse(second.stdout).actions as Array<{ kind: string }>).filter((a) => a.kind !== "skip"),
+    [],
+  );
 });
 
 test("harness overrides in the environment running the tests never reach the CLI child: it links into the temp home, not into them", () => {
@@ -228,7 +273,8 @@ test("harness overrides in the environment running the tests never reach the CLI
   try {
     const r = cli("--quiet", "--json", "--no-pull", "--no-projects", "--no-wsl");
     assert.equal(r.status, 0, r.stderr);
-    for (const k of HARNESS_ENV) assert.deepEqual(fs.readdirSync(path.join(decoy, k)), [], `nothing written under $${k}`);
+    for (const k of HARNESS_ENV)
+      assert.deepEqual(fs.readdirSync(path.join(decoy, k)), [], `nothing written under $${k}`);
     for (const [n, dir] of expected()) {
       const u = path.join(claude.userSkills, n);
       assert.ok(isLink(u), u);

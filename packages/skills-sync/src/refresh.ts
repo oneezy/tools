@@ -12,10 +12,36 @@ import { isDir, isLink, isSkillDir } from "./fs.js";
 import { RESERVED } from "./harnesses.js";
 import { Library } from "./library.js";
 import { apply, Report } from "./plan.js";
-import { hasOldLock, LOCK_NAME, lockedSource, lockText, readLock, type LockedSkill, type LockedSource } from "./lock.js";
-import { cloneUrl, cmp, findSkills, isCommit, readConfig, selection, skillHash, withName, type Selected } from "./sources.js";
+import {
+  hasOldLock,
+  LOCK_NAME,
+  lockedSource,
+  lockText,
+  readLock,
+  type LockedSkill,
+  type LockedSource,
+} from "./lock.js";
+import {
+  cloneUrl,
+  cmp,
+  findSkills,
+  isCommit,
+  readConfig,
+  selection,
+  skillHash,
+  withName,
+  type Selected,
+} from "./sources.js";
 import { discard, git, moveTo, remoteTip, stage, type Staged } from "./stage.js";
-import { compareVersions, isPrerelease, listVersions, plainVersion, resolveVersion, type Release, type SourceVersion } from "./versions.js";
+import {
+  compareVersions,
+  isPrerelease,
+  listVersions,
+  plainVersion,
+  resolveVersion,
+  type Release,
+  type SourceVersion,
+} from "./versions.js";
 
 export interface RefreshOptions {
   /** every skill at the commit the lock records; a skill the lock does not know is left alone; the lock is not written */
@@ -83,9 +109,19 @@ export function refresh(lib: Library, opts: RefreshOptions): RefreshResult {
   const old = readLock(lib.root, config);
   const next: Record<string, LockedSource> = {};
   const lockSkills = new Map<string, Record<string, LockedSkill>>(); // per source, the skills it won in the working set
-  const result: RefreshResult = { report: new Report(), sources: {}, gone: [], unlocked: [], problems: [], updated: [], config: [] };
+  const result: RefreshResult = {
+    report: new Report(),
+    sources: {},
+    gone: [],
+    unlocked: [],
+    problems: [],
+    updated: [],
+    config: [],
+  };
   const report = result.report;
-  const staged = new Map<string, Staged>(Object.entries(opts.prestaged ?? {}).map(([id, s]) => [`${id}@${s.commit}`, s]));
+  const staged = new Map<string, Staged>(
+    Object.entries(opts.prestaged ?? {}).map(([id, s]) => [`${id}@${s.commit}`, s]),
+  );
   const found = new Map<string, Map<string, string>>(); // skills discovered per checkout
   const resolved: Resolved[] = [];
   const selected = new Set<string>();
@@ -126,7 +162,7 @@ export function refresh(lib: Library, opts: RefreshOptions): RefreshResult {
 
       // 1. the source's commit: frozen takes the lock's; a version (--to, else the held one) that release's commit, found
       //    in a clone of ref's history; latest takes the tip of ref
-      const want = frozen ? undefined : opts.to?.[id] ?? src.version;
+      const want = frozen ? undefined : (opts.to?.[id] ?? src.version);
       let commit: string | null;
       if (frozen) {
         if (!prior || !wanted.some((s) => mine(s))) {
@@ -153,7 +189,8 @@ export function refresh(lib: Library, opts: RefreshOptions): RefreshResult {
         }
         staged.set(`${id}@${at.commit}`, at);
         commit = at.commit;
-        if (opts.to?.[id] && src.version !== (pick as Release).version) result.config.push({ source: id, version: (pick as Release).version });
+        if (opts.to?.[id] && src.version !== (pick as Release).version)
+          result.config.push({ source: id, version: (pick as Release).version });
       } else if (isCommit(src.ref)) commit = src.ref;
       else {
         commit = remoteTip(url, src.ref);
@@ -174,10 +211,18 @@ export function refresh(lib: Library, opts: RefreshOptions): RefreshResult {
           result.unlocked.push(`${id}:${s.name}`);
           continue;
         }
-        const at: string = frozen ? l!.commit : src.pins?.[s.upstream] ?? commit;
+        const at: string = frozen ? l!.commit : (src.pins?.[s.upstream] ?? commit);
         const snap = l && l.commit === at ? path.join(snapDir, l.path) : null;
         if (snap && l!.hash && isSkillDir(snap) && skillHash(snap) === l!.hash) {
-          here.push({ ...s, source: id, dir: snap, rel: l!.path, snapshot: snap, fromSnapshot: true, locked: { ...l!, commit: at } });
+          here.push({
+            ...s,
+            source: id,
+            dir: snap,
+            rel: l!.path,
+            snapshot: snap,
+            fromSnapshot: true,
+            locked: { ...l!, commit: at },
+          });
           continue;
         }
         const co = checkout(at);
@@ -191,7 +236,15 @@ export function refresh(lib: Library, opts: RefreshOptions): RefreshResult {
           result.gone.push(`${id}:${s.name}`);
           continue;
         }
-        here.push({ ...s, source: id, dir: path.join(co.dir, rel), rel, snapshot: path.join(snapDir, rel), fromSnapshot: false, locked: { path: rel, hash: skillHash(path.join(co.dir, rel)), commit: at } });
+        here.push({
+          ...s,
+          source: id,
+          dir: path.join(co.dir, rel),
+          rel,
+          snapshot: path.join(snapDir, rel),
+          fromSnapshot: false,
+          locked: { path: rel, hash: skillHash(path.join(co.dir, rel)), commit: at },
+        });
       }
       if (failed) {
         keep();
@@ -207,7 +260,10 @@ export function refresh(lib: Library, opts: RefreshOptions): RefreshResult {
       const fromLock = !!prior && !old!.migrated && prior.commit === commit;
       const fromMeta = sameCommit && meta!.version !== undefined;
       const known: SourceVersion | null = fromLock
-        ? { version: prior!.version, ahead: fromMeta && meta!.version === prior!.version ? meta!.ahead ?? null : null }
+        ? {
+            version: prior!.version,
+            ahead: fromMeta && meta!.version === prior!.version ? (meta!.ahead ?? null) : null,
+          }
         : fromMeta
           ? { version: meta!.version!, ahead: meta!.ahead ?? null }
           : null;
@@ -222,15 +278,28 @@ export function refresh(lib: Library, opts: RefreshOptions): RefreshResult {
       const date = co ? co.date : meta!.date;
       // frozen holds the lock's version; otherwise a checkout says what the commit is now (a tag may have come since)
       const fresh = co ? resolveVersion(co.dir, commit, src.root) : null;
-      const v: SourceVersion | null = frozen && fromLock ? { version: known!.version, ahead: fresh?.version === known!.version ? fresh.ahead : known!.ahead } : fresh ?? known;
+      const v: SourceVersion | null =
+        frozen && fromLock
+          ? { version: known!.version, ahead: fresh?.version === known!.version ? fresh.ahead : known!.ahead }
+          : (fresh ?? known);
       result.sources[id] = { version: v?.version ?? null, ahead: v?.ahead ?? null, commit, date, moved: !sameCommit };
       if (!frozen) {
         next[id] = { repo: src.repo, ref: src.ref, version: v!.version, commit, date, skills: {} };
         if (opts.to?.[id] === "latest" && src.version) result.config.push({ source: id, version: null });
         if (prior?.commit !== commit) {
           if (!co) co = checkout(commit) ?? undefined;
-          const from = prior ? { version: prior.version, commit: prior.commit, ahead: aheadOf(prior, meta, co, src.root) } : null;
-          result.updated.push(moved(id, from, { version: v?.version ?? null, commit, ahead: v?.ahead ?? null }, co?.dir ?? null, src.root));
+          const from = prior
+            ? { version: prior.version, commit: prior.commit, ahead: aheadOf(prior, meta, co, src.root) }
+            : null;
+          result.updated.push(
+            moved(
+              id,
+              from,
+              { version: v?.version ?? null, commit, ahead: v?.ahead ?? null },
+              co?.dir ?? null,
+              src.root,
+            ),
+          );
         }
       } else if (!opts.frozen) {
         // not named in an update: its lock entry as it is (a version 1 lock's gains the version and date it lacked)
@@ -240,29 +309,63 @@ export function refresh(lib: Library, opts: RefreshOptions): RefreshResult {
 
       // 4. the snapshot: the selected folders and attribution files at their upstream paths, plus .snapshot.json
       for (const r of here) {
-        if (r.fromSnapshot || (isSkillDir(r.snapshot) && skillHash(r.snapshot) === r.locked.hash)) report.add({ kind: "skip", path: r.snapshot, note: "ok" });
-        else report.add({ kind: "copy", path: r.snapshot, target: r.dir, note: `snapshot at ${r.locked.commit.slice(0, 7)}` });
+        if (r.fromSnapshot || (isSkillDir(r.snapshot) && skillHash(r.snapshot) === r.locked.hash))
+          report.add({ kind: "skip", path: r.snapshot, note: "ok" });
+        else
+          report.add({
+            kind: "copy",
+            path: r.snapshot,
+            target: r.dir,
+            note: `snapshot at ${r.locked.commit.slice(0, 7)}`,
+          });
       }
       const paths = new Set(here.map((r) => r.rel));
       if (frozen) for (const s of sel) if (mine(s)) paths.add(mine(s)!.path);
-      for (const rel of findSkills(snapDir, undefined, 6).values()) if (!paths.has(rel)) report.add({ kind: "delete", path: path.join(snapDir, rel), note: "no longer selected" });
+      for (const rel of findSkills(snapDir, undefined, 6).values())
+        if (!paths.has(rel)) report.add({ kind: "delete", path: path.join(snapDir, rel), note: "no longer selected" });
       for (const f of copied) {
         const dst = path.join(snapDir, f);
         const bytes = co ? fs.readFileSync(path.join(co.dir, f)) : null;
-        if (bytes && (!fs.existsSync(dst) || !bytes.equals(fs.readFileSync(dst)))) report.add({ kind: "write", path: dst, payload: bytes, note: "attribution" });
+        if (bytes && (!fs.existsSync(dst) || !bytes.equals(fs.readFileSync(dst))))
+          report.add({ kind: "write", path: dst, payload: bytes, note: "attribution" });
         else report.add({ kind: "skip", path: dst, note: "ok" });
       }
-      for (const f of meta?.attribution ?? []) if (!copied.includes(f) && fs.existsSync(path.join(snapDir, f))) report.add({ kind: "delete", path: path.join(snapDir, f), note: "no longer listed as attribution" });
+      for (const f of meta?.attribution ?? [])
+        if (!copied.includes(f) && fs.existsSync(path.join(snapDir, f)))
+          report.add({ kind: "delete", path: path.join(snapDir, f), note: "no longer listed as attribution" });
       const skills: SnapshotMeta["skills"] = {};
-      for (const r of [...here].sort((a, b) => cmp(a.upstream, b.upstream))) skills[r.upstream] = { path: r.rel, hash: r.locked.hash, commit: r.locked.commit };
-      const metaNext: SnapshotMeta = { source: id, repo: src.repo, ref: src.ref, commit, date, version: v?.version, ahead: v ? v.ahead : undefined, skills, attribution: copied, absent };
-      writeIfChanged(report, path.join(snapDir, ".snapshot.json"), JSON.stringify(metaNext, null, 2) + "\n", `${here.length} skills at ${commit.slice(0, 7)}`);
+      for (const r of [...here].sort((a, b) => cmp(a.upstream, b.upstream)))
+        skills[r.upstream] = { path: r.rel, hash: r.locked.hash, commit: r.locked.commit };
+      const metaNext: SnapshotMeta = {
+        source: id,
+        repo: src.repo,
+        ref: src.ref,
+        commit,
+        date,
+        version: v?.version,
+        ahead: v ? v.ahead : undefined,
+        skills,
+        attribution: copied,
+        absent,
+      };
+      writeIfChanged(
+        report,
+        path.join(snapDir, ".snapshot.json"),
+        JSON.stringify(metaNext, null, 2) + "\n",
+        `${here.length} skills at ${commit.slice(0, 7)}`,
+      );
       resolved.push(...here);
     }
 
     // 5. snapshots of sources no longer in the config
     if (isDir(lib.upstream)) {
-      for (const id of fs.readdirSync(lib.upstream).sort(cmp)) if (!config.sources[id] && isDir(path.join(lib.upstream, id))) report.add({ kind: "delete", path: path.join(lib.upstream, id), note: "source no longer in skills-sync.json" });
+      for (const id of fs.readdirSync(lib.upstream).sort(cmp))
+        if (!config.sources[id] && isDir(path.join(lib.upstream, id)))
+          report.add({
+            kind: "delete",
+            path: path.join(lib.upstream, id),
+            note: "source no longer in skills-sync.json",
+          });
     }
 
     // 6. the working set: one copy per resolved skill with its rename applied; copies no longer selected go.
@@ -271,7 +374,12 @@ export function refresh(lib: Library, opts: RefreshOptions): RefreshResult {
     const taken = new Map<string, string>();
     for (const r of resolved.sort((a, b) => cmp(a.name, b.name) || cmp(a.source, b.source))) {
       const winner = taken.get(r.name);
-      if (winner) report.add({ kind: "conflict", path: path.join(lib.agents, r.name), note: `${r.source} also selects ${r.upstream} as ${r.name}; ${winner} wins; rename one in skills-sync.json` });
+      if (winner)
+        report.add({
+          kind: "conflict",
+          path: path.join(lib.agents, r.name),
+          note: `${r.source} also selects ${r.upstream} as ${r.name}; ${winner} wins; rename one in skills-sync.json`,
+        });
       else {
         taken.set(r.name, r.source);
         lockSkills.set(r.source, { ...lockSkills.get(r.source), [r.name]: r.locked });
@@ -281,7 +389,8 @@ export function refresh(lib: Library, opts: RefreshOptions): RefreshResult {
     if (isDir(lib.agents)) {
       for (const n of fs.readdirSync(lib.agents).sort(cmp)) {
         const p = path.join(lib.agents, n);
-        if (n.startsWith(".") || RESERVED.has(n) || isLink(p) || !isSkillDir(p) || own.has(n) || selected.has(n)) continue;
+        if (n.startsWith(".") || RESERVED.has(n) || isLink(p) || !isSkillDir(p) || own.has(n) || selected.has(n))
+          continue;
         report.add({ kind: "delete", path: p, note: "no longer selected in skills-sync.json" });
       }
     }
@@ -289,9 +398,11 @@ export function refresh(lib: Library, opts: RefreshOptions): RefreshResult {
     // 7. the lock: what this refresh resolved (a pinned skill's commit only where it differs from its source's), and a
     //    version 1 lock goes; never when frozen
     if (!opts.frozen) {
-      for (const [id, skills] of lockSkills) if (next[id] && (!opts.only || opts.only.includes(id))) next[id].skills = skills;
+      for (const [id, skills] of lockSkills)
+        if (next[id] && (!opts.only || opts.only.includes(id))) next[id].skills = skills;
       writeIfChanged(report, lib.lockFile, lockText(next), "what this refresh resolved");
-      if (hasOldLock(lib.root)) report.add({ kind: "delete", path: lib.npxLockFile, note: `old lock format, migrated to ${LOCK_NAME}` });
+      if (hasOldLock(lib.root))
+        report.add({ kind: "delete", path: lib.npxLockFile, note: `old lock format, migrated to ${LOCK_NAME}` });
     }
 
     apply(report, opts.plan);
@@ -321,7 +432,10 @@ export function snapshotLock(lib: Library): Record<string, LockedSource> | null 
     if (!meta) {
       const prior = lockedSource(old, id, src);
       if (!prior) continue;
-      next[id] = { ...prior, skills: Object.fromEntries(sel.filter((s) => prior.skills[s.name]).map((s) => [s.name, prior.skills[s.name]])) };
+      next[id] = {
+        ...prior,
+        skills: Object.fromEntries(sel.filter((s) => prior.skills[s.name]).map((s) => [s.name, prior.skills[s.name]])),
+      };
     } else {
       snapshots++;
       const skills: Record<string, LockedSkill> = {};
@@ -331,7 +445,14 @@ export function snapshotLock(lib: Library): Record<string, LockedSource> | null 
         const dir = path.join(snapDir, snap.path);
         skills[s.name] = { path: snap.path, hash: isSkillDir(dir) ? skillHash(dir) : snap.hash, commit: snap.commit };
       }
-      next[id] = { repo: src.repo, ref: src.ref, version: meta.version ?? null, commit: meta.commit, date: meta.date, skills };
+      next[id] = {
+        repo: src.repo,
+        ref: src.ref,
+        version: meta.version ?? null,
+        commit: meta.commit,
+        date: meta.date,
+        skills,
+      };
     }
     for (const n of Object.keys(next[id].skills)) taken.add(n);
   }
@@ -345,14 +466,22 @@ export function snapshotLock(lib: Library): Record<string, LockedSource> | null 
 function pickRelease(releases: Release[], want: string, current: string | null): Release | string {
   if (want === "previous") {
     if (!current) return "previous: the lock records no version to go below";
-    return releases.find((r) => !isPrerelease(r.version) && compareVersions(r.version, current) < 0) ?? `previous: no release below ${current}`;
+    return (
+      releases.find((r) => !isPrerelease(r.version) && compareVersions(r.version, current) < 0) ??
+      `previous: no release below ${current}`
+    );
   }
   const v = plainVersion(want) ?? want;
   return releases.find((r) => r.version === v) ?? `${want} is not a release`;
 }
 
 /** How far past its version a source's locked commit was: what the snapshot recorded there, else counted in a checkout that has that commit. */
-function aheadOf(prior: LockedSource, meta: SnapshotMeta | null, co: Staged | undefined, root: string | undefined): number | null {
+function aheadOf(
+  prior: LockedSource,
+  meta: SnapshotMeta | null,
+  co: Staged | undefined,
+  root: string | undefined,
+): number | null {
   if (meta?.commit === prior.commit && meta.version === prior.version && meta.ahead !== undefined) return meta.ahead;
   if (!co || prior.version === null || !git(["cat-file", "-e", `${prior.commit}^{commit}`], co.dir).ok) return null;
   const v = resolveVersion(co.dir, prior.commit, root);
@@ -363,7 +492,11 @@ function aheadOf(prior: LockedSource, meta: SnapshotMeta | null, co: Staged | un
 function workingCopy(lib: Library, r: Resolved, own: Set<string>, report: Report): void {
   const dst = path.join(lib.agents, r.name);
   if (own.has(r.name)) {
-    report.add({ kind: "conflict", path: dst, note: `an own skill is named ${r.name}; the third-party one is left out of the working set` });
+    report.add({
+      kind: "conflict",
+      path: dst,
+      note: `an own skill is named ${r.name}; the third-party one is left out of the working set`,
+    });
     return;
   }
   if (isLink(dst)) {
@@ -372,20 +505,28 @@ function workingCopy(lib: Library, r: Resolved, own: Set<string>, report: Report
   }
   const renamed = r.name !== r.upstream;
   const expected = folderFiles(r.dir);
-  if (renamed) expected.set("SKILL.md", Buffer.from(withName(expected.get("SKILL.md")?.toString("utf8") ?? "", r.name)));
+  if (renamed)
+    expected.set("SKILL.md", Buffer.from(withName(expected.get("SKILL.md")?.toString("utf8") ?? "", r.name)));
   if (isDir(dst) && sameFiles(folderFiles(dst), expected)) {
     report.add({ kind: "skip", path: dst, note: "ok" });
     return;
   }
   // copied from the snapshot, which exists by then: its copy action comes earlier in the same report
   report.add({ kind: "copy", path: dst, target: r.snapshot, note: renamed ? `renamed from ${r.upstream}` : undefined });
-  if (renamed) report.add({ kind: "write", path: path.join(dst, "SKILL.md"), payload: expected.get("SKILL.md"), note: `frontmatter name: ${r.name}` });
+  if (renamed)
+    report.add({
+      kind: "write",
+      path: path.join(dst, "SKILL.md"),
+      payload: expected.get("SKILL.md"),
+      note: `frontmatter name: ${r.name}`,
+    });
 }
 
 /** A write of `text` unless the file already says it: CRLF line endings on disk (a checkout under core.autocrlf=true) are no difference. */
 function writeIfChanged(report: Report, file: string, text: string, note: string): void {
   const lf = (s: string) => s.replace(/\r\n/g, "\n");
-  if (fs.existsSync(file) && lf(fs.readFileSync(file, "utf8")) === lf(text)) report.add({ kind: "skip", path: file, note: "ok" });
+  if (fs.existsSync(file) && lf(fs.readFileSync(file, "utf8")) === lf(text))
+    report.add({ kind: "skip", path: file, note: "ok" });
   else report.add({ kind: "write", path: file, payload: text, note });
 }
 

@@ -8,7 +8,7 @@ import { createHash } from "node:crypto";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { after, before, beforeEach, test } from "node:test";
+import { afterAll, beforeAll, beforeEach, test } from "vite-plus/test";
 
 let base: string;
 let root: string;
@@ -16,7 +16,7 @@ let homeDir: string;
 let tmpDir: string;
 let up: Upstream;
 
-const CLI = path.resolve(import.meta.dirname, "..", "src", "cli.js");
+const CLI = path.resolve(import.meta.dirname, "..", "dist", "src", "cli.js");
 const HARNESS_ENV = ["CLAUDE_CONFIG_DIR", "CODEX_HOME", "XDG_CONFIG_HOME", "HERMES_HOME"] as const;
 const GIT = ["-c", "user.name=t", "-c", "user.email=t@example.com", "-c", "commit.gpgsign=false"];
 const LOCK = "skills-sync.lock.json";
@@ -24,7 +24,14 @@ const OLD_LOCK = "skills-lock.json";
 
 /** Run the CLI against the temp library, home and temp folder redirected, every harness override dropped. */
 function cli(...args: string[]): { status: number | null; stdout: string; stderr: string } {
-  const env: NodeJS.ProcessEnv = { ...process.env, HOME: homeDir, USERPROFILE: homeDir, TMP: tmpDir, TEMP: tmpDir, TMPDIR: tmpDir };
+  const env: NodeJS.ProcessEnv = {
+    ...process.env,
+    HOME: homeDir,
+    USERPROFILE: homeDir,
+    TMP: tmpDir,
+    TEMP: tmpDir,
+    TMPDIR: tmpDir,
+  };
   for (const k of HARNESS_ENV) delete env[k];
   return spawnSync(process.execPath, [CLI, ...args, "--repo", root], { encoding: "utf8", cwd: root, env });
 }
@@ -55,8 +62,9 @@ class Upstream {
   head(): string {
     return this.git("rev-parse", "HEAD");
   }
+  /** The commit's date as the lock spells it: UTC as Z, whichever git printed it. */
   date(commit = "HEAD"): string {
-    return this.git("log", "-1", "--format=%cI", commit);
+    return this.git("log", "-1", "--format=%cI", commit).replace(/[+-]00:?00$/, "Z");
   }
   tag(name: string, annotated = false): void {
     if (annotated) this.git("tag", "-a", name, "-m", name);
@@ -90,24 +98,30 @@ function json(rel: string): any {
 }
 
 function config(sources: Record<string, unknown>): void {
-  fs.writeFileSync(path.join(root, "skills-sync.json"), JSON.stringify({ version: 1, generate: { skills: true, plugins: false }, sources, plugins: {} }, null, 2) + "\n");
+  fs.writeFileSync(
+    path.join(root, "skills-sync.json"),
+    JSON.stringify({ version: 1, generate: { skills: true, plugins: false }, sources, plugins: {} }, null, 2) + "\n",
+  );
 }
 
 function source(u: Upstream, extra: Record<string, unknown> = {}): Record<string, unknown> {
   return { repo: u.dir, ref: "main", root: "skills", skills: ["a", "b"], ...extra };
 }
 
-before(() => {
+beforeAll(() => {
   base = fs.mkdtempSync(path.join(os.tmpdir(), "skills-sync-lock-"));
 });
-after(() => {
+afterAll(() => {
   fs.rmSync(base, { recursive: true, force: true });
 });
 beforeEach(() => {
   for (const n of fs.readdirSync(base)) fs.rmSync(path.join(base, n), { recursive: true, force: true });
   root = path.join(base, "dev", "skills");
   fs.mkdirSync(path.join(root, "skills", "oneezy", "own-one"), { recursive: true });
-  fs.writeFileSync(path.join(root, "skills", "oneezy", "own-one", "SKILL.md"), "---\nname: own-one\ndescription: mine\n---\nmine\n");
+  fs.writeFileSync(
+    path.join(root, "skills", "oneezy", "own-one", "SKILL.md"),
+    "---\nname: own-one\ndescription: mine\n---\nmine\n",
+  );
   homeDir = path.join(base, "home");
   fs.mkdirSync(homeDir);
   tmpDir = path.join(base, "tmp");
@@ -193,7 +207,11 @@ test("the version is the nearest release tag at or before the commit, as plain s
 
 test("a source without tags takes the version of the nearest plugin or package manifest at or above its root (pstack/.cursor-plugin/plugin.json over the repo's package.json), counting commits since the one that set that version, edits to the manifest that keep it included", () => {
   const ps = new Upstream(path.join(base, "plugins"));
-  const manifest = (version: string, description = "pstack") => ps.file("pstack/.cursor-plugin/plugin.json", JSON.stringify({ name: "pstack", description, version }, null, 2) + "\n");
+  const manifest = (version: string, description = "pstack") =>
+    ps.file(
+      "pstack/.cursor-plugin/plugin.json",
+      JSON.stringify({ name: "pstack", description, version }, null, 2) + "\n",
+    );
   ps.skill("a", "one", "pstack/skills");
   ps.skill("b", "one", "pstack/skills");
   ps.file("package.json", JSON.stringify({ name: "plugins", version: "9.9.9" }) + "\n");
@@ -211,7 +229,10 @@ test("a source without tags takes the version of the nearest plugin or package m
 
   const r = cli("refresh", "--json");
   assert.equal(r.status, 0, r.stderr);
-  assert.deepEqual([JSON.parse(r.stdout).sources.pstack.version, JSON.parse(r.stdout).sources.pstack.ahead], ["0.15.9", 3]);
+  assert.deepEqual(
+    [JSON.parse(r.stdout).sources.pstack.version, JSON.parse(r.stdout).sources.pstack.ahead],
+    ["0.15.9", 3],
+  );
   assert.equal(json(LOCK).sources.pstack.version, "0.15.9");
 
   manifest("v0.15.10");
@@ -223,7 +244,10 @@ test("a source without tags takes the version of the nearest plugin or package m
 });
 
 test("a version 1 skills-lock.json (what 0.4.0 wrote) is read in memory by a frozen sync, which writes no lock; check reports it as one problem; refresh migrates it once (pin and rename kept, version resolved), removes it and says so in one line; a second refresh reports nothing; an npx skills lock without commits is never touched", () => {
-  const hashes = () => ({ a: recipeHash(path.join(up.dir, "skills", "a")), b: recipeHash(path.join(up.dir, "skills", "b")) });
+  const hashes = () => ({
+    a: recipeHash(path.join(up.dir, "skills", "a")),
+    b: recipeHash(path.join(up.dir, "skills", "b")),
+  });
   const zero = up.head();
   const atZero = hashes();
   up.skill("a", "one");
@@ -232,20 +256,48 @@ test("a version 1 skills-lock.json (what 0.4.0 wrote) is read in memory by a fro
   up.tag("v1.0.0");
   const atOne = hashes();
   config({ up: source(up, { skills: { a: "a", b: "up-b" }, pins: { a: zero } }) });
-  const entry = (dir: string, hash: string, commit: string) => ({ source: up.dir, sourceUrl: up.dir, ref: "main", sourceType: "git", skillPath: `skills/${dir}/SKILL.md`, computedHash: hash, commit });
-  const v1 = JSON.stringify({ version: 1, skills: { a: entry("a", atZero.a, zero), "up-b": entry("b", atOne.b, one) } }, null, 2) + "\n";
+  const entry = (dir: string, hash: string, commit: string) => ({
+    source: up.dir,
+    sourceUrl: up.dir,
+    ref: "main",
+    sourceType: "git",
+    skillPath: `skills/${dir}/SKILL.md`,
+    computedHash: hash,
+    commit,
+  });
+  const v1 =
+    JSON.stringify(
+      { version: 1, skills: { a: entry("a", atZero.a, zero), "up-b": entry("b", atOne.b, one) } },
+      null,
+      2,
+    ) + "\n";
   fs.writeFileSync(path.join(root, OLD_LOCK), v1);
 
-  const sync = cli("--quiet", "--json", "--no-pull", "--no-projects", "--no-wsl", "--no-global", "--agents", "claude-code");
+  const sync = cli(
+    "--quiet",
+    "--json",
+    "--no-pull",
+    "--no-projects",
+    "--no-wsl",
+    "--no-global",
+    "--agents",
+    "claude-code",
+  );
   assert.equal(sync.status, 0, sync.stderr);
-  assert.ok(fs.readFileSync(path.join(root, ".agents", "skills", "a", "SKILL.md"), "utf8").includes("do the thing"), "a at its pin, read from the version 1 lock");
+  assert.ok(
+    fs.readFileSync(path.join(root, ".agents", "skills", "a", "SKILL.md"), "utf8").includes("do the thing"),
+    "a at its pin, read from the version 1 lock",
+  );
   assert.ok(fs.readFileSync(path.join(root, ".agents", "skills", "up-b", "SKILL.md"), "utf8").includes("one"));
   assert.ok(!fs.existsSync(path.join(root, LOCK)), "a frozen sync writes no lock");
   assert.equal(fs.readFileSync(path.join(root, OLD_LOCK), "utf8"), v1, "and leaves the old one as it is");
 
   const checked = cli("check");
   assert.equal(checked.status, 1);
-  assert.deepEqual(checked.stdout.split("\n").filter((l) => l && !l.startsWith("check:")), ["skills-lock.json: old lock format; refresh migrates it to skills-sync.lock.json"]);
+  assert.deepEqual(
+    checked.stdout.split("\n").filter((l) => l && !l.startsWith("check:")),
+    ["skills-lock.json: old lock format; refresh migrates it to skills-sync.lock.json"],
+  );
 
   // the snapshot as 0.4.0 left it: no version recorded
   const metaFile = path.join(root, "upstream", "up", ".snapshot.json");
@@ -256,20 +308,54 @@ test("a version 1 skills-lock.json (what 0.4.0 wrote) is read in memory by a fro
 
   const r = cli("refresh");
   assert.equal(r.status, 0, r.stderr);
-  assert.deepEqual(r.stdout.split("\n").filter((l) => l.includes(OLD_LOCK)).map((l) => l.replace(/\s+/g, " ")), [`- delete ${path.join(root, OLD_LOCK)} (old lock format, migrated to skills-sync.lock.json)`]);
+  assert.deepEqual(
+    r.stdout
+      .split("\n")
+      .filter((l) => l.includes(OLD_LOCK))
+      .map((l) => l.replace(/\s+/g, " ")),
+    [`- delete ${path.join(root, OLD_LOCK)} (old lock format, migrated to skills-sync.lock.json)`],
+  );
   assert.ok(!fs.existsSync(path.join(root, OLD_LOCK)), "removed");
   assert.deepEqual(json(LOCK), {
     version: 2,
-    sources: { up: { repo: up.dir, ref: "main", version: "1.0.0", commit: one, date: up.date(), skills: { a: { path: "skills/a", hash: atZero.a, commit: zero }, "up-b": { path: "skills/b", hash: atOne.b } } } },
+    sources: {
+      up: {
+        repo: up.dir,
+        ref: "main",
+        version: "1.0.0",
+        commit: one,
+        date: up.date(),
+        skills: { a: { path: "skills/a", hash: atZero.a, commit: zero }, "up-b": { path: "skills/b", hash: atOne.b } },
+      },
+    },
   });
   assert.equal(cli("check").status, 0, "the migrated lock is what the snapshots give");
 
   const again = cli("refresh", "--json");
   assert.equal(again.status, 0, again.stderr);
-  assert.deepEqual(JSON.parse(again.stdout).actions.filter((a: { kind: string }) => a.kind !== "skip"), [], "nothing to migrate the second time");
+  assert.deepEqual(
+    JSON.parse(again.stdout).actions.filter((a: { kind: string }) => a.kind !== "skip"),
+    [],
+    "nothing to migrate the second time",
+  );
 
   // a config library holding npx skills' own lock (entries without a commit): not this tool's, never migrated or removed
-  const npx = JSON.stringify({ version: 1, skills: { other: { source: "someone/else", sourceType: "github", skillPath: "skills/other/SKILL.md", computedHash: "x" } } }, null, 2) + "\n";
+  const npx =
+    JSON.stringify(
+      {
+        version: 1,
+        skills: {
+          other: {
+            source: "someone/else",
+            sourceType: "github",
+            skillPath: "skills/other/SKILL.md",
+            computedHash: "x",
+          },
+        },
+      },
+      null,
+      2,
+    ) + "\n";
   fs.writeFileSync(path.join(root, OLD_LOCK), npx);
   assert.equal(cli("refresh", "--quiet").status, 0);
   assert.equal(fs.readFileSync(path.join(root, OLD_LOCK), "utf8"), npx);
@@ -302,7 +388,11 @@ test("a lock checked out with CRLF line endings (core.autocrlf=true) that says w
   for (const cmd of ["update", "refresh"]) {
     const r = cli(cmd, "--json");
     assert.equal(r.status, 0, r.stderr);
-    assert.deepEqual(JSON.parse(r.stdout).actions.filter((a: { kind: string; path: string }) => a.kind !== "skip" && a.path === file), [], `${cmd} reports no write`);
+    assert.deepEqual(
+      JSON.parse(r.stdout).actions.filter((a: { kind: string; path: string }) => a.kind !== "skip" && a.path === file),
+      [],
+      `${cmd} reports no write`,
+    );
     assert.equal(fs.readFileSync(file, "utf8"), crlf, `${cmd} leaves the bytes`);
   }
   assert.equal(cli("check").status, 0);

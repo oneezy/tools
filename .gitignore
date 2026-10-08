@@ -11,7 +11,6 @@ __pycache__/
 .claude/skills/
 .agents/skills/
 
-# pnpm workspace and Turborepo
+# pnpm workspace
 node_modules/
-.turbo/
 dist/

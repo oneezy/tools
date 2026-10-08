@@ -30,7 +30,12 @@ export interface GroupNodeData extends Record<string, unknown> {
 export type MapFlowNode = Node<SkillNodeData, "skill"> | Node<GroupNodeData, "group">;
 
 /** Lay the map out; `aspect` is the viewport's width / height so phones get a tall map. */
-export async function layout(key: LayoutKey, data: MapData, aspect: number, draggable: boolean): Promise<MapFlowNode[]> {
+export async function layout(
+  key: LayoutKey,
+  data: MapData,
+  aspect: number,
+  draggable: boolean,
+): Promise<MapFlowNode[]> {
   const a = Math.max(0.55, Math.min(2, aspect));
   const colors = new Map(data.groups.map((g) => [g.key, g.color]));
   const skill = (n: MapNode, x: number, y: number, parentId?: string): MapFlowNode => ({
@@ -73,7 +78,9 @@ async function layoutLibraries(
   const byId = new Map(data.nodes.map((n) => [n.id, n]));
   const groups: ElkNode[] = data.groups.map((g) => {
     const members = data.nodes.filter((n) => n.group === g.key);
-    const children: ElkNode[] = members.filter((n) => !familyOf(n, data.families)).map((n) => ({ id: n.id, width: CARD_W, height: CARD_H }));
+    const children: ElkNode[] = members
+      .filter((n) => !familyOf(n, data.families))
+      .map((n) => ({ id: n.id, width: CARD_W, height: CARD_H }));
     for (const fk of Object.keys(data.families).filter((k) => data.families[k].group === g.key)) {
       children.push({
         id: `f:${fk}`,
@@ -83,7 +90,9 @@ async function layoutLibraries(
           "elk.padding": pad(56, 20),
           "elk.spacing.nodeNode": "14",
         },
-        children: members.filter((n) => familyOf(n, data.families) === fk).map((n) => ({ id: n.id, width: CARD_W, height: CARD_H })),
+        children: members
+          .filter((n) => familyOf(n, data.families) === fk)
+          .map((n) => ({ id: n.id, width: CARD_W, height: CARD_H })),
       });
     }
     // edges inside this group, with family members standing in as their family box

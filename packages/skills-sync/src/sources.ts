@@ -80,7 +80,13 @@ export function selection(s: Source): Selected[] {
 /** The config, validated against the shipped schema, with the switches, sources and plugins filled in when absent; throws with every problem listed. */
 export function readConfig(file: string): Config {
   const parsed = readConfigRaw(file) as Partial<Config>;
-  return { ...parsed, version: 1, generate: { skills: true, plugins: true, ...parsed.generate }, sources: parsed.sources ?? {}, plugins: parsed.plugins ?? {} };
+  return {
+    ...parsed,
+    version: 1,
+    generate: { skills: true, plugins: true, ...parsed.generate },
+    sources: parsed.sources ?? {},
+    plugins: parsed.plugins ?? {},
+  };
 }
 
 /** The config exactly as the file holds it, validated; what add writes back with one more source. */
@@ -140,7 +146,9 @@ export function findSkills(checkout: string, root: string | undefined, depth = 3
     } catch {
       return;
     }
-    for (const e of entries.filter((x) => x.isDirectory() && x.name !== ".git" && x.name !== "node_modules").sort((a, b) => cmp(a.name, b.name))) {
+    for (const e of entries
+      .filter((x) => x.isDirectory() && x.name !== ".git" && x.name !== "node_modules")
+      .sort((a, b) => cmp(a.name, b.name))) {
       const full = path.join(dir, e.name);
       if (isSkillDir(full)) {
         if (!out.has(e.name)) out.set(e.name, path.relative(checkout, full).split("\\").join("/"));
@@ -184,4 +192,12 @@ export function withName(md: string, name: string): string {
 /** Plain code-point order, the same on every machine (localeCompare is only for the hash, where the recipe demands it). */
 export function cmp(a: string, b: string): number {
   return a < b ? -1 : a > b ? 1 : 0;
+}
+
+/**
+ * A commit date as git's %cI gives it, in one spelling: git 2.45 and later write UTC as `Z`, older git as `+00:00`.
+ * A NOTICE or a lock must not depend on which git wrote it, so `+00:00` is written `Z`, what CI's git prints.
+ */
+export function isoDate<T extends string | null>(d: T): T {
+  return (d === null ? d : d.replace(/[+-]00:?00$/, "Z")) as T;
 }

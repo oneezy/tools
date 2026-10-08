@@ -5,7 +5,7 @@ import { spawnSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { after, before, beforeEach, test } from "node:test";
+import { afterAll, beforeAll, beforeEach, test } from "vite-plus/test";
 import { pathToFileURL } from "node:url";
 
 let base: string;
@@ -13,7 +13,7 @@ let root: string;
 let homeDir: string;
 let up: Upstream;
 
-const CLI = path.resolve(import.meta.dirname, "..", "src", "cli.js");
+const CLI = path.resolve(import.meta.dirname, "..", "dist", "src", "cli.js");
 const HARNESS_ENV = ["CLAUDE_CONFIG_DIR", "CODEX_HOME", "XDG_CONFIG_HOME", "HERMES_HOME"] as const;
 const GIT = ["-c", "user.name=t", "-c", "user.email=t@example.com", "-c", "commit.gpgsign=false"];
 
@@ -82,14 +82,27 @@ function write(rel: string, text: string): void {
   fs.writeFileSync(path.join(root, rel), text);
 }
 
-const MIT = "MIT License\n\nCopyright (c) 2026 Up\n\nPermission is hereby granted, free of charge, to any person obtaining a copy\nof this software and associated documentation files (the \"Software\"), to deal\nin the Software without restriction.\n";
+const MIT =
+  'MIT License\n\nCopyright (c) 2026 Up\n\nPermission is hereby granted, free of charge, to any person obtaining a copy\nof this software and associated documentation files (the "Software"), to deal\nin the Software without restriction.\n';
 
 const CONFIG = () => ({
   version: 1,
   library: { name: "skills", owner: "oneezy", homepage: "https://github.com/oneezy/skills" },
-  sources: { up: { repo: up.dir, ref: "main", root: "skills", skills: { a: "a", b: "b", tdd: "up-tdd" }, attribution: ["LICENSE"] } },
+  sources: {
+    up: {
+      repo: up.dir,
+      ref: "main",
+      root: "skills",
+      skills: { a: "a", b: "b", tdd: "up-tdd" },
+      attribution: ["LICENSE"],
+    },
+  },
   plugins: {
-    oneezy: { displayName: "Oneezy", description: "Justin's own skills, for every harness and project on the machine.", group: "oneezy" },
+    oneezy: {
+      displayName: "Oneezy",
+      description: "Justin's own skills, for every harness and project on the machine.",
+      group: "oneezy",
+    },
     up: { displayName: "Up", description: "Up's skills, following main.", source: "up" },
   },
 });
@@ -100,7 +113,9 @@ function config(c: Record<string, unknown> = CONFIG()): void {
 
 /** The actions of a --json run that touch a file: neither a skip, a note nor a conflict. */
 function changes(r: { stdout: string }): Array<{ kind: string; path: string; note?: string }> {
-  return (JSON.parse(r.stdout).actions as Array<{ kind: string; path: string; note?: string }>).filter((a) => a.kind !== "skip" && a.kind !== "note" && a.kind !== "conflict");
+  return (JSON.parse(r.stdout).actions as Array<{ kind: string; path: string; note?: string }>).filter(
+    (a) => a.kind !== "skip" && a.kind !== "note" && a.kind !== "conflict",
+  );
 }
 
 function actions(r: { stdout: string }): Array<{ kind: string; path: string; note?: string }> {
@@ -123,10 +138,10 @@ function tree(dir: string): Record<string, string> {
 
 let library: Upstream;
 
-before(() => {
+beforeAll(() => {
   base = fs.mkdtempSync(path.join(os.tmpdir(), "skills-sync-build-"));
 });
-after(() => {
+afterAll(() => {
   fs.rmSync(base, { recursive: true, force: true });
 });
 beforeEach(() => {
@@ -145,7 +160,10 @@ beforeEach(() => {
   write(".gitignore", ".agents/skills/\n.claude/skills/\nupstream/\nskills-sync.local.json\n");
   write("skills/oneezy/own-one/SKILL.md", "---\nname: own-one\ndescription: mine\n---\nmine\n");
   write("skills/oneezy/own-one/agents/openai.yaml", "interface:\n  display_name: own-one\n");
-  write("skills/oneezy/own-two/SKILL.md", "---\nname: own-two\ndescription: two\nmetadata:\n  author: justin\n---\ntwo\n");
+  write(
+    "skills/oneezy/own-two/SKILL.md",
+    "---\nname: own-two\ndescription: two\nmetadata:\n  author: justin\n---\ntwo\n",
+  );
   write("skills/flat-one/SKILL.md", "---\nname: flat-one\ndescription: flat\n---\nflat\n");
   config();
   assert.equal(cli("refresh", "--quiet").status, 0);
@@ -156,15 +174,45 @@ test("build --plugins writes plugins/<id>/ for an own group and a refreshed sour
   const r = cli("build", "--plugins", "--json");
   assert.equal(r.status, 0, r.stderr);
   assert.deepEqual(fs.readdirSync(path.join(root, "plugins")).sort(), ["oneezy", "up"]);
-  assert.deepEqual(Object.keys(tree(path.join(root, "plugins", "oneezy"))), [".claude-plugin/plugin.json", ".codex-plugin/plugin.json", "NOTICE.md", "plugin.json", "skills/own-one/SKILL.md", "skills/own-one/agents/openai.yaml", "skills/own-two/SKILL.md"]);
-  assert.deepEqual(Object.keys(tree(path.join(root, "plugins", "up"))), [".claude-plugin/plugin.json", ".codex-plugin/plugin.json", "LICENSE", "NOTICE.md", "plugin.json", "skills/a/SKILL.md", "skills/b/SKILL.md", "skills/up-tdd/SKILL.md"]);
+  assert.deepEqual(Object.keys(tree(path.join(root, "plugins", "oneezy"))), [
+    ".claude-plugin/plugin.json",
+    ".codex-plugin/plugin.json",
+    "NOTICE.md",
+    "plugin.json",
+    "skills/own-one/SKILL.md",
+    "skills/own-one/agents/openai.yaml",
+    "skills/own-two/SKILL.md",
+  ]);
+  assert.deepEqual(Object.keys(tree(path.join(root, "plugins", "up"))), [
+    ".claude-plugin/plugin.json",
+    ".codex-plugin/plugin.json",
+    "LICENSE",
+    "NOTICE.md",
+    "plugin.json",
+    "skills/a/SKILL.md",
+    "skills/b/SKILL.md",
+    "skills/up-tdd/SKILL.md",
+  ]);
 
   // fix d1: every copy carries metadata.internal: true; everything else byte for byte, a rename keeps its rewritten name
-  assert.equal(read("plugins/oneezy/skills/own-one/SKILL.md"), "---\nname: own-one\ndescription: mine\nmetadata:\n  internal: true\n---\nmine\n");
-  assert.equal(read("plugins/oneezy/skills/own-two/SKILL.md"), "---\nname: own-two\ndescription: two\nmetadata:\n  internal: true\n  author: justin\n---\ntwo\n", "inserted into the existing metadata map");
+  assert.equal(
+    read("plugins/oneezy/skills/own-one/SKILL.md"),
+    "---\nname: own-one\ndescription: mine\nmetadata:\n  internal: true\n---\nmine\n",
+  );
+  assert.equal(
+    read("plugins/oneezy/skills/own-two/SKILL.md"),
+    "---\nname: own-two\ndescription: two\nmetadata:\n  internal: true\n  author: justin\n---\ntwo\n",
+    "inserted into the existing metadata map",
+  );
   assert.equal(read("plugins/oneezy/skills/own-one/agents/openai.yaml"), "interface:\n  display_name: own-one\n");
-  assert.equal(read("plugins/up/skills/up-tdd/SKILL.md"), "---\nname: up-tdd\ndescription: tdd skill\nmetadata:\n  internal: true\n---\nred, green\n");
-  assert.equal(read("plugins/up/skills/a/SKILL.md"), "---\nname: a\ndescription: a skill\nmetadata:\n  internal: true\n---\ndo the thing\n");
+  assert.equal(
+    read("plugins/up/skills/up-tdd/SKILL.md"),
+    "---\nname: up-tdd\ndescription: tdd skill\nmetadata:\n  internal: true\n---\nred, green\n",
+  );
+  assert.equal(
+    read("plugins/up/skills/a/SKILL.md"),
+    "---\nname: a\ndescription: a skill\nmetadata:\n  internal: true\n---\ndo the thing\n",
+  );
 
   // the version of a new package: 0.1.0+<sha12> of the library's HEAD
   const version = `0.1.0+${library.git("rev-parse", "--short=12", "HEAD")}`;
@@ -186,7 +234,11 @@ test("build --plugins writes plugins/<id>/ for an own group and a refreshed sour
   assert.equal(iface.developerName, "oneezy");
   assert.equal(typeof iface.category, "string");
   assert.ok(Array.isArray(iface.capabilities) && iface.capabilities.length > 0);
-  assert.deepEqual(Object.keys(portable), ["$schema", "name", "version", "description", "author", "homepage", "repository", "keywords", "extensions"], "only Agent Plugins 1.0 fields at the root");
+  assert.deepEqual(
+    Object.keys(portable),
+    ["$schema", "name", "version", "description", "author", "homepage", "repository", "keywords", "extensions"],
+    "only Agent Plugins 1.0 fields at the root",
+  );
 
   const legacy = json(path.join(root, "plugins", "oneezy", ".codex-plugin", "plugin.json"));
   assert.equal(legacy.name, "oneezy");
@@ -196,7 +248,19 @@ test("build --plugins writes plugins/<id>/ for an own group and a refreshed sour
   assert.ok(!("extensions" in legacy));
 
   const claude = json(path.join(root, "plugins", "oneezy", ".claude-plugin", "plugin.json"));
-  assert.deepEqual(claude, { name: "oneezy", displayName: "Oneezy", description: "Justin's own skills, for every harness and project on the machine.", author: { name: "oneezy", url: "https://github.com/oneezy" }, homepage: "https://github.com/oneezy/skills", repository: "https://github.com/oneezy/skills", keywords: portable.keywords }, "no version, so Claude Code tracks commits");
+  assert.deepEqual(
+    claude,
+    {
+      name: "oneezy",
+      displayName: "Oneezy",
+      description: "Justin's own skills, for every harness and project on the machine.",
+      author: { name: "oneezy", url: "https://github.com/oneezy" },
+      homepage: "https://github.com/oneezy/skills",
+      repository: "https://github.com/oneezy/skills",
+      keywords: portable.keywords,
+    },
+    "no version, so Claude Code tracks commits",
+  );
 
   // the source plugin: license from the attribution file, the upstream repo and commit in the NOTICE
   const upPortable = json(path.join(root, "plugins", "up", "plugin.json"));
@@ -218,8 +282,14 @@ test("build --plugins writes plugins/<id>/ for an own group and a refreshed sour
 
   // an own plugin with no LICENSE in the library: none in the package, one reported line, still built
   assert.ok(!fs.existsSync(path.join(root, "plugins", "oneezy", "LICENSE")));
-  assert.ok(actions(r).some((a) => a.kind === "note" && /LICENSE/.test(a.note ?? "") && /oneezy/.test(a.path)), `a note about the missing LICENSE: ${r.stdout}`);
-  assert.ok(!JSON.stringify(tree(path.join(root, "plugins"))).includes("flat-one"), "a flat skill belongs to no plugin");
+  assert.ok(
+    actions(r).some((a) => a.kind === "note" && /LICENSE/.test(a.note ?? "") && /oneezy/.test(a.path)),
+    `a note about the missing LICENSE: ${r.stdout}`,
+  );
+  assert.ok(
+    !JSON.stringify(tree(path.join(root, "plugins"))).includes("flat-one"),
+    "a flat skill belongs to no plugin",
+  );
   assert.deepEqual(fs.readdirSync(homeDir), [], "nothing written outside the library");
 });
 
@@ -232,7 +302,11 @@ test("build --catalogs writes the Claude Code catalog (name from the library's o
   assert.deepEqual(claude.owner, { name: "oneezy" });
   assert.equal(typeof claude.description, "string");
   assert.deepEqual(claude.plugins, [
-    { name: "oneezy", source: "./plugins/oneezy", description: "Justin's own skills, for every harness and project on the machine." },
+    {
+      name: "oneezy",
+      source: "./plugins/oneezy",
+      description: "Justin's own skills, for every harness and project on the machine.",
+    },
     { name: "up", source: "./plugins/up", description: "Up's skills, following main." },
   ]);
   const codex = json(path.join(root, ".agents", "plugins", "marketplace.json"));
@@ -271,14 +345,36 @@ test("build is idempotent and deterministic: a second build changes nothing byte
   library.commit("edit own-one");
   const edited = cli("build", "--json");
   assert.equal(edited.status, 0, edited.stderr);
-  const touched = changes(edited).map((a) => path.relative(root, a.path).split("\\").join("/")).sort();
-  assert.deepEqual(touched, ["plugins/oneezy/.codex-plugin/plugin.json", "plugins/oneezy/NOTICE.md", "plugins/oneezy/plugin.json", "plugins/oneezy/skills/own-one/SKILL.md"], "only the edited package, and only its files that changed");
+  const touched = changes(edited)
+    .map((a) => path.relative(root, a.path).split("\\").join("/"))
+    .sort();
+  assert.deepEqual(
+    touched,
+    [
+      "plugins/oneezy/.codex-plugin/plugin.json",
+      "plugins/oneezy/NOTICE.md",
+      "plugins/oneezy/plugin.json",
+      "plugins/oneezy/skills/own-one/SKILL.md",
+    ],
+    "only the edited package, and only its files that changed",
+  );
   const version = `0.2.0+${library.git("rev-parse", "--short=12", "HEAD")}`;
-  assert.equal(json(path.join(root, "plugins", "oneezy", "plugin.json")).version, version, "the next minor after 0.1.0, whatever the commit count");
+  assert.equal(
+    json(path.join(root, "plugins", "oneezy", "plugin.json")).version,
+    version,
+    "the next minor after 0.1.0, whatever the commit count",
+  );
   assert.equal(json(path.join(root, "plugins", "oneezy", ".codex-plugin", "plugin.json")).version, version);
-  assert.match(json(path.join(root, "plugins", "up", "plugin.json")).version, /^0\.1\.0\+/, "the untouched package keeps the version it was built with");
+  assert.match(
+    json(path.join(root, "plugins", "up", "plugin.json")).version,
+    /^0\.1\.0\+/,
+    "the untouched package keeps the version it was built with",
+  );
   assert.ok(read("plugins/oneezy/NOTICE.md").includes(library.head()));
-  assert.equal(read("plugins/oneezy/skills/own-one/SKILL.md"), "---\nname: own-one\ndescription: mine\nmetadata:\n  internal: true\n---\nmine, edited\n");
+  assert.equal(
+    read("plugins/oneezy/skills/own-one/SKILL.md"),
+    "---\nname: own-one\ndescription: mine\nmetadata:\n  internal: true\n---\nmine, edited\n",
+  );
   assert.deepEqual(changes(cli("build", "--json")), [], "settled");
 
   // a removed own skill leaves its package; a package for an id dropped from the config goes
@@ -289,7 +385,12 @@ test("build is idempotent and deterministic: a second build changes nothing byte
   assert.equal(pruned.status, 0, pruned.stderr);
   assert.ok(!fs.existsSync(path.join(root, "plugins", "oneezy", "skills", "own-two")), "own-two's copy is gone");
   assert.ok(!fs.existsSync(path.join(root, "plugins", "old")), "the stale package is gone");
-  assert.ok(actions(pruned).some((a) => a.kind === "delete" && a.path.endsWith("old") && /no longer in skills-sync\.json/.test(a.note ?? "")), pruned.stdout);
+  assert.ok(
+    actions(pruned).some(
+      (a) => a.kind === "delete" && a.path.endsWith("old") && /no longer in skills-sync\.json/.test(a.note ?? ""),
+    ),
+    pruned.stdout,
+  );
   assert.deepEqual(fs.readdirSync(path.join(root, "plugins")).sort(), ["oneezy", "up"]);
 });
 
@@ -299,7 +400,10 @@ test("build --check computes every output in memory, prints each drifted path an
   assert.equal(clean.status, 0, clean.stderr + clean.stdout);
   assert.match(clean.stdout, /build --check: clean/);
 
-  write("plugins/up/skills/a/SKILL.md", "---\nname: a\ndescription: a skill\nmetadata:\n  internal: true\n---\nhand edited\n");
+  write(
+    "plugins/up/skills/a/SKILL.md",
+    "---\nname: a\ndescription: a skill\nmetadata:\n  internal: true\n---\nhand edited\n",
+  );
   write("skills/oneezy/own-one/SKILL.md", "---\nname: own-one\ndescription: mine\n---\nmine, edited after the build\n");
   fs.rmSync(path.join(root, ".agents", "plugins", "marketplace.json"));
   write("plugins/old/plugin.json", "{}\n");
@@ -312,7 +416,16 @@ test("build --check computes every output in memory, prints each drifted path an
   const lines = drifted.stdout.split("\n").filter((l) => l.startsWith("drift"));
   const paths = lines.map((l) => l.replace(/^drift\s+/, "").trim()).sort();
   // a changed package takes the next version, so its two versioned manifests drift with the files that changed
-  assert.deepEqual(paths, [".agents/plugins/marketplace.json", "plugins/old", "plugins/oneezy/.codex-plugin/plugin.json", "plugins/oneezy/plugin.json", "plugins/oneezy/skills/own-one/SKILL.md", "plugins/up/.codex-plugin/plugin.json", "plugins/up/plugin.json", "plugins/up/skills/a/SKILL.md"]);
+  assert.deepEqual(paths, [
+    ".agents/plugins/marketplace.json",
+    "plugins/old",
+    "plugins/oneezy/.codex-plugin/plugin.json",
+    "plugins/oneezy/plugin.json",
+    "plugins/oneezy/skills/own-one/SKILL.md",
+    "plugins/up/.codex-plugin/plugin.json",
+    "plugins/up/plugin.json",
+    "plugins/up/skills/a/SKILL.md",
+  ]);
   assert.deepEqual(tree(root), before, "--check wrote nothing");
   const asJson = cli("build", "--check", "--json");
   assert.equal(asJson.status, 1);
@@ -321,7 +434,11 @@ test("build --check computes every output in memory, prints each drifted path an
   assert.equal(cli("build", "--quiet").status, 0);
   const again = cli("build", "--check");
   assert.equal(again.status, 0, again.stdout);
-  assert.equal(read("plugins/up/skills/a/SKILL.md"), "---\nname: a\ndescription: a skill\nmetadata:\n  internal: true\n---\ndo the thing\n", "the hand edit was overwritten from the working set");
+  assert.equal(
+    read("plugins/up/skills/a/SKILL.md"),
+    "---\nname: a\ndescription: a skill\nmetadata:\n  internal: true\n---\ndo the thing\n",
+    "the hand edit was overwritten from the working set",
+  );
   assert.ok(read("plugins/oneezy/skills/own-one/SKILL.md").includes("edited after the build"));
   // --check --catalogs looks at the catalogs only
   write("plugins/up/skills/a/SKILL.md", "drifted again\n");
@@ -344,8 +461,14 @@ test("generate.plugins: false builds nothing and --check ignores the plugin form
 
   config();
   assert.equal(cli("build", "--quiet").status, 0);
-  assert.ok(fs.existsSync(path.join(root, "plugins", "oneezy", "plugin.json")) && fs.existsSync(path.join(root, ".claude-plugin", "marketplace.json")));
-  assert.ok(!fs.existsSync(path.join(root, "artifacts")), "a build with no output named writes the committed form only: no archive");
+  assert.ok(
+    fs.existsSync(path.join(root, "plugins", "oneezy", "plugin.json")) &&
+      fs.existsSync(path.join(root, ".claude-plugin", "marketplace.json")),
+  );
+  assert.ok(
+    !fs.existsSync(path.join(root, "artifacts")),
+    "a build with no output named writes the committed form only: no archive",
+  );
 
   fs.rmSync(path.join(root, ".git"), { recursive: true, force: true });
   assert.equal(cli("build", "--quiet").status, 0);
@@ -355,7 +478,11 @@ test("generate.plugins: false builds nothing and --check ignores the plugin form
   assert.deepEqual(changes(cli("build", "--json")), [], "settled without git too");
   // the archives carry the same version; an own plugin has no commit to record, a source plugin still has upstream's
   assert.equal(cli("build", "--artifacts", "--quiet").status, 0);
-  assert.deepEqual(fs.readdirSync(path.join(root, "artifacts")).sort(), ["oneezy-0.0.0+nogit.zip", "releases.json", "up-0.0.0+nogit.zip"]);
+  assert.deepEqual(fs.readdirSync(path.join(root, "artifacts")).sort(), [
+    "oneezy-0.0.0+nogit.zip",
+    "releases.json",
+    "up-0.0.0+nogit.zip",
+  ]);
   const record = json(path.join(root, "artifacts", "releases.json")).plugins;
   assert.equal(record.oneezy.commit, null);
   assert.equal(record.up.commit, up.head());
@@ -364,15 +491,47 @@ test("generate.plugins: false builds nothing and --check ignores the plugin form
 test("the config schema admits a releases section (the ChatGPT upload record per plugin: plugin_id, release_id, sha256, scope, date, optional files) and nothing else inside it", async () => {
   const { shippedSchema, validate } = await import("../src/schema.js");
   const sha = "a".repeat(64);
-  const releases = { oneezy: { plugin_id: "plugin_abc", release_id: "rel_1", sha256: sha, scope: "personal", date: "2026-10-01" }, up: { plugin_id: "plugin_def", release_id: "rel_2", sha256: sha, scope: "personal", date: "2026-10-01", files: ["plugin.json", "skills/a/SKILL.md"] } };
+  const releases = {
+    oneezy: { plugin_id: "plugin_abc", release_id: "rel_1", sha256: sha, scope: "personal", date: "2026-10-01" },
+    up: {
+      plugin_id: "plugin_def",
+      release_id: "rel_2",
+      sha256: sha,
+      scope: "personal",
+      date: "2026-10-01",
+      files: ["plugin.json", "skills/a/SKILL.md"],
+    },
+  };
   config({ ...CONFIG(), releases });
   assert.deepEqual(validate(shippedSchema("skills-sync"), json(path.join(root, "skills-sync.json"))), []);
   assert.equal(cli("build", "--plugins", "--quiet").status, 0, "a config with releases builds");
-  const bad = { ...CONFIG(), releases: { oneezy: { plugin_id: "plugin_abc", release_id: "rel_1", sha256: "nope", scope: "personal", date: "2026-10-01", extra: 1 }, up: { release_id: "rel_2" } } };
+  const bad = {
+    ...CONFIG(),
+    releases: {
+      oneezy: {
+        plugin_id: "plugin_abc",
+        release_id: "rel_1",
+        sha256: "nope",
+        scope: "personal",
+        date: "2026-10-01",
+        extra: 1,
+      },
+      up: { release_id: "rel_2" },
+    },
+  };
   const errors = validate(shippedSchema("skills-sync"), bad);
-  assert.ok(errors.some((e) => /\$\.releases\.oneezy\.extra: not allowed/.test(e)), errors.join("\n"));
-  assert.ok(errors.some((e) => /\$\.releases\.oneezy\.sha256: must match/.test(e)), errors.join("\n"));
-  assert.ok(errors.some((e) => /\$\.releases\.up: missing plugin_id/.test(e)), errors.join("\n"));
+  assert.ok(
+    errors.some((e) => /\$\.releases\.oneezy\.extra: not allowed/.test(e)),
+    errors.join("\n"),
+  );
+  assert.ok(
+    errors.some((e) => /\$\.releases\.oneezy\.sha256: must match/.test(e)),
+    errors.join("\n"),
+  );
+  assert.ok(
+    errors.some((e) => /\$\.releases\.up: missing plugin_id/.test(e)),
+    errors.join("\n"),
+  );
   config(bad);
   const r = cli("build", "--plugins", "--quiet");
   assert.equal(r.status, 1);
@@ -383,14 +542,23 @@ test("a prior version is believed only when the package agrees with itself and w
   assert.equal(cli("build", "--quiet").status, 0);
   const c1 = library.head();
   const c2 = library.commit("built");
-  assert.equal(cli("build", "--check").status, 0, "verified: the repository holds c1 and the NOTICE names it with its date");
+  assert.equal(
+    cli("build", "--check").status,
+    0,
+    "verified: the repository holds c1 and the NOTICE names it with its date",
+  );
   const short = (c: string) => library.git("rev-parse", "--short=12", c);
   // the NOTICE spells UTC as Z whatever git printed (git < 2.45 prints +00:00)
   const date = (c: string) => library.git("log", "-1", "--format=%cI", c).replace(/[+-]00:00$/, "Z");
-  const manifests = ["plugins/oneezy/.codex-plugin/plugin.json", "plugins/oneezy/NOTICE.md", "plugins/oneezy/plugin.json"];
+  const manifests = [
+    "plugins/oneezy/.codex-plugin/plugin.json",
+    "plugins/oneezy/NOTICE.md",
+    "plugins/oneezy/plugin.json",
+  ];
   const built = tree(path.join(root, "plugins", "oneezy"));
   const tamper = (version: string, commit: string, when: string) => {
-    for (const f of ["plugin.json", ".codex-plugin/plugin.json"]) write(`plugins/oneezy/${f}`, built[f].replace(/"version": "[^"]+"/, `"version": "${version}"`));
+    for (const f of ["plugin.json", ".codex-plugin/plugin.json"])
+      write(`plugins/oneezy/${f}`, built[f].replace(/"version": "[^"]+"/, `"version": "${version}"`));
     write("plugins/oneezy/NOTICE.md", built["NOTICE.md"].replace(/^- Commit: .*$/m, `- Commit: ${commit} (${when})`));
   };
   // well-formed, the version naming one commit and the NOTICE another
@@ -416,7 +584,12 @@ test("a prior version is believed only when the package agrees with itself and w
   // build treats the package as changed: the next minor after the one on disk (0.1.0) at HEAD; the source package stays at the version it was built with
   const rebuilt = cli("build", "--json");
   assert.equal(rebuilt.status, 0, rebuilt.stderr);
-  assert.deepEqual(changes(rebuilt).map((a) => path.relative(root, a.path).split("\\").join("/")).sort(), manifests);
+  assert.deepEqual(
+    changes(rebuilt)
+      .map((a) => path.relative(root, a.path).split("\\").join("/"))
+      .sort(),
+    manifests,
+  );
   const version = `0.2.0+${short(c2)}`;
   assert.equal(json(path.join(root, "plugins", "oneezy", "plugin.json")).version, version);
   assert.equal(json(path.join(root, "plugins", "oneezy", ".codex-plugin", "plugin.json")).version, version);
@@ -447,7 +620,11 @@ test("a package built on a branch is as built after the branch is squash-merged:
   library.git("merge", "-q", "--squash", "feature/x");
   library.commit("edit own-one (#1)");
   assert.equal(library.git("rev-list", "--count", "HEAD"), "3", "library, built, the squash");
-  assert.equal(spawnSync("git", ["-C", root, "merge-base", "--is-ancestor", onBranch, "HEAD"]).status, 1, "the commit the package was built at is not in main's history");
+  assert.equal(
+    spawnSync("git", ["-C", root, "merge-base", "--is-ancestor", onBranch, "HEAD"]).status,
+    1,
+    "the commit the package was built at is not in main's history",
+  );
   assert.deepEqual(tree(path.join(root, "plugins")), built, "the squash landed the packages as the branch built them");
   const check = cli("build", "--check");
   assert.equal(check.status, 0, check.stdout);
@@ -455,7 +632,11 @@ test("a package built on a branch is as built after the branch is squash-merged:
   const whole = cli("check");
   assert.equal(whole.status, 0, whole.stdout);
   assert.deepEqual(changes(cli("build", "--json")), [], "nothing rewritten");
-  assert.equal(json(path.join(root, "plugins", "oneezy", "plugin.json")).version, version, "the version it was built with, the branch's commit");
+  assert.equal(
+    json(path.join(root, "plugins", "oneezy", "plugin.json")).version,
+    version,
+    "the version it was built with, the branch's commit",
+  );
   assert.ok(read("plugins/oneezy/NOTICE.md").includes(`- Commit: ${onBranch} (`));
 
   // the next change on main, whose count (3) is below the branch's (7): the version still goes up, never back
@@ -463,7 +644,10 @@ test("a package built on a branch is as built after the branch is squash-merged:
   library.commit("edit own-one on main");
   assert.equal(library.git("rev-list", "--count", "HEAD"), "4");
   assert.equal(cli("build", "--quiet").status, 0);
-  assert.equal(json(path.join(root, "plugins", "oneezy", "plugin.json")).version, `0.3.0+${library.git("rev-parse", "--short=12", "HEAD")}`);
+  assert.equal(
+    json(path.join(root, "plugins", "oneezy", "plugin.json")).version,
+    `0.3.0+${library.git("rev-parse", "--short=12", "HEAD")}`,
+  );
   library.git("checkout", "-q", "--", ".");
   library.git("reset", "-q", "--hard", "HEAD~1");
 
@@ -489,8 +673,14 @@ test("a shallow clone is as built: at depth 1 (what actions/checkout fetches) it
   const c3 = library.commit("edit own-one");
   assert.equal(cli("build", "--quiet").status, 0);
   library.commit("rebuilt");
-  assert.equal(json(path.join(root, "plugins", "oneezy", "plugin.json")).version, `0.2.0+${library.git("rev-parse", "--short=12", c3)}`);
-  assert.equal(json(path.join(root, "plugins", "up", "plugin.json")).version, `0.1.0+${library.git("rev-parse", "--short=12", c1)}`);
+  assert.equal(
+    json(path.join(root, "plugins", "oneezy", "plugin.json")).version,
+    `0.2.0+${library.git("rev-parse", "--short=12", c3)}`,
+  );
+  assert.equal(
+    json(path.join(root, "plugins", "up", "plugin.json")).version,
+    `0.1.0+${library.git("rev-parse", "--short=12", c1)}`,
+  );
 
   for (const depth of [1, 2]) {
     const clone = path.join(base, `shallow-${depth}`);
@@ -499,7 +689,11 @@ test("a shallow clone is as built: at depth 1 (what actions/checkout fetches) it
     assert.equal(at.git("rev-parse", "--is-shallow-repository"), "true");
     assert.ok(!holds(clone, c1), "the commit the source package was built at is not there");
     assert.equal(holds(clone, c3), depth === 2, "the commit the own package was built at is there at depth 2 only");
-    assert.equal(cliIn(clone, "refresh", "--frozen", "--quiet").status, 0, "the snapshot and working set from the lock");
+    assert.equal(
+      cliIn(clone, "refresh", "--frozen", "--quiet").status,
+      0,
+      "the snapshot and working set from the lock",
+    );
     const check = cliIn(clone, "build", "--check");
     assert.equal(check.status, 0, `depth ${depth}: ${check.stdout}`);
     assert.match(check.stdout, /build --check: clean/);
@@ -512,22 +706,52 @@ test("a shallow clone is as built: at depth 1 (what actions/checkout fetches) it
   // a package whose inputs changed takes the next version at the clone's HEAD; the shallow history does not matter
   const clone = path.join(base, "shallow-1");
   const at = new Upstream(clone);
-  fs.writeFileSync(path.join(clone, "skills", "oneezy", "own-two", "SKILL.md"), "---\nname: own-two\ndescription: two\n---\ntwo, edited in the shallow clone\n");
+  fs.writeFileSync(
+    path.join(clone, "skills", "oneezy", "own-two", "SKILL.md"),
+    "---\nname: own-two\ndescription: two\n---\ntwo, edited in the shallow clone\n",
+  );
   const drifted = cliIn(clone, "build", "--check", "--json");
   assert.equal(drifted.status, 1);
-  assert.deepEqual(drift(drifted), ["plugins/oneezy/.codex-plugin/plugin.json", "plugins/oneezy/NOTICE.md", "plugins/oneezy/plugin.json", "plugins/oneezy/skills/own-two/SKILL.md"]);
+  assert.deepEqual(drift(drifted), [
+    "plugins/oneezy/.codex-plugin/plugin.json",
+    "plugins/oneezy/NOTICE.md",
+    "plugins/oneezy/plugin.json",
+    "plugins/oneezy/skills/own-two/SKILL.md",
+  ]);
   const built = cliIn(clone, "build", "--json");
   assert.equal(built.status, 0, built.stderr + built.stdout);
-  assert.equal(json(path.join(clone, "plugins", "oneezy", "plugin.json")).version, `0.3.0+${at.git("rev-parse", "--short=12", "HEAD")}`);
-  assert.match(json(path.join(clone, "plugins", "up", "plugin.json")).version, /^0\.1\.0\+/, "the untouched package keeps its own");
+  assert.equal(
+    json(path.join(clone, "plugins", "oneezy", "plugin.json")).version,
+    `0.3.0+${at.git("rev-parse", "--short=12", "HEAD")}`,
+  );
+  assert.match(
+    json(path.join(clone, "plugins", "up", "plugin.json")).version,
+    /^0\.1\.0\+/,
+    "the untouched package keeps its own",
+  );
   assert.equal(cliIn(clone, "build", "--check").status, 0);
 });
 
 test("a checkout without a commit yet builds 0.0.0+nogit and its NOTICE says so; after the first commit that prior is not believed: build gives the package the real version and --check agrees", () => {
   const fresh = repo(path.join(base, "fresh"));
   fs.mkdirSync(path.join(fresh.dir, "skills", "grp", "one"), { recursive: true });
-  fs.writeFileSync(path.join(fresh.dir, "skills", "grp", "one", "SKILL.md"), "---\nname: one\ndescription: one\n---\none\n");
-  fs.writeFileSync(path.join(fresh.dir, "skills-sync.json"), JSON.stringify({ version: 1, library: { name: "fresh", owner: "t" }, sources: {}, plugins: { grp: { displayName: "Grp", group: "grp" } } }, null, 2) + "\n");
+  fs.writeFileSync(
+    path.join(fresh.dir, "skills", "grp", "one", "SKILL.md"),
+    "---\nname: one\ndescription: one\n---\none\n",
+  );
+  fs.writeFileSync(
+    path.join(fresh.dir, "skills-sync.json"),
+    JSON.stringify(
+      {
+        version: 1,
+        library: { name: "fresh", owner: "t" },
+        sources: {},
+        plugins: { grp: { displayName: "Grp", group: "grp" } },
+      },
+      null,
+      2,
+    ) + "\n",
+  );
   const manifest = path.join(fresh.dir, "plugins", "grp", "plugin.json");
   const notice = () => fs.readFileSync(path.join(fresh.dir, "plugins", "grp", "NOTICE.md"), "utf8");
   assert.equal(cliIn(fresh.dir, "build", "--quiet").status, 0);
@@ -537,7 +761,11 @@ test("a checkout without a commit yet builds 0.0.0+nogit and its NOTICE says so;
   fresh.commit("one");
   const check = cliIn(fresh.dir, "build", "--check", "--json");
   assert.equal(check.status, 1, "0.0.0+nogit is no longer what a build would write");
-  assert.deepEqual(drift(check), ["plugins/grp/.codex-plugin/plugin.json", "plugins/grp/NOTICE.md", "plugins/grp/plugin.json"]);
+  assert.deepEqual(drift(check), [
+    "plugins/grp/.codex-plugin/plugin.json",
+    "plugins/grp/NOTICE.md",
+    "plugins/grp/plugin.json",
+  ]);
   assert.equal(cliIn(fresh.dir, "build", "--quiet").status, 0);
   const version = `0.1.0+${fresh.git("rev-parse", "--short=12", "HEAD")}`;
   assert.equal(json(manifest).version, version);
@@ -547,7 +775,10 @@ test("a checkout without a commit yet builds 0.0.0+nogit and its NOTICE says so;
 });
 
 test("a play group with skills is packaged and cataloged exactly like oneezy: the same files in plugins/play as in plugins/oneezy, its skill copies marked internal, its NOTICE naming skills/play, an entry in both catalogs; build --check and check are clean", () => {
-  config({ ...CONFIG(), plugins: { ...CONFIG().plugins, play: { displayName: "Play", description: "Justin's playground.", group: "play" } } });
+  config({
+    ...CONFIG(),
+    plugins: { ...CONFIG().plugins, play: { displayName: "Play", description: "Justin's playground.", group: "play" } },
+  });
   write("skills/play/play-unslop/SKILL.md", "---\nname: play-unslop\ndescription: unslop\n---\nunslop\n");
   write("skills/play/play-unslop/agents/openai.yaml", "interface:\n  display_name: play-unslop\n");
   write("skills/oneezy/own-two/agents/openai.yaml", "interface:\n  display_name: own-two\n");
@@ -555,30 +786,57 @@ test("a play group with skills is packaged and cataloged exactly like oneezy: th
   library.commit("playground");
   const r = cli("build", "--json");
   assert.equal(r.status, 0, r.stdout + r.stderr);
-  const shape = (id: string, skill: string) => Object.keys(tree(path.join(root, "plugins", id))).filter((f) => !f.startsWith("skills/") || f.startsWith(`skills/${skill}/`)).map((f) => f.replace(`skills/${skill}/`, "skills/<skill>/")).sort();
+  const shape = (id: string, skill: string) =>
+    Object.keys(tree(path.join(root, "plugins", id)))
+      .filter((f) => !f.startsWith("skills/") || f.startsWith(`skills/${skill}/`))
+      .map((f) => f.replace(`skills/${skill}/`, "skills/<skill>/"))
+      .sort();
   assert.deepEqual(shape("play", "play-unslop"), shape("oneezy", "own-two"));
   assert.match(read("plugins", "play", "skills", "play-unslop", "SKILL.md"), /metadata:\n  internal: true\n/);
   assert.match(read("plugins", "play", "NOTICE.md"), /^- Source: `skills\/play` of oneezy\/skills/m);
   assert.match(read("plugins", "play", "NOTICE.md"), /^- Skills: play-unslop$/m);
-  assert.equal(json(path.join(root, "plugins", "play", "plugin.json")).version, json(path.join(root, "plugins", "oneezy", "plugin.json")).version, "both new at the same HEAD");
+  assert.equal(
+    json(path.join(root, "plugins", "play", "plugin.json")).version,
+    json(path.join(root, "plugins", "oneezy", "plugin.json")).version,
+    "both new at the same HEAD",
+  );
   for (const catalog of [".claude-plugin/marketplace.json", ".agents/plugins/marketplace.json"]) {
-    assert.deepEqual(json(path.join(root, catalog)).plugins.map((p: { name: string }) => p.name), ["oneezy", "up", "play"], catalog);
+    assert.deepEqual(
+      json(path.join(root, catalog)).plugins.map((p: { name: string }) => p.name),
+      ["oneezy", "up", "play"],
+      catalog,
+    );
   }
   assert.equal(cli("build", "--check").status, 0);
   assert.equal(cli("check").status, 0);
 });
 
 test("a group declared as a plugin but holding no skills yet is skipped with one note, exit 0: build writes no package and no catalog entry for it, build --check and check are clean and print the note; once it has a skill it is built, and when its last skill goes its package and catalog entries go too", () => {
-  const withPlay = () => config({ ...CONFIG(), plugins: { ...CONFIG().plugins, play: { displayName: "Play", description: "Justin's playground.", group: "play" } } });
+  const withPlay = () =>
+    config({
+      ...CONFIG(),
+      plugins: {
+        ...CONFIG().plugins,
+        play: { displayName: "Play", description: "Justin's playground.", group: "play" },
+      },
+    });
   withPlay();
   const NOTE = "no skills under skills/play yet; not built, not cataloged";
   const r = cli("build", "--json");
   assert.equal(r.status, 0, r.stdout + r.stderr);
   const about = actions(r).filter((a) => a.path.split(path.sep).join("/").endsWith("plugins/play"));
-  assert.deepEqual(about.map((a) => [a.kind, a.note]), [["note", NOTE]], "one note, nothing else about plugins/play");
+  assert.deepEqual(
+    about.map((a) => [a.kind, a.note]),
+    [["note", NOTE]],
+    "one note, nothing else about plugins/play",
+  );
   assert.ok(!fs.existsSync(path.join(root, "plugins", "play")));
   for (const catalog of [".claude-plugin/marketplace.json", ".agents/plugins/marketplace.json"]) {
-    assert.deepEqual(json(path.join(root, catalog)).plugins.map((p: { name: string }) => p.name), ["oneezy", "up"], catalog);
+    assert.deepEqual(
+      json(path.join(root, catalog)).plugins.map((p: { name: string }) => p.name),
+      ["oneezy", "up"],
+      catalog,
+    );
   }
   library.commit("empty playground");
   const buildCheck = cli("build", "--check");
@@ -587,14 +845,21 @@ test("a group declared as a plugin but holding no skills yet is skipped with one
   assert.match(buildCheck.stdout, /^build --check: clean\b/m);
   const check = cli("check");
   assert.equal(check.status, 0, check.stdout);
-  assert.deepEqual(check.stdout.split("\n").filter((l) => l && !l.startsWith("check:")), [`note: plugins/play: ${NOTE}`]);
+  assert.deepEqual(
+    check.stdout.split("\n").filter((l) => l && !l.startsWith("check:")),
+    [`note: plugins/play: ${NOTE}`],
+  );
   assert.deepEqual(JSON.parse(cli("check", "--json").stdout).notes, [{ path: "plugins/play", reason: NOTE }]);
 
   // a first skill: built and cataloged; the last one gone: package and catalog entries removed, the note again
   write("skills/play/play-unslop/SKILL.md", "---\nname: play-unslop\ndescription: unslop\n---\nunslop\n");
   assert.equal(cli("build", "--quiet").status, 0);
   assert.ok(fs.existsSync(path.join(root, "plugins", "play", "skills", "play-unslop", "SKILL.md")));
-  assert.ok(json(path.join(root, ".claude-plugin", "marketplace.json")).plugins.some((p: { name: string }) => p.name === "play"));
+  assert.ok(
+    json(path.join(root, ".claude-plugin", "marketplace.json")).plugins.some(
+      (p: { name: string }) => p.name === "play",
+    ),
+  );
   library.commit("first play skill");
   fs.rmSync(path.join(root, "skills", "play"), { recursive: true });
   const stale = cli("check");
@@ -602,9 +867,18 @@ test("a group declared as a plugin but holding no skills yet is skipped with one
   assert.ok(stale.stdout.includes(`plugins/play: ${NOTE}; build would remove it`), stale.stdout);
   const emptied = cli("build", "--json");
   assert.equal(emptied.status, 0, emptied.stdout);
-  assert.deepEqual(actions(emptied).filter((a) => a.path.split(path.sep).join("/").endsWith("plugins/play")).map((a) => [a.kind, a.note]), [["delete", NOTE]], "one line: the removal, with the reason");
+  assert.deepEqual(
+    actions(emptied)
+      .filter((a) => a.path.split(path.sep).join("/").endsWith("plugins/play"))
+      .map((a) => [a.kind, a.note]),
+    [["delete", NOTE]],
+    "one line: the removal, with the reason",
+  );
   assert.ok(!fs.existsSync(path.join(root, "plugins", "play")));
-  assert.deepEqual(json(path.join(root, ".claude-plugin", "marketplace.json")).plugins.map((p: { name: string }) => p.name), ["oneezy", "up"]);
+  assert.deepEqual(
+    json(path.join(root, ".claude-plugin", "marketplace.json")).plugins.map((p: { name: string }) => p.name),
+    ["oneezy", "up"],
+  );
   assert.equal(cli("check").status, 0);
 });
 
@@ -616,8 +890,16 @@ test("a package that cannot be built is a conflict that fails the run: a source 
   assert.equal(check.status, 1);
   assert.match(check.stdout, /source nosrc is not in skills-sync\.json/);
   assert.match(check.stdout, /1 conflict\(s\) above to fix first/);
-  const paths = check.stdout.split("\n").filter((l) => l.startsWith("drift")).map((l) => l.replace(/^drift\s+/, "").trim()).sort();
-  assert.deepEqual(paths, [".agents/plugins/marketplace.json", ".claude-plugin/marketplace.json", "plugins/src"], "the catalogs gained an entry; the package cannot be built");
+  const paths = check.stdout
+    .split("\n")
+    .filter((l) => l.startsWith("drift"))
+    .map((l) => l.replace(/^drift\s+/, "").trim())
+    .sort();
+  assert.deepEqual(
+    paths,
+    [".agents/plugins/marketplace.json", ".claude-plugin/marketplace.json", "plugins/src"],
+    "the catalogs gained an entry; the package cannot be built",
+  );
   const r = cli("build", "--json");
   assert.equal(r.status, 1, "a conflict fails build too");
   assert.equal(actions(r).filter((a) => a.kind === "conflict").length, 1);
@@ -631,10 +913,17 @@ test("a package that cannot be built is a conflict that fails the run: a source 
   const noSnapshot = cli("build", "--check", "--json");
   assert.equal(noSnapshot.status, 1);
   assert.deepEqual(drift(noSnapshot), ["plugins/up"]);
-  assert.ok(actions(noSnapshot).some((a) => a.kind === "conflict" && /no snapshot under upstream\/up/.test(a.note ?? "")), noSnapshot.stdout);
+  assert.ok(
+    actions(noSnapshot).some((a) => a.kind === "conflict" && /no snapshot under upstream\/up/.test(a.note ?? "")),
+    noSnapshot.stdout,
+  );
   const built = tree(path.join(root, "plugins", "up"));
   assert.equal(cli("build").status, 1);
-  assert.deepEqual(tree(path.join(root, "plugins", "up")), built, "the committed package is never deleted for want of a snapshot");
+  assert.deepEqual(
+    tree(path.join(root, "plugins", "up")),
+    built,
+    "the committed package is never deleted for want of a snapshot",
+  );
 });
 
 test("a clone that git converts to CRLF on checkout (core.autocrlf=true) is as built: build --check is clean, build rewrites nothing and git sees nothing to commit; a real edit there still drifts", () => {
@@ -643,7 +932,10 @@ test("a clone that git converts to CRLF on checkout (core.autocrlf=true) is as b
   const clone = path.join(base, "clone");
   library.git("clone", "-q", "-c", "core.autocrlf=true", root, clone);
   const at = new Upstream(clone);
-  const eol = at.git("ls-files", "--eol").split(/\r?\n/).filter((l) => /plugins\/|marketplace\.json/.test(l));
+  const eol = at
+    .git("ls-files", "--eol")
+    .split(/\r?\n/)
+    .filter((l) => /plugins\/|marketplace\.json/.test(l));
   assert.ok(eol.length > 10 && eol.every((l) => /^i\/lf\s+w\/crlf/.test(l)), eol.join("\n"));
   assert.equal(cliIn(clone, "refresh", "--frozen", "--quiet").status, 0, "the snapshot and working set from the lock");
   const check = cliIn(clone, "build", "--check");
@@ -651,10 +943,17 @@ test("a clone that git converts to CRLF on checkout (core.autocrlf=true) is as b
   assert.match(check.stdout, /build --check: clean/);
   assert.deepEqual(changes(cliIn(clone, "build", "--json")), [], "nothing rewritten");
   assert.equal(at.git("status", "--porcelain"), "");
-  fs.writeFileSync(path.join(clone, "plugins", "up", "skills", "a", "SKILL.md"), "---\r\nname: a\r\ndescription: a skill\r\nmetadata:\r\n  internal: true\r\n---\r\nhand edited\r\n");
+  fs.writeFileSync(
+    path.join(clone, "plugins", "up", "skills", "a", "SKILL.md"),
+    "---\r\nname: a\r\ndescription: a skill\r\nmetadata:\r\n  internal: true\r\n---\r\nhand edited\r\n",
+  );
   const edited = cliIn(clone, "build", "--check", "--json");
   assert.equal(edited.status, 1);
-  assert.deepEqual(drift(edited), ["plugins/up/.codex-plugin/plugin.json", "plugins/up/plugin.json", "plugins/up/skills/a/SKILL.md"], "the edited package counts as changed, so it would take the clone's HEAD version too");
+  assert.deepEqual(
+    drift(edited),
+    ["plugins/up/.codex-plugin/plugin.json", "plugins/up/plugin.json", "plugins/up/skills/a/SKILL.md"],
+    "the edited package counts as changed, so it would take the clone's HEAD version too",
+  );
 });
 
 test("build never follows a link: a junction or symlink inside plugins/<id>, or plugins/<id> itself as one, is a conflict that fails the run, the package is left alone and the source is never written through; --check lists the link; a link inside a source skill folder is not copied, with a note", () => {
@@ -668,12 +967,18 @@ test("build never follows a link: a junction or symlink inside plugins/<id>, or 
   assert.deepEqual(drift(check), ["plugins/oneezy/skills/own-one"]);
   const r = cli("build", "--json");
   assert.equal(r.status, 1);
-  assert.ok(actions(r).some((a) => a.kind === "conflict" && a.path === link && /never follows/.test(a.note ?? "")), r.stdout);
+  assert.ok(
+    actions(r).some((a) => a.kind === "conflict" && a.path === link && /never follows/.test(a.note ?? "")),
+    r.stdout,
+  );
   assert.deepEqual(tree(path.join(root, "skills")), source, "no source file was written through the link");
   assert.ok(fs.lstatSync(link).isSymbolicLink(), "the link is still there");
   fs.rmSync(link);
   assert.equal(cli("build", "--quiet").status, 0, "with the link gone the package is rebuilt");
-  assert.equal(read("plugins/oneezy/skills/own-one/SKILL.md"), "---\nname: own-one\ndescription: mine\nmetadata:\n  internal: true\n---\nmine\n");
+  assert.equal(
+    read("plugins/oneezy/skills/own-one/SKILL.md"),
+    "---\nname: own-one\ndescription: mine\nmetadata:\n  internal: true\n---\nmine\n",
+  );
   assert.equal(cli("build", "--check").status, 0);
   // the package folder itself as a link
   const pkg = path.join(root, "plugins", "up");
@@ -690,7 +995,10 @@ test("build never follows a link: a junction or symlink inside plugins/<id>, or 
   fs.symlinkSync(path.join(root, "skills", "flat-one"), inside, "junction");
   const noted = cli("build", "--json");
   assert.equal(noted.status, 0, noted.stderr);
-  assert.ok(actions(noted).some((a) => a.kind === "note" && a.path === inside && /not copied/.test(a.note ?? "")), noted.stdout);
+  assert.ok(
+    actions(noted).some((a) => a.kind === "note" && a.path === inside && /not copied/.test(a.note ?? "")),
+    noted.stdout,
+  );
   assert.ok(!fs.existsSync(path.join(root, "plugins", "oneezy", "skills", "own-two", "linked")));
   assert.equal(cli("build", "--check").status, 0);
   fs.rmSync(inside);
@@ -699,23 +1007,42 @@ test("build never follows a link: a junction or symlink inside plugins/<id>, or 
 /** `claude` on PATH, or null: the validation test skips itself without it. */
 function claudeBinary(): string | null {
   const r = spawnSync(process.platform === "win32" ? "where" : "which", ["claude"], { encoding: "utf8" });
-  const first = r.status === 0 ? r.stdout.split(/\r?\n/).map((l) => l.trim()).filter(Boolean)[0] : undefined;
+  const first =
+    r.status === 0
+      ? r.stdout
+          .split(/\r?\n/)
+          .map((l) => l.trim())
+          .filter(Boolean)[0]
+      : undefined;
   return first ?? null;
 }
 
-test("claude plugin validate passes on every built package and on the library root (its marketplace); warnings allowed, no errors", { skip: claudeBinary() ? false : "claude is not on PATH" }, () => {
-  assert.equal(cli("build", "--quiet").status, 0);
-  const claudeHome = path.join(homeDir, ".claude");
-  fs.mkdirSync(claudeHome, { recursive: true });
-  const env: NodeJS.ProcessEnv = { ...process.env, HOME: homeDir, USERPROFILE: homeDir, CLAUDE_CONFIG_DIR: claudeHome };
-  for (const target of [".", "plugins/oneezy", "plugins/up"]) {
-    const r = spawnSync(claudeBinary()!, ["plugin", "validate", target], { encoding: "utf8", cwd: root, env, timeout: 120_000 });
-    assert.equal(r.status, 0, `${target}: ${r.stdout}\n${r.stderr}`);
-    assert.match(r.stdout, /Validation passed/, `${target}: ${r.stdout}`);
-    assert.doesNotMatch(r.stdout, /error/i, `${target}: ${r.stdout}`);
-  }
-  assert.ok(!fs.existsSync(path.join(root, ".claude.json")), "validate wrote nothing into the library");
-});
+test.skipIf(!claudeBinary())(
+  "claude plugin validate passes on every built package and on the library root (its marketplace); warnings allowed, no errors",
+  () => {
+    assert.equal(cli("build", "--quiet").status, 0);
+    const claudeHome = path.join(homeDir, ".claude");
+    fs.mkdirSync(claudeHome, { recursive: true });
+    const env: NodeJS.ProcessEnv = {
+      ...process.env,
+      HOME: homeDir,
+      USERPROFILE: homeDir,
+      CLAUDE_CONFIG_DIR: claudeHome,
+    };
+    for (const target of [".", "plugins/oneezy", "plugins/up"]) {
+      const r = spawnSync(claudeBinary()!, ["plugin", "validate", target], {
+        encoding: "utf8",
+        cwd: root,
+        env,
+        timeout: 120_000,
+      });
+      assert.equal(r.status, 0, `${target}: ${r.stdout}\n${r.stderr}`);
+      assert.match(r.stdout, /Validation passed/, `${target}: ${r.stdout}`);
+      assert.doesNotMatch(r.stdout, /error/i, `${target}: ${r.stdout}`);
+    }
+    assert.ok(!fs.existsSync(path.join(root, ".claude.json")), "validate wrote nothing into the library");
+  },
+);
 
 test("commit dates are written one way whatever git printed: UTC as Z (git 2.45 and later) and +00:00 (older git) give the same NOTICE date; other offsets are kept", async () => {
   const { isoDate } = await import("../src/build.js");
@@ -729,7 +1056,13 @@ test("commit dates are written one way whatever git printed: UTC as Z (git 2.45 
 
 test("a changed package's version is the next minor after the one on disk, never a commit count: 1 for a new package or one whose version is not of the rule, with HEAD's sha; without a commit, 0.0.0+nogit", async () => {
   const { bump } = await import("../src/build.js");
-  const head = { version: "0.1.0+abcdefabcdef", commit: "abcdefabcdef" + "0".repeat(28), date: "2026-10-05T00:00:00Z", checkout: true, shallow: false };
+  const head = {
+    version: "0.1.0+abcdefabcdef",
+    commit: "abcdefabcdef" + "0".repeat(28),
+    date: "2026-10-05T00:00:00Z",
+    checkout: true,
+    shallow: false,
+  };
   assert.equal(bump("0.25.0+d5b0644567db", head), "0.26.0+abcdefabcdef");
   assert.equal(bump("0.9.0+0123456789ab", head), "0.10.0+abcdefabcdef");
   assert.equal(bump(undefined, head), "0.1.0+abcdefabcdef");

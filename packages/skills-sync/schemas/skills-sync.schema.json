@@ -3,9 +3,7 @@
   "title": "skills-sync.json",
   "description": "The committed config of a skills library: the library itself, the third-party repositories it takes skills from (what is taken from each, renames, per-skill pins, attribution), and the plugins the library builds. Hand-edited and written by add; read by skills-sync refresh, sync and build.",
   "type": "object",
-  "required": [
-    "version"
-  ],
+  "required": ["version"],
   "additionalProperties": false,
   "properties": {
     "version": {
@@ -76,13 +74,7 @@
   "$defs": {
     "release": {
       "type": "object",
-      "required": [
-        "plugin_id",
-        "release_id",
-        "sha256",
-        "scope",
-        "date"
-      ],
+      "required": ["plugin_id", "release_id", "sha256", "scope", "date"],
       "additionalProperties": false,
       "properties": {
         "plugin_id": {
@@ -102,10 +94,7 @@
         },
         "scope": {
           "description": "Where the plugin lives in ChatGPT: a personal plugin, or a workspace one.",
-          "enum": [
-            "personal",
-            "workspace"
-          ]
+          "enum": ["personal", "workspace"]
         },
         "date": {
           "description": "The day of the upload, YYYY-MM-DD.",
@@ -133,11 +122,7 @@
     },
     "source": {
       "type": "object",
-      "required": [
-        "repo",
-        "ref",
-        "skills"
-      ],
+      "required": ["repo", "ref", "skills"],
       "additionalProperties": false,
       "properties": {
         "repo": {
@@ -203,9 +188,7 @@
     },
     "plugin": {
       "type": "object",
-      "required": [
-        "displayName"
-      ],
+      "required": ["displayName"],
       "additionalProperties": false,
       "properties": {
         "displayName": {
@@ -227,14 +210,10 @@
       },
       "oneOf": [
         {
-          "required": [
-            "group"
-          ]
+          "required": ["group"]
         },
         {
-          "required": [
-            "source"
-          ]
+          "required": ["source"]
         }
       ]
     }

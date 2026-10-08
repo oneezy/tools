@@ -34,7 +34,7 @@ does not imply GUI installer coverage; report validation limits faithfully.
 
 ## Workspace
 
-This is `packages/apps-sync` in the tools workspace; `clis/apps-sync-cli/` keeps compatibility shims that delegate here.
+This is `packages/apps-sync` in the tools workspace.
 `pnpm test` runs tests/test_software_manager.py and `pnpm check` syntax-checks the PowerShell and Python files.
 tests/test_launchers.py and tests/Test-Updater.ps1 expect `Manage Software.cmd` and `Manage-Software.ps1`, which this
 checkout names `App Sync.cmd` and `Apps Sync.ps1` (so do the launchers themselves, since ea0c5bc); reconcile the names
