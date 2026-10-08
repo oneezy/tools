@@ -109,18 +109,22 @@ function lacking(id: string, release: Release, names: string[]): string[] {
   return (release.files ?? []).filter((f) => !have.has(inside(f.split("\\").join("/")))).sort(cmp);
 }
 
-/** <id>.changes.md: which files, and that the upload has to be a new plugin because an update cannot delete. */
+/** <id>.changes.md: removed files requiring an explicitly authorized, guarded cloud update. */
 function changesText(id: string, release: Release, record: ArchiveRecord, gone: string[]): string {
   return [
-    `# ${id}: upload as a new plugin`,
+    `# ${id}: review removed files before updating`,
     "",
     `The recorded release \`${release.release_id}\` of plugin \`${release.plugin_id}\` (${release.date}, sha256 \`${release.sha256}\`) holds ${gone.length === 1 ? "a file" : "files"} that \`${record.archive}\` no longer has, removed or renamed since:`,
     "",
     ...gone.map((f) => `- \`${f}\``),
     "",
-    "A ChatGPT plugin update is an overlay: it adds and replaces files and cannot delete one, so every file above would stay in the plugin.",
+    "A ChatGPT plugin update overlays uploaded files. Omitted files remain unless explicitly listed in the current API’s delete_paths; omission is not deletion.",
     "",
-    `Upload \`${record.archive}\` as a **new plugin**, not as an update of \`${release.plugin_id}\`; then uninstall \`${release.plugin_id}\` and record the new plugin id, release id, sha256 and files under \`releases.${id}\` in the config.`,
+    `Read the current files of \`${release.plugin_id}\` through Plugin Creator and retain its current release. After explicit deletion authorization, update with \`${record.archive}\`, guarded by expected_release_id, and pass only verified exact plugin-root-relative paths in delete_paths. Strip a leading \`${id}/\` archive folder where present; directories and globs are not accepted. Reconcile a changed release before retrying.`,
+    "",
+    "Verify the updated release and affected file inventory. If this host’s API lacks deletion, report that exact unsupported operation; do not automatically create a replacement or uninstall the existing plugin.",
+    "",
+    `After verified delivery, record the returned release id, sha256 and files under \`releases.${id}\` in the config, preserving plugin identity and scope.`,
     "",
   ].join("\n");
 }
