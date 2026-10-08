@@ -130,11 +130,11 @@ same way. Discovery inspects known/configured roots; cached runtimes are not act
 
 From the project directory in PowerShell:
 
-    .\Manage-Software.ps1 -Mode check
-    .\Manage-Software.ps1 -Mode check-latest -Only codex,claude -Target all
-    .\Manage-Software.ps1 -Mode inventory
-    .\Manage-Software.ps1 -Mode update -Only codex -Target windows
-    .\Manage-Software.ps1 -Mode install -Only copilot -Target windows
+    & '.\Apps Sync.ps1' -Mode check
+    & '.\Apps Sync.ps1' -Mode check-latest -Only codex,claude -Target all
+    & '.\Apps Sync.ps1' -Mode inventory
+    & '.\Apps Sync.ps1' -Mode update -Only codex -Target windows
+    & '.\Apps Sync.ps1' -Mode install -Only copilot -Target windows
     .\.venv\Scripts\python.exe -B software_manager.py --mode check --json
 
 CLI update/install explicitly select dated saved targets and require terminal confirmation. They
@@ -142,14 +142,14 @@ do not discover releases. The UI uses checks selected during the current session
 
 Direct Ubuntu:
 
-    python3 /mnt/v/dev/tools/app-updater/software_manager.py --mode check --target wsl
-    python3 /mnt/v/dev/tools/app-updater/software_manager.py --mode check-latest --only codex
+    python3 /mnt/v/dev/tools/packages/apps-sync/software_manager.py --mode check --target wsl
+    python3 /mnt/v/dev/tools/packages/apps-sync/software_manager.py --mode check-latest --only codex
 
 Direct Ubuntu interactive operation uses numbered menus unless its optional UI dependency exists.
 
 ## Relocation and compatibility
 
-The desktop shortcut points through cmd.exe to V:\dev\tools\app-updater\Manage Software.cmd.
+The desktop shortcut points through cmd.exe to V:\dev\tools\packages\apps-sync\App Sync.cmd.
 Both .cmd launchers resolve the wrapper relative to themselves; the wrapper resolves Python and
 the application relative to the project. The desktop wrapper pauses even after startup failures.
 

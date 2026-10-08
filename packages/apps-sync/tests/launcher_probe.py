@@ -4,5 +4,5 @@ from pathlib import Path
 import subprocess
 import sys
 root = Path(__file__).resolve().parents[1]
-command = f'{os.environ["COMSPEC"]} /d /c ""{root / "Manage Software.cmd"}""'
+command = f'{os.environ["COMSPEC"]} /d /c ""{root / "App Sync.cmd"}""'
 sys.exit(subprocess.run(command, cwd=root).returncode)
