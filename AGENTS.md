@@ -24,7 +24,7 @@ npx --yes @oneezy/skills-sync -y --agents claude-code --global --no-projects --n
 
 Claude Code lists the new skills about a minute later; until then, Read the SKILL.md.
 
-A message that starts with `/<name>` runs that skill, even in a project thread, where it reaches you as plain text rather than a command. If the skill is in your list, invoke it. If it is not, which is always the case for skills marked `disable-model-invocation` (`/wayfinder`, `/grill-me`, `/to-tickets`, `/oneezy-merge` and others), Read `~/.claude/skills/<name>/SKILL.md` and follow it, with the rest of the message as its arguments.
+A message that starts with `/<name>` runs that skill, even in a project thread, where it reaches you as plain text rather than a command. If the skill is in your list, invoke it. If it is not, which is always the case for skills marked `disable-model-invocation` (`/wayfinder`, `/grill-me`, `/to-tickets`, `/oneezy-merge` and others), Read `~/.claude/skills/<name>/SKILL.md` (on a machine where skills-sync installed the library's plugins, it is `~/.skills-sync/plugins/<plugin>/skills/<name>/SKILL.md`) and follow it, with the rest of the message as its arguments.
 
 ### Issue tracker
 

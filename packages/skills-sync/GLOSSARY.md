@@ -69,6 +69,10 @@ _Avoid_: global folder, home folder
 A Group or a Source's skills packaged for a Harness's plugin system, with its own version and notice, committed under `plugins/<id>/`.
 _Avoid_: package, bundle
 
+**Form**:
+How a Harness on a Host gets the Library's skills: `plugin` (the Library's Plugins installed through the Harness's own commands, Claude Code and Codex) or `links` (one link per skill in its User folder). A skill a verified Plugin carries has no link there.
+_Avoid_: mode (that is a project's link or copy), install mode
+
 **Catalog**:
 A marketplace file listing the Library's Plugins, one per Harness format.
 _Avoid_: marketplace (the Harness's word for where a Catalog is added)

@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "title": "skills-sync.local.json",
-  "description": "This machine's answers to skills-sync, kept beside the committed config and gitignored: which harnesses to sync, whether to link the user folders, which projects and how, which WSL distros, skills an earlier run found gone upstream, and how links are made. Written by the tool after every run; --ask prompts again.",
+  "description": "This machine's answers to skills-sync, kept beside the committed config and gitignored: which harnesses to sync, whether to link the user folders, which projects and how, which WSL distros, skills an earlier run found gone upstream, how links are made, the user folders' form on harnesses with plugins, and the plugins the tool installed. Written by the tool after every run; --ask prompts again.",
   "type": "object",
   "additionalProperties": false,
   "properties": {
@@ -57,6 +57,40 @@
     "links": {
       "description": "auto: a directory symlink, or a junction when Windows refuses one. symlink or junction: that kind only (--symlinks, --junctions).",
       "enum": ["auto", "symlink", "junction"]
+    },
+    "form": {
+      "description": "plugin: harnesses with plugin commands (Claude Code, Codex) get the library's built plugins, and the skills those carry get no loose link there. links: one loose link per skill everywhere, and the plugins the tool installed are uninstalled. Written only when --plugins or --links chose it; absent means the default (plugin, links in a cloud session).",
+      "enum": ["plugin", "links"]
+    },
+    "plugins": {
+      "description": "What the tool installed through each harness's own plugin commands, keyed by the harness's config folder (so a WSL distro's harnesses are told apart from Windows'): rollback and unlink remove only these.",
+      "type": "object",
+      "additionalProperties": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["harness", "plugins"],
+        "properties": {
+          "harness": {
+            "description": "The harness id.",
+            "type": "string",
+            "minLength": 1
+          },
+          "marketplace": {
+            "description": "The marketplace the tool registered (the library folder), when it did.",
+            "type": "string",
+            "minLength": 1
+          },
+          "plugins": {
+            "description": "Plugin ids (name@marketplace) the tool installed.",
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 1
+            },
+            "uniqueItems": true
+          }
+        }
+      }
     }
   }
 }

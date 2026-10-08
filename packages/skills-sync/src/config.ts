@@ -4,6 +4,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import type { LinkMode } from "./fs.js";
+import type { Form, Owned } from "./install.js";
 import type { Report } from "./plan.js";
 import { shippedSchema, validate } from "./schema.js";
 
@@ -26,6 +27,10 @@ export interface Local {
   unavailable?: string[];
   /** how links are made: a symlink with a junction fallback (auto), or one kind only */
   links?: LinkMode;
+  /** the user folders' form on harnesses with plugins, when --plugins or --links chose one (else the default) */
+  form?: Form;
+  /** what this tool installed through each harness's plugin commands, keyed by the harness's config folder */
+  plugins?: Record<string, Owned>;
 }
 
 export const CONFIG_NAME = "skills-sync.json";
