@@ -173,7 +173,9 @@ test("a skills-sync.json with a sources or plugins key is the committed config, 
   assert.ok(fs.existsSync(config()), "never moved");
 });
 
-test("links: a directory symlink is tried first; when it is refused with EPERM the link becomes a junction and the report says so", () => {
+test("links: a directory symlink is tried first; when it is refused with EPERM the link becomes a junction and the report says so", (t) => {
+  if (process.platform !== "win32")
+    return t.skip("junction fallback is a Windows behavior; POSIX always uses symlinks");
   const eperm = Object.assign(new Error("EPERM: operation not permitted, symlink"), { code: "EPERM" });
   const real = linkDeps.symlink;
   linkDeps.symlink = (target, link, type) => {
@@ -214,8 +216,13 @@ test("--junctions forces junctions and records links: junction; --symlinks the i
   assert.equal(first.status, 0, first.stderr);
   assert.equal(json(local()).links, "junction");
   const out = JSON.parse(first.stdout);
-  assert.equal(out.links.symlink, 0);
-  assert.ok(out.links.junction >= 4, JSON.stringify(out.links));
+  if (process.platform === "win32") {
+    assert.equal(out.links.symlink, 0);
+    assert.ok(out.links.junction >= 4, JSON.stringify(out.links));
+  } else {
+    assert.equal(out.links.junction, 0);
+    assert.ok(out.links.symlink >= 4, JSON.stringify(out.links));
+  }
   if (process.platform === "win32") assert.equal(kindOnDisk(path.join(claude.userSkills, "a")), "junction");
 
   // the inverse: the user folders are unlinked and made again as symlinks

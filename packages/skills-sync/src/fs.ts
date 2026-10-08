@@ -180,3 +180,12 @@ export function gitExclude(repo: string, entries: string[]): boolean {
   fs.writeFileSync(file, existing.replace(/\n?$/, "\n") + "# skills-sync links\n" + missing.join("\n") + "\n");
   return true;
 }
+
+export function toHash(bytes: Buffer): string {
+  return createHash("sha256").update(bytes).digest("hex");
+}
+
+export function hasLinkedParent(file: string): boolean {
+  const dir = path.resolve(file);
+  return isLink(dir) || (path.dirname(dir) !== dir && hasLinkedParent(path.dirname(dir)));
+}

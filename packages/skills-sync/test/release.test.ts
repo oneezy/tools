@@ -1,5 +1,5 @@
 // The release: the version the package and the CLI banner carry, the commands and flags --help lists, and what the
-// package ships (the built CLI, the three schemas, the README). Nothing here touches a library or the network.
+// package ships (the built CLI, the four schemas, the README). Nothing here touches a library or the network.
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import fs from "node:fs";
@@ -19,11 +19,11 @@ function cli(...args: string[]): { status: number | null; stdout: string; stderr
   return spawnSync(process.execPath, [CLI, ...args], { encoding: "utf8", cwd: PACKAGE });
 }
 
-test("the package is 0.5.1 and --help opens with that version: the banner and package.json never differ", () => {
-  assert.equal(manifest.version, "0.5.1");
+test("the package is 0.6.0 and --help opens with that version: the banner and package.json never differ", () => {
+  assert.equal(manifest.version, "0.6.0");
   const r = cli("--help");
   assert.equal(r.status, 0);
-  assert.equal(r.stdout.split("\n")[0], "skills-sync 0.5.1");
+  assert.equal(r.stdout.split("\n")[0], "skills-sync 0.6.0");
 });
 
 test("--help lists every command and every flag of build, check, update (refresh), versions and add beside the 0.2.0 ones; an unknown option exits 2 with the same help", () => {
@@ -77,6 +77,8 @@ test("--help lists every command and every flag of build, check, update (refresh
       "--retry",
       "--sidecars",
       "--no-layers",
+      "--no-entrypoints",
+      "--no-remember",
       "--watch",
       "--plan",
       "--quiet",
@@ -107,11 +109,12 @@ test("--help lists every command and every flag of build, check, update (refresh
   assert.equal(bad.stdout, "");
 });
 
-test("the package ships the built CLI, the three schemas (the flow schema among them) and the README, and its bin is the built CLI", () => {
+test("the package ships the built CLI, the four schemas (the flow schema among them) and the README, and its bin is the built CLI", () => {
   assert.deepEqual(manifest.files, ["dist/src", "schemas", "README.md"]);
   assert.deepEqual(manifest.bin, { "skills-sync": "dist/src/cli.js" });
   assert.deepEqual(fs.readdirSync(path.join(PACKAGE, "schemas")).sort(), [
     "flow.schema.json",
+    "skills-sync.entrypoints.schema.json",
     "skills-sync.local.schema.json",
     "skills-sync.schema.json",
   ]);

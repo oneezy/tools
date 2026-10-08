@@ -7,6 +7,7 @@ import * as p from "@clack/prompts";
 import { addSource } from "./add.js";
 import { build } from "./build.js";
 import { check } from "./check.js";
+import { entrypoints } from "./entrypoints.js";
 import { LOCAL_NAME, migrateAnswers, readLocal, writeLocal, type LinkMode, type Local } from "./config.js";
 import { gitExclude, isDir, isLink, lexists, linkMode, linkTarget, real, samePath, setLinkMode } from "./fs.js";
 import { detected, harnessTable, type Harness } from "./harnesses.js";
@@ -29,7 +30,7 @@ import { findProjects, home, isRepo, layers, projects, status, unlink, type Stat
 import { commitsPast, releasesOf, versionLabel } from "./versions.js";
 import { runInWsl, wslDistros } from "./wsl.js";
 
-const VERSION = "0.5.1";
+const VERSION = "0.6.0";
 const HELP = `skills-sync ${VERSION}
 One skills library, every harness, every project on this machine. Run it anywhere; it works out the rest.
 
@@ -114,6 +115,8 @@ Options
   --retry                look again for skills an earlier run reported gone upstream (sync and refresh)
   --sidecars             generate agents/openai.yaml for own skills that lack one (writes into skills/, so opt-in)
   --no-layers            leave the library's own layers alone (used inside WSL, where Windows owns them)
+  --no-entrypoints       skip the library's managed instruction blocks (default: sync selected user folders and projects)
+  --no-remember          leave ~/.skills-sync pointing at the existing library (isolated development/test runs)
   --watch                stay running; redo layers and user folders when skills/ or the lock changes
   --plan                 show what would change, touch nothing
   --quiet                for scripts: no prompts, no WSL fan-out, print only changes and problems
@@ -159,6 +162,8 @@ interface Args {
   retry: boolean;
   sidecars: boolean;
   layers: boolean;
+  entrypoints: boolean;
+  remember: boolean;
   watch: boolean;
   plan: boolean;
   quiet: boolean;
@@ -182,6 +187,8 @@ function parseArgs(argv: string[]): Args {
     retry: false,
     sidecars: false,
     layers: true,
+    entrypoints: true,
+    remember: true,
     watch: false,
     plan: false,
     quiet: false,
@@ -243,6 +250,8 @@ function parseArgs(argv: string[]): Args {
     else if (x === "--retry") a.retry = true;
     else if (x === "--sidecars") a.sidecars = true;
     else if (x === "--no-layers") a.layers = false;
+    else if (x === "--no-entrypoints") a.entrypoints = false;
+    else if (x === "--no-remember") a.remember = false;
     else if (x === "--watch") a.watch = true;
     else if (x === "--plan") a.plan = true;
     else if (x === "--quiet") a.quiet = true;
@@ -327,7 +336,7 @@ async function main(): Promise<void> {
   // ~/.skills-sync points at the library from now on, so every later run finds it from anywhere
   const hl = homeLibrary(userHome);
   const remember = new Report();
-  if (!samePath(real(hl), lib.root)) {
+  if (args.remember && !samePath(real(hl), lib.root)) {
     if (!lexists(hl))
       remember.add({ kind: "link", path: hl, target: lib.root, note: "remembers where the library is" });
     else if (isLink(hl)) remember.add({ kind: "relink", path: hl, target: lib.root, note: `was ${linkTarget(hl)}` });
@@ -366,7 +375,7 @@ async function main(): Promise<void> {
 
   if (args.command === "status") {
     const ids = args.agents ?? local.agents;
-    return printStatus(lib, ids ? table.filter((h) => ids.includes(h.id)) : detected(table), args.json);
+    return printStatus(lib, ids ? table.filter((h) => ids.includes(h.id)) : detected(table), args, local);
   }
   if (args.command === "unlink") {
     const r = new Report();
@@ -845,16 +854,36 @@ async function runOnce(lib: Library, c: Choices, args: Args, cwd: string, report
     report.merge(pr);
   }
 
-  printReport(report, args);
+  const instructionProjects = c.projects.map((name) => path.join(c.dev, name)).filter(isDir);
+  const instructionGlobal = c.global && args.command !== "projects";
+  const instructions = new Report();
+  if (args.entrypoints) {
+    entrypoints(lib, c.agents, instructionGlobal, instructionProjects, instructions);
+    apply(instructions, args.plan);
+    report.merge(instructions);
+  }
+  const verified = args.entrypoints
+    ? entrypoints(lib, c.agents, instructionGlobal, instructionProjects, new Report(), !args.plan)
+    : [];
+  if (instructions.conflicts().length || (!args.plan && verified.some((item) => item.state !== "current")))
+    process.exitCode = 1;
+  printReport(report, args, { entrypoints: verified });
   if (c.wsl.length && args.command !== "projects" && !args.quiet) {
     for (const d of c.wsl) {
-      const r = runInWsl(d, lib.root, [], args.plan);
+      const r = runInWsl(
+        d,
+        lib.root,
+        [...(!args.entrypoints ? ["--no-entrypoints"] : []), ...(!args.remember ? ["--no-remember"] : [])],
+        args.plan,
+      );
+      if (!r.ok) process.exitCode = 1;
       log(`WSL ${d}: ${r.ok ? "ok" : "failed"}${r.output ? "\n  " + r.output.split("\n").slice(-3).join("\n  ") : ""}`);
     }
   }
 }
 
 function printReport(r: Report, args: Args, extra: Record<string, unknown> = {}): void {
+  if (r.actions.some((action) => action.failed)) process.exitCode = 1;
   if (args.json) {
     // a write's payload is the file body; bytes (an attribution file) are summarised, text is kept as before
     const actions = r.actions.map((a) =>
@@ -886,10 +915,22 @@ function linksLine(r: Report): string {
   return `links: ${symlink} made as symlinks${mode === "symlink" ? " (--symlinks)" : ""}`;
 }
 
-function printStatus(lib: Library, table: Harness[], json: boolean): void {
+function printStatus(lib: Library, table: Harness[], args: Args, local: Local): void {
   const s = status(lib, table);
-  if (json) {
-    process.stdout.write(JSON.stringify(s, null, 2) + "\n");
+  const dev = path.resolve(args.dev ?? local.dev ?? process.cwd());
+  const projectNames =
+    args.projects === false
+      ? []
+      : args.projects === "*"
+        ? findProjects(dev, lib).map((project) => path.basename(project))
+        : (args.projects ?? local.projects ?? []);
+  const instructionProjects = projectNames.map((name) => path.join(dev, name)).filter(isDir);
+  const instructions = args.entrypoints
+    ? entrypoints(lib, table, args.global ?? local.global ?? true, instructionProjects, new Report(), true)
+    : [];
+  if (instructions.some((item) => item.state !== "current")) process.exitCode = 1;
+  if (args.json) {
+    process.stdout.write(JSON.stringify({ ...s, entrypoints: instructions }, null, 2) + "\n");
     return;
   }
   process.stdout.write(
@@ -899,6 +940,8 @@ function printStatus(lib: Library, table: Harness[], json: boolean): void {
     process.stdout.write(`${layer}: ${v.linked} linked, ${v.missing.length} missing\n`);
   for (const [dir, v] of Object.entries(s.user))
     process.stdout.write(`${dir}: ${v.linked} linked, ${v.missing.length} missing\n`);
+  for (const item of instructions)
+    process.stdout.write(`${item.path}: ${item.block} ${item.state}${item.reason ? ` (${item.reason})` : ""}\n`);
 }
 
 /** " (oneezy: 2, flat: 1)" when any own skill sits in a group; nothing for a flat-only library. */

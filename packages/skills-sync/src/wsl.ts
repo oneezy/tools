@@ -30,7 +30,7 @@ export interface WslRun {
  */
 export function runInWsl(distro: string, libraryRoot: string, extraArgs: string[], plan: boolean): WslRun {
   const lib = toWslPath(libraryRoot);
-  const bin = process.env.SKILLS_SYNC_WSL_BIN?.trim() || "npx --yes @oneezy/skills-sync";
+  const bin = process.env.SKILLS_SYNC_WSL_BIN?.trim() || "npx --yes @oneezy/skills-sync@^0.6.0";
   const args = [
     bin,
     "--repo",

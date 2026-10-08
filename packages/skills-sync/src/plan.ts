@@ -1,7 +1,19 @@
 // Every step builds a list of actions first; apply() executes them unless planning.
 import fs from "node:fs";
 import path from "node:path";
-import { copyDir, isLink, lexists, linkTarget, makeLink, removeLink, samePath, under, type LinkKind } from "./fs.js";
+import {
+  copyDir,
+  isLink,
+  lexists,
+  linkTarget,
+  makeLink,
+  removeLink,
+  samePath,
+  under,
+  hasLinkedParent,
+  toHash,
+  type LinkKind,
+} from "./fs.js";
 
 /**
  * remove drops a link; delete drops a real folder or file (only ever a generated one: a snapshot, a working-set copy or
@@ -29,6 +41,8 @@ export interface Action {
   note?: string;
   /** for write: the file body; for exclude: the entries */
   payload?: string | Buffer | string[];
+  expectedHash?: string | null;
+  failed?: boolean;
 }
 
 export class Report {
@@ -81,39 +95,68 @@ export function apply(report: Report, plan: boolean, exclude?: (repo: string, en
   const link = (a: Action) => {
     report.links[makeLink(a.target!, a.path)]++;
   };
+  const failedPaths: string[] = [];
   for (const a of report.actions) {
-    switch (a.kind) {
-      case "link":
-        link(a);
-        break;
-      case "relink":
-        removeLink(a.path);
-        link(a);
-        break;
-      case "remove":
-        removeLink(a.path);
-        break;
-      case "delete":
-        fs.rmSync(a.path, { recursive: true, force: true, maxRetries: 3 });
-        break;
-      case "replace-copy":
-        fs.rmSync(a.path, { recursive: true, force: true });
-        link(a);
-        break;
-      case "copy":
-        copyDir(a.target!, a.path);
-        break;
-      case "write":
-        fs.mkdirSync(path.dirname(a.path), { recursive: true });
-        fs.writeFileSync(a.path, a.payload as string | Buffer);
-        break;
-      case "move":
-        fs.mkdirSync(path.dirname(a.target!), { recursive: true });
-        fs.renameSync(a.path, a.target!);
-        break;
-      case "exclude":
-        exclude?.(a.path, a.payload as string[]);
-        break;
+    if (a.kind === "skip" || a.kind === "conflict" || a.kind === "note") continue;
+    const dependency = failedPaths.find((file) => under(a.path, file) || (a.target && under(a.target, file)));
+    if (dependency) {
+      a.kind = "conflict";
+      a.failed = true;
+      a.note = `dependent action blocked by failed destination ${dependency}`;
+      failedPaths.push(a.path);
+      continue;
+    }
+    const kind = a.kind;
+    try {
+      switch (a.kind) {
+        case "link":
+          link(a);
+          break;
+        case "relink":
+          removeLink(a.path);
+          link(a);
+          break;
+        case "remove":
+          removeLink(a.path);
+          break;
+        case "delete":
+          fs.rmSync(a.path, { recursive: true, force: true, maxRetries: 3 });
+          break;
+        case "replace-copy":
+          fs.rmSync(a.path, { recursive: true, force: true });
+          link(a);
+          break;
+        case "copy":
+          copyDir(a.target!, a.path);
+          break;
+        case "write":
+          if (a.expectedHash !== undefined) {
+            const current = !hasLinkedParent(a.path) && lexists(a.path) ? fs.readFileSync(a.path) : null;
+            if (hasLinkedParent(a.path) || (current ? toHash(current) : null) !== a.expectedHash) {
+              a.kind = "conflict";
+              a.note = "instruction file changed since planning; left alone";
+              break;
+            }
+          }
+          fs.mkdirSync(path.dirname(a.path), { recursive: true });
+          fs.writeFileSync(a.path, a.payload as string | Buffer, a.expectedHash === null ? { flag: "wx" } : undefined);
+          if (a.expectedHash !== undefined && !fs.readFileSync(a.path).equals(Buffer.from(a.payload as string)))
+            throw new Error(`${a.path}: instruction readback differs from the planned write`);
+          break;
+        case "move":
+          fs.mkdirSync(path.dirname(a.target!), { recursive: true });
+          fs.renameSync(a.path, a.target!);
+          break;
+        case "exclude":
+          exclude?.(a.path, a.payload as string[]);
+          break;
+      }
+    } catch (error) {
+      a.kind = "conflict";
+      a.failed = true;
+      const code = (error as NodeJS.ErrnoException).code;
+      a.note = `${kind} failed${code ? ` (${code})` : ""}: ${error instanceof Error ? error.message : String(error)}; independent destinations continue`;
+      failedPaths.push(a.path);
     }
   }
 }
