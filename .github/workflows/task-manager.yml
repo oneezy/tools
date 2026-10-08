@@ -141,14 +141,18 @@ jobs:
           repository: oneezy/skills
           ref: main
           path: .task-manager
-          sparse-checkout: skills/oneezy-estimate
+          # The library groups its own skills by plugin: skills/<group>/<skill>.
+          sparse-checkout: skills/oneezy/oneezy-estimate
           persist-credentials: false
       - name: Put the skill where Claude Code reads it
         run: |
           mkdir -p .claude/skills
           rm -rf .claude/skills/oneezy-estimate
-          cp -r .task-manager/skills/oneezy-estimate .claude/skills/oneezy-estimate
+          cp -r .task-manager/skills/oneezy/oneezy-estimate .claude/skills/oneezy-estimate
           chmod +x .claude/skills/oneezy-estimate/scripts/*.sh
+          test -f .claude/skills/oneezy-estimate/SKILL.md
+          test -x .claude/skills/oneezy-estimate/scripts/set.sh
+          test -x .claude/skills/oneezy-estimate/scripts/backlog.sh
       - name: Run /oneezy-estimate
         uses: anthropics/claude-code-action@v1
         env:
