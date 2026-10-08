@@ -5,6 +5,7 @@
 // FAKE_HARNESS_BROKEN=<claude,codex> one that installs but never resolves a plugin's skills.
 import fs from "node:fs";
 import path from "node:path";
+import {spawnSync} from "node:child_process";
 
 const [host, ...args] = process.argv.slice(2);
 const has = (v, h) => (v ?? "").split(",").includes(h);
@@ -71,7 +72,8 @@ if (args[0] === "plugin" && args.includes("--help")) {
   const rows = Object.entries(state.plugins);
   out(
     host === "claude"
-      ? rows.map(([id, p]) => ({ id, version: p.version, scope: "user", enabled: p.enabled, readFromFolder: p.dir }))
+      ? rows.map(([id, p]) => ({ id, version: p.version, scope: "user", enabled: p.enabled,
+          ...(process.env.FAKE_HARNESS_CACHE ? {installPath: p.dir} : {readFromFolder: p.dir}) }))
       : {
           installed: rows.map(([id, p]) => ({
             pluginId: id,
@@ -88,7 +90,11 @@ if (args[0] === "plugin" && args.includes("--help")) {
   const p = resolve(words[2]);
   const at = state.plugins[words[2]];
   state.plugins[words[2]] = {
-    version: host === "claude" ? "c69993a67bba" : codexVersion(p.dir),
+    version: host === "claude"
+      ? process.env.FAKE_HARNESS_CACHE
+        ? spawnSync("git", ["-C", state.marketplaces[p.mkt], "rev-parse", "--short=12", "HEAD"], {encoding:"utf8"}).stdout.trim()
+        : "c69993a67bba"
+      : codexVersion(p.dir),
     enabled: at?.enabled ?? true,
     dir: p.dir,
     skills: skillsOf(p.dir),
@@ -107,8 +113,13 @@ if (args[0] === "plugin" && args.includes("--help")) {
   out(`${words[2]}\n\nComponent inventory\n  Skills (${skills.length})  ${skills.join(", ")}\n  Agents (0)`);
 } else if (host === "codex" && args[0] === "debug" && args[1] === "prompt-input") {
   const lines = [];
+  let rootIndex = 0;
   if (!has(process.env.FAKE_HARNESS_BROKEN, host))
-    for (const [id, p] of Object.entries(state.plugins))
-      if (p.enabled) for (const s of skillsOf(p.dir)) lines.push(`- ${id.slice(0, id.lastIndexOf("@"))}:${s}: ${s} skill (file: ${path.join(p.dir, "skills", s, "SKILL.md")})`);
+    for (const [id, p] of Object.entries(state.plugins)) {
+      if (!p.enabled) continue;
+      const alias = `r${rootIndex++}`;
+      if (process.env.FAKE_HARNESS_ALIASES) lines.push(`- \`${alias}\` = \`${path.join(p.dir, "skills")}\``);
+      for (const s of skillsOf(p.dir)) lines.push(`- ${id.slice(0, id.lastIndexOf("@"))}:${s}: ${s} skill (file: ${process.env.FAKE_HARNESS_ALIASES ? alias + "/" + s + "/SKILL.md" : path.join(p.dir, "skills", s, "SKILL.md")})`);
+    }
   out(JSON.stringify([{ type: "message", content: [{ text: `### Available skills\n${lines.join("\n")}` }] }]));
 } else fail(`fake ${host}: unhandled ${args.join(" ")}`);
