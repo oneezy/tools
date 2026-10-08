@@ -20,9 +20,9 @@ class LauncherTests(unittest.TestCase):
     def test_desktop_wrapper_preserves_failure_and_pause(self):
         with tempfile.TemporaryDirectory(prefix="updater launcher ") as directory:
             root = Path(directory)
-            shutil.copyfile(ROOT / "Manage Software.cmd", root / "Manage Software.cmd")
-            (root / "Manage-Software.ps1").write_text("Write-Output 'fixture startup failure'; exit 17")
-            command = f'{os.environ["COMSPEC"]} /d /c ""{root / "Manage Software.cmd"}""'
+            shutil.copyfile(ROOT / "App Sync.cmd", root / "App Sync.cmd")
+            (root / "Apps Sync.ps1").write_text("Write-Output 'fixture startup failure'; exit 17")
+            command = f'{os.environ["COMSPEC"]} /d /c ""{root / "App Sync.cmd"}""'
             result = subprocess.run(command, input="\r\n", text=True, capture_output=True, timeout=15)
         self.assertEqual(result.returncode, 17)
         self.assertIn("fixture startup failure", result.stdout)
@@ -31,9 +31,9 @@ class LauncherTests(unittest.TestCase):
     def test_missing_powershell_stays_visible_without_installing(self):
         with tempfile.TemporaryDirectory(prefix="updater launcher ") as directory:
             root = Path(directory)
-            shutil.copyfile(ROOT / "Manage Software.cmd", root / "Manage Software.cmd")
+            shutil.copyfile(ROOT / "App Sync.cmd", root / "App Sync.cmd")
             entry = root / "missing-runtime.cmd"
-            entry.write_text(f'@echo off\nset "ProgramFiles={root}"\ncall "{root / "Manage Software.cmd"}"\nexit /b %errorlevel%\n')
+            entry.write_text(f'@echo off\nset "ProgramFiles={root}"\ncall "{root / "App Sync.cmd"}"\nexit /b %errorlevel%\n')
             command = f'{os.environ["COMSPEC"]} /d /c ""{entry}""'
             result = subprocess.run(command, input="\r\n", text=True, capture_output=True, timeout=15)
         self.assertEqual(result.returncode, 1)

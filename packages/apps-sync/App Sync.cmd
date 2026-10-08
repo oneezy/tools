@@ -7,7 +7,7 @@ if not exist "%UPDATER_PWSH%" (
   pause
   exit /b 1
 )
-"%UPDATER_PWSH%" -NoProfile -ExecutionPolicy Bypass -File "%~dp0Manage-Software.ps1" %*
+"%UPDATER_PWSH%" -NoProfile -ExecutionPolicy Bypass -File "%~dp0Apps Sync.ps1" %*
 set "UPDATER_EXIT=%errorlevel%"
 echo.
 echo App Updater exited with code %UPDATER_EXIT%.

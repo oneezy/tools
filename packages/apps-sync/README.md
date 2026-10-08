@@ -1,9 +1,9 @@
 # App Updater
 
 A manually launched terminal manager for selected Windows applications and native Ubuntu CLI installations.
-The authoritative project directory is **V:\dev\tools\app-updater**.
+The project directory is **V:\dev\tools\packages\apps-sync** (`packages/apps-sync` in the tools workspace).
 
-Double-click **Update Software** on the desktop, or **Manage Software.cmd** here.
+Double-click **Update Software** on the desktop, or **App Sync.cmd** here.
 Launch scans local installation records and displays one table:
 
 **Tool | Windows | WSL | Latest available version | Status / action**
@@ -36,7 +36,7 @@ Setup is never performed on launch. If the environment is missing, the launcher 
 Windows Python 3.12 with numbered menus. If Python or PowerShell is missing, the desktop launcher
 displays the failure and pauses. PowerShell 7 is required by the Windows wrapper.
 
-Use Manage-Software.ps1 or Python directly for redirected output; the desktop .cmd deliberately pauses.
+Use Apps Sync.ps1 or Python directly for redirected output; the desktop .cmd deliberately pauses.
 With redirected input or output, default launch prints the local table and exits without prompting.
 
 ## Checks
@@ -44,8 +44,8 @@ With redirected input or output, default launch prints the local table and exits
     & .\.venv\Scripts\python.exe -B -m unittest discover -s tests -v
     & .\.venv\Scripts\python.exe -B tests\offline_smoke.py
     & .\tests\Test-Updater.ps1
-    wsl.exe -d Ubuntu-26.04 --cd /mnt/v/dev/tools/app-updater --exec /usr/bin/python3 -B -m unittest discover -s tests -v
-    wsl.exe -d Ubuntu-26.04 --cd /mnt/v/dev/tools/app-updater --exec /usr/bin/python3 -B tests/offline_smoke.py
+    wsl.exe -d Ubuntu-26.04 --cd /mnt/v/dev/tools/packages/apps-sync --exec /usr/bin/python3 -B -m unittest discover -s tests -v
+    wsl.exe -d Ubuntu-26.04 --cd /mnt/v/dev/tools/packages/apps-sync --exec /usr/bin/python3 -B tests/offline_smoke.py
 
 Tests use simulated releases and temporary fake programs. They do not update installed applications.
 The offline smoke test audits real local scans and rejects network calls or unapproved subprocesses.

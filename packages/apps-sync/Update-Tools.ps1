@@ -4,5 +4,5 @@ param([switch]$CheckOnly,[switch]$Pause)
 $arguments=@{}
 if ($CheckOnly) { $arguments.Mode='check'; $arguments.Target='windows' }
 if ($Pause) { $arguments.Pause=$true }
-& (Join-Path $PSScriptRoot 'Manage-Software.ps1') @arguments
+& (Join-Path $PSScriptRoot 'Apps Sync.ps1') @arguments
 exit $LASTEXITCODE
