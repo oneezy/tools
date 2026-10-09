@@ -6,6 +6,7 @@ import path from "node:path";
 import * as p from "@clack/prompts";
 import { addSource } from "./add.js";
 import { adoptBrain, rollbackBrain, brainLinks } from "./adoption.js";
+import { aliasLinks, migrateAliases, rollbackAliases } from "./aliases.js";
 import { build } from "./build.js";
 import { check } from "./check.js";
 import { entrypoints, instructionDependencies } from "./entrypoints.js";
@@ -33,7 +34,7 @@ import { findProjects, home, isRepo, layers, projects, status, unlink, type Stat
 import { commitsPast, releasesOf, versionLabel } from "./versions.js";
 import { runInWsl, wslDistros } from "./wsl.js";
 
-const VERSION = "0.7.3";
+const VERSION = "0.7.4";
 const HELP = `skills-sync ${VERSION}
 One skills library, every harness, every project on this machine. Run it anywhere; it works out the rest.
 
@@ -51,6 +52,8 @@ Commands
   unlink           remove every link this tool made in the user folders, and every plugin and marketplace it installed
   adopt-brain      explicitly adopt only this host's two historical Brain links; propagate verified instructions only
   rollback-brain   restore the exact preserved links in --receipt; refuse later destination edits
+  migrate-aliases  back up only explicit historical Skills/Status aliases after verifying installed native replacements
+  rollback-aliases restore unchanged aliases from --receipt; keep the installed plugins
   projects         only the project step
   update [<source>...]
                    resolve the named sources (every one when none is named) at the tip of their ref, or at the version
@@ -109,6 +112,7 @@ Update, refresh and add
 Options
   --repo <path>          the skills library (default: $SKILLS_REPO, ~/.skills-sync, a library folder above here)
   --adoption-file <json> version 1 manifest of exact historical Brain paths and expectedTarget values
+  --alias-file <json>    version 1 manifest of exact historical Skills/Status alias paths and expectedTarget values
   --receipt <path>       durable adoption/rollback receipt (required for scoped Brain commands)
   --library <src>        what to clone when there is no library yet (owner/repo or URL; default ${DEFAULT_LIBRARY})
   --expect-revision <sha> verify library HEAD and origin's --remote-ref before any instruction rollout
@@ -167,6 +171,7 @@ interface Args {
   repo?: string;
   library?: string;
   adoptionFile?: string;
+  aliasFile?: string;
   receipt?: string;
   expectRevision?: string;
   remoteRef?: string;
@@ -255,6 +260,7 @@ function parseArgs(argv: string[]): Args {
     else if (x === "--check") a.check = true;
     else if (x === "--repo") a.repo = next();
     else if (x === "--adoption-file") a.adoptionFile = next();
+    else if (x === "--alias-file") a.aliasFile = next();
     else if (x === "--receipt") a.receipt = next();
     else if (x === "--library") a.library = next();
     else if (x === "--expect-revision") a.expectRevision = next();
@@ -326,11 +332,14 @@ async function main(): Promise<void> {
   const setup = new Report();
 
   const scopedBrain = args.command === "adopt-brain" || args.command === "rollback-brain";
-  if (scopedBrain) {
-    if (!args.receipt) bail("Scoped Brain commands require --receipt");
+  const scopedAliases = args.command === "migrate-aliases" || args.command === "rollback-aliases";
+  if (scopedBrain || scopedAliases) {
+    const label = scopedBrain ? "Brain" : "alias";
+    if (!args.receipt) bail(`Scoped ${label} commands require --receipt`);
     if (!args.repo || !looksLikeLibrary(path.resolve(args.repo)))
-      bail("Scoped Brain commands require --repo pointing to an existing reviewed library");
+      bail(`Scoped ${label} commands require --repo pointing to an existing reviewed library`);
     if (args.command === "adopt-brain" && !args.adoptionFile) bail("adopt-brain requires --adoption-file");
+    if (args.command === "migrate-aliases" && !args.aliasFile) bail("migrate-aliases requires --alias-file");
   }
 
   // 1. the library: find it, or get one
@@ -360,6 +369,30 @@ async function main(): Promise<void> {
   if (!root || (!looksLikeLibrary(root) && !firstAdd))
     bail("no skills library found: run this inside one, or pass --repo <path> or --library owner/repo");
   const lib = new Library(root);
+  if (scopedAliases) {
+    const report = new Report();
+    try {
+      if (args.command === "rollback-aliases")
+        rollbackAliases(path.resolve(args.receipt!), aliasLinks(process.platform), report, args.plan);
+      else {
+        const reason = verifyLibraryRevision(lib.root, args.expectRevision, args.remoteRef);
+        if (reason) throw new Error(reason);
+        migrateAliases(
+          lib,
+          JSON.parse(fs.readFileSync(path.resolve(args.aliasFile!), "utf8")),
+          aliasLinks(process.platform),
+          harnessTable(),
+          path.resolve(args.receipt!),
+          report,
+          args.plan,
+        );
+      }
+    } catch (error) {
+      report.add({ kind: "conflict", path: lib.root, note: String(error) });
+    }
+    if (report.conflicts().length) process.exitCode = 1;
+    return printReport(report, args, { receipt: path.resolve(args.receipt!) });
+  }
   // Scoped recovery never enters broad sync, pulls, remembers a library or saves machine answers.
   if (scopedBrain) {
     const report = new Report();
