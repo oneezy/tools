@@ -6,10 +6,13 @@ import { spawnSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { afterAll, beforeAll, beforeEach, test } from "vite-plus/test";
+import { afterAll, beforeAll, beforeEach, test, vi } from "vite-plus/test";
 import { isLink, linkTarget, under, makeLink } from "../src/fs.js";
 import { withInternal } from "../src/build.js";
 import { ENTRYPOINTS_NAME } from "../src/entrypoints.js";
+import { Library } from "../src/library.js";
+import { harnessTable } from "../src/harnesses.js";
+import { pluginDependency } from "../src/install.js";
 
 const CLI = path.resolve(import.meta.dirname, "..", "dist", "src", "cli.js");
 const FAKE = path.resolve(import.meta.dirname, "fixtures", "fake-harness", "fake-harness.mjs");
@@ -89,7 +92,12 @@ interface Run {
   stdout: string;
   stderr: string;
   json: {
-    actions: Array<{ kind: string; path: string; note?: string }>;
+    actions: Array<{
+      kind: string;
+      path: string;
+      note?: string;
+      diagnostic?: { command: string[]; exitCode: number | null; stderr: string; stdout: string };
+    }>;
     harnesses?: Record<string, HarnessJson>;
     user?: Record<string, { linked: number; plugin: number; missing: string[] }>;
   };
@@ -167,6 +175,88 @@ function linked(dir: string, name: string): boolean {
   return isLink(p) && under(linkTarget(p)!, root);
 }
 const PLUGIN_SKILLS = ["oneezy-merge", "oneezy-status", "grilling"];
+test("Claude write commands negotiate --json through help before registering or installing", () => {
+  const result = cli(["--plugins"], { FAKE_HARNESS_NO_WRITE_JSON: "claude" });
+  assert.equal(result.status, 0, result.stderr);
+  assert.ok(call(result, "claude", "plugin", "marketplace", "add", "--help"));
+  const writes = result.calls.filter(
+    (c) =>
+      c[0] === "claude" && !c.includes("--help") && (c[2] === "install" || (c[2] === "marketplace" && c[3] === "add")),
+  );
+  assert.equal(writes.length, 3);
+  assert.ok(writes.every((c) => !c.includes("--json")));
+  assert.equal(Object.keys(installed(claudeHome)).length, 2);
+});
+
+test("plugin failures retain structured command, exit status and original stdout/stderr", () => {
+  const result = cli(["--plugins"], { FAKE_HARNESS_FAIL_MARKETPLACE: "claude" });
+  const failed = result.json.actions.find(
+    (a) => a.kind === "conflict" && a.path === "Claude Code: marketplace oneezy-skills",
+  );
+  assert.equal(failed?.diagnostic?.exitCode, 1);
+  assert.match(failed?.diagnostic?.stderr ?? "", /fixture registry registration denied/);
+  assert.match(failed?.diagnostic?.stdout ?? "", /registry provider context/);
+  assert.ok(failed?.diagnostic?.command.includes(root));
+  assert.deepEqual(installed(claudeHome), {});
+  assert.equal(Object.keys(installed(codexHome)).length, 2, "independent Codex installation continues");
+});
+
+for (const failedIds of ["oneezy@oneezy-skills", "oneezy@oneezy-skills,matt-pocock@oneezy-skills"])
+  test(`Claude resolution retains each original diagnostic after later checks: ${failedIds}`, () => {
+    const result = cli(["--plugins"], { FAKE_HARNESS_FAIL_DETAILS: failedIds });
+    for (const id of failedIds.split(",")) {
+      const failure = result.json.actions.find((a) => a.kind === "conflict" && a.path === `Claude Code: plugin ${id}`);
+      assert.equal(failure?.diagnostic?.exitCode, 1);
+      assert.deepEqual(failure?.diagnostic?.command.slice(-3), ["plugin", "details", id]);
+      assert.match(failure?.diagnostic?.stderr ?? "", new RegExp(`fixture details failed: ${id}`));
+    }
+  });
+
+test("alias replacement verification bypasses only the exact approved foreign target and still checks enabled identity and every file", () => {
+  const own = path.join(root, "skills", "oneezy", "oneezy-status");
+  const built = path.join(root, "plugins", "oneezy", "skills", "oneezy-status");
+  write(path.join(own, "references", "status.md"), "current report rules");
+  write(path.join(built, "references", "status.md"), "current report rules");
+  write(path.join(built, "SKILL.md"), withInternal(fs.readFileSync(path.join(own, "SKILL.md"), "utf8")));
+  assert.equal(cli(["--plugins"]).status, 0);
+  const old = path.join(base, "legacy", "oneezy-status");
+  skill(path.dirname(old), "oneezy-status");
+  makeLink(old, path.join(codexSkills(), "oneezy-status"));
+  const pathKey = Object.keys(process.env).find((k) => k.toUpperCase() === "PATH") ?? "PATH";
+  vi.stubEnv(pathKey, bin + path.delimiter + (process.env[pathKey] ?? ""));
+  vi.stubEnv("CODEX_HOME", codexHome);
+  vi.stubEnv("CLAUDE_CONFIG_DIR", claudeHome);
+  vi.stubEnv("FAKE_HARNESS_LOG", log);
+  try {
+    const lib = new Library(root),
+      host = harnessTable(homeDir).find((h) => h.id === "codex")!;
+    assert.equal(pluginDependency(lib, host, "oneezy-status", ["references/status.md"], false), null);
+    assert.equal(
+      pluginDependency(lib, host, "oneezy-status", ["references/status.md"], false, path.join(base, "wrong")),
+      null,
+    );
+    assert.equal(pluginDependency(lib, host, "oneezy-status", ["references/status.md"], false, old), built);
+    vi.stubEnv("FAKE_HARNESS_FAIL_PROMPT", "codex");
+    const failures: NonNullable<import("../src/plan.js").Action["diagnostic"]>[] = [];
+    assert.equal(
+      pluginDependency(lib, host, "oneezy-status", ["references/status.md"], false, old, (d) => failures.push(d)),
+      null,
+    );
+    assert.equal(failures[0]?.exitCode, 1);
+    assert.deepEqual(failures[0]?.command.slice(-2), ["debug", "prompt-input"]);
+    assert.match(failures[0]?.stderr ?? "", /fixture prompt inventory failed/);
+    vi.stubEnv("FAKE_HARNESS_FAIL_PROMPT", "");
+    write(path.join(built, "references", "status.md"), "wrong cache");
+    assert.equal(pluginDependency(lib, host, "oneezy-status", ["references/status.md"], false, old), null);
+    write(path.join(built, "references", "status.md"), "current report rules");
+    const state = JSON.parse(fs.readFileSync(path.join(codexHome, "fake-harness.json"), "utf8"));
+    state.plugins["oneezy@oneezy-skills"].enabled = false;
+    fs.writeFileSync(path.join(codexHome, "fake-harness.json"), JSON.stringify(state));
+    assert.equal(pluginDependency(lib, host, "oneezy-status", ["references/status.md"], false, old), null);
+  } finally {
+    vi.unstubAllEnvs();
+  }
+});
 test("sync preserves a newer installed Codex plugin instead of reinstalling the older built version", () => {
   assert.equal(cli(["--plugins"]).status, 0);
   const file = path.join(codexHome, "fake-harness.json");
