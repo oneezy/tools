@@ -167,6 +167,18 @@ function linked(dir: string, name: string): boolean {
   return isLink(p) && under(linkTarget(p)!, root);
 }
 const PLUGIN_SKILLS = ["oneezy-merge", "oneezy-status", "grilling"];
+test("sync preserves a newer installed Codex plugin instead of reinstalling the older built version", () => {
+  assert.equal(cli(["--plugins"]).status, 0);
+  const file = path.join(codexHome, "fake-harness.json");
+  const saved = JSON.parse(fs.readFileSync(file, "utf8"));
+  saved.plugins["oneezy@oneezy-skills"].version = "0.99.0+newer";
+  fs.writeFileSync(file, JSON.stringify(saved));
+  const result = cli(["--plugins"]);
+  assert.equal(installed(codexHome)["oneezy@oneezy-skills"].version, "0.99.0+newer");
+  assert.ok(!call(result, "codex", "plugin", "add", "oneezy@oneezy-skills"));
+  assert.ok(result.json.actions.some((a) => a.kind === "conflict" && a.note?.includes("newer installed version")));
+});
+
 const call = (r: Run, ...words: string[]) => r.calls.some((c) => words.every((w, i) => c[i] === w));
 
 test("sync installs the built plugins on Claude Code and Codex, verifies them, then drops only their skills' loose links", () => {

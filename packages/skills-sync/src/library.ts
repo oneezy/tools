@@ -320,14 +320,14 @@ export function verifyLibraryRevision(root: string, expected?: string, ref = "re
 }
 
 /**
- * Fast-forward a clean library at most once per `minutes`. Save regenerated files and
- * restore their original bytes if the pull fails; a frozen refresh never changes pins.
+ * Fast-forward only a clean library at most once per `minutes`.
+ * Generated locks are user work too: sync preserves their exact dirty bytes.
  */
 export function pullLibrary(
   root: string,
   minutes: number,
   log: (s: string) => void,
-  regenerated: string[] = [],
+  _regenerated: string[] = [],
 ): "pulled" | "skipped" | "dirty" | "failed" | "throttled" {
   const stamp = path.join(root, ".git", "skills-sync-pulled");
   try {
@@ -344,13 +344,7 @@ export function pullLibrary(
     .split("\n")
     .filter(Boolean)
     .map((l) => l.slice(3).trim());
-  if (changed.some((f) => !regenerated.includes(f))) return "dirty";
-  const saved = changed.map(
-    (f) =>
-      [path.join(root, f), fs.existsSync(path.join(root, f)) ? fs.readFileSync(path.join(root, f)) : null] as const,
-  );
-  if (changed.length)
-    spawnSync("git", ["-c", "core.autocrlf=false", "-C", root, "checkout", "--", ...changed], { encoding: "utf8" });
+  if (changed.length) return "dirty";
   const r = spawnSync("git", ["-c", "core.autocrlf=false", "-C", root, "pull", "--ff-only", "--quiet"], {
     encoding: "utf8",
     timeout: 20_000,
@@ -361,10 +355,6 @@ export function pullLibrary(
     /* stamp is best-effort */
   }
   if (r.status !== 0) {
-    for (const [file, bytes] of saved) {
-      if (bytes) fs.writeFileSync(file, bytes);
-      else fs.rmSync(file, { force: true });
-    }
     log(`library pull skipped: ${(r.stderr ?? "").trim().split("\n").pop()}`);
     return "failed";
   }

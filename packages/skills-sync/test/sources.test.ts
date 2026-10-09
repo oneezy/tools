@@ -335,7 +335,7 @@ test("sync with a config never moves a source upstream: after an upstream commit
   assert.ok(!fs.existsSync(legacy.configFile), "no config was written");
 });
 
-test("sync on a clone of the library installs the committed lock: an upstream commit moves nothing and leaves the tree clean; a lock moved on this machine never blocks the pull, which puts it back; a library commit that moves the lock arrives on the next due sync and is installed; own skills committed to the origin arrive; a failed pull leaves the lock as it was; any other change still blocks", async () => {
+test("frozen sync preserves dirty locks; only a clean library fast-forwards and installs a landed lock; failed pulls and authored edits preserve work", async () => {
   const { harnessTable } = await import("../src/harnesses.js");
   const table = harnessTable(homeDir, {});
   for (const h of table) if (h.id === "claude-code" || h.id === "codex") fs.mkdirSync(h.configDir, { recursive: true });
@@ -393,13 +393,21 @@ test("sync on a clone of the library installs the committed lock: an upstream co
   assert.ok(!body("a").includes("newer"), "and a is installed at the lock's commit");
   assert.deepEqual(dirty(), [], "the sync left the tree clean");
 
-  // a lock moved on this machine (an explicit refresh here, or an older version's sync) is no local change that blocks the pull
+  // A local explicit update is dirty work: sync must never discard its lock.
   assert.equal(cli("refresh", "--quiet").status, 0);
   assert.deepEqual(dirty(), [` M ${lockName}`]);
   ownSkill("own-two");
+  const localLock = cloneLock();
+  const localHead = clone.head();
   const pulled = sync("--pull");
   assert.equal(pulled.status, 0, pulled.stderr);
-  assert.equal(clone.head(), origin.head(), "the clone pulled despite its moved lock");
+  assert.equal(clone.head(), localHead, "dirty lock blocks fast-forward");
+  assert.equal(cloneLock(), localLock, "dirty lock bytes preserved");
+  assert.deepEqual(dirty(), [` M ${lockName}`]);
+  // The fixture owner explicitly resolves its local update; sync may now pull.
+  clone.git("-c", "core.autocrlf=false", "checkout", "--", lockName);
+  assert.equal(sync("--pull").status, 0);
+  assert.equal(clone.head(), origin.head(), "clean compatible clone fast-forwarded");
   assert.ok(fs.existsSync(path.join(lib.own, "oneezy", "own-two", "SKILL.md")), "own-two arrived");
   assert.ok(isLink(path.join(claude.userSkills, "own-two")), "and is linked into the user folder");
   assert.equal(cloneLock(), originLock(), "the pull put the lock back at the library's");

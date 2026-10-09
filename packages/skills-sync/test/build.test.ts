@@ -653,7 +653,7 @@ test("a package built on a branch is as built after the branch is squash-merged:
 
   // what CI checks out: main alone, over the transport, so the branch's commits are not there at all
   const clone = path.join(base, "clone");
-  library.git("clone", "-q", "--single-branch", "--branch", "main", pathToFileURL(root).href, clone);
+  library.git("clone", "-q", "--no-local", "--single-branch", "--branch", "main", root, clone);
   assert.ok(!holds(clone, onBranch), "the clone never had the branch's commits");
   assert.equal(cliIn(clone, "refresh", "--frozen", "--quiet").status, 0, "the snapshot and working set from the lock");
   const cloned = cliIn(clone, "build", "--check");
@@ -684,7 +684,7 @@ test("a shallow clone is as built: at depth 1 (what actions/checkout fetches) it
 
   for (const depth of [1, 2]) {
     const clone = path.join(base, `shallow-${depth}`);
-    library.git("clone", "-q", "--depth", String(depth), pathToFileURL(root).href, clone);
+    library.git("clone", "-q", "--no-local", "--depth", String(depth), root, clone);
     const at = new Upstream(clone);
     assert.equal(at.git("rev-parse", "--is-shallow-repository"), "true");
     assert.ok(!holds(clone, c1), "the commit the source package was built at is not there");

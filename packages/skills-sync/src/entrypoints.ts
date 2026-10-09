@@ -143,6 +143,7 @@ export function entrypoints(
   planned?: Report,
   projectCopies = false,
   nativePlugins = false,
+  onlySkill?: string,
 ): EntryStatus[] {
   const statuses: EntryStatus[] = [];
   let entries: Record<string, Entry>;
@@ -153,6 +154,7 @@ export function entrypoints(
     return [{ path: path.join(lib.root, ENTRYPOINTS_NAME), block: "", state: "conflict", reason: String(error) }];
   }
   for (const [id, entry] of Object.entries(entries)) {
+    if (onlySkill && entry.skill !== onlySkill) continue;
     let body: string;
     try {
       body = read_source(lib, entry);
