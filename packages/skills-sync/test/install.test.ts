@@ -159,7 +159,7 @@ function cli(args: string[], extra: Record<string, string> = {}, entrypoints = f
 }
 
 /** What a fake harness has installed: plugin id -> its record. */
-function installed(home: string): Record<string, { version: string; enabled: boolean }> {
+function installed(home: string): Record<string, { version: string; enabled: boolean; dir: string }> {
   const f = path.join(home, "fake-harness.json");
   return fs.existsSync(f) ? JSON.parse(fs.readFileSync(f, "utf8")).plugins : {};
 }
@@ -403,6 +403,181 @@ test("status --json names each harness's form and whether each installed plugin 
   assert.ok(call(r, "codex", "plugin", "add", "oneezy@oneezy-skills"));
   assert.ok(!call(r, "claude", "plugin", "install"), "Claude reads the package in place");
   assert.ok(cli(["status"]).json.harnesses!.codex.plugins.every((p) => p.match));
+});
+
+function commitFixture(message: string): string {
+  const git = (args: string[]) => {
+    const result = spawnSync(
+      "git",
+      ["-c", "user.name=t", "-c", "user.email=t@example.invalid", "-c", "commit.gpgsign=false", "-C", root, ...args],
+      { encoding: "utf8" },
+    );
+    assert.equal(result.status, 0, result.stderr);
+    return result.stdout.trim();
+  };
+  if (!fs.existsSync(path.join(root, ".git"))) git(["init", "-q"]);
+  git(["add", "skills", "plugins", ".claude-plugin", ".agents/plugins", "skills-lock.json"]);
+  git(["commit", "-q", "-m", message]);
+  return git(["rev-parse", "--short=12", "HEAD"]);
+}
+
+function rebuildCachedFixture(): string {
+  write(path.join(root, "plugins", "oneezy", "skills", "oneezy-status", "revision.txt"), "release B");
+  return commitFixture("release B");
+}
+
+test("cached Claude upgrade uses scoped update, verifies new cache bytes and leaves repeat sync unchanged", () => {
+  const extra = { FAKE_HARNESS_CACHE: "true" };
+  const first = commitFixture("release A");
+  assert.equal(cli(["--plugins"], extra).status, 0);
+  const oldCache = installed(claudeHome)["oneezy@oneezy-skills"].dir;
+  const next = rebuildCachedFixture();
+  assert.notEqual(next, first);
+  makeLink(path.join(root, "skills", "oneezy", "oneezy-status"), path.join(claudeSkills(), "oneezy-status"));
+  const stateBefore = fs.readFileSync(path.join(claudeHome, "fake-harness.json"));
+  const plan = cli(["--plan"], extra);
+  assert.equal(plan.status, 0, plan.stderr);
+  assert.ok(!call(plan, "claude", "plugin", "install") && !call(plan, "claude", "plugin", "update"));
+  assert.deepEqual(fs.readFileSync(path.join(claudeHome, "fake-harness.json")), stateBefore);
+  assert.ok(linked(claudeSkills(), "oneezy-status"));
+  const result = cli([], extra);
+  assert.equal(result.status, 0, result.stderr);
+  assert.ok(call(result, "claude", "plugin", "update", "oneezy@oneezy-skills", "--scope", "user", "--json"));
+  assert.ok(!call(result, "claude", "plugin", "install"));
+  assert.equal(installed(claudeHome)["oneezy@oneezy-skills"].version, next);
+  const cache = installed(claudeHome)["oneezy@oneezy-skills"].dir;
+  assert.notEqual(cache, oldCache);
+  assert.equal(fs.readFileSync(path.join(cache, "skills", "oneezy-status", "revision.txt"), "utf8"), "release B");
+  assert.equal(fs.existsSync(path.join(oldCache, "skills", "oneezy-status", "revision.txt")), false);
+  assert.equal(fs.existsSync(path.join(claudeSkills(), "oneezy-status")), false);
+  assert.ok(cli(["status"], extra).json.harnesses!["claude-code"].plugins.every((p) => p.match));
+  const after = fs.readFileSync(path.join(claudeHome, "fake-harness.json"));
+  const repeat = cli([], extra);
+  assert.equal(repeat.status, 0, repeat.stderr);
+  assert.ok(!call(repeat, "claude", "plugin", "install") && !call(repeat, "claude", "plugin", "update"));
+  assert.equal(repeat.json.actions.filter((a) => !["skip", "note"].includes(a.kind)).length, 0);
+  assert.deepEqual(fs.readFileSync(path.join(claudeHome, "fake-harness.json")), after);
+});
+
+for (const failure of ["denied", "stale", "disabled", "unsupported"])
+  test(`cached Claude ${failure} update preserves loose links and reports the failure`, () => {
+    const extra = { FAKE_HARNESS_CACHE: "true" };
+    commitFixture("release A");
+    assert.equal(cli([], extra).status, 0);
+    const old = installed(claudeHome)["oneezy@oneezy-skills"].version;
+    rebuildCachedFixture();
+    makeLink(path.join(root, "skills", "oneezy", "oneezy-status"), path.join(claudeSkills(), "oneezy-status"));
+    const env: Record<string, string> =
+      failure === "denied"
+        ? { FAKE_HARNESS_FAIL_UPDATE: "oneezy@oneezy-skills" }
+        : failure === "stale"
+          ? { FAKE_HARNESS_STALE_UPDATE: "true" }
+          : failure === "disabled"
+            ? { FAKE_HARNESS_DISABLED_UPDATE: "true" }
+            : { FAKE_HARNESS_NO_UPDATE: "true" };
+    const result = cli([], { ...extra, ...env });
+    const conflict = result.json.actions.find(
+      (a) => a.kind === "conflict" && a.path === "Claude Code: plugin oneezy@oneezy-skills",
+    );
+    assert.ok(conflict, result.stdout);
+    assert.ok(linked(claudeSkills(), "oneezy-status"));
+    assert.ok(!call(result, "claude", "plugin", "install"), "no reinstall fallback");
+    if (failure === "denied") {
+      assert.equal(conflict.diagnostic?.exitCode, 1);
+      assert.deepEqual(conflict.diagnostic?.command.slice(-6), [
+        "plugin",
+        "update",
+        "oneezy@oneezy-skills",
+        "--scope",
+        "user",
+        "--json",
+      ]);
+      assert.match(conflict.diagnostic?.stderr ?? "", /fixture update denied: oneezy@oneezy-skills/);
+      assert.match(conflict.diagnostic?.stdout ?? "", /update provider context/);
+      assert.equal(installed(claudeHome)["oneezy@oneezy-skills"].version, old);
+      assert.notEqual(installed(claudeHome)["matt-pocock@oneezy-skills"].version, old, "independent plugin continues");
+    } else if (failure === "stale") assert.match(conflict.note ?? "", /does not match built/);
+    else if (failure === "disabled") assert.match(conflict.note ?? "", /does not list it enabled/);
+    else {
+      assert.equal(conflict.diagnostic?.exitCode, 1);
+      assert.deepEqual(conflict.diagnostic?.command.slice(-3), ["plugin", "update", "--help"]);
+    }
+    assert.equal(Object.keys(installed(codexHome)).length, 2, "independent Codex remains installed");
+  });
+
+for (const outcome of ["success", "denied", "stale"])
+  test(`cached Claude Brain upgrade ${outcome} verifies its cache before instruction writes`, () => {
+    const extra = { FAKE_HARNESS_CACHE: "true" };
+    const own = path.join(root, "skills", "oneezy", "oneezy-brain");
+    skill(path.dirname(own), "oneezy-brain");
+    const built = path.join(root, "plugins", "oneezy", "skills", "oneezy-brain");
+    write(path.join(built, "SKILL.md"), withInternal(fs.readFileSync(path.join(own, "SKILL.md"), "utf8")));
+    for (const dir of [own, built]) write(path.join(dir, "references", "location.md"), "registry A");
+    write(path.join(root, "brain-routing.md"), "Load registry A.");
+    write(
+      path.join(root, ENTRYPOINTS_NAME),
+      JSON.stringify({
+        version: 1,
+        blocks: {
+          brain: {
+            source: "brain-routing.md",
+            skill: "oneezy-brain",
+            agents: ["claude-code"],
+            requiredFiles: ["references/location.md"],
+          },
+        },
+      }),
+    );
+    commitFixture("release A");
+    assert.equal(cli([], extra, true).status, 0);
+    const instructions = path.join(claudeHome, "CLAUDE.md");
+    const original = fs.readFileSync(instructions);
+    for (const dir of [own, built]) write(path.join(dir, "references", "location.md"), "registry B");
+    write(path.join(root, "brain-routing.md"), "Load registry B.");
+    const next = commitFixture("release B");
+    makeLink(own, path.join(claudeSkills(), "oneezy-brain"));
+    const failure: Record<string, string> =
+      outcome === "denied"
+        ? { FAKE_HARNESS_FAIL_UPDATE: "oneezy@oneezy-skills" }
+        : outcome === "stale"
+          ? { FAKE_HARNESS_STALE_UPDATE: "true" }
+          : {};
+    const result = cli([], { ...extra, ...failure }, true);
+    assert.ok(!call(result, "claude", "plugin", "install"));
+    if (outcome === "success") {
+      assert.equal(result.status, 0, result.stderr);
+      const current = installed(claudeHome)["oneezy@oneezy-skills"];
+      assert.equal(current.version, next);
+      assert.equal(
+        fs.readFileSync(path.join(current.dir, "skills", "oneezy-brain", "references", "location.md"), "utf8"),
+        "registry B",
+      );
+      assert.ok(fs.readFileSync(instructions, "utf8").includes("Load registry B."));
+      assert.equal(fs.existsSync(path.join(claudeSkills(), "oneezy-brain")), false);
+      const repeated = cli([], extra, true);
+      assert.equal(repeated.status, 0, repeated.stderr);
+      assert.ok(!call(repeated, "claude", "plugin", "update"));
+      assert.equal(repeated.json.actions.filter((a) => !["skip", "note"].includes(a.kind)).length, 0);
+    } else {
+      assert.equal(result.status, 1, result.stderr);
+      assert.deepEqual(fs.readFileSync(instructions), original, "failed dependency leaves instructions byte-identical");
+      assert.ok(linked(claudeSkills(), "oneezy-brain"));
+    }
+  });
+
+test("cached Claude update negotiates older command help without JSON", () => {
+  const extra = { FAKE_HARNESS_CACHE: "true", FAKE_HARNESS_NO_WRITE_JSON: "claude" };
+  commitFixture("release A");
+  assert.equal(cli([], extra).status, 0);
+  const next = rebuildCachedFixture();
+  const result = cli([], extra);
+  assert.equal(result.status, 0, result.stderr);
+  const updates = result.calls.filter(
+    (c) => c[0] === "claude" && c[1] === "plugin" && c[2] === "update" && !c.includes("--help"),
+  );
+  assert.equal(updates.length, 2);
+  assert.ok(updates.every((c) => !c.includes("--json") && c.slice(-2).join(" ") === "--scope user"));
+  assert.equal(installed(claudeHome)["oneezy@oneezy-skills"].version, next);
 });
 
 test("unlink removes both forms the tool owns: its links, its plugins, then its marketplace", () => {
