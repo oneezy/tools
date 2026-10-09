@@ -2,7 +2,7 @@
 // installed on Claude Code and Codex through each harness's own plugin commands. The tool never edits a settings file; the
 // harness writes its own while it installs. A plugin's skills lose their loose links on a harness only once that harness lists
 // the plugin enabled and resolves one of its skills (verified without a session: no tokens spent). Goose and Hermes have
-// no plugins and keep their links. What the tool installed is recorded per harness in the local file, so a rollback
+// no native plugin driver in this tool and keep their links. What the tool installed is recorded per harness in the local file, so a rollback
 // (sync --links) or unlink removes only its own.
 import { spawnSync } from "node:child_process";
 import fs from "node:fs";
@@ -10,6 +10,7 @@ import os from "node:os";
 import path from "node:path";
 import { isDir, isLink, linkTarget, samePath, under, real, hasLinkedParent } from "./fs.js";
 import { withInternal } from "./build.js";
+import { plainVersion, compareVersions } from "./versions.js";
 import type { Harness } from "./harnesses.js";
 import type { Library } from "./library.js";
 import type { Report } from "./plan.js";
@@ -509,6 +510,20 @@ function install(
       fail(`plugin ${id}`, "installed but disabled; left alone, loose links kept");
       continue;
     } else if (!d.matches(mine, b, lib)) {
+      const installedVersion = mine.version ? plainVersion(mine.version) : null;
+      const builtVersion = d.built(lib, b);
+      if (
+        installedVersion &&
+        builtVersion &&
+        plainVersion(builtVersion) &&
+        compareVersions(installedVersion, builtVersion) > 0
+      ) {
+        fail(
+          `plugin ${id}`,
+          `newer installed version ${mine.version} > ${builtVersion}; preserved, update the reviewed library first`,
+        );
+        continue;
+      }
       report.add({
         kind: "install",
         path: where(`plugin ${id}`),
