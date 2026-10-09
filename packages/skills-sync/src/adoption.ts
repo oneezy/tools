@@ -93,6 +93,13 @@ export function adoptBrain(
       const previous = receipt.links.find((a) => samePath(a.path, item.path));
       const target = linkTarget(item.path);
       if (previous?.state === "adopted" && target && samePath(target, own.dir)) {
+        if (
+          !samePath(path.dirname(previous.backup), path.dirname(item.path)) ||
+          !path.basename(previous.backup).startsWith(".oneezy-brain.skills-sync-backup-") ||
+          !isLink(previous.backup) ||
+          !samePath(linkTarget(previous.backup) ?? "", item.expectedTarget)
+        )
+          throw new Error("Preserved backup ownership changed; left alone");
         report.add({ kind: "skip", path: item.path, target: own.dir, note: `adopted; backup ${previous.backup}` });
         continue;
       }

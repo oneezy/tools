@@ -33,7 +33,7 @@ import { findProjects, home, isRepo, layers, projects, status, unlink, type Stat
 import { commitsPast, releasesOf, versionLabel } from "./versions.js";
 import { runInWsl, wslDistros } from "./wsl.js";
 
-const VERSION = "0.7.2";
+const VERSION = "0.7.3";
 const HELP = `skills-sync ${VERSION}
 One skills library, every harness, every project on this machine. Run it anywhere; it works out the rest.
 
@@ -325,6 +325,14 @@ async function main(): Promise<void> {
   const log = (m: string) => (args.json ? undefined : process.stderr.write(m + "\n"));
   const setup = new Report();
 
+  const scopedBrain = args.command === "adopt-brain" || args.command === "rollback-brain";
+  if (scopedBrain) {
+    if (!args.receipt) bail("Scoped Brain commands require --receipt");
+    if (!args.repo || !looksLikeLibrary(path.resolve(args.repo)))
+      bail("Scoped Brain commands require --repo pointing to an existing reviewed library");
+    if (args.command === "adopt-brain" && !args.adoptionFile) bail("adopt-brain requires --adoption-file");
+  }
+
   // 1. the library: find it, or get one
   let root = args.repo ? real(path.resolve(args.repo)) : findLibrary(cwd);
   // check reads what is there: it never clones a library to have one to check
@@ -353,7 +361,7 @@ async function main(): Promise<void> {
     bail("no skills library found: run this inside one, or pass --repo <path> or --library owner/repo");
   const lib = new Library(root);
   // Scoped recovery never enters broad sync, pulls, remembers a library or saves machine answers.
-  if (args.command === "adopt-brain" || args.command === "rollback-brain") {
+  if (scopedBrain) {
     const report = new Report();
     if (!args.receipt) bail("Scoped Brain commands require --receipt");
     if (args.command === "rollback-brain") {
@@ -381,13 +389,35 @@ async function main(): Promise<void> {
       const changedRevision = verifyLibraryRevision(lib.root, args.expectRevision, args.remoteRef);
       if (changedRevision) report.add({ kind: "conflict", path: lib.root, note: changedRevision });
       else {
-        entrypoints(lib, hosts, true, [], instructions, true, args.plan ? report : undefined);
+        entrypoints(
+          lib,
+          hosts,
+          true,
+          [],
+          instructions,
+          true,
+          args.plan ? report : undefined,
+          false,
+          false,
+          "oneezy-brain",
+        );
         apply(instructions, args.plan);
         report.merge(instructions);
       }
     }
     const verified = args.entrypoints
-      ? entrypoints(lib, hosts, true, [], new Report(), true, args.plan ? report : undefined)
+      ? entrypoints(
+          lib,
+          hosts,
+          true,
+          [],
+          new Report(),
+          true,
+          args.plan ? report : undefined,
+          false,
+          false,
+          "oneezy-brain",
+        )
       : [];
     if (report.conflicts().length || (!args.plan && verified.some((item) => item.state !== "current")))
       process.exitCode = 1;

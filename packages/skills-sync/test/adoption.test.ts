@@ -61,6 +61,59 @@ test("CLI advertises scoped adoption rather than requiring a broad unlink", () =
   assert.match(r.stdout, /--receipt/);
 });
 
+for (const command of ["adopt-brain", "rollback-brain"])
+  test(`${command} requires an existing explicit library before discovery or cloning`, () => {
+    const home = fs.mkdtempSync(path.join(os.tmpdir(), "brain-no-clone-"));
+    try {
+      const cli = path.resolve(import.meta.dirname, "../dist/src/cli.js");
+      const r = spawnSync(process.execPath, [cli, command, "--receipt", path.join(home, "receipt.json"), "--json"], {
+        encoding: "utf8",
+        cwd: home,
+        env: { ...process.env, HOME: home, USERPROFILE: home, SKILLS_REPO: "" },
+      });
+      assert.equal(r.status, 1, r.stderr);
+      assert.match(r.stderr, /require --repo pointing to an existing reviewed library/);
+      assert.deepEqual(fs.readdirSync(home), []);
+    } finally {
+      fs.rmSync(home, { recursive: true, force: true });
+    }
+  });
+
+for (const failure of ["missing-backup", "changed-backup"])
+  test(`an adoption rerun refuses ${failure} without changing the installed link or receipt`, () => {
+    const base = fs.mkdtempSync(path.join(os.tmpdir(), "brain-backup-guard-"));
+    try {
+      const lib = new Library(path.join(base, "reviewed"));
+      const target = path.join(lib.own, "oneezy", "oneezy-brain");
+      const old = path.join(base, "old");
+      const other = path.join(base, "other");
+      for (const dir of [target, old, other]) {
+        fs.mkdirSync(dir, { recursive: true });
+        fs.writeFileSync(path.join(dir, "SKILL.md"), "Brain");
+      }
+      const link = path.join(base, "home", ".agents", "skills", "oneezy-brain");
+      makeLink(old, link);
+      const allowed = [{ path: link, expectedTarget: old }];
+      const manifest = { version: 1, links: allowed };
+      const receipt = path.join(base, "receipt.json");
+      adoptBrain(lib, manifest, allowed, receipt, new Report(), false);
+      const saved = fs.readFileSync(receipt);
+      const backup = JSON.parse(saved.toString()).links[0].backup;
+      removeLink(backup);
+      if (failure === "changed-backup") makeLink(other, backup);
+      const repeat = new Report();
+      adoptBrain(lib, manifest, allowed, receipt, repeat, false);
+      assert.equal(repeat.conflicts().length, 1);
+      assert.equal(repeat.changes().length, 0);
+      assert.ok(samePath(linkTarget(link)!, target));
+      assert.deepEqual(fs.readFileSync(receipt), saved);
+      if (failure === "changed-backup") assert.ok(samePath(linkTarget(backup)!, other));
+      else assert.equal(lexists(backup), false);
+    } finally {
+      fs.rmSync(base, { recursive: true, force: true });
+    }
+  });
+
 for (const failure of ["changed-target", "link-failure", "later-rollback-edit", "outside-allowlist"])
   test(`adoption ${failure} preserves unexpected work`, () => {
     const base = fs.mkdtempSync(path.join(os.tmpdir(), "brain-adopt-guard-"));

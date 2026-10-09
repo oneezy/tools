@@ -71,6 +71,41 @@ beforeEach(() => {
 });
 afterEach(() => fs.rmSync(base, { recursive: true, force: true }));
 
+test("scoped Brain propagation leaves unrelated configured instruction blocks untouched", () => {
+  const config = JSON.parse(read(path.join(lib.root, ENTRYPOINTS_NAME)));
+  config.blocks.other = {
+    source: "skills/oneezy/oneezy-skills/assets/other-routing.md",
+    skill: "oneezy-skills",
+    agents: ["codex", "claude-code"],
+  };
+  write(
+    path.join(lib.own, "oneezy", "oneezy-skills", "SKILL.md"),
+    "---\nname: oneezy-skills\ndescription: Sync\n---\nSync\n",
+  );
+  write(path.join(lib.own, "oneezy", "oneezy-skills", "assets", "other-routing.md"), "Unrelated routing");
+  write(path.join(lib.root, ENTRYPOINTS_NAME), JSON.stringify(config));
+  const report = new Report();
+  const statuses = entrypoints(
+    lib,
+    harnessTable(userDir, {}),
+    true,
+    [],
+    report,
+    false,
+    undefined,
+    false,
+    false,
+    "oneezy-brain",
+  );
+  apply(report, false);
+  assert.ok(statuses.length > 0);
+  assert.ok(statuses.every((item) => item.block === "brain"));
+  const actual = read(path.join(userDir, ".codex", "AGENTS.md"));
+  assert.ok(actual.includes(start));
+  assert.ok(!actual.includes("skills-sync:other"));
+  assert.ok(!actual.includes("Unrelated routing"));
+});
+
 test("plan writes nothing; apply preserves text, CRLF, imports, overrides and nested instructions; repeat is silent", () => {
   const agents = path.join(project, "AGENTS.md");
   const override = path.join(project, "AGENTS.override.md");
