@@ -48,6 +48,7 @@ export interface Action {
   expectedHash?: string | null;
   dependencies?: Array<{ path: string; target: string | null; files: Array<{ name: string; hash: string }> }>;
   failed?: boolean;
+  diagnostic?: { command: string[]; exitCode: number | null; stderr: string; stdout: string };
 }
 
 export class Report {

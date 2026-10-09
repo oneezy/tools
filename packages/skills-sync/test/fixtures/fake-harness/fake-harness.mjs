@@ -44,7 +44,7 @@ const codexVersion = (dir) => JSON.parse(fs.readFileSync(path.join(dir, ".codex-
 
 if (args[0] === "plugin" && args.includes("--help")) {
   if (has(process.env.FAKE_HARNESS_OLD, host)) out(`Usage: ${host} [options] [prompt]`);
-  else out(`Usage: ${host} plugin [command]\n\nCommands:\n  install  list  marketplace  uninstall`);
+  else out(`Usage: ${host} plugin [command]\n\nCommands:\n  install  list  marketplace  uninstall\n${has(process.env.FAKE_HARNESS_NO_WRITE_JSON, host) ? "" : "Options:\n  --json  Print machine-readable result"}`);
 } else if (has(process.env.FAKE_HARNESS_OLD, host)) {
   fail(`unknown command ${args.join(" ")}`);
 } else if (cmd === "plugin marketplace list") {
@@ -55,6 +55,11 @@ if (args[0] === "plugin" && args.includes("--help")) {
       : { marketplaces: rows.map(([name, p]) => ({ name, root: p })) },
   );
 } else if (cmd === "plugin marketplace add") {
+  if (has(process.env.FAKE_HARNESS_NO_WRITE_JSON, host) && args.includes("--json")) fail("unknown option '--json'");
+  if (has(process.env.FAKE_HARNESS_FAIL_MARKETPLACE, host)) {
+    out("registry provider context");
+    fail("fixture registry registration denied");
+  }
   const root = path.resolve(words[3]);
   const name = catalog(root).name;
   state.marketplaces[name] = root;
@@ -107,11 +112,13 @@ if (args[0] === "plugin" && args.includes("--help")) {
   save();
   out({ outcome: "ok" });
 } else if (host === "claude" && cmd === "plugin details") {
+  if (has(process.env.FAKE_HARNESS_FAIL_DETAILS, args[2])) fail(`fixture details failed: ${args[2]}`);
   const p = state.plugins[words[2]];
   if (!p) fail(`Plugin "${words[2]}" not found.`);
   const skills = has(process.env.FAKE_HARNESS_BROKEN, host) ? [] : skillsOf(p.dir);
   out(`${words[2]}\n\nComponent inventory\n  Skills (${skills.length})  ${skills.join(", ")}\n  Agents (0)`);
 } else if (host === "codex" && args[0] === "debug" && args[1] === "prompt-input") {
+  if (has(process.env.FAKE_HARNESS_FAIL_PROMPT, host)) fail("fixture prompt inventory failed");
   const lines = [];
   let rootIndex = 0;
   if (!has(process.env.FAKE_HARNESS_BROKEN, host))

@@ -72,6 +72,16 @@ Pass `--repo <reviewed-clean-library> --expect-revision <full-sha> --remote-ref 
 
 `rollback-brain --repo <library> --receipt <same-json>` restores only those preserved links, refusing changed adopted links or backups. It does not undo instruction blocks; retain the before-images for a reviewed instruction rollback. Receipts and the reviewed library must outlive the links. Generated package versions and installed plugin versions are separate facts. A newer installed semver plugin is preserved rather than reinstalled at an older built version.
 
+### Explicit historical Skills/Status alias handoff (0.7.4)
+
+`migrate-aliases --alias-file <manifest> --receipt <durable-json> --repo <verified-library> --expect-revision <full-sha> --remote-ref <exact-ref>` handles only the historical `oneezy-skills` and `oneezy-status` aliases in Justin's Windows `.agents/skills` and `.claude/skills`, or Ubuntu `/home/justin/` equivalents. The version 1 manifest supplies literal `path`/`expectedTarget` pairs at `V:\dev\skills\skills\oneezy\<skill>` or `/mnt/v/dev/skills/skills/oneezy/<skill>`. Preview with `--plan --json` first.
+
+The enabled native plugin must match this library's registered source/version, expose the exact skill, and carry all reviewed files before an alias moves. Every selected alias on a harness passes preflight together. The tool rechecks immediately before mutation and moves the original link into `.skills-sync-alias-backups` under that harness's config directory, outside skill discovery. The receipt records replacement hashes and backup ownership. Independent harnesses can succeed while a failed prerequisite holds the other. This command does not pull, install plugins, remember choices or write instructions. Ordinary sync still preserves foreign links.
+
+Repeat with the same manifest/receipt to verify idempotence. `rollback-aliases --repo <library> --receipt <receipt> [--plan --json]` restores only unchanged preserved aliases, refuses later destination edits and retains installed plugins. Keep receipts and backups durable. Verify fresh default discovery and actual Skills-to-Status execution separately from installed-file checks.
+
+Claude write commands negotiate `--json` from their own `--help`; older versions with JSON listings but no JSON writes remain supported. Failed native commands retain structured `diagnostic.command`, `exitCode`, `stdout` and `stderr` on their conflict actions, with credential-bearing transport text redacted. No settings patch is used to hide failures.
+
 ### Links
 
 Every link is a directory symlink. On Windows a symlink needs Developer Mode or elevation; when the system refuses one (EPERM) the tool makes a junction instead and says so in the run's `links:` line. `--symlinks` makes symlinks only (the run fails where one is refused), `--junctions` makes junctions only; either flag is remembered as `links` in `skills-sync.local.json` (`auto` by default) and read on every run. The mode applies to links the run creates; a link that already points at the right folder is left as it is, whatever its kind (`unlink`, then sync, remakes the user-folder links). POSIX has only symlinks.

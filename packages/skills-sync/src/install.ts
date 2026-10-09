@@ -13,7 +13,7 @@ import { withInternal } from "./build.js";
 import { plainVersion, compareVersions } from "./versions.js";
 import type { Harness } from "./harnesses.js";
 import type { Library } from "./library.js";
-import type { Report } from "./plan.js";
+import type { Action, Report } from "./plan.js";
 
 /** How a harness gets the library's skills: its plugins, or one loose link per skill in its user folder. */
 export type Form = "plugin" | "links";
@@ -44,7 +44,23 @@ interface Installed {
 }
 
 interface Run {
-  (args: string[]): { ok: boolean; out: string; err: string };
+  (args: string[]): { ok: boolean; out: string; err: string; exitCode: number | null };
+  failure?: Action["diagnostic"];
+  resolutionFailures?: Map<string, Action["diagnostic"]>;
+}
+
+// Ask each write command's help once; older Claude versions support listings' --json but not writes'.
+const jsonCapabilities = new WeakMap<Run, Map<string, boolean>>();
+function claudeWrite(run: Run, command: string[], args: string[]): boolean {
+  const capabilities = jsonCapabilities.get(run) ?? new Map<string, boolean>();
+  jsonCapabilities.set(run, capabilities);
+  const key = command.join(" ");
+  if (!capabilities.has(key)) {
+    const help = run([...command, "--help"]);
+    if (!help.ok) return false;
+    capabilities.set(key, /(?:^|\s)--json(?:\s|,|$)/m.test(help.out + help.err));
+  }
+  return run([...command, ...args, ...(capabilities.get(key) ? ["--json"] : [])]).ok;
 }
 
 interface Driver {
@@ -130,14 +146,16 @@ const claude: Driver = {
         readInPlace: !!str(p.readFromFolder),
       }));
   },
-  addMarketplace: (run, root) => run(["plugin", "marketplace", "add", root, "--json"]).ok,
-  removeMarketplace: (run, name) => run(["plugin", "marketplace", "remove", name, "--json"]).ok,
-  install: (run, id) => run(["plugin", "install", id, "--scope", "user", "--json"]).ok,
-  uninstall: (run, id) => run(["plugin", "uninstall", id, "--scope", "user", "--json"]).ok,
+  addMarketplace: (run, root) => claudeWrite(run, ["plugin", "marketplace", "add"], [root]),
+  removeMarketplace: (run, name) => claudeWrite(run, ["plugin", "marketplace", "remove"], [name]),
+  install: (run, id) => claudeWrite(run, ["plugin", "install"], [id, "--scope", "user"]),
+  uninstall: (run, id) => claudeWrite(run, ["plugin", "uninstall"], [id, "--scope", "user"]),
   resolving(run, plugins, marketplace) {
     const out = new Set<string>();
+    run.resolutionFailures = new Map();
     for (const b of plugins) {
       const r = run(["plugin", "details", `${b.name}@${marketplace}`]);
+      if (run.failure) run.resolutionFailures.set(b.name, run.failure);
       const m = r.ok ? /^\s*Skills \((\d+)\)\s+(.*)$/m.exec(r.out) : null;
       const listed = m ? m[2].split(",").map((s) => s.trim()) : [];
       if (b.skills.some((s) => listed.includes(s))) out.add(b.name);
@@ -183,10 +201,14 @@ const codex: Driver = {
   uninstall: (run, id) => run(["plugin", "remove", id, "--json"]).ok,
   resolving(run, plugins) {
     const out = new Set<string>();
+    run.resolutionFailures = new Map();
     if (!plugins.length) return out;
     // the model-visible prompt input, rendered locally: each loaded plugin skill is listed as <plugin>:<skill>
     const r = run(["debug", "prompt-input"]);
-    if (!r.ok) return out;
+    if (!r.ok) {
+      for (const b of plugins) if (run.failure) run.resolutionFailures.set(b.name, run.failure);
+      return out;
+    }
     for (const b of plugins) if (b.skills.some((s) => r.out.includes(`- ${b.name}:${s}:`))) out.add(b.name);
     return out;
   },
@@ -223,6 +245,8 @@ export function pluginDependency(
   skill: string,
   required: string[],
   plan: boolean,
+  expectedLooseTarget?: string,
+  onFailure?: (diagnostic: NonNullable<Action["diagnostic"]>) => void,
 ): string | null {
   const d = DRIVERS[h.id];
   const catalog = readCatalog(lib, h);
@@ -232,7 +256,12 @@ export function pluginDependency(
   if (!d || !catalog || !b || !own || !file) return null;
   const built = path.join(b.dir, "skills", skill);
   const loose = path.join(h.userSkills, skill);
-  if (fs.existsSync(path.join(loose, "SKILL.md")) && !ownLink(lib, loose)) return null;
+  if (
+    fs.existsSync(path.join(loose, "SKILL.md")) &&
+    !ownLink(lib, loose) &&
+    !(expectedLooseTarget && isLink(loose) && samePath(linkTarget(loose) ?? "", expectedLooseTarget))
+  )
+    return null;
   const matchesFiles = (dir: string) =>
     ["SKILL.md", ...required].every((name) => {
       const expected =
@@ -244,7 +273,7 @@ export function pluginDependency(
     });
   try {
     if (hasLinkedParent(built) || !matchesFiles(built)) return null;
-    const run = runner(file);
+    const run = runner(file, onFailure);
     const market = d.marketplaces(run)?.find((item) => item.name === catalog.marketplace);
     if (market && !samePath(market.path, lib.root)) return null;
     const id = `${b.name}@${catalog.marketplace}`;
@@ -347,10 +376,10 @@ export function which(bin: string, env: NodeJS.ProcessEnv = process.env): string
 }
 
 /** Run a harness CLI with no TTY: a .cmd shim (npm's, on Windows) through the shell, anything else directly. */
-function runner(file: string): Run {
+function runner(file: string, onFailure?: (diagnostic: NonNullable<Action["diagnostic"]>) => void): Run {
   const shell = process.platform === "win32" && /\.(cmd|bat)$/i.test(file);
   const quote = (s: string) => (/[\s&|<>^()%!"]/.test(s) ? `"${s.replace(/"/g, "")}"` : s);
-  return (args) => {
+  const run: Run = (args) => {
     const r = shell
       ? spawnSync(quote(file), args.map(quote), {
           shell: true,
@@ -361,8 +390,26 @@ function runner(file: string): Run {
           windowsHide: true,
         })
       : spawnSync(file, args, { encoding: "utf8", cwd: os.homedir(), input: "", timeout: 180_000, windowsHide: true });
-    return { ok: r.status === 0, out: r.stdout ?? "", err: (r.stderr ?? "") + (r.error ? r.error.message : "") };
+    const result = {
+      ok: r.status === 0,
+      out: r.stdout ?? "",
+      err: (r.stderr ?? "") + (r.error ? r.error.message : ""),
+      exitCode: r.status,
+    };
+    const redact = (text: string) =>
+      text.replace(/(https?:\/\/)[^\s/@]+@/g, "$1[redacted]@").replace(/(Bearer\s+)\S+/gi, "$1[redacted]");
+    run.failure = result.ok
+      ? undefined
+      : {
+          command: [file, ...args].map(redact),
+          exitCode: result.exitCode,
+          stdout: redact(result.out),
+          stderr: redact(result.err),
+        };
+    if (run.failure) onFailure?.(run.failure);
+    return result;
   };
+  return run;
 }
 
 /** Does this harness's CLI have plugin commands? Asked through --help only, so an old CLI never starts a session. */
@@ -443,7 +490,8 @@ function install(
   const skills = new Map<string, string>();
   const mkt = catalog.marketplace;
   const where = (what: string) => `${h.name}: ${what}`;
-  const fail = (what: string, why: string) => report.add({ kind: "conflict", path: where(what), note: why });
+  const fail = (what: string, why: string, diagnostic: Action["diagnostic"] | null = run.failure ?? null) =>
+    report.add({ kind: "conflict", path: where(what), note: why, ...(diagnostic ? { diagnostic } : {}) });
 
   const markets = d.marketplaces(run);
   if (!markets) {
@@ -545,6 +593,7 @@ function install(
   // verify before any link goes: listed enabled, and one skill resolving. A plugin already in place whose skills hold
   // no loose link of this tool's has nothing left to unlink, so it is not asked again on every run
   const after = d.installed(run) ?? [];
+  const inventoryFailure = run.failure;
   const enabled = candidates.filter((b) => after.some((i) => i.id === `${b.name}@${mkt}` && i.enabled));
   const toAsk = enabled.filter(
     (b) => fresh.has(`${b.name}@${mkt}`) || b.skills.some((s) => ownLink(lib, path.join(h.userSkills, s))),
@@ -557,6 +606,7 @@ function install(
       fail(
         `plugin ${id}`,
         `installed but not verified (${enabled.includes(b) ? `none of its skills resolves in ${d.bin}` : `${d.bin} does not list it enabled`}); loose links kept`,
+        (enabled.includes(b) ? run.resolutionFailures?.get(b.name) : inventoryFailure) ?? null,
       );
       continue;
     }
@@ -599,7 +649,12 @@ function rollback(h: Harness, d: Driver, prior: Owned, marketplace: boolean, rep
       report.add({ kind: "uninstall", path: where(`plugin ${id}`), note: "installed by skills-sync" });
       if (plan) continue;
       if (!d.uninstall(run, id)) {
-        report.add({ kind: "conflict", path: where(`plugin ${id}`), note: `${d.bin} could not uninstall it` });
+        report.add({
+          kind: "conflict",
+          path: where(`plugin ${id}`),
+          note: `${d.bin} could not uninstall it`,
+          diagnostic: run.failure,
+        });
         continue;
       }
     }
@@ -611,7 +666,13 @@ function rollback(h: Harness, d: Driver, prior: Owned, marketplace: boolean, rep
       report.add({ kind: "uninstall", path: where(`marketplace ${m}`), note: "registered by skills-sync" });
       if (!plan) {
         if (d.removeMarketplace(run, m)) delete owned.marketplace;
-        else report.add({ kind: "conflict", path: where(`marketplace ${m}`), note: `${d.bin} could not remove it` });
+        else
+          report.add({
+            kind: "conflict",
+            path: where(`marketplace ${m}`),
+            note: `${d.bin} could not remove it`,
+            diagnostic: run.failure,
+          });
       }
     } else if (!plan) delete owned.marketplace;
   }
