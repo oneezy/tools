@@ -74,6 +74,7 @@ interface Driver {
   addMarketplace: (run: Run, root: string) => boolean;
   removeMarketplace: (run: Run, name: string) => boolean;
   install: (run: Run, id: string) => boolean;
+  update: (run: Run, id: string) => boolean;
   uninstall: (run: Run, id: string) => boolean;
   /** the names of the given plugins that resolve at least one of their skills */
   resolving: (run: Run, plugins: Built[], marketplace: string) => Set<string>;
@@ -149,6 +150,7 @@ const claude: Driver = {
   addMarketplace: (run, root) => claudeWrite(run, ["plugin", "marketplace", "add"], [root]),
   removeMarketplace: (run, name) => claudeWrite(run, ["plugin", "marketplace", "remove"], [name]),
   install: (run, id) => claudeWrite(run, ["plugin", "install"], [id, "--scope", "user"]),
+  update: (run, id) => claudeWrite(run, ["plugin", "update"], [id, "--scope", "user"]),
   uninstall: (run, id) => claudeWrite(run, ["plugin", "uninstall"], [id, "--scope", "user"]),
   resolving(run, plugins, marketplace) {
     const out = new Set<string>();
@@ -198,6 +200,7 @@ const codex: Driver = {
   addMarketplace: (run, root) => run(["plugin", "marketplace", "add", root, "--json"]).ok,
   removeMarketplace: (run, name) => run(["plugin", "marketplace", "remove", name, "--json"]).ok,
   install: (run, id) => run(["plugin", "add", id, "--json"]).ok,
+  update: (run, id) => run(["plugin", "add", id, "--json"]).ok,
   uninstall: (run, id) => run(["plugin", "remove", id, "--json"]).ok,
   resolving(run, plugins) {
     const out = new Set<string>();
@@ -577,8 +580,8 @@ function install(
         path: where(`plugin ${id}`),
         note: `${mine.version ?? "no version"} -> ${d.built(lib, b) ?? "built"}`,
       });
-      if (!plan && !d.install(run, id)) {
-        fail(`plugin ${id}`, `${d.bin} could not reinstall it at the built version`);
+      if (!plan && !d.update(run, id)) {
+        fail(`plugin ${id}`, `${d.bin} could not update it at the built version; loose links kept`);
         continue;
       }
       fresh.add(id);
@@ -590,23 +593,31 @@ function install(
     return { skills, owned };
   }
 
-  // verify before any link goes: listed enabled, and one skill resolving. A plugin already in place whose skills hold
+  // verify before any link goes: listed enabled at the built version/source, and one skill resolving. A plugin already in place whose skills hold
   // no loose link of this tool's has nothing left to unlink, so it is not asked again on every run
   const after = d.installed(run) ?? [];
   const inventoryFailure = run.failure;
   const enabled = candidates.filter((b) => after.some((i) => i.id === `${b.name}@${mkt}` && i.enabled));
-  const toAsk = enabled.filter(
+  const matching = enabled.filter((b) =>
+    after.some((i) => i.id === `${b.name}@${mkt}` && i.enabled && d.matches(i, b, lib)),
+  );
+  const toAsk = matching.filter(
     (b) => fresh.has(`${b.name}@${mkt}`) || b.skills.some((s) => ownLink(lib, path.join(h.userSkills, s))),
   );
   const resolving = d.resolving(run, toAsk, mkt);
   for (const b of candidates) {
     const id = `${b.name}@${mkt}`;
-    const ok = enabled.includes(b) && (!toAsk.includes(b) || resolving.has(b.name));
+    const ok = matching.includes(b) && (!toAsk.includes(b) || resolving.has(b.name));
     if (!ok) {
+      const reason = !enabled.includes(b)
+        ? `${d.bin} does not list it enabled`
+        : !matching.includes(b)
+          ? `installed ${after.find((i) => i.id === id)?.version ?? "no version"} does not match built ${d.built(lib, b) ?? "source"}`
+          : `none of its skills resolves in ${d.bin}`;
       fail(
         `plugin ${id}`,
-        `installed but not verified (${enabled.includes(b) ? `none of its skills resolves in ${d.bin}` : `${d.bin} does not list it enabled`}); loose links kept`,
-        (enabled.includes(b) ? run.resolutionFailures?.get(b.name) : inventoryFailure) ?? null,
+        `installed but not verified (${reason}); loose links kept`,
+        (matching.includes(b) ? run.resolutionFailures?.get(b.name) : inventoryFailure) ?? null,
       );
       continue;
     }

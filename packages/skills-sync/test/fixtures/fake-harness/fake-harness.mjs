@@ -43,8 +43,9 @@ const resolve = (id) => {
 const codexVersion = (dir) => JSON.parse(fs.readFileSync(path.join(dir, ".codex-plugin", "plugin.json"), "utf8")).version;
 
 if (args[0] === "plugin" && args.includes("--help")) {
+  if (cmd === "plugin update" && process.env.FAKE_HARNESS_NO_UPDATE) fail("unknown command update");
   if (has(process.env.FAKE_HARNESS_OLD, host)) out(`Usage: ${host} [options] [prompt]`);
-  else out(`Usage: ${host} plugin [command]\n\nCommands:\n  install  list  marketplace  uninstall\n${has(process.env.FAKE_HARNESS_NO_WRITE_JSON, host) ? "" : "Options:\n  --json  Print machine-readable result"}`);
+  else out(`Usage: ${host} plugin [command]\n\nCommands:\n  install  update  list  marketplace  uninstall\n${has(process.env.FAKE_HARNESS_NO_WRITE_JSON, host) ? "" : "Options:\n  --json  Print machine-readable result"}`);
 } else if (has(process.env.FAKE_HARNESS_OLD, host)) {
   fail(`unknown command ${args.join(" ")}`);
 } else if (cmd === "plugin marketplace list") {
@@ -91,18 +92,40 @@ if (args[0] === "plugin" && args.includes("--help")) {
           available: [],
         },
   );
-} else if ((host === "claude" && cmd === "plugin install") || (host === "codex" && cmd === "plugin add")) {
+} else if ((host === "claude" && ["plugin install", "plugin update"].includes(cmd)) || (host === "codex" && cmd === "plugin add")) {
+  if (has(process.env.FAKE_HARNESS_NO_WRITE_JSON, host) && args.includes("--json")) fail("unknown option '--json'");
   const p = resolve(words[2]);
   const at = state.plugins[words[2]];
-  state.plugins[words[2]] = {
-    version: host === "claude"
+  // Native Claude install leaves an existing cache untouched; only update rebuilds it.
+  if (host === "claude" && cmd === "plugin install" && at) {
+    out({ outcome: "ok", message: "already installed" });
+    process.exit(0);
+  }
+  if (cmd === "plugin update") {
+    if (has(process.env.FAKE_HARNESS_FAIL_UPDATE, words[2])) {
+      out(`update provider context: ${words[2]}`);
+      fail(`fixture update denied: ${words[2]}`);
+    }
+    if (process.env.FAKE_HARNESS_STALE_UPDATE) {
+      out({ outcome: "ok", message: "already up to date" });
+      process.exit(0);
+    }
+  }
+  const version = host === "claude"
       ? process.env.FAKE_HARNESS_CACHE
         ? spawnSync("git", ["-C", state.marketplaces[p.mkt], "rev-parse", "--short=12", "HEAD"], {encoding:"utf8"}).stdout.trim()
         : "c69993a67bba"
-      : codexVersion(p.dir),
-    enabled: at?.enabled ?? true,
-    dir: p.dir,
-    skills: skillsOf(p.dir),
+      : codexVersion(p.dir);
+  let dir = p.dir;
+  if (host === "claude" && process.env.FAKE_HARNESS_CACHE) {
+    dir = path.join(home, "cache", p.mkt, p.name, version);
+    fs.cpSync(p.dir, dir, { recursive: true });
+  }
+  state.plugins[words[2]] = {
+    version,
+    enabled: cmd === "plugin update" && process.env.FAKE_HARNESS_DISABLED_UPDATE ? false : at?.enabled ?? true,
+    dir,
+    skills: skillsOf(dir),
   };
   save();
   out({ outcome: "ok", pluginId: words[2] });
