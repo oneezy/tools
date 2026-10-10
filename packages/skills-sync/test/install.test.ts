@@ -269,6 +269,31 @@ test("sync preserves a newer installed Codex plugin instead of reinstalling the 
   assert.ok(result.json.actions.some((a) => a.kind === "conflict" && a.note?.includes("newer installed version")));
 });
 
+test("a tool-owned legacy generated version migrates to the official semantic version even when its synthetic minor was higher", () => {
+  plugin("matt-pocock", ["grilling"], "0.25.0+aaaaaaaaaaaa");
+  assert.equal(cli(["--plugins"]).status, 0);
+  plugin("matt-pocock", ["grilling"], "1.3.1");
+  plugin("oneezy", ["oneezy-brain", "oneezy-status"], "0.0.1");
+  const migrated = cli(["--plugins"]);
+  assert.equal(migrated.status, 0, migrated.stderr);
+  assert.equal(installed(codexHome)["matt-pocock@oneezy-skills"].version, "1.3.1");
+  assert.equal(installed(codexHome)["oneezy@oneezy-skills"].version, "0.0.1");
+  assert.ok(call(migrated, "codex", "plugin", "add", "oneezy@oneezy-skills"));
+});
+
+test("changed upstream bytes refresh the owned Codex cache without inventing a new semantic version", () => {
+  plugin("matt-pocock", ["grilling"], "1.3.1");
+  assert.equal(cli(["--plugins"]).status, 0);
+  write(path.join(root, "plugins", "matt-pocock", "skills", "grilling", "reference.md"), "updated source snapshot");
+  const updated = cli(["--plugins"]);
+  assert.equal(updated.status, 0, updated.stderr);
+  assert.ok(call(updated, "codex", "plugin", "add", "matt-pocock@oneezy-skills"));
+  assert.equal(installed(codexHome)["matt-pocock@oneezy-skills"].version, "1.3.1");
+  const unchanged = cli(["--plugins"]);
+  assert.equal(unchanged.status, 0, unchanged.stderr);
+  assert.ok(!call(unchanged, "codex", "plugin", "add", "matt-pocock@oneezy-skills"));
+});
+
 const call = (r: Run, ...words: string[]) => r.calls.some((c) => words.every((w, i) => c[i] === w));
 
 test("sync installs the built plugins on Claude Code and Codex, verifies them, then drops only their skills' loose links", () => {

@@ -149,7 +149,7 @@ function unzip(buf: Buffer): Entry[] {
 
 const CONFIG = (extra: Record<string, unknown> = {}) => ({
   version: 1,
-  library: { name: "skills", owner: "oneezy", homepage: "https://github.com/oneezy/skills" },
+  library: { version: "0.1.0", name: "skills", owner: "oneezy", homepage: "https://github.com/oneezy/skills" },
   sources: { up: { repo: up.dir, ref: "main", root: "skills", skills: ["a", "b"], attribution: ["LICENSE"] } },
   plugins: {
     oneezy: { displayName: "Oneezy", description: "Justin's own skills.", group: "oneezy" },
@@ -182,6 +182,7 @@ beforeEach(() => {
     path.join(up.dir, "LICENSE"),
     "MIT License\n\nPermission is hereby granted, free of charge, to any person\n",
   );
+  fs.writeFileSync(path.join(up.dir, "package.json"), JSON.stringify({ version: "0.1.0" }));
   up.commit("one");
 
   library = new Repo(root);
@@ -198,7 +199,7 @@ beforeEach(() => {
 test("build --artifacts writes artifacts/<id>-<version>.zip for each built plugin: a store-only ZIP holding the package under one folder named after the plugin, entries sorted by path with forward slashes and no directory entries, every timestamp 1980-01-01 00:00, each entry the bytes of the package file with its CRC-32", () => {
   const r = cli("build", "--plugins", "--catalogs", "--artifacts", "--json");
   assert.equal(r.status, 0, r.stderr);
-  const version = `0.1.0+${library.git("rev-parse", "--short=12", "HEAD")}`;
+  const version = "0.1.0";
   assert.deepEqual(artifacts(), [`oneezy-${version}.zip`, "releases.json", `up-${version}.zip`]);
   for (const id of ["oneezy", "up"]) {
     const entries = unzip(fs.readFileSync(path.join(root, "artifacts", `${id}-${version}.zip`)));
@@ -247,7 +248,7 @@ function same(a: Map<string, Buffer>, b: Map<string, Buffer>): boolean {
 test("two builds of the same input give byte-identical archives and record, from nothing each time; a second run rewrites nothing; a library commit that touches no input changes no archive; after one own skill changes only its package and its archive change: the other plugin's archive keeps its name and bytes, and the changed plugin's older archive is removed", () => {
   assert.equal(cli(...ALL, "--quiet").status, 0);
   const first = files("artifacts");
-  const v1 = `0.1.0+${library.git("rev-parse", "--short=12", "HEAD")}`;
+  const v1 = "0.1.0";
   assert.deepEqual([...first.keys()].sort(), [`oneezy-${v1}.zip`, "releases.json", `up-${v1}.zip`]);
 
   // the same input, built again with no output of the first build left
@@ -272,10 +273,13 @@ test("two builds of the same input give byte-identical archives and record, from
   // one own skill edited and committed
   const upPackage = files("plugins/up");
   write("skills/oneezy/own-one/SKILL.md", skillMd("own-one", "edited"));
+  const cfg = CONFIG();
+  cfg.library.version = "0.2.0";
+  write("skills-sync.json", JSON.stringify(cfg, null, 2) + "\n");
   library.commit("edit own-one");
   const edited = cli(...ALL, "--json");
   assert.equal(edited.status, 0, edited.stderr);
-  const v3 = `0.2.0+${library.git("rev-parse", "--short=12", "HEAD")}`;
+  const v3 = "0.2.0";
   const after = files("artifacts");
   assert.deepEqual(
     [...after.keys()].sort(),
@@ -428,7 +432,7 @@ test("artifacts/releases.json records per plugin its archive, sha256, version, s
   config({ releases: { up: recorded, oneezy: own } });
   const head = library.commit("releases");
   assert.equal(cli(...ALL, "--quiet").status, 0);
-  const version = `0.1.0+${library.git("rev-parse", "--short=12", "HEAD")}`;
+  const version = "0.1.0";
   assert.deepEqual(artifacts(), [`oneezy-${version}.zip`, "releases.json", `up-${version}.zip`, "up.changes.md"]);
 
   const record = json("artifacts/releases.json");
@@ -436,7 +440,7 @@ test("artifacts/releases.json records per plugin its archive, sha256, version, s
   assert.deepEqual(Object.keys(record.plugins), ["oneezy", "up"]);
   for (const id of ["oneezy", "up"]) {
     const r = record.plugins[id];
-    assert.deepEqual(Object.keys(r), ["archive", "sha256", "version", "commit", "files", "release"]);
+    assert.deepEqual(Object.keys(r), ["archive", "sha256", "version", "versionScheme", "commit", "files", "release"]);
     assert.equal(r.archive, `artifacts/${id}-${version}.zip`);
     const bytes = fs.readFileSync(path.join(root, r.archive));
     assert.equal(r.sha256, sha256(bytes));
@@ -488,7 +492,7 @@ test("artifacts/releases.json records per plugin its archive, sha256, version, s
 test("artifacts are upload material, apart from the committed form: --artifacts alone writes no package and no catalog; a check never reads or writes artifacts/; --plan writes nothing; generate.plugins false writes nothing; a link inside a skill folder is left out of the archive with a report line; an older archive or a stale note goes, any other file in artifacts/ is left alone", () => {
   const alone = cli("build", "--artifacts", "--json");
   assert.equal(alone.status, 0, alone.stderr);
-  const version = `0.1.0+${library.git("rev-parse", "--short=12", "HEAD")}`;
+  const version = "0.1.0";
   assert.deepEqual(artifacts(), [`oneezy-${version}.zip`, "releases.json", `up-${version}.zip`]);
   assert.ok(!fs.existsSync(path.join(root, "plugins")), "--artifacts alone builds no package");
   assert.ok(!fs.existsSync(path.join(root, ".claude-plugin")), "and no catalog");

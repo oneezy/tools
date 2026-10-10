@@ -502,7 +502,7 @@ test("the config and the local file validate against the shipped schemas; the sk
   config(
     { up: source(up, { skills: { a: "a", b: "renamed-b" }, pins: { a: up.head() } }) },
     {
-      library: { name: "skills", owner: "oneezy", homepage: "https://github.com/oneezy/skills" },
+      library: { version: "0.1.0", name: "skills", owner: "oneezy", homepage: "https://github.com/oneezy/skills" },
       plugins: {
         up: { displayName: "Up", source: "up" },
         oneezy: { displayName: "Oneezy", description: "mine", group: "oneezy" },

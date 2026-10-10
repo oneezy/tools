@@ -15,7 +15,8 @@ import { zip } from "./zip.js";
 export interface Built {
   id: string;
   /** the version its manifests carry, and its archive's name with them */
-  version: string;
+  version: string | null;
+  versionScheme: "authored" | "upstream";
   /** where its files came from: the upstream commit for a source, the library commit it was built at for an own group; null without git */
   commit: string | null;
   /** relative path (/ separators) -> bytes, every file of the package, in the package's line endings (LF), never the checkout's */
@@ -27,7 +28,8 @@ interface ArchiveRecord {
   /** the archive, relative to the library */
   archive: string;
   sha256: string;
-  version: string;
+  version: string | null;
+  versionScheme: "authored" | "upstream";
   commit: string | null;
   /** the archive's entries: what to record as `files` of the release once it is uploaded */
   files: string[];
@@ -36,7 +38,7 @@ interface ArchiveRecord {
 }
 
 /** An archive of a plugin at any version of the rule, and a changes note: the files a build may remove from artifacts/; group 1 is the plugin id. */
-const ARCHIVE_RE = /^(.+)-(?:0\.\d+\.0\+[0-9a-f]{12,40}|0\.0\.0\+nogit)\.zip$/;
+const ARCHIVE_RE = /^(.+)-(?:\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?|unversioned)\.zip$/;
 const CHANGES_RE = /^(.+)\.changes\.md$/;
 
 /**
@@ -56,7 +58,7 @@ export function archives(lib: Library, config: Config, built: Built[], report: R
     // one folder named after the plugin: what the ChatGPT upload expects an archive to hold
     const entries = new Map([...b.files].map(([rel, bytes]) => [`${b.id}/${rel}`, bytes]));
     const bytes = zip(entries);
-    const name = `${b.id}-${b.version}.zip`;
+    const name = `${b.id}-${b.version ?? "unversioned"}.zip`;
     const release = config.releases?.[b.id] ?? null;
     const names = [...entries.keys()].sort(cmp);
     expected.set(name, bytes);
@@ -64,6 +66,7 @@ export function archives(lib: Library, config: Config, built: Built[], report: R
       archive: `${path.basename(dir)}/${name}`,
       sha256: createHash("sha256").update(bytes).digest("hex"),
       version: b.version,
+      versionScheme: b.versionScheme,
       commit: b.commit,
       files: names,
       release,

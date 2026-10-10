@@ -5,6 +5,7 @@
 // no native plugin driver in this tool and keep their links. What the tool installed is recorded per harness in the local file, so a rollback
 // (sync --links) or unlink removes only its own.
 import { spawnSync } from "node:child_process";
+import { createHash } from "node:crypto";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -23,6 +24,8 @@ export interface Owned {
   harness: string;
   marketplace?: string;
   plugins: string[];
+  /** Built bytes last verified on this harness; cache identity is separate from the displayed semantic version. */
+  revisions?: Record<string, string>;
 }
 
 /** One built plugin as a harness's catalog lists it. */
@@ -228,6 +231,26 @@ const codex: Driver = {
 };
 
 const DRIVERS: Record<string, Driver> = { "claude-code": claude, codex };
+
+function revision(dir: string): string {
+  const hash = createHash("sha256");
+  const walk = (rel: string): void => {
+    for (const entry of fs
+      .readdirSync(path.join(dir, rel), { withFileTypes: true })
+      .sort((a, b) => a.name.localeCompare(b.name))) {
+      const name = rel ? `${rel}/${entry.name}` : entry.name;
+      if (entry.isDirectory()) walk(name);
+      else if (entry.isFile())
+        hash
+          .update(name)
+          .update("\0")
+          .update(fs.readFileSync(path.join(dir, name)))
+          .update("\0");
+    }
+  };
+  walk("");
+  return hash.digest("hex");
+}
 
 /** The harnesses this step can give plugins to. */
 export function pluginHarness(h: Harness): boolean {
@@ -489,7 +512,12 @@ function install(
   report: Report,
   plan: boolean,
 ): { skills: Map<string, string>; owned: Owned } {
-  const owned: Owned = { ...prior, harness: h.id, plugins: [...prior.plugins] };
+  const owned: Owned = {
+    ...prior,
+    harness: h.id,
+    plugins: [...prior.plugins],
+    ...(h.id === "codex" ? { revisions: { ...prior.revisions } } : {}),
+  };
   const skills = new Map<string, string>();
   const mkt = catalog.marketplace;
   const where = (what: string) => `${h.name}: ${what}`;
@@ -560,10 +588,18 @@ function install(
     } else if (!mine.enabled) {
       fail(`plugin ${id}`, "installed but disabled; left alone, loose links kept");
       continue;
-    } else if (!d.matches(mine, b, lib)) {
+    } else if (
+      !d.matches(mine, b, lib) ||
+      (h.id === "codex" && owned.plugins.includes(id) && owned.revisions?.[id] !== revision(b.dir))
+    ) {
       const installedVersion = mine.version ? plainVersion(mine.version) : null;
       const builtVersion = d.built(lib, b);
+      const legacyMigration =
+        owned.plugins.includes(id) &&
+        /^0\.\d+\.0\+[0-9a-f]{12,40}$/.test(mine.version ?? "") &&
+        !builtVersion?.includes("+");
       if (
+        !legacyMigration &&
         installedVersion &&
         builtVersion &&
         plainVersion(builtVersion) &&
@@ -622,6 +658,7 @@ function install(
       continue;
     }
     for (const s of b.skills) skills.set(s, id);
+    if (h.id === "codex" && owned.plugins.includes(id)) owned.revisions![id] = revision(b.dir);
   }
   return { skills, owned };
 }
