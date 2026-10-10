@@ -11,6 +11,7 @@ import { isDir, isLink, isSkillDir, lexists } from "./fs.js";
 import { Library } from "./library.js";
 import { apply, Report } from "./plan.js";
 import { cmp, githubSlug, isoDate, readConfig, selection, type Config, type Plugin, type Source } from "./sources.js";
+import { plainVersion } from "./versions.js";
 
 export { isoDate };
 
@@ -29,8 +30,8 @@ export interface BuildOptions {
 
 export interface BuildResult {
   report: Report;
-  /** plugin id -> the version its manifests carry after this run (kept, or bumped because its files changed) */
-  versions: Record<string, string>;
+  /** plugin id -> its declared authored version or locked upstream version; null for unversioned sources */
+  versions: Record<string, string | null>;
   /** --check: every path that differs from what the build would write, and every package that cannot be built, relative to the library, / separators */
   drift: string[];
   /** generate.plugins is false: nothing built, nothing checked */
@@ -40,11 +41,10 @@ export interface BuildResult {
 }
 
 /**
- * The library's HEAD, for the NOTICE of an own package and the build metadata of a changed one. `version` is what a
- * package new at this HEAD carries (0.1.0+<sha12>); a changed package takes the next minor after its own (see bump).
+ * The library's HEAD supplies provenance only. A package's version comes from its declaration or source lock.
  */
 export interface Head {
-  version: string;
+  version: string | null;
   commit: string | null;
   date: string | null;
   /** the library is a git checkout, with or without a commit yet */
@@ -58,13 +58,8 @@ export const PLUGIN_SCHEMA = "https://agent-plugins.org/schemas/1.0.0/plugin.sch
 /** What the ChatGPT interface and the Codex catalog say every package is; the hosts enumerate neither value in their docs. */
 const CATEGORY = "Developer Tools";
 const CAPABILITIES = ["Interactive"];
-/**
- * 0.<n>.0+<sha12>: what a package built in a checkout with a commit carries. n starts at 1 and goes up by one each time
- * the package's files change; the sha is the library's HEAD at that build. n never comes from git history: a commit
- * count shrinks across a squash merge or a promotion, and a version must never move backwards.
- */
+/** Legacy generated versions are checked against NOTICE during migration, never assigned to new packages. */
 const VERSION_RE = /^0\.(\d+)\.0\+([0-9a-f]{12,40})$/;
-const NOGIT = "0.0.0+nogit";
 
 /**
  * The trimmed stdout of a git command run in the library; null when it fails. Never a fetch: asking a partial clone
@@ -78,14 +73,14 @@ function git(root: string, ...args: string[]): string | null {
   return r.status === 0 ? r.stdout.trim() : null;
 }
 
-/** A library without git, or a checkout without a commit yet, gets 0.0.0+nogit and no commit. */
+/** Read provenance without assigning a version, including libraries without git or a first commit. */
 export function libraryHead(root: string): Head {
   const checkout = git(root, "rev-parse", "--git-dir") !== null;
   const short = checkout ? git(root, "rev-parse", "--short=12", "HEAD") : null;
   const shallow = checkout && git(root, "rev-parse", "--is-shallow-repository") === "true";
-  if (!short) return { version: NOGIT, commit: null, date: null, checkout, shallow };
+  if (!short) return { version: null, commit: null, date: null, checkout, shallow };
   return {
-    version: `0.1.0+${short}`,
+    version: null,
     commit: git(root, "rev-parse", "HEAD"),
     date: isoDate(git(root, "log", "-1", "--format=%cI")),
     checkout,
@@ -93,20 +88,23 @@ export function libraryHead(root: string): Head {
   };
 }
 
-/**
- * The version a package whose files changed takes: the next minor after the one on disk (1 for a new package, or one
- * whose version is not of the rule), with HEAD's sha. Monotonic whatever the branch history did.
- */
-export function bump(diskVersion: unknown, head: Head): string {
-  if (!head.commit) return NOGIT;
-  const v = typeof diskVersion === "string" ? VERSION_RE.exec(diskVersion) : null;
-  return `0.${v ? Number(v[1]) + 1 : 1}.0+${head.version.split("+")[1]}`;
+/** Compatibility export: builds now use the declared version regardless of the package previously on disk. */
+export function bump(_diskVersion: unknown, head: Head): string | null {
+  return head.version;
 }
 
 /** Where a package's skills came from, for its NOTICE. */
 type Origin =
   | { kind: "own"; group: string }
-  | { kind: "source"; id: string; src: Source; commit: string; date: string; perSkill: Record<string, string> };
+  | {
+      kind: "source";
+      id: string;
+      src: Source;
+      commit: string;
+      date: string;
+      version: string | null;
+      perSkill: Record<string, string>;
+    };
 
 /** One package, resolved: its skills with every transform applied, its license, its origin. */
 interface Package {
@@ -161,10 +159,20 @@ export function build(lib: Library, opts: BuildOptions): BuildResult {
       }
       // a package whose files are unchanged keeps the version and commit it was built with: the HEAD moves with every
       // commit of the library, and a rebuild after one must not rewrite packages whose inputs did not change
-      const prior = priorHead(lib.root, disk.files, head, pkg.origin.kind === "own");
+      const version = pkg.origin.kind === "source" ? pkg.origin.version : (config.library?.version ?? null);
+      if (pkg.origin.kind === "own" && version === null) {
+        changes.add({
+          kind: "conflict",
+          path: dir,
+          note: "set library.version to an explicit semantic version; build never assigns authored versions",
+        });
+        continue;
+      }
+      const target = { ...head, version };
+      const prior = priorHead(lib.root, disk.files, target, pkg.origin.kind === "own");
       const atPrior = render(pkg, config, prior);
       const unchanged = sameFiles(disk.files, atPrior);
-      const at = unchanged ? prior : { ...head, version: bump(diskVersion(disk.files), head) };
+      const at = unchanged ? prior : target;
       const files = unchanged ? atPrior : render(pkg, config, at);
       result.versions[id] = at.version;
       if (opts.plugins) reconcile(changes, dir, disk.files, files, opts.check);
@@ -173,6 +181,7 @@ export function build(lib: Library, opts: BuildOptions): BuildResult {
         id,
         version: at.version,
         commit: pkg.origin.kind === "source" ? pkg.origin.commit : at.commit,
+        versionScheme: pkg.origin.kind === "source" ? "upstream" : "authored",
         files,
       });
     }
@@ -269,6 +278,23 @@ function resolvePackage(lib: Library, config: Config, id: string, report: Report
   // the working-set copies of this source's selected skills, renames applied; the lock says which copy is this source's
   const locked = lib.lock()?.sources[plugin.source!];
   const lock = locked?.repo === src.repo ? locked : undefined;
+  if (!lock || lock.commit !== meta.commit) {
+    report.add({
+      kind: "conflict",
+      path: where,
+      note: "snapshot and locked source commit differ; run refresh --frozen before building",
+    });
+    return null;
+  }
+  const version = lock.version === null ? null : plainVersion(lock.version)?.split("+")[0];
+  if (version === undefined) {
+    report.add({
+      kind: "conflict",
+      path: where,
+      note: "locked source version is not semantic; run refresh --frozen before building",
+    });
+    return null;
+  }
   const skills = new Map<string, Map<string, Buffer>>();
   const perSkill: Record<string, string> = {};
   for (const s of selection(src)) {
@@ -309,7 +335,7 @@ function resolvePackage(lib: Library, config: Config, id: string, report: Report
     skills,
     license,
     spdx: license ? spdx(license.toString("utf8")) : null,
-    origin: { kind: "source", id: plugin.source!, src, commit: meta.commit, date: meta.date, perSkill },
+    origin: { kind: "source", id: plugin.source!, src, commit: meta.commit, date: meta.date, version, perSkill },
   };
 }
 
@@ -334,7 +360,7 @@ function render(pkg: Package, config: Config, head: Head): Map<string, Buffer> {
 function manifests(
   pkg: Package,
   config: Config,
-  version: string,
+  version: string | null,
 ): { portable: Record<string, unknown>; legacy: Record<string, unknown>; claude: Record<string, unknown> } {
   const lib = config.library ?? {};
   const homepage = lib.homepage && /^https?:\/\//.test(lib.homepage) ? lib.homepage : undefined;
@@ -368,11 +394,17 @@ function manifests(
     portable: {
       $schema: PLUGIN_SCHEMA,
       name: pkg.id,
-      version,
+      ...(version === null ? {} : { version }),
       ...common,
       extensions: { "com.openai": { interface: iface } },
     },
-    legacy: { name: pkg.id, version, ...common, skills: "./skills/", interface: iface },
+    legacy: {
+      name: pkg.id,
+      ...(version === null ? {} : { version }),
+      ...common,
+      skills: "./skills/",
+      interface: iface,
+    },
     claude: compact({
       name: pkg.id,
       displayName: pkg.plugin.displayName,
@@ -429,6 +461,7 @@ function notice(pkg: Package, config: Config, head: Head): string {
     `\`${pkg.id}\` is a plugin package built by @oneezy/skills-sync; its files are copies, not the place to edit.`,
     "",
     `- Source: ${source}`,
+    `- Version: ${head.version ?? "unversioned upstream"}`,
     `- Commit: ${commitLine}`,
     `- License: ${license}`,
     `- Skills: ${skills.join(", ")}`,
@@ -479,7 +512,7 @@ export function withInternal(md: string): string {
   if (!fm) return `---\nmetadata:\n  internal: true\n---\n${md}`;
   const [whole, open, body, close] = fm;
   const lines = body.split(open);
-  const i = lines.findIndex((l) => /^metadata:/.test(l));
+  const i = lines.findIndex((l) => l.startsWith("metadata:"));
   let next: string[];
   if (i < 0) next = [...lines, "metadata:", "  internal: true"];
   else {
@@ -546,25 +579,21 @@ function diskVersion(disk: Map<string, Buffer>): unknown {
 }
 
 /**
- * The version and commit a package on disk was built with. The package is the record of that: its commit need not be
- * in HEAD's history, or in the repository at all. A squash merge lands the package and leaves the branch commit it
- * was built at behind, and a shallow clone holds no commit but the newest, so on the branch a pull request merges
- * into, and in CI, the commit a version names is routinely one git cannot show. What is checked is what can be:
- * the version has the form of the rule; an own package's NOTICE names, in full and with a date, the commit the
- * version abbreviates; and when the repository does hold that commit, its date is the one recorded. A package that
- * fails any of these (a hand-set version, 0.0.0+nogit once there is a commit, a NOTICE naming another commit) is
- * treated as changed: it takes the next version at HEAD. Without a commit there is no prior, only 0.0.0+nogit.
+ * Keep existing provenance when the inputs still render identically. Squashed and shallow checkouts need not hold
+ * the recorded commit. Verify its date when available, and verify old generated hash suffixes during migration.
+ * The target version always remains authoritative; a value on disk never chooses or bumps it.
  */
 function priorHead(root: string, disk: Map<string, Buffer>, head: Head, own: boolean): Head {
   if (!head.commit) return head;
   const version = diskVersion(disk);
-  const v = typeof version === "string" ? VERSION_RE.exec(version) : null;
-  if (!v) return head;
+  const v = typeof version === "string" ? plainVersion(version) : null;
+  if (!v && version !== undefined) return head;
   const n = own ? /^- Commit: ([0-9a-f]{40}) \(([^)]+)\)$/m.exec(disk.get("NOTICE.md")?.toString("utf8") ?? "") : null;
-  if (own && (!n || !n[1].startsWith(v[2]))) return head;
+  const legacy = typeof version === "string" ? VERSION_RE.exec(version) : null;
+  if (own && (!n || (legacy && !n[1].startsWith(legacy[2])))) return head;
   const held = n ? git(root, "rev-parse", "--verify", "--quiet", `${n[1]}^{commit}`) : null;
   if (held && n && isoDate(git(root, "log", "-1", "--format=%cI", held)) !== isoDate(n[2])) return head;
-  return n ? { ...head, version: v[0], commit: n[1], date: n[2] } : { ...head, version: v[0] };
+  return n ? { ...head, commit: n[1], date: n[2] } : head;
 }
 
 /** Writes for files that differ or are missing, deletes for files no longer part of the package (a whole skill folder as one), skips for the rest. */

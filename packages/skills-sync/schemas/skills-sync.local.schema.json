@@ -88,6 +88,14 @@
               "minLength": 1
             },
             "uniqueItems": true
+          },
+          "revisions": {
+            "description": "Verified package sha256 per owned plugin. Tracks cache changes independently of the displayed semantic version.",
+            "type": "object",
+            "additionalProperties": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{64}$"
+            }
           }
         }
       }

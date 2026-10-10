@@ -83,7 +83,7 @@ const FLOW = (skill: string, steps: string) =>
 
 const CONFIG = () => ({
   version: 1,
-  library: { name: "skills", owner: "oneezy", homepage: "https://github.com/oneezy/skills" },
+  library: { version: "0.1.0", name: "skills", owner: "oneezy", homepage: "https://github.com/oneezy/skills" },
   sources: { up: { repo: up.dir, ref: "main", root: "skills", skills: ["a", "b"], attribution: ["LICENSE"] } },
   plugins: {
     oneezy: { displayName: "Oneezy", description: "Justin's own skills.", group: "oneezy" },
@@ -287,15 +287,13 @@ test("check fails on generated-file drift, the computation of build --check: a h
   const r = cli("check");
   assert.equal(r.status, 1);
   assert.deepEqual(problems(r), [
-    "plugins/up/.codex-plugin/plugin.json: differs from what build would write",
-    "plugins/up/plugin.json: differs from what build would write",
     "plugins/up/skills/a/SKILL.md: differs from what build would write",
     "plugins/ghost: source nosrc is not in skills-sync.json; package not built",
     "plugins/old: no longer in skills-sync.json; build would remove it",
     ".claude-plugin/marketplace.json: differs from what build would write",
     ".agents/plugins/marketplace.json: missing; build would write it",
   ]);
-  assert.match(r.stdout, /^check: 7 problems; build --plugins --catalogs writes the plugin form$/m);
+  assert.match(r.stdout, /^check: 5 problems; build --plugins --catalogs writes the plugin form$/m);
   assert.deepEqual(tree(root), before, "check wrote nothing");
   // the same paths build --check lists
   const drift = (JSON.parse(cli("build", "--check", "--json").stdout).drift as string[]).sort();
@@ -337,7 +335,7 @@ test("check fails when skills-sync.lock.json is not what refresh would write fro
   // without the lock nothing says which working-set copy is the source's, so its package cannot be built either
   fs.rmSync(path.join(root, "skills-sync.lock.json"));
   assert.deepEqual(problems(cli("check")), [
-    "plugins/up: none of up's skills is in the working set; run refresh; package not built",
+    "plugins/up: snapshot and locked source commit differ; run refresh --frozen before building",
     "skills-sync.lock.json: missing; refresh would write it from the snapshots under upstream/ (up)",
   ]);
 

@@ -30,12 +30,13 @@ export const MANIFESTS = [
   "package.json",
 ];
 
-const SEMVER = /^(\d+)\.(\d+)\.(\d+)(?:-([0-9A-Za-z.-]+))?(?:\+[0-9A-Za-z.-]+)?$/;
+const SEMVER =
+  /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-((?:0|[1-9]\d*|[0-9]*[A-Za-z-][0-9A-Za-z-]*)(?:\.(?:0|[1-9]\d*|[0-9]*[A-Za-z-][0-9A-Za-z-]*))*))?(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?$/;
 
 /** A tag name or manifest version as plain semver: `v1.3.1`, `name@1.3.1` and `1.3.1` all give 1.3.1; null when not semver. */
 export function plainVersion(name: string): string | null {
   const m = /^(?:v|.*@v?)?(\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?)$/.exec(name.trim());
-  return m ? m[1] : null;
+  return m && SEMVER.test(m[1]) ? m[1] : null;
 }
 
 export function isPrerelease(version: string): boolean {
