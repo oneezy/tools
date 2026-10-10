@@ -8,7 +8,7 @@ import { shippedSchema, validate } from "./schema.js";
 
 export interface Config {
   version: 1;
-  library?: { name?: string; owner?: string; homepage?: string };
+  library?: { name?: string; owner?: string; homepage?: string; version?: string };
   /** the two forms, each behind a switch: the loose-skill layers and the plugin packages; both true when absent */
   generate: { skills: boolean; plugins: boolean };
   sources: Record<string, Source>;

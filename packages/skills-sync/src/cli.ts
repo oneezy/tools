@@ -34,7 +34,7 @@ import { findProjects, home, isRepo, layers, projects, status, unlink, type Stat
 import { commitsPast, releasesOf, versionLabel } from "./versions.js";
 import { runInWsl, wslDistros } from "./wsl.js";
 
-const VERSION = "0.7.5";
+const VERSION = "0.7.6";
 const HELP = `skills-sync ${VERSION}
 One skills library, every harness, every project on this machine. Run it anywhere; it works out the rest.
 
@@ -83,9 +83,9 @@ Build
   --plugins              plugins/<id>/ for every plugin in the config: the skill copies, plugin.json,
                          .codex-plugin/plugin.json, .claude-plugin/plugin.json, LICENSE, NOTICE.md. Every copied SKILL.md
                          is marked metadata.internal: true, so npx skills installs each own skill once, from skills/
-                         (INSTALL_INTERNAL_SKILLS=1 re-exposes the copies). A package is versioned 0.<n>.0+<sha12>:
-                         it keeps its version while its files do, and a change takes the next n (1 for a new package)
-                         with the library HEAD's sha; n never comes from git history, so it never goes backwards
+                         (INSTALL_INTERNAL_SKILLS=1 re-exposes the copies). A source package uses its locked upstream version;
+                         unversioned sources omit it. Own packages use the explicit library.version unchanged.
+                         Builds never bump a version or append a commit hash; release policy owns authored bumps
   --catalogs             .claude-plugin/marketplace.json and .agents/plugins/marketplace.json, listing ./plugins/<id>
   --artifacts            artifacts/<id>-<version>.zip per plugin for the ChatGPT upload (stored, fixed timestamps, sorted:
                          the same input gives the same bytes), artifacts/releases.json (archive, sha256, version, source
