@@ -122,7 +122,7 @@ test("a dirty checkout and one on another branch are named on stderr and left al
   advanceOrigin(m, "oneezy/tools");
   const toolsHead = head(m, tools);
   // run from inside tools: skills is a sibling
-  const r = await cli(m, ["hook"], {}, path.join(tools, "..", "tools"));
+  const r = await cli(m, ["hook"], {}, tools);
   assert.equal(r.status, 0, r.stderr);
   assert.equal(r.stdout, "");
   assert.deepEqual(lines(r.stderr).sort(), [

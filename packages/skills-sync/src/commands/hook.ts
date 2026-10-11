@@ -87,7 +87,7 @@ export async function runHook(options: HookOptions = {}): Promise<number> {
   // 3. what is not in dev yet, one line per repository; skipped when GitHub already failed the release read
   if (checkouts.length && sync.error === null) {
     const gh = github(env);
-    for (const name of [...new Set(checkouts.map((c) => c.repo))]) {
+    for (const name of new Set(checkouts.map((c) => c.repo))) {
       try {
         const text = await drift(gh, name);
         if (text) write(text + "\n");
@@ -182,15 +182,10 @@ function tend(c: Checkout, env: NodeJS.ProcessEnv, write: (t: string) => void, w
 export async function drift(gh: GitHub, repo: string): Promise<string | null> {
   const branches = await gh.getList<Branch>(`/repos/${repo}/branches?per_page=100`);
   const others = branches.map((b) => b.name).filter((n) => n !== "main" && n !== "dev");
-  const compared = await Promise.all(
-    others.map(
-      async (name) => [name, await gh.getJson<Compare>(`/repos/${repo}/compare/dev...${refPath(name)}`)] as const,
-    ),
-  );
-  const ahead = compared
-    .filter(([, c]) => c.ahead_by > 0)
-    .map(([name]) => name)
-    .sort();
+  // one compare at a time: GitHub asks for a user's requests to be made serially, and a session start can wait a second
+  const ahead: string[] = [];
+  for (const name of others.sort())
+    if ((await gh.getJson<Compare>(`/repos/${repo}/compare/dev...${refPath(name)}`)).ahead_by > 0) ahead.push(name);
   const pulls = await gh.getList<Pull>(`/repos/${repo}/pulls?state=open&base=dev&per_page=100`);
   const numbers = pulls.map((p) => p.number).sort((a, b) => a - b);
   if (!ahead.length && !numbers.length) return null;
