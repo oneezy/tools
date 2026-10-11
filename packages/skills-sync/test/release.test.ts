@@ -41,6 +41,7 @@ test("--help lists every command and every flag of build, check, update (refresh
   assert.deepEqual(commands, [
     "sync",
     "status",
+    "branches",
     "unlink",
     "adopt-brain",
     "rollback-brain",
@@ -106,6 +107,10 @@ test("--help lists every command and every flag of build, check, update (refresh
   assert.match(help, /INSTALL_INTERNAL_SKILLS=1/);
   assert.match(help, /locked upstream version/);
   assert.match(help, /exit 1 on any, 0 when clean/);
+  // what the branch rules promise: the names never deleted, the archive tag, that --plan writes nothing
+  assert.match(help, /main, dev and any \*-keep branch are never deleted/);
+  assert.match(help, /tagged archive\/<name> at its head,\s+then deleted/);
+  assert.match(help, /--plan lists every tag and delete without making\s+them/);
   // what a library's CI has to know about its checkout: neither a check nor a build needs history, and versions only go up
   assert.match(help, /Needs no history: clean in a shallow clone/);
   assert.match(help, /Builds never bump a version or append a commit hash/);
