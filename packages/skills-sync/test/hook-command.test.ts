@@ -1,8 +1,9 @@
 // hook, the command the session-start entry runs: the quiet sync, then the checkout duties on real local git
 // repositories (a bare origin per repository under the pretend machine, the clones beside each other, their GitHub
-// origin URL rewritten to the bare repository by url.insteadOf), then the drift line from the fake GitHub. The built
-// CLI runs on the pretend machine from inside a checkout; the tests assert what a user sees: stdout, stderr, exit codes,
-// and the checkouts' heads and trees afterwards.
+// origin URL rewritten to the bare repository by url.insteadOf), then the drift line: the branches ahead of dev from
+// the bare origin's refs, the open pull requests from the fake GitHub. The built CLI runs on the pretend machine from
+// inside a checkout; the tests assert what a user sees: stdout, stderr, exit codes, and the checkouts' heads and trees
+// afterwards.
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
@@ -15,6 +16,7 @@ import {
   destroy,
   git,
   hooksFile,
+  originBranch,
   pretendMachine,
   write,
   type PretendMachine,
@@ -53,16 +55,15 @@ function checkouts(m: PretendMachine): { skills: string; tools: string } {
 test("the first run writes the blocks and the hook entries and says so; a clean dev checkout behind origin is fast-forwarded; the drift line names the branches ahead of dev and the open pull requests", async () => {
   const m = machine();
   const { skills, tools } = checkouts(m);
+  // the branches live on origin: two with commits of their own, one at dev's head (not ahead)
+  originBranch(m, "oneezy/skills", "feat/b", 1);
+  originBranch(m, "oneezy/skills", "feat/a", 2);
+  originBranch(m, "oneezy/skills", "feat/done", 0);
+  // the pull requests come from GitHub
   gh.fixture.repos = {
     ...gh.fixture.repos,
     "oneezy/skills": {
-      branches: {
-        ...quiet,
-        "feat/b": { sha: sha("2"), ahead: 1 },
-        "feat/a": { sha: sha("1"), ahead: 2 },
-        // every commit in dev: not ahead
-        "feat/done": { sha: sha("d") },
-      },
+      branches: { ...quiet },
       pulls: [
         { number: 15, head: "feat/b" },
         { number: 12, head: "feat/a" },
@@ -93,12 +94,15 @@ test("the first run writes the blocks and the hook entries and says so; a clean 
     r.stdout,
   );
   assert.ok(!out.some((l) => l.startsWith("oneezy/tools:")), r.stdout);
-  // GitHub was asked about the branches of both repositories, compared only the ones that are not main or dev
+  // GitHub was asked one thing per repository, its open pull requests into dev; the branches were counted locally
   const paths = r.requests.map((q) => q.path);
-  assert.ok(paths.some((p) => p.startsWith("/repos/oneezy/skills/branches")));
-  assert.ok(paths.some((p) => p.startsWith("/repos/oneezy/tools/branches")));
-  assert.ok(!paths.some((p) => /compare\/dev\.\.\.(main|dev)(\?|$)/.test(p)), paths.join("\n"));
-  assert.ok(paths.some((p) => p.includes("/pulls?state=open&base=dev")));
+  for (const repo of ["oneezy/skills", "oneezy/tools"])
+    assert.equal(
+      paths.filter((p) => p.startsWith(`/repos/${repo}/pulls?state=open&base=dev`)).length,
+      1,
+      paths.join("\n"),
+    );
+  assert.ok(!paths.some((p) => p.includes("/branches") || p.includes("/compare/")), paths.join("\n"));
   // the next session start: the machine is current, the checkout is current, only the drift is left to say
   const again = await cli(m, ["hook"], {}, skills);
   assert.equal(again.status, 0, again.stderr);
@@ -152,28 +156,34 @@ test("nothing changed, nothing ahead, nothing open: hook prints nothing and exit
   assert.equal(home.stdout, "");
   assert.equal(home.stderr, "");
   assert.ok(!home.requests.some((q) => q.path.includes("/branches") || q.path.includes("/pulls")));
+  // the fetch brought every branch of origin, so the drift needs no request for them
+  assert.ok(git(m, skills, ["for-each-ref", "refs/remotes/origin/"]).includes("refs/remotes/origin/main"));
 });
 
-test("GitHub unreachable: the sync's red line goes to stderr, the drift is skipped, the checkout is still fast-forwarded, exit 0; a drift that GitHub refuses is one stderr line", async () => {
+test("GitHub unreachable: the sync's red line goes to stderr, the pull requests are not asked for, the branches ahead still count, the checkout is still fast-forwarded, exit 0; pull requests GitHub refuses are one stderr line", async () => {
   const offline = machine({ github: null });
   const skills = checkoutOf(offline, "oneezy/skills");
   const settle = await cli(offline, []);
   assert.equal(settle.status, 1, settle.stderr);
   const moved = advanceOrigin(offline, "oneezy/skills");
+  originBranch(offline, "oneezy/skills", "feat/offline", 1);
   const r = await cli(offline, ["hook"], {}, skills);
   assert.equal(r.status, 0, r.stderr);
-  assert.deepEqual(lines(r.stdout), [`${skills}: dev fast-forwarded to ${moved.slice(0, 7)}`]);
+  assert.deepEqual(lines(r.stdout), [
+    `${skills}: dev fast-forwarded to ${moved.slice(0, 7)}`,
+    "oneezy/skills: 1 branch ahead of dev (feat/offline)",
+  ]);
   const err = lines(r.stderr);
   assert.equal(err.length, 1, r.stderr);
   assert.ok(err[0].startsWith("! conflict") && err[0].includes("latest release not read"), err[0]);
-  // the release is served but the repository's branches are not (not in the fixture): the drift line is a stderr line
+  // the release is served but the repository's pull requests are not (not in the fixture): one stderr line
   const m = machine();
   const checkout = checkoutOf(m, "oneezy/skills");
   await cli(m, []);
   const d = await cli(m, ["hook"], {}, checkout);
   assert.equal(d.status, 0, d.stderr);
   assert.equal(d.stdout, "");
-  assert.deepEqual(lines(d.stderr), ["oneezy/skills: branches and pull requests not read: 404 Not Found"]);
+  assert.deepEqual(lines(d.stderr), ["oneezy/skills: open pull requests not read: 404 Not Found"]);
 });
 
 test("a conflict in the sync (a hooks file that is not JSON) is the one thing that exits 1, on stderr; the rest of the run still happens", async () => {

@@ -76,7 +76,8 @@ Commands
   hook             what the session-start hook runs: the sync above, quietly (only what changed or went wrong is
                    printed), then the checkouts of ${DEFAULT_REPO} and oneezy/tools in and beside the current repository:
                    a clean one on dev is fast-forwarded to origin/dev, a dirty one or one on another branch is named and
-                   left alone, and one line per repository says which branches and pull requests are not in dev yet.
+                   left alone, and one line per repository says which branches (counted from the fetch) and open pull
+                   requests (one GitHub request) are not in dev yet.
                    Prints nothing when nothing changed; exit 0 unless the sync hit a conflict
   unlink           remove every link this tool made in the user folders, and every plugin and marketplace it installed
   adopt-brain      explicitly adopt only this host's two historical Brain links; propagate verified instructions only

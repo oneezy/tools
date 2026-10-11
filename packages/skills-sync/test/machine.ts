@@ -10,7 +10,7 @@ import { createHash } from "node:crypto";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { isLink, lexists, linkTarget, makeLink } from "../src/fs.js";
+import { isLink, lexists, linkTarget, makeLink, samePath } from "../src/fs.js";
 import { fixtureRelease, type FakeGithub } from "./fixtures/fake-github/fake-github.mjs";
 
 const CLI = path.resolve(import.meta.dirname, "..", "dist", "src", "cli.js");
@@ -32,7 +32,7 @@ export interface PretendMachine {
   github: FakeGithub | null;
   /** the environment every run gets; a test may add to it */
   env: Record<string, string>;
-  /** folders on PATH after the fake CLIs: the real git's, when the machine was asked for it */
+  /** folders on PATH after the fake CLIs: the real git's (and what it needs beside it), when the machine was asked for it */
   extraPath: string[];
 }
 
@@ -113,16 +113,35 @@ export function pretendMachine(options: MachineOptions = {}): PretendMachine {
     log: env.FAKE_HARNESS_LOG,
     github,
     env,
-    extraPath: options.git ? [gitFolder()] : [],
+    extraPath: options.git ? gitFolders() : [],
   };
 }
 
-/** The folder the session's git is in, so a run can have it on an otherwise bare PATH. */
-function gitFolder(): string {
+/**
+ * The folders the session's git needs on an otherwise bare PATH. On Linux, the one git is in. On Windows, Git for
+ * Windows is three folders under one root, and the session's PATH may put any of them first (Git Bash puts mingw64\bin
+ * and usr\bin ahead of cmd): cmd, the launcher; mingw64\bin, git itself; usr\bin, the sh that git runs to serve a
+ * fetch from a local path. All three go on the run's PATH, cmd first, with System32 after them as on every Windows
+ * PATH.
+ */
+function gitFolders(): string[] {
   const names = process.platform === "win32" ? ["git.exe", "git.cmd"] : ["git"];
-  for (const dir of (process.env.PATH ?? "").split(path.delimiter))
-    if (dir && names.some((n) => fs.existsSync(path.join(dir, n)))) return dir;
-  throw new Error("git is not on PATH");
+  const found = (process.env.PATH ?? "")
+    .split(path.delimiter)
+    .find((dir) => dir && names.some((n) => fs.existsSync(path.join(dir, n))));
+  if (!found) throw new Error("git is not on PATH");
+  if (process.platform !== "win32") return [found];
+  const folders: string[] = [];
+  for (const root of [path.dirname(found), path.dirname(path.dirname(found))])
+    if (!folders.length && fs.existsSync(path.join(root, "cmd", "git.exe")))
+      for (const sub of [["cmd"], ["mingw64", "bin"], ["usr", "bin"]]) {
+        const dir = path.join(root, ...sub);
+        if (fs.existsSync(dir)) folders.push(dir);
+      }
+  if (!folders.some((f) => samePath(f, found))) folders.push(found);
+  const systemRoot = process.env.SystemRoot ?? process.env.SYSTEMROOT ?? process.env.windir;
+  if (systemRoot) folders.push(path.join(systemRoot, "System32"), systemRoot);
+  return folders;
 }
 
 export function destroy(m: PretendMachine): void {
@@ -520,6 +539,23 @@ export function advanceOrigin(m: PretendMachine, repo: string, file = "CHANGES.m
   git(m, work, ["add", "."]);
   git(m, work, ["commit", "--quiet", "-m", `change ${file}`]);
   git(m, work, ["push", "--quiet", "origin", "dev"]);
+  return git(m, work, ["rev-parse", "HEAD"]);
+}
+
+/**
+ * A branch on origin named `name`, from dev's head with `commits` commits of its own (0: dev's head itself), made
+ * through a scratch clone. Returns the branch's sha.
+ */
+export function originBranch(m: PretendMachine, repo: string, name: string, commits = 1): string {
+  const work = fs.mkdtempSync(path.join(scratch(m), "branch-"));
+  git(m, m.base, ["clone", "--quiet", "--branch", "dev", bareOrigin(m, repo), work]);
+  git(m, work, ["checkout", "--quiet", "-b", name]);
+  for (let i = 0; i < commits; i++) {
+    fs.appendFileSync(path.join(work, `${name.replace(/\//g, "-")}.md`), `${i} ${Math.random()}\n`);
+    git(m, work, ["add", "."]);
+    git(m, work, ["commit", "--quiet", "-m", `${name} ${i + 1}`]);
+  }
+  git(m, work, ["push", "--quiet", "origin", name]);
   return git(m, work, ["rev-parse", "HEAD"]);
 }
 
