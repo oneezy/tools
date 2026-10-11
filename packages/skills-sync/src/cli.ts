@@ -55,12 +55,13 @@ Commands
                    scripts; exit 1 on any red line. Reads only: nothing cloned, linked or written
   branches [owner/repo ...]
                    the branch rules on GitHub (no library needed), for each repository named or, with none, every
-                   repository the token owns: main, dev and any *-keep branch are never deleted; a branch whose pull
-                   request was merged into dev (or whose commits are all in dev) is deleted; one whose pull request was
-                   closed without merging is tagged archive/<name> at its head, then deleted; every other branch is left
-                   alone and listed. Pull requests are never touched. --plan lists every tag and delete without making
-                   them; --json carries the same lists; a repository the token cannot read or write is reported and
-                   skipped. Exit 1 when anything was reported, 2 without a token to list your repositories
+                   repository the token owns: main, dev and any *-keep branch are never deleted (nor the repository's
+                   default branch); a branch whose pull request was merged into dev (or whose commits are all in dev)
+                   is deleted; one whose pull request was closed without merging is tagged archive/<name> at its head,
+                   then deleted; every other branch is left alone and listed. Pull requests are never touched: the head
+                   or the base of an open one stays. --plan lists every tag and delete without making them; --json
+                   carries the same lists; a repository the token cannot read or write is reported and skipped. Exit 1
+                   when anything was reported, 2 without a token to list your repositories
   unlink           remove every link this tool made in the user folders, and every plugin and marketplace it installed
   adopt-brain      explicitly adopt only this host's two historical Brain links; propagate verified instructions only
   rollback-brain   restore the exact preserved links in --receipt; refuse later destination edits

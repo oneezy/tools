@@ -49,6 +49,8 @@ export interface FixtureBranch {
   protected?: boolean;
   /** what compare dev...<branch> answers as ahead_by (default: 0 when the sha is dev's, else 1) */
   ahead?: number;
+  /** the sha GET /git/ref/heads/<branch> answers while the listing still says `sha`: a push between the two */
+  movedTo?: string;
 }
 
 export interface FixturePull {
@@ -73,8 +75,10 @@ export interface FixtureRepo {
   tags?: Record<string, string>;
   /** false: every write answers 403 */
   writable?: boolean;
-  /** listed as archived by GET /user/repos */
+  /** listed as archived by GET /user/repos and GET /repos/:o/:r */
   archived?: boolean;
+  /** GET /repos/:o/:r default_branch (default: main) */
+  defaultBranch?: string;
 }
 
 export interface Fixture {

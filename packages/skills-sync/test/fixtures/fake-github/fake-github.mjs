@@ -124,12 +124,13 @@ const readBody = (req) =>
  * `fixture.token`, when set, is the only bearer token accepted. A release with `noReleaseJson: true` is cut without
  * its release.json asset.
  *
- * `fixture.repos["owner/name"]` is a repository `branches` works on: { branches: { <name>: { sha, protected?, ahead? }
- * }, pulls: [{ number, head, base?, state, merged?, sha? }], tags: { "archive/<name>": sha }, writable?, archived? }.
- * `ahead` is what compare dev...<name> answers as ahead_by (default: 0 when the sha is dev's, else 1); a pull's `base`
- * defaults to dev and its `sha` to the head branch's; `writable: false` answers 403 to every write. The server is
- * live: a test writes `fixture.repos` before a run and reads it after. `fixture.pageSize` caps per_page, so a test can
- * make the client turn pages.
+ * `fixture.repos["owner/name"]` is a repository `branches` works on: { branches: { <name>: { sha, protected?, ahead?,
+ * movedTo? } }, pulls: [{ number, head, base?, state, merged?, sha? }], tags: { "archive/<name>": sha }, writable?,
+ * archived?, defaultBranch? }. `ahead` is what compare dev...<name> answers as ahead_by (default: 0 when the sha is
+ * dev's, else 1); `movedTo` is the sha a single-ref read answers while the listing still says `sha` (a push between
+ * the two); a pull's `base` defaults to dev and its `sha` to the head branch's; `writable: false` answers 403 to every
+ * write; `defaultBranch` defaults to main. The server is live: a test writes `fixture.repos` before a run and reads it
+ * after. `fixture.pageSize` caps per_page, so a test can make the client turn pages.
  */
 export async function startFakeGithub(fixture = fixtureLibrary()) {
   const requests = [];
@@ -277,6 +278,18 @@ export async function startFakeGithub(fixture = fixtureLibrary()) {
         object: { sha: s, type: "commit", url: `${base}/repos/${full}/git/commits/${s}` },
       });
       if (req.method === "GET") {
+        if (rest === "")
+          return send(200, {
+            id: 1,
+            name: repoMatch[2],
+            full_name: full,
+            owner: { login: repoMatch[1] },
+            private: false,
+            fork: false,
+            archived: !!repo.archived,
+            default_branch: repo.defaultBranch ?? "main",
+            permissions: { admin: repo.writable !== false, push: repo.writable !== false, pull: true },
+          });
         if (rest === "/branches")
           return page(
             Object.entries(repo.branches)
@@ -286,8 +299,14 @@ export async function startFakeGithub(fixture = fixtureLibrary()) {
         if (rest === "/pulls") {
           const state = url.searchParams.get("state") ?? "open";
           const head = url.searchParams.get("head");
-          const list = repo.pulls.map(pullJson).filter((p) => state === "all" || p.state === state);
-          return page(head ? list.filter((p) => `${repoMatch[1]}:${p.head.ref}` === head) : list);
+          const baseRef = url.searchParams.get("base");
+          return page(
+            repo.pulls
+              .map(pullJson)
+              .filter((p) => state === "all" || p.state === state)
+              .filter((p) => !head || `${repoMatch[1]}:${p.head.ref}` === head)
+              .filter((p) => !baseRef || p.base.ref === baseRef),
+          );
         }
         const compare = /^\/compare\/(.+)\.\.\.(.+)$/.exec(rest);
         if (compare) {
@@ -305,7 +324,9 @@ export async function startFakeGithub(fixture = fixtureLibrary()) {
         }
         const ref = /^\/git\/ref\/(tags|heads)\/(.+)$/.exec(rest);
         if (ref) {
-          const s = ref[1] === "tags" ? repo.tags[ref[2]] : repo.branches[ref[2]]?.sha;
+          // a branch's `movedTo` is a push that landed after the listing: the ref read answers it, the listing did not
+          const b = repo.branches[ref[2]];
+          const s = ref[1] === "tags" ? repo.tags[ref[2]] : (b?.movedTo ?? b?.sha);
           return s ? send(200, refJson(`refs/${ref[1]}/${ref[2]}`, s)) : notFound();
         }
         return notFound();

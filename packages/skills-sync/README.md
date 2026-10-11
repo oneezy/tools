@@ -253,13 +253,13 @@ status: 3 red lines
 
 `branches [owner/repo ...]` applies the branch rules (ADR-0013 in `oneezy/skills`) through GitHub REST, with the token from `GITHUB_TOKEN` or `GH_TOKEN`, to each repository named; with none, to every repository the token's user owns (archived ones left out; without a token that is exit 2). It needs no library on the machine. Per branch, in name order:
 
-- `main`, `dev` and any branch whose name ends in `-keep` are kept: never deleted, never the target of a request.
-- A branch with an open pull request is left alone (deleting it would close the pull request; pull requests are never touched).
+- `main`, `dev`, the repository's default branch and any branch whose name ends in `-keep` are kept: never deleted, never the target of a request. The names are exact: `Main` or `-Keep` are other branches.
+- A branch that is the head or the base of an open pull request is left alone (deleting it would close or retarget the pull request; pull requests are never touched).
 - A branch whose pull request was merged into `dev` is deleted, and so is one whose commits are all in `dev` (compare `dev...<branch>` ahead by 0), whether or not a pull request was closed without merging first.
 - A branch whose pull request was closed without merging gets the tag `archive/<name>` at its head, then is deleted. A tag of that name already at the head is reused; one at another commit is a problem line and the branch stays.
 - Every other branch is left alone and listed with why: protected on GitHub, merged into `dev` but with commits after the merge, merged into another branch, or no pull request and commits `dev` lacks.
 
-A repository without a `dev` branch is skipped as a note. One the token cannot read (404) or write (403 on the first tag or delete) is skipped with a problem line; the others still run. `--plan` lists every tag and delete without making a single write request:
+Right before its first tag or delete, a branch's head is read once more; one pushed to since the listing is left (`moved during the run`). A repository without a `dev` branch is skipped as a note. One the token cannot read (404) or write (403 on the first tag or delete) is skipped with a problem line; the others still run. `--plan` lists every tag and delete without making a single write request:
 
 ```
 oneezy/tools

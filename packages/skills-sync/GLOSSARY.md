@@ -91,7 +91,7 @@ A numbered cut of the Library (`release-<n>`) carrying one upload archive per Pl
 ### Branches
 
 **Keep branch**:
-A branch whose name ends in `-keep`: `branches` never deletes it, as it never deletes `main` and `dev`. The suffix is the only keep marker (ADR-0013 in oneezy/skills).
+A branch whose name ends in `-keep`: `branches` never deletes it, as it never deletes `main`, `dev` and the repository's default branch. The suffix is the only keep marker (ADR-0013 in oneezy/skills), matched exactly.
 _Avoid_: protected branch (GitHub's own setting, which `branches` reads and leaves alone too)
 
 **Archive tag**:

@@ -1,8 +1,9 @@
 // branches: the branch rules of ADR-0013 against the fake GitHub. One repository carries a branch per rule (main, dev,
-// a -keep branch that is merged, merged, squashed, closed without merging, closed and merged, open, no pull request,
-// moved on after its merge, merged into main); the tests run the built CLI on the pretend machine and assert only
-// what a user sees: --json, the text, exit codes, the requests the fake GitHub recorded and the state it has afterwards.
-// No request ever names main, dev or a -keep branch as its target, in any mode.
+// a -keep branch that is merged, merged, every commit in dev with no pull request, closed without merging, closed and
+// merged, open, the base of an open one, no pull request, moved on after its merge, merged into main); the tests run
+// the built CLI on the pretend machine and assert only what a user sees: --json, the text, exit codes, the requests
+// the fake GitHub recorded and the state it has afterwards. No request ever names main, dev or a -keep branch as its
+// target, in any mode.
 import assert from "node:assert/strict";
 import { afterAll, afterEach, beforeAll, test } from "vite-plus/test";
 import {
@@ -64,7 +65,7 @@ function toolsRepo(): FixtureRepo {
       // its pull request was squash-merged into dev: deleted although compare says it is ahead
       "feat/merged": { sha: sha("1") },
       // no pull request, every commit is in dev
-      "feat/squashed": { sha: sha("2"), ahead: 0 },
+      "feat/all-in-dev": { sha: sha("2"), ahead: 0 },
       // its pull request was closed without merging: tagged, then deleted
       "feat/closed": { sha: sha("3"), ahead: 2 },
       // one pull request closed without merging, another merged into dev: deleted, no tag
@@ -77,6 +78,11 @@ function toolsRepo(): FixtureRepo {
       "feat/moved": { sha: sha("7"), ahead: 2 },
       // merged into main, not dev
       "fix/to-main": { sha: sha("8"), ahead: 1 },
+      // merged into dev at an earlier head, then more commits that a later pull request merged into main
+      "feat/moved-twice": { sha: sha("b"), ahead: 3 },
+      // merged into dev at its head, but an open pull request has it as base: left alone, the stack stays whole
+      "feat/stack-base": { sha: sha("f") },
+      "feat/stack-top": { sha: sha("g"), ahead: 3 },
     },
     pulls: [
       { number: 1, head: "spike-keep", merged: true },
@@ -87,22 +93,28 @@ function toolsRepo(): FixtureRepo {
       { number: 6, head: "feat/open" },
       { number: 7, head: "feat/moved", merged: true, sha: sha("9") },
       { number: 8, head: "fix/to-main", base: "main", merged: true },
+      { number: 9, head: "feat/moved-twice", merged: true, sha: sha("c") },
+      { number: 10, head: "feat/moved-twice", base: "main", merged: true },
+      { number: 11, head: "feat/stack-top", base: "feat/stack-base" },
+      { number: 12, head: "feat/stack-base", merged: true },
     ],
     tags: {},
   };
 }
 
 /** The core branches and the -keep branch are never a request's target: not deleted, not compared as head, not asked about. */
-function neverCore(requests: RecordedRequest[]): void {
+function neverCore(requests: RecordedRequest[], names = ["main", "dev"]): void {
+  const alt = names.join("|");
   for (const r of requests) {
     const p = decodeURIComponent(r.path);
-    assert.doesNotMatch(p, /\/heads\/(main|dev)(\/|\?|$)/, p);
-    assert.doesNotMatch(p, /[?&]head=[^:&]+:(main|dev)(&|$)/, p);
-    assert.doesNotMatch(p, /\/compare\/[^?]*\.\.\.(main|dev)(\?|$)/, p);
-    assert.doesNotMatch(p, /\/tags\/archive\/(main|dev)(\/|\?|$)/, p);
+    assert.doesNotMatch(p, new RegExp(`/heads/(${alt})(/|\\?|$)`), p);
+    assert.doesNotMatch(p, new RegExp(`[?&]head=[^:&]+:(${alt})(&|$)`), p);
+    assert.doesNotMatch(p, new RegExp(`[?&]base=(${alt})(&|$)`), p);
+    assert.doesNotMatch(p, new RegExp(`/compare/[^?]*\\.\\.\\.(${alt})(\\?|$)`), p);
+    assert.doesNotMatch(p, new RegExp(`/tags/archive/(${alt})(/|\\?|$)`), p);
     assert.ok(!p.includes("spike-keep"), p);
     const ref = (r.body as { ref?: unknown } | null)?.ref;
-    if (typeof ref === "string") assert.doesNotMatch(ref, /\/(main|dev|spike-keep)$/, ref);
+    if (typeof ref === "string") assert.doesNotMatch(ref, new RegExp(`/(${alt}|spike-keep)$`), ref);
   }
 }
 
@@ -110,20 +122,26 @@ const writes = (requests: RecordedRequest[]) =>
   requests.filter((x) => x.method !== "GET").map((x) => `${x.method} ${decodeURIComponent(x.path)}`);
 
 const expectedDeleted = [
+  { branch: "feat/all-in-dev", reason: "all commits are in dev" },
   { branch: "feat/both", reason: "pull request #5 merged into dev" },
   { branch: "feat/closed", reason: "pull request #3 closed without merging" },
   { branch: "feat/merged", reason: "pull request #2 merged into dev" },
-  { branch: "feat/squashed", reason: "all commits are in dev" },
 ];
 const expectedArchived = [{ branch: "feat/closed", tag: "archive/feat/closed", commit: sha("3"), reused: false }];
 const expectedLeft = [
   { branch: "feat/moved", why: "pull request #7 merged into dev, then 2 commits more" },
+  {
+    branch: "feat/moved-twice",
+    why: "pull request #9 merged into dev, then 3 commits more; pull request #10 merged into main",
+  },
   { branch: "feat/none", why: "no pull request, 3 commits not in dev" },
   { branch: "feat/open", why: "open pull request #6" },
+  { branch: "feat/stack-base", why: "base of open pull request #11" },
+  { branch: "feat/stack-top", why: "open pull request #11" },
   { branch: "fix/to-main", why: "pull request #8 merged into main, 1 commit not in dev" },
 ];
 
-test("every rule holds: main, dev and the merged -keep branch are kept; merged and squashed branches are deleted; the closed one is tagged then deleted; the closed-and-merged one is deleted with no tag; the rest are listed", async () => {
+test("every rule holds: main, dev and the merged -keep branch are kept; merged and all-in-dev branches are deleted; the closed one is tagged then deleted; the closed-and-merged one is deleted with no tag; the rest, the base of an open pull request among them, are listed", async () => {
   const m = machine();
   gh.fixture.repos = { "oneezy/tools": toolsRepo() };
   const r = await cli(m, ["branches", "oneezy/tools", "--json"]);
@@ -145,8 +163,11 @@ test("every rule holds: main, dev and the merged -keep branch are kept; merged a
   assert.deepEqual(Object.keys(repo.branches).sort(), [
     "dev",
     "feat/moved",
+    "feat/moved-twice",
     "feat/none",
     "feat/open",
+    "feat/stack-base",
+    "feat/stack-top",
     "fix/to-main",
     "main",
     "spike-keep",
@@ -154,18 +175,23 @@ test("every rule holds: main, dev and the merged -keep branch are kept; merged a
   assert.deepEqual(repo.tags, { "archive/feat/closed": sha("3") });
   // the writes, in branch order, the tag made before its branch goes
   assert.deepEqual(writes(r.requests), [
+    "DELETE /repos/oneezy/tools/git/refs/heads/feat/all-in-dev",
     "DELETE /repos/oneezy/tools/git/refs/heads/feat/both",
     "POST /repos/oneezy/tools/git/refs",
     "DELETE /repos/oneezy/tools/git/refs/heads/feat/closed",
     "DELETE /repos/oneezy/tools/git/refs/heads/feat/merged",
-    "DELETE /repos/oneezy/tools/git/refs/heads/feat/squashed",
   ]);
   assert.deepEqual(r.requests.find((x) => x.method === "POST")?.body, {
     ref: "refs/tags/archive/feat/closed",
     sha: sha("3"),
   });
-  // the merged pull request decides before any compare; the pull requests themselves are only read
-  assert.ok(!r.requests.some((x) => decodeURIComponent(x.path).includes("compare/dev...feat/merged")));
+  const paths = r.requests.map((x) => decodeURIComponent(x.path));
+  // every branch's head is read again right before its first write
+  for (const d of expectedDeleted) assert.ok(paths.includes(`/repos/oneezy/tools/git/ref/heads/${d.branch}`), d.branch);
+  // the merged pull request decides before any compare; the base of a stacked pull request is asked about
+  assert.ok(!paths.some((p) => p.includes("compare/dev...feat/merged")));
+  assert.ok(paths.includes("/repos/oneezy/tools/pulls?state=open&base=feat/stack-base&per_page=100"));
+  // the pull requests themselves are only read
   assert.ok(!r.requests.some((x) => x.method !== "GET" && x.path.includes("/pulls")));
   neverCore(r.requests);
 });
@@ -180,16 +206,19 @@ test("--plan lists every tag and delete without a single write request, and --js
     text.stdout,
     [
       "oneezy/tools",
+      "- feat/all-in-dev  delete: all commits are in dev",
       "- feat/both  delete: pull request #5 merged into dev",
       `- feat/closed  tag archive/feat/closed at ${sha("3").slice(0, 7)}, delete: pull request #3 closed without merging`,
       "- feat/merged  delete: pull request #2 merged into dev",
       ". feat/moved  left: pull request #7 merged into dev, then 2 commits more",
+      ". feat/moved-twice  left: pull request #9 merged into dev, then 3 commits more; pull request #10 merged into main",
       ". feat/none  left: no pull request, 3 commits not in dev",
       ". feat/open  left: open pull request #6",
-      "- feat/squashed  delete: all commits are in dev",
+      ". feat/stack-base  left: base of open pull request #11",
+      ". feat/stack-top  left: open pull request #11",
       ". fix/to-main  left: pull request #8 merged into main, 1 commit not in dev",
       "= kept: dev, main, spike-keep",
-      "plan: 4 to delete, 1 to tag, 4 left alone, 3 kept",
+      "plan: 4 to delete, 1 to tag, 7 left alone, 3 kept",
       "",
     ].join("\n"),
   );
@@ -202,6 +231,8 @@ test("--plan lists every tag and delete without a single write request, and --js
   assert.deepEqual(j.repos[0].archived, expectedArchived);
   assert.deepEqual(j.repos[0].left, expectedLeft);
   assert.ok([...text.requests, ...r.requests].every((x) => x.method === "GET"));
+  // planning re-reads no head: it writes nothing
+  assert.ok(!r.requests.some((x) => x.path.includes("/git/ref/heads/")));
   assert.equal(JSON.stringify(gh.fixture.repos), before, "the plan changed GitHub");
   neverCore([...text.requests, ...r.requests]);
 });
@@ -254,10 +285,14 @@ test("an archive tag already at the branch head is reused; one at another commit
   neverCore([...plan.requests, ...r.requests, ...j.requests]);
 });
 
-test("a repository the token cannot read or write is reported and skipped, and the others still run; --quiet prints only changes and problems", async () => {
+test("a repository the token cannot read or write is reported and skipped (a refused tag leaves its branch), and the others still run; --quiet prints only changes and problems", async () => {
   const m = machine();
   gh.fixture.repos = {
-    "oneezy/locked": { writable: false, branches: { ...core, "feat/x": { sha: sha("1"), ahead: 0 } } },
+    "oneezy/locked": {
+      writable: false,
+      branches: { ...core, "feat/x": { sha: sha("1"), ahead: 1 } },
+      pulls: [{ number: 1, head: "feat/x", state: "closed" }],
+    },
     "oneezy/tools": { branches: { ...core, "feat/y": { sha: sha("2"), ahead: 0 } } },
   };
   const r = await cli(m, ["branches", "oneezy/nothere", "oneezy/locked", "oneezy/tools", "--quiet"]);
@@ -266,7 +301,7 @@ test("a repository the token cannot read or write is reported and skipped, and t
     r.stdout,
     [
       "oneezy/nothere",
-      "! skipped: cannot read branches: 404 Not Found",
+      "! skipped: cannot read repository: 404 Not Found",
       "oneezy/locked",
       "! skipped: cannot write: 403 Resource not accessible by personal access token",
       "oneezy/tools",
@@ -275,7 +310,13 @@ test("a repository the token cannot read or write is reported and skipped, and t
       "",
     ].join("\n"),
   );
+  // the refused tag was the only write tried on the locked repository: no delete followed it, nothing is recorded
+  assert.deepEqual(
+    writes(r.requests).filter((w) => w.includes("oneezy/locked")),
+    ["POST /repos/oneezy/locked/git/refs"],
+  );
   assert.ok("feat/x" in gh.fixture.repos["oneezy/locked"].branches, "the unwritable repository lost a branch");
+  assert.deepEqual(gh.fixture.repos["oneezy/locked"].tags, {});
   assert.ok(!("feat/y" in gh.fixture.repos["oneezy/tools"].branches));
 
   gh.fixture.repos["oneezy/tools"].branches["feat/y"] = { sha: sha("2"), ahead: 0 };
@@ -284,20 +325,79 @@ test("a repository the token cannot read or write is reported and skipped, and t
   const out = j.json as unknown as BranchesJson;
   assert.equal(out.ok, false);
   assert.deepEqual(
-    out.repos.map((x) => [x.repo, x.skipped, x.problems, x.deleted.length]),
+    out.repos.map((x) => [x.repo, x.skipped, x.problems, x.deleted.length, x.archived.length]),
     [
-      ["oneezy/nothere", "cannot read branches: 404 Not Found", ["cannot read branches: 404 Not Found"], 0],
+      ["oneezy/nothere", "cannot read repository: 404 Not Found", ["cannot read repository: 404 Not Found"], 0, 0],
       [
         "oneezy/locked",
         "cannot write: 403 Resource not accessible by personal access token",
         ["cannot write: 403 Resource not accessible by personal access token"],
         0,
+        0,
       ],
-      ["oneezy/tools", null, [], 1],
+      ["oneezy/tools", null, [], 1, 0],
     ],
   );
   assert.deepEqual(out.repos[1].kept, ["dev", "main"]);
   neverCore([...r.requests, ...j.requests]);
+});
+
+test("a branch pushed to between the listing and its delete is left alone: the head is read again before the first write", async () => {
+  const m = machine();
+  gh.fixture.repos = {
+    "oneezy/tools": {
+      branches: {
+        ...core,
+        "feat/racing": { sha: sha("1"), ahead: 0, movedTo: sha("2") },
+        "feat/racing-closed": { sha: sha("3"), ahead: 1, movedTo: sha("4") },
+        "feat/still": { sha: sha("5"), ahead: 0 },
+      },
+      pulls: [{ number: 1, head: "feat/racing-closed", state: "closed" }],
+    },
+  };
+  const r = await cli(m, ["branches", "oneezy/tools", "--json"]);
+  assert.equal(r.status, 0, r.stderr);
+  const t = (r.json as unknown as BranchesJson).repos[0];
+  assert.deepEqual(t.deleted, [{ branch: "feat/still", reason: "all commits are in dev" }]);
+  assert.deepEqual(t.archived, []);
+  assert.deepEqual(t.left, [
+    { branch: "feat/racing", why: "moved during the run" },
+    { branch: "feat/racing-closed", why: "moved during the run" },
+  ]);
+  assert.deepEqual(writes(r.requests), ["DELETE /repos/oneezy/tools/git/refs/heads/feat/still"]);
+  assert.deepEqual(gh.fixture.repos["oneezy/tools"].tags, {});
+  assert.deepEqual(Object.keys(gh.fixture.repos["oneezy/tools"].branches).sort(), [
+    "dev",
+    "feat/racing",
+    "feat/racing-closed",
+    "main",
+  ]);
+  neverCore(r.requests);
+});
+
+test("the repository's default branch is kept like main, whatever its name, and never named by a request", async () => {
+  const m = machine();
+  gh.fixture.repos = {
+    "oneezy/old": {
+      defaultBranch: "master",
+      branches: { dev: core.dev, master: { sha: sha("a"), ahead: 0 }, "feat/x": { sha: sha("1"), ahead: 0 } },
+      pulls: [{ number: 1, head: "master", merged: true }],
+    },
+  };
+  const r = await cli(m, ["branches", "oneezy/old"]);
+  assert.equal(r.status, 0, r.stderr);
+  assert.equal(
+    r.stdout,
+    [
+      "oneezy/old",
+      "- feat/x  deleted: all commits are in dev",
+      "= kept: dev, master",
+      "branches: 1 deleted, 0 tagged, 0 left alone, 2 kept",
+      "",
+    ].join("\n"),
+  );
+  assert.deepEqual(Object.keys(gh.fixture.repos["oneezy/old"].branches).sort(), ["dev", "master"]);
+  neverCore(r.requests, ["main", "dev", "master"]);
 });
 
 test("with no repository named, the token's own repositories are done (archived ones left out, one without dev skipped as a note), every page read; without a token, exit 2", async () => {

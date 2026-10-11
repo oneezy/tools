@@ -1,9 +1,10 @@
 // branches: the branch rules of ADR-0013, applied through GitHub REST to each repository named (default: the ones the
-// token owns). main, dev and any branch ending in -keep are never deleted and never the target of a request. A branch
-// whose pull request was merged into dev, or whose commits are all in dev, is deleted. A branch whose pull request was
-// closed without merging gets a tag archive/<name> at its head, then is deleted. Every other branch is left alone and
-// listed with why. Pull requests are never touched. --plan lists every tag and delete without making them; --json
-// carries the same lists. A repository the token cannot read or write is reported and skipped; the others still run.
+// token owns). main, dev, the repository's default branch and any branch ending in -keep are never deleted and never
+// the target of a request. A branch whose pull request was merged into dev, or whose commits are all in dev, is
+// deleted. A branch whose pull request was closed without merging gets a tag archive/<name> at its head, then is
+// deleted. Every other branch is left alone and listed with why. Pull requests are never touched: a branch that is the
+// head or the base of an open one stays. --plan lists every tag and delete without making them; --json carries the same
+// lists. A repository the token cannot read or write is reported and skipped; the others still run.
 import { github, GitHubError, type GitHub } from "../github.js";
 import { isRepoName } from "../release.js";
 
@@ -15,7 +16,7 @@ export interface BranchLine {
 
 export interface RepoReport {
   repo: string;
-  /** main, dev and *-keep: never deleted, never asked about */
+  /** main, dev, the default branch and *-keep: never deleted, never asked about */
   kept: string[];
   deleted: Array<{ branch: string; reason: string }>;
   /** the archive tags made before a delete; `reused` when a tag at the same commit was there already */
@@ -43,6 +44,10 @@ export interface BranchesOptions {
   env?: NodeJS.ProcessEnv;
   write?: (text: string) => void;
   warn?: (text: string) => void;
+}
+
+interface Repository {
+  default_branch?: string;
 }
 
 interface Branch {
@@ -83,7 +88,11 @@ interface Job {
   r: RepoReport;
 }
 
-/** The branch names the rules never delete: the two core branches and the one keep marker (ADR-0013). */
+/**
+ * The branch names the rules never delete: the two core branches and the one keep marker (ADR-0013). Exact and
+ * case-sensitive on purpose: `Main`, `DEV` or `-Keep` are other branches, and a rule that guesses is a rule nobody
+ * can predict.
+ */
 const isKeptName = (name: string): boolean => name === "main" || name === "dev" || name.endsWith("-keep");
 
 /** A ref name in a URL path: each segment encoded, the slashes kept, as GitHub's ref routes expect. */
@@ -138,8 +147,8 @@ async function ownRepos(gh: GitHub): Promise<string[]> {
 }
 
 /**
- * One repository: list its branches, decide each by the rules, make (or plan) the tags and deletes. Any GitHub error
- * stops this repository where it is, reported, and the next repository still runs.
+ * One repository: read it and its branches, decide each by the rules, make (or plan) the tags and deletes. Any GitHub
+ * error stops this repository where it is, reported, and the next repository still runs.
  */
 async function cleanRepo(gh: GitHub, repo: string, plan: boolean): Promise<RepoReport> {
   const r: RepoReport = { repo, kept: [], deleted: [], archived: [], left: [], skipped: null, problems: [], lines: [] };
@@ -148,11 +157,14 @@ async function cleanRepo(gh: GitHub, repo: string, plan: boolean): Promise<RepoR
     r.problems.push(reason);
     r.lines.push({ mark: "!", text: `skipped: ${reason}` });
   };
+  let defaultBranch: string;
   let branches: Branch[];
   try {
+    // GitHub refuses to delete the default branch (422), so it is kept like main, whatever it is called
+    defaultBranch = (await gh.getJson<Repository>(`/repos/${repo}`)).default_branch ?? "main";
     branches = await gh.getList<Branch>(`/repos/${repo}/branches?per_page=100`);
   } catch (e) {
-    skip(`cannot read branches: ${detail(e)}`);
+    skip(`cannot read repository: ${detail(e)}`);
     return r;
   }
   if (!branches.some((b) => b.name === "dev")) {
@@ -161,21 +173,23 @@ async function cleanRepo(gh: GitHub, repo: string, plan: boolean): Promise<RepoR
     r.lines.push({ mark: ".", text: "skipped: no dev branch" });
     return r;
   }
+  const kept = (name: string) => isKeptName(name) || name === defaultBranch;
   const sorted = [...branches].sort((a, z) => a.name.localeCompare(z.name));
   // the kept names are known from the listing alone: nothing is ever asked about them
-  r.kept = sorted.filter((b) => isKeptName(b.name)).map((b) => b.name);
+  r.kept = sorted.filter((b) => kept(b.name)).map((b) => b.name);
   const keptLine = () => {
     if (r.kept.length) r.lines.push({ mark: "=", text: `kept: ${r.kept.join(", ")}` });
   };
   const job: Job = { gh, repo, owner: repo.split("/")[0], plan, r };
   for (const b of sorted) {
-    if (isKeptName(b.name)) continue;
+    if (kept(b.name)) continue;
     try {
       await decide(job, b);
     } catch (e) {
-      const status = e instanceof GitHubError ? e.status : 0;
       keptLine();
-      skip(`${status === 403 || status === 404 ? "cannot write" : "GitHub"}: ${detail(e)}`);
+      // the only writes are the ref routes; a 403 or 404 there is the token's reach, anywhere else it is GitHub's answer
+      const write = e instanceof GitHubError && (e.status === 403 || e.status === 404) && e.url.includes("/git/refs");
+      skip(`${write ? "cannot write" : "GitHub"}: ${detail(e)}`);
       return r;
     }
   }
@@ -183,14 +197,24 @@ async function cleanRepo(gh: GitHub, repo: string, plan: boolean): Promise<RepoR
   return r;
 }
 
-/** The rules for one branch that is not main, dev or *-keep. Writes go through here only when `plan` is false. */
+/** The rules for one branch that is not kept. Writes go through here only when `plan` is false. */
 async function decide({ gh, repo, owner, plan, r }: Job, b: Branch): Promise<void> {
   const left = (why: string) => {
     r.left.push({ branch: b.name, why });
     r.lines.push({ mark: ".", text: `${b.name}  left: ${why}` });
   };
-  /** Delete the branch (unless planning); `prefix` names the tag made first, when one was. */
-  const remove = async (reason: string, prefix = "") => {
+  /**
+   * Before the first write to this branch, read its head again: a push since the listing means the rules decided on
+   * a branch that no longer exists as read, so it stays. Planning writes nothing and so reads nothing more.
+   */
+  const stillAtHead = async (): Promise<boolean> => {
+    if (plan) return true;
+    const ref = await gh.getJson<Ref>(`/repos/${repo}/git/ref/heads/${refPath(b.name)}`);
+    return ref.object.sha === b.commit.sha;
+  };
+  /** Delete the branch (unless planning); `prefix` names the tag made first, when one was; `checked` says the head was re-read. */
+  const remove = async (reason: string, prefix = "", checked = false) => {
+    if (!checked && !(await stillAtHead())) return left("moved during the run");
     if (!plan) await gh.del(`/repos/${repo}/git/refs/heads/${refPath(b.name)}`);
     r.deleted.push({ branch: b.name, reason });
     r.lines.push({ mark: "-", text: `${b.name}  ${prefix}${plan ? "delete" : "deleted"}: ${reason}` });
@@ -203,14 +227,26 @@ async function decide({ gh, repo, owner, plan, r }: Job, b: Branch): Promise<voi
   // deleting a branch closes its open pull request, and pull requests are never touched
   const open = pulls.find((p) => p.state === "open");
   if (open) return left(`open ${pr(open)}`);
-  const intoDev = pulls.find((p) => p.merged_at && p.base.ref === "dev");
+  // nor is a pull request whose base this branch is (a stacked pull request): GitHub would close or retarget it
+  const stacked = await gh.getList<Pull>(
+    `/repos/${repo}/pulls?state=open&base=${encodeURIComponent(b.name)}&per_page=100`,
+  );
+  if (stacked.length) return left(`base of open ${pr(stacked.sort((a, z) => a.number - z.number)[0])}`);
+  const mergedIntoDev = (p: Pull) => !!p.merged_at && p.base.ref === "dev";
+  // the pull request that merged this very head, else the latest merged into dev (GitHub lists newest first)
+  const intoDev = pulls.find((p) => mergedIntoDev(p) && p.head.sha === b.commit.sha) ?? pulls.find(mergedIntoDev);
   if (intoDev && intoDev.head.sha === b.commit.sha) return remove(`${pr(intoDev)} merged into dev`);
   const cmp = await gh.getJson<Compare>(`/repos/${repo}/compare/dev...${refPath(b.name)}`);
   if (cmp.ahead_by === 0) return remove("all commits are in dev");
+  const elsewhere = pulls.find((p) => p.merged_at && p.base.ref !== "dev");
   // merged, but commits came after the merge: nothing of them is in dev, so the branch stays
-  if (intoDev) return left(`${pr(intoDev)} merged into dev, then ${count(cmp.ahead_by, "commit")} more`);
-  const merged = pulls.find((p) => p.merged_at);
-  if (merged) return left(`${pr(merged)} merged into ${merged.base.ref}, ${count(cmp.ahead_by, "commit")} not in dev`);
+  if (intoDev)
+    return left(
+      `${pr(intoDev)} merged into dev, then ${count(cmp.ahead_by, "commit")} more` +
+        (elsewhere ? `; ${pr(elsewhere)} merged into ${elsewhere.base.ref}` : ""),
+    );
+  if (elsewhere)
+    return left(`${pr(elsewhere)} merged into ${elsewhere.base.ref}, ${count(cmp.ahead_by, "commit")} not in dev`);
   const closed = pulls.find((p) => p.state === "closed" && !p.merged_at);
   if (!closed) return left(`no pull request, ${count(cmp.ahead_by, "commit")} not in dev`);
   const tag = `archive/${b.name}`;
@@ -227,10 +263,11 @@ async function decide({ gh, repo, owner, plan, r }: Job, b: Branch): Promise<voi
     r.lines.push({ mark: "!", text: `${b.name}  ${why}; left alone` });
     return;
   }
+  if (!(await stillAtHead())) return left("moved during the run");
   if (!existing && !plan) await gh.post(`/repos/${repo}/git/refs`, { ref: `refs/tags/${tag}`, sha: b.commit.sha });
   r.archived.push({ branch: b.name, tag, commit: b.commit.sha, reused: !!existing });
   const made = existing ? `${tag} already at` : `${plan ? "tag" : "tagged"} ${tag} at`;
-  await remove(`${pr(closed)} closed without merging`, `${made} ${short(b.commit.sha)}, `);
+  await remove(`${pr(closed)} closed without merging`, `${made} ${short(b.commit.sha)}, `, true);
 }
 
 /** The text a user reads. Quiet: only the changes and the problems, under their repository, and the summary when any. */
