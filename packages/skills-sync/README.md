@@ -255,6 +255,29 @@ status: 3 red lines
 
 `=` is green, `!` red, `.` a note. Under each harness: the plugin lines sorted by id, then the duplicate lines, then the notes (what else is in the user folders, which other plugins are left alone). A plugin switched off, at claude.ai or through the CLI, loads nothing: it is listed, never judged, and its skills count for no duplicate. When Codex cannot render its prompt input, an installed plugin's skills are not read (`skills not read`) and its version alone is judged. Red: a plugin behind the release (its version, or its skill set), a plugin the tool installed on Claude Code (the account plugin of the same name is the form there, and a CLI install hides it), nothing of the library installed on a plugin harness, a duplicate skill name, or the release not readable. Any red line exits 1; `--quiet` prints only the red lines. `--json` carries the same facts under stable keys: `release` (`repo`, `tag`, `number`, `commit`, `tool`), `cloud`, `lines`, `ok`, and per harness `name`, `form`, `cli`, `plugins.synced` / `plugins.installed` (each with `version`, `latest`, `current`, `skills`) / `plugins.other`, `loose`, `folders`, `duplicates`, `lines`.
 
+## Branches
+
+`branches [owner/repo ...]` applies the branch rules (ADR-0013 in `oneezy/skills`) through GitHub REST, with the token from `GITHUB_TOKEN` or `GH_TOKEN`, to each repository named; with none, to every repository the token's user owns (archived ones left out; without a token that is exit 2). It needs no library on the machine. Per branch, in name order:
+
+- `main`, `dev`, the repository's default branch and any branch whose name ends in `-keep` are kept: never deleted, never the target of a request. The names are exact: `Main` or `-Keep` are other branches.
+- A branch that is the head or the base of an open pull request is left alone (deleting it would close or retarget the pull request; pull requests are never touched).
+- A branch whose pull request was merged into `dev` is deleted, and so is one whose commits are all in `dev` (compare `dev...<branch>` ahead by 0), whether or not a pull request was closed without merging first.
+- A branch whose pull request was closed without merging gets the tag `archive/<name>` at its head, then is deleted. A tag of that name already at the head is reused; one at another commit is a problem line and the branch stays.
+- Every other branch is left alone and listed with why: protected on GitHub, merged into `dev` but with commits after the merge, merged into another branch, or no pull request and commits `dev` lacks.
+
+Right before its first tag or delete, a branch's head is read once more; one pushed to since the listing is left (`moved during the run`). A repository without a `dev` branch is skipped as a note. One the token cannot read (404) or write (403 on the first tag or delete) is skipped with a problem line; the others still run. `--plan` lists every tag and delete without making a single write request:
+
+```
+oneezy/tools
+- feat/146-status-against-release  delete: pull request #160 merged into dev
+- feat/old-idea  tag archive/feat/old-idea at 1a2b3c4, delete: pull request #12 closed without merging
+. feat/next  left: open pull request #170
+= kept: dev, main, spike-keep
+plan: 2 to delete, 1 to tag, 1 left alone, 3 kept
+```
+
+Exit 0 when every change was made (or planned), 1 when anything was reported (a skipped repository, a tag in the way), 2 for bad usage. `--quiet` prints only the changes and the problems. `--json` carries the same under stable keys: `plan`, `ok`, and per repository `repo`, `kept`, `deleted` (`branch`, `reason`), `archived` (`branch`, `tag`, `commit`, `reused`), `left` (`branch`, `why`), `skipped`, `problems`, `lines`.
+
 ## Artifacts
 
 ChatGPT takes a plugin as an uploaded archive, by hand. **`build --artifacts`** writes what that upload needs into `artifacts/` (generated, gitignored, never part of a check):
@@ -336,7 +359,7 @@ build: --plugins  --catalogs  --artifacts  --check
 check: --json  --quiet
 ```
 
-Commands: `sync` (default), `status` (this machine against the latest release, see [Status](#status)), `unlink` (remove every link this tool made in the user folders, then every plugin and marketplace it installed), `projects` (only step 7), `update` (alias `refresh`), `versions <source>` and `add <source>` (see [Third-party sources](#third-party-sources)), `build` (see [Plugins and catalogs](#plugins-and-catalogs) and [Artifacts](#artifacts)), `check` (see [Check](#check)).
+Commands: `sync` (default), `status` (this machine against the latest release, see [Status](#status)), `branches` (the branch rules on GitHub, see [Branches](#branches)), `unlink` (remove every link this tool made in the user folders, then every plugin and marketplace it installed), `projects` (only step 7), `update` (alias `refresh`), `versions <source>` and `add <source>` (see [Third-party sources](#third-party-sources)), `build` (see [Plugins and catalogs](#plugins-and-catalogs) and [Artifacts](#artifacts)), `check` (see [Check](#check)).
 
 `--watch` keeps running and redoes layers and user folders when `skills/`, the config or the lock changes, so a skill you add is linked the moment its folder appears.
 

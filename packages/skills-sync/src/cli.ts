@@ -12,6 +12,7 @@ import { check } from "./check.js";
 import { entrypoints, instructionDependencies } from "./entrypoints.js";
 import { LOCAL_NAME, migrateAnswers, readLocal, writeLocal, type LinkMode, type Local } from "./config.js";
 import { gitExclude, isDir, isLink, lexists, linkMode, linkTarget, real, samePath, setLinkMode } from "./fs.js";
+import { runBranches } from "./commands/branches.js";
 import { runStatus } from "./commands/status.js";
 import { runSync, syncFacts, type SyncResult } from "./commands/sync.js";
 import { isCloud } from "./machine.js";
@@ -59,6 +60,15 @@ Commands
   status           this machine against the latest release of ${DEFAULT_REPO} on GitHub (no library needed): per harness
                    its form, each plugin's version against the release, every skill name listed twice; --json for
                    scripts; exit 1 on any red line. Reads only: nothing cloned, linked or written
+  branches [owner/repo ...]
+                   the branch rules on GitHub (no library needed), for each repository named or, with none, every
+                   repository the token owns: main, dev and any *-keep branch are never deleted (nor the repository's
+                   default branch); a branch whose pull request was merged into dev (or whose commits are all in dev)
+                   is deleted; one whose pull request was closed without merging is tagged archive/<name> at its head,
+                   then deleted; every other branch is left alone and listed. Pull requests are never touched: the head
+                   or the base of an open one stays. --plan lists every tag and delete without making them; --json
+                   carries the same lists; a repository the token cannot read or write is reported and skipped. Exit 1
+                   when anything was reported, 2 without a token to list your repositories
   unlink           remove every link this tool made in the user folders, and every plugin and marketplace it installed
   adopt-brain      explicitly adopt only this host's two historical Brain links; propagate verified instructions only
   rollback-brain   restore the exact preserved links in --receipt; refuse later destination edits
@@ -341,8 +351,9 @@ async function main(): Promise<void> {
   const log = (m: string) => (args.json ? undefined : process.stderr.write(m + "\n"));
   const setup = new Report();
 
-  // Machine commands act on this machine against the latest release on GitHub and never look for a library: status,
-  // and sync (the block, and the form work as its tickets land). unlink keeps the library-based run below until #154.
+  // Machine commands act on this machine against GitHub and never look for a library: status and sync (the block, and
+  // the form work as its tickets land) against the latest release, branches against the repositories' branch rules.
+  // unlink keeps the library-based run below until #154.
   const repo = args.library ?? DEFAULT_REPO;
   if ((args.command === "status" || args.command === "sync") && !isRepoName(repo)) {
     process.stderr.write(`${args.command}: --library names the release repo as owner/repo, not ${repo}\n`);
@@ -350,6 +361,15 @@ async function main(): Promise<void> {
   }
   if (args.command === "status") {
     process.exitCode = await runStatus({ repo, json: args.json, quiet: args.quiet });
+    return;
+  }
+  if (args.command === "branches") {
+    process.exitCode = await runBranches({
+      repos: args.positional,
+      plan: args.plan,
+      json: args.json,
+      quiet: args.quiet,
+    });
     return;
   }
   // sync with --repo <path> is still the library-based run of that checkout alone (the publish guard plans against one),
