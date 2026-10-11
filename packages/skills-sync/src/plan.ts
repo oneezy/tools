@@ -1,4 +1,5 @@
 // Every step builds a list of actions first; apply() executes them unless planning.
+import { randomBytes } from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 import {
@@ -47,6 +48,13 @@ export interface Action {
   expectedHash?: string | null;
   dependencies?: Array<{ path: string; target: string | null; files: Array<{ name: string; hash: string }> }>;
   failed?: boolean;
+  /**
+   * for write: where the file as it was is copied first, beside it, never over an existing file (a name taken already
+   * gets -2, -3 ...: the path the copy really went to replaces this one, and the note with it)
+   */
+  backup?: string;
+  /** for note: printed under --quiet too, when nothing changed (the one line about a block that could not be updated) */
+  loud?: boolean;
   diagnostic?: { command: string[]; exitCode: number | null; stderr: string; stdout: string };
 }
 
@@ -162,21 +170,7 @@ export function apply(report: Report, plan: boolean, exclude?: (repo: string, en
             )
               throw new Error(`${dependency.path}: instruction dependency changed since planning; left alone`);
           }
-          if (a.expectedHash !== undefined) {
-            const current = !hasLinkedParent(a.path) && lexists(a.path) ? fs.readFileSync(a.path) : null;
-            if (hasLinkedParent(a.path) || (current ? toHash(current) : null) !== a.expectedHash) {
-              a.kind = "conflict";
-              a.note = "instruction file changed since planning; left alone";
-              break;
-            }
-          }
-          fs.mkdirSync(path.dirname(a.path), { recursive: true });
-          // planned as a new file: never over one that appeared since
-          if (a.expectedHash === null && lexists(a.path))
-            throw new Error(`${a.path}: exists since planning; left alone`);
-          writeWhole(a.path, a.payload as string | Buffer);
-          if (a.expectedHash !== undefined && !fs.readFileSync(a.path).equals(Buffer.from(a.payload as string)))
-            throw new Error(`${a.path}: instruction readback differs from the planned write`);
+          write(a);
           break;
         case "move":
           fs.mkdirSync(path.dirname(a.target!), { recursive: true });
@@ -196,17 +190,142 @@ export function apply(report: Report, plan: boolean, exclude?: (repo: string, en
   }
 }
 
+/** How old another run's lock may be before it counts as left behind by a run that died. */
+const LOCK_STALE_MS = 60_000;
+
 /**
- * Write `file` through a sibling temp file renamed into place (a rename replaces on Windows too), so a crash mid-write
- * never leaves a user's instructions file empty or half written.
+ * One write. An instruction write (planned against the file's hash) holds the file's lock, `<file>.skills-sync.lock`,
+ * around the hash check, the backup and the rename, so two runs at once (a session hook and a sync, two sessions
+ * starting) never interleave: the one that finds the lock taken skips the file silently, the other is writing it.
  */
-function writeWhole(file: string, body: string | Buffer): void {
-  const tmp = `${file}.skills-sync.tmp`;
-  fs.writeFileSync(tmp, body);
+function write(a: Action): void {
+  const instruction = a.expectedHash !== undefined;
+  const changed = () => {
+    a.kind = "conflict";
+    a.note = "instruction file changed since planning; left alone";
+  };
+  if (instruction && hasLinkedParent(a.path)) return changed();
+  fs.mkdirSync(path.dirname(a.path), { recursive: true });
+  const lock = instruction ? takeLock(a.path) : null;
+  if (lock === false) {
+    a.kind = "skip";
+    a.note = "another skills-sync run is writing it";
+    return;
+  }
   try {
+    if (instruction) {
+      const current = lexists(a.path) ? fs.readFileSync(a.path) : null;
+      if ((current ? toHash(current) : null) !== a.expectedHash) return changed();
+    }
+    // planned as a new file: never over one that appeared since
+    if (a.expectedHash === null && lexists(a.path)) throw new Error(`${a.path}: exists since planning; left alone`);
+    const made = writeInstruction(a.path, a.payload as string | Buffer, a.backup ?? null, a.expectedHash);
+    if (made && a.backup && made !== a.backup) {
+      a.note = a.note?.replace(a.backup, made);
+      a.backup = made;
+    }
+    if (instruction && !fs.readFileSync(a.path).equals(Buffer.from(a.payload as string)))
+      throw new Error(`${a.path}: instruction readback differs from the planned write`);
+  } finally {
+    if (lock) fs.rmSync(lock, { force: true });
+  }
+}
+
+/**
+ * The file's lock for this run: created exclusively, so only one run holds it. Taken by another run: false, unless
+ * that lock is older than a minute (its run died). A stale lock is first renamed to a name of this run's own, and only
+ * the run whose rename succeeded removes it and tries again: two runs that both find it stale cannot both take it (the
+ * second one's rename finds nothing and it skips). Should the lock renamed aside turn out fresh (another run took the
+ * stale one over between this run's look and its rename), it is put back and this run skips.
+ */
+function takeLock(file: string): string | false {
+  const lock = `${file}.skills-sync.lock`;
+  for (let attempt = 0; attempt < 2; attempt++) {
+    try {
+      fs.writeFileSync(lock, `${process.pid}\n`, { flag: "wx" });
+      return lock;
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
+    }
+    let age: number;
+    try {
+      age = Date.now() - fs.statSync(lock).mtimeMs;
+    } catch {
+      continue; // released meanwhile: try again
+    }
+    if (age < LOCK_STALE_MS) return false;
+    const aside = `${lock}.${process.pid}.${randomBytes(4).toString("hex")}.stale`;
+    try {
+      fs.renameSync(lock, aside);
+    } catch {
+      return false; // another run moved it first: that run takes it
+    }
+    let fresh = false;
+    try {
+      fresh = Date.now() - fs.statSync(aside).mtimeMs < LOCK_STALE_MS;
+    } catch {
+      // gone already: nothing to put back
+    }
+    if (fresh) {
+      try {
+        fs.linkSync(aside, lock); // back where it was, never over a lock made since
+      } catch {
+        // a lock is there again either way
+      }
+      fs.rmSync(aside, { force: true });
+      return false;
+    }
+    fs.rmSync(aside, { force: true });
+  }
+  return false;
+}
+
+/**
+ * Write `file` whole: the new body to a temp file of this process's own beside it first, then the backup of the file
+ * as it is (when one is asked for and the file exists), checked against `expectedHash`, then the rename into place (a
+ * rename replaces on Windows too), so a crash never leaves the file empty or half written. When any step fails the
+ * temp file goes, and so does the backup this call made: a failed write leaves no copies behind. Returns the backup's
+ * path (its name may have moved on to -2 ...), or null when none was made.
+ */
+export function writeInstruction(
+  file: string,
+  body: string | Buffer,
+  backup: string | null,
+  expectedHash: string | null | undefined,
+): string | null {
+  const tmp = `${file}.skills-sync.${process.pid}.${randomBytes(4).toString("hex")}.tmp`;
+  fs.writeFileSync(tmp, body);
+  let made: string | null = null;
+  try {
+    if (backup && lexists(file)) {
+      made = backupCopy(file, backup);
+      if (expectedHash && toHash(fs.readFileSync(made)) !== expectedHash)
+        throw new Error(`${file}: backup does not match the file as planned; left alone`);
+    }
     fs.renameSync(tmp, file);
+    return made;
   } catch (error) {
     fs.rmSync(tmp, { force: true });
+    if (made) fs.rmSync(made, { force: true });
     throw error;
+  }
+}
+
+/**
+ * Copy `file` to `backup`, or, when that name is taken (an earlier backup made in the same second), to the first free
+ * `<name>-2<ext>`, `<name>-3<ext>` ...: a backup is never overwritten. Returns the path the copy went to. Throws when
+ * it cannot be made, so the write that needed it does not happen.
+ */
+function backupCopy(file: string, backup: string): string {
+  const ext = path.extname(backup);
+  const stem = backup.slice(0, backup.length - ext.length);
+  for (let n = 1; ; n++) {
+    const to = n === 1 ? backup : `${stem}-${n}${ext}`;
+    try {
+      fs.copyFileSync(file, to, fs.constants.COPYFILE_EXCL);
+      return to;
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
+    }
   }
 }

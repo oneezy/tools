@@ -5,7 +5,7 @@ import type { Harness } from "./harnesses.js";
 import type { Library } from "./library.js";
 import { Report, type Action } from "./plan.js";
 import { shippedSchema, validate } from "./schema.js";
-import { BLOCK_ID } from "./block.js";
+import { BLOCK_ID, blockIds } from "./block.js";
 
 export const ENTRYPOINTS_NAME = "skills-sync.entrypoints.json";
 
@@ -123,7 +123,7 @@ function replace_block(text: string, id: string, body: string): string {
   const start = `<!-- skills-sync:${id}:start -->`;
   const end = `<!-- skills-sync:${id}:end -->`;
   // a file the machine sync already manages gets no second block from the library-based run (ADR-0011)
-  if (id !== BLOCK_ID && text.includes(`<!-- skills-sync:${BLOCK_ID}:start -->`))
+  if (id !== BLOCK_ID && blockIds(text).includes(BLOCK_ID))
     throw new Error("superseded by the global skills block; left alone");
   const starts = text.split(start).length - 1;
   const ends = text.split(end).length - 1;

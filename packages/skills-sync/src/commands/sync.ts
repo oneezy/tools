@@ -1,12 +1,14 @@
 // sync, the default machine command: read the latest release, probe this machine, compute what each harness should
 // have (desired.ts) and apply it, or show it with --plan; nothing else is looked for, no library, no local file, nothing
 // of its own left on the machine (ADR-0012). Today that is the managed block in each harness's global instructions file
-// (ADR-0011), a cleanup line per block an older skills-sync left in a repository, a note per leftover of the old tool,
-// and whatever each harness's form in src/forms/ asks for. Outside the cloud, GitHub being unreachable is one red line,
-// not a stop: the block needs no release and is written anyway. In the cloud the release is not read at all: the block
-// is the whole sync there, and a session start must not go red (or print) over a GitHub it cannot reach. The caller
-// prints the report (cli.ts's printer, shared with every command) and sets the exit code from it: 1 when an action
-// failed or anything is red. On Windows the caller also runs this same sync inside every WSL distro (wsl.ts).
+// (ADR-0011; its text the release's SHARED.md), a cleanup line per block an older skills-sync left in a repository, a
+// note per leftover of the old tool, and whatever each harness's form in src/forms/ asks for. GitHub being unreachable
+// keeps every block as it is with one line saying so; outside the cloud it is also one red line, the plugins', not a
+// stop. In the cloud the release is read for the block alone, the block being the whole sync there, and a GitHub it
+// cannot reach is that one line and nothing red: a session start must not go red over it. The caller prints the
+// report (cli.ts's printer, shared with every command) and sets the exit code from it: 1 when an action failed or
+// anything is red. On Windows the caller also runs this same sync inside every WSL distro (wsl.ts).
+import { releaseSource } from "../block.js";
 import { desired, type FormFn } from "../desired.js";
 import { claudeCode } from "../forms/claude-code.js";
 import { codex } from "../forms/codex.js";
@@ -43,21 +45,39 @@ export async function runSync(options: SyncOptions): Promise<SyncResult> {
   const machine = probe(harnessTable(undefined, env), env, options.cwd);
   let release: Release | null = null;
   let error: string | null = null;
-  const gh = machine.cloud ? null : github(env);
-  if (gh)
-    try {
-      release = await latestRelease(gh, options.repo);
-    } catch (e) {
-      error = e instanceof Error ? e.message : String(e);
-    }
+  const gh = github(env);
+  try {
+    release = await latestRelease(gh, options.repo);
+  } catch (e) {
+    error = e instanceof Error ? e.message : String(e);
+  }
   const report = new Report();
-  if (error) report.add({ kind: "conflict", path: options.repo, note: `latest release not read: ${error}` });
-  report.merge(await desired(release, machine, FORMS, { plan: options.plan, github: release ? gh : null }));
+  // the plugins' red line; in the cloud there are no plugins to judge, and the block's own line says it all
+  if (error && !machine.cloud)
+    report.add({ kind: "conflict", path: options.repo, note: `latest release not read: ${error}` });
+  report.merge(
+    await desired(release, machine, FORMS, {
+      plan: options.plan,
+      github: release ? gh : null,
+      releaseError: error,
+    }),
+  );
   apply(report, options.plan);
   return { report, release, error, machine };
 }
 
-/** What sync adds to the report's --json beside the actions: the release it read (or why not) and the session kind. */
+/** The global block's text this run had: its release and sha256 (fallback: the built-in text), or why there was none. */
+function sharedFacts(r: SyncResult): Record<string, unknown> {
+  const text = releaseSource(r.release, r.error);
+  return text.ok
+    ? { release: text.source.release, sha256: text.source.sha256, fallback: text.source.fallback }
+    : { error: text.reason };
+}
+
+/**
+ * What sync adds to the report's --json beside the actions: the release it read (or why not), the block's text
+ * (`shared`) and the session kind.
+ */
 export function syncFacts(r: SyncResult): Record<string, unknown> {
   return {
     release: r.release
@@ -71,6 +91,7 @@ export function syncFacts(r: SyncResult): Record<string, unknown> {
         }
       : null,
     ...(r.error ? { error: r.error } : {}),
+    shared: sharedFacts(r),
     cloud: r.machine.cloud,
     oldLibrary: r.machine.oldLibrary,
     oldLocalFile: r.machine.oldLocalFile,

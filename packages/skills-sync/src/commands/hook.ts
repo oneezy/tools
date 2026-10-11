@@ -122,7 +122,7 @@ export async function runHook(options: HookOptions = {}): Promise<number> {
   if (changes.length) {
     for (const a of report.actions) if (a.kind !== "skip" && a.kind !== "conflict") write(line(a) + "\n");
     write(`${changes.length} changed, ${report.skips()} already right, ${conflicts.length} left alone\n`);
-  }
+  } else for (const a of report.actions) if (a.kind === "note" && a.loud) write(line(a) + "\n");
   for (const a of conflicts) warn(line(a) + "\n");
   // GitHub out of reach is one red line (the release conflict), not a failed hook: a session start must stay green offline
   const releaseConflict = (a: (typeof conflicts)[number]) => sync.error !== null && a.path === repo && !a.failed;
