@@ -510,7 +510,7 @@ test("--agents picks nothing any more: every detected harness is served and the 
   assert.ok(
     r.stdout
       .split("\n")
-      .some((l) => l.startsWith(". note") && l.includes("Hermes") && l.includes("form: loose skills")),
+      .some((l) => l.startsWith(". note") && l.includes("Hermes: plugins") && l.includes("no hermes on PATH")),
     r.stdout,
   );
   assert.deepEqual(fs.readdirSync(m.hermesHome), []);

@@ -7,16 +7,28 @@
 // else, other hook entries, Codex's trust record and blocks in repository files are never touched. Offline: no release
 // is read, so the library is --library's repo or the default, and the catalog name is the one its build gives its
 // marketplaces (<owner>-<name>). A harness that cannot list its plugins keeps its registration: on Claude Code removing
-// it would take every plugin from it, unseen. Hermes's plugins (tools#153) join here when its module lands. Under --plan
-// no plugin command that changes anything runs and apply() writes nothing; the caller exits 1 when anything is red.
+// it would take every plugin from it, unseen. Hermes has no marketplace: the tool's plugins there are the ones hermes
+// recorded as installed from the library repository (`hermes plugins install owner/repo/...`, read from its files by
+// the probe), removed with `hermes plugins remove <id>`; a folder hermes did not record, or one from another repository,
+// stays. Under --plan no plugin command that changes anything runs and apply() writes nothing; the caller exits 1 when
+// anything is red.
 import os from "node:os";
 import path from "node:path";
 import { blockRemoval } from "../block.js";
 import { catalogFor, formOf } from "../desired.js";
 import { lexists } from "../fs.js";
 import { harnessTable } from "../harnesses.js";
+import { githubRepo } from "../hermes.js";
 import { hookRemoval } from "../hooks.js";
-import { listMarketplaces, refused, removeMarketplace, runner, supportsPlugins, uninstallPlugin } from "../install.js";
+import {
+  hermes,
+  listMarketplaces,
+  refused,
+  removeMarketplace,
+  runner,
+  supportsPlugins,
+  uninstallPlugin,
+} from "../install.js";
 import { libraryCopy, oldStateNotes, probe, type HarnessState, type Machine } from "../machine.js";
 import { apply, Report, type Action } from "../plan.js";
 
@@ -42,7 +54,11 @@ export function runUnlink(options: UnlinkOptions): UnlinkResult {
   const home = os.homedir();
   for (const state of machine.harnesses) {
     if (!formOf(state.harness.id)) continue;
-    for (const a of plugins(state, options.repo, options.plan)) report.add(a);
+    const taken =
+      state.harness.id === "hermes"
+        ? hermesPlugins(state, options.repo, options.plan)
+        : plugins(state, options.repo, options.plan);
+    for (const a of taken) report.add(a);
     for (const l of state.loose)
       if (!l.target) report.add({ kind: "note", path: l.path, note: "a link whose target cannot be read; left alone" });
       else if (libraryCopy(l.target, options.repo, home))
@@ -110,5 +126,44 @@ function plugins(state: HarnessState, repo: string, plan: boolean): Action[] {
   const a: Action = { kind: "uninstall", path: where(`marketplace ${catalog}`), note: "registered by this tool" };
   out.push(a);
   if (!plan && !removeMarketplace(state.harness, run, catalog)) refused(a, run, `${bin} could not remove it`);
+  return out;
+}
+
+/**
+ * Hermes's plugins from the library: the ones hermes recorded as installed from the library repository (the probe read
+ * its install rows), removed one by one with `hermes plugins remove`, which drops the folder, the row and the config
+ * entry. Nothing else under <home>/plugins is the tool's. Without hermes on PATH they are named and stay.
+ */
+function hermesPlugins(state: HarnessState, repo: string, plan: boolean): Action[] {
+  const out: Action[] = [];
+  const mine = state.installed
+    .filter((p) => p.install && githubRepo(p.install.url) === repo.toLowerCase())
+    .sort((a, b) => a.id.localeCompare(b.id));
+  if (!mine.length) return out;
+  const where = (what: string) => `${state.harness.name}: ${what}`;
+  const ids = mine.map((p) => p.id).join(", ");
+  if (!state.cli) {
+    out.push({
+      kind: "note",
+      path: where("plugins"),
+      note: `no ${hermes.bin} on PATH; ${ids} installed from ${repo} stay`,
+    });
+    return out;
+  }
+  const run = runner(state.cli);
+  if (!hermes.supports(run)) {
+    out.push({
+      kind: "conflict",
+      path: where("plugins"),
+      note: `this ${hermes.bin} has no plugins command; ${ids} installed from ${repo} stay`,
+      ...(run.failure ? { diagnostic: run.failure } : {}),
+    });
+    return out;
+  }
+  for (const p of mine) {
+    const a: Action = { kind: "uninstall", path: where(`plugin ${p.id}`), note: `installed by this tool from ${repo}` };
+    out.push(a);
+    if (!plan && !hermes.remove(run, p.id)) refused(a, run, `${hermes.bin} could not remove it`);
+  }
   return out;
 }

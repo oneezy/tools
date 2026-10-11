@@ -43,15 +43,16 @@ export async function runSync(options: SyncOptions): Promise<SyncResult> {
   const machine = probe(harnessTable(undefined, env), env, options.cwd);
   let release: Release | null = null;
   let error: string | null = null;
-  if (!machine.cloud)
+  const gh = machine.cloud ? null : github(env);
+  if (gh)
     try {
-      release = await latestRelease(github(env), options.repo);
+      release = await latestRelease(gh, options.repo);
     } catch (e) {
       error = e instanceof Error ? e.message : String(e);
     }
   const report = new Report();
   if (error) report.add({ kind: "conflict", path: options.repo, note: `latest release not read: ${error}` });
-  report.merge(desired(release, machine, FORMS, { plan: options.plan }));
+  report.merge(await desired(release, machine, FORMS, { plan: options.plan, github: release ? gh : null }));
   apply(report, options.plan);
   return { report, release, error, machine };
 }

@@ -8,8 +8,9 @@
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
+import YAML from "yaml";
 import { afterAll, afterEach, beforeAll, test } from "vite-plus/test";
-import { lexists } from "../src/fs.js";
+import { isLink, lexists } from "../src/fs.js";
 import { HOOK_COMMAND } from "../src/hooks.js";
 import { libraryCopy as isLibraryCopy } from "../src/machine.js";
 import { startFakeGithub, type FakeGithub } from "./fixtures/fake-github/fake-github.mjs";
@@ -21,6 +22,8 @@ import {
   destroy,
   githubClone,
   globalFile,
+  hermesConfig,
+  hermesPlugin,
   hookEntry,
   installedPlugin,
   libraryCopy,
@@ -352,4 +355,72 @@ test("a block sync appended to a file goes with the blank line sync put before i
   // the rule unlink and the forms share: an empty target (the link could not be read) is never a dangling link
   assert.equal(isLibraryCopy("", "oneezy/skills", m.home), false);
   assert.equal(isLibraryCopy(path.join(m.base, "nowhere"), "oneezy/skills", m.home), true);
+});
+
+test("Hermes: unlink removes the plugins hermes recorded as installed from the library (hermes plugins remove) and the tool's links; a folder hermes did not record, one from another repository and a link to somewhere else stay; --plan runs no remove; without hermes on PATH the plugins are named and stay", async () => {
+  const m = machine({ harnesses: ["hermes"], clis: ["hermes"] });
+  libraryCopy(m);
+  const oneezy = hermesPlugin(m, "oneezy", { version: "0.43.1", skills: ["oneezy-merge", "oneezy-status"] });
+  const play = hermesPlugin(m, "play", { version: "0.43.1", skills: ["play-unslop"] });
+  const copied = hermesPlugin(m, "copied", { version: "1.0.0", skills: ["one"], recorded: false });
+  const acme = hermesPlugin(m, "acme", {
+    version: "2.0.0",
+    skills: ["two"],
+    source: "https://github.com/acme/skills.git#dist/hermes/acme",
+  });
+  const grilling = looseLink(m, "hermes", "grilling");
+  const gone = looseLink(m, "hermes", "gone");
+  fs.rmSync(path.join(m.base, "old-library", ".agents", "skills", "gone"), { recursive: true });
+  const mine = looseLink(m, "hermes", "mine", path.join(m.base, "mine", "mine"));
+  const before = snapshot(m.home);
+  const plan = await cli(m, ["unlink", "--plan", "--json"]);
+  assert.equal(plan.status, 0, plan.stderr + plan.stdout);
+  assert.deepEqual(snapshot(m.home), before);
+  assert.deepEqual(plan.calls.filter(pluginWrite), []);
+  const planned = (plan.json as unknown as { actions: ActionJson[] }).actions;
+  assert.deepEqual(
+    planned.filter((a) => a.kind === "uninstall").map((a) => [a.path, a.note]),
+    [
+      ["Hermes: plugin oneezy", "installed by this tool from oneezy/skills"],
+      ["Hermes: plugin play", "installed by this tool from oneezy/skills"],
+    ],
+  );
+  assert.deepEqual(
+    planned.filter((a) => a.kind === "remove").map((a) => a.path),
+    [gone, grilling],
+  );
+  assert.ok(!planned.some((a) => a.path === mine || a.path.includes("copied") || a.path.includes("acme")));
+  const r = await cli(m, ["unlink", "--json"]);
+  assert.equal(r.status, 0, r.stderr + r.stdout);
+  assert.deepEqual(r.calls.filter(pluginWrite), [
+    ["hermes", "plugins", "remove", "oneezy"],
+    ["hermes", "plugins", "remove", "play"],
+  ]);
+  assert.equal(lexists(oneezy), false);
+  assert.equal(lexists(play), false);
+  assert.ok(lexists(copied) && lexists(acme), "not the tool's: left alone");
+  assert.equal(lexists(grilling), false);
+  assert.equal(lexists(gone), false);
+  assert.ok(isLink(mine), "a link to somewhere else stays");
+  const meta = JSON.parse(read(path.join(m.hermesHome, "plugins", ".install-metadata.json"))) as Record<
+    string,
+    unknown
+  >;
+  assert.deepEqual(Object.keys(meta).sort(), ["acme"]);
+  const config = YAML.parse(read(hermesConfig(m))) as { plugins: { enabled: string[]; disabled: string[] } };
+  assert.deepEqual(config.plugins.enabled, ["acme", "copied"]);
+  assert.equal((r.json as unknown as { actions: ActionJson[] }).actions.length, 4, r.stdout);
+  const again = await cli(m, ["unlink"]);
+  assert.equal(again.status, 0, again.stderr + again.stdout);
+  assert.ok(again.stdout.trimEnd().endsWith("0 changed, 0 already right, 0 left alone"), again.stdout);
+  // without hermes on PATH the tool's plugins cannot be removed through hermes: one line names them, exit 0
+  const m2 = machine({ harnesses: ["hermes"], clis: [] });
+  hermesPlugin(m2, "oneezy", { version: "0.43.1", skills: ["oneezy-status"] });
+  const r2 = await cli(m2, ["unlink", "--json"]);
+  assert.equal(r2.status, 0, r2.stderr + r2.stdout);
+  assert.deepEqual(
+    (r2.json as unknown as { actions: ActionJson[] }).actions.map((a) => [a.kind, a.path, a.note]),
+    [["note", "Hermes: plugins", "no hermes on PATH; oneezy installed from oneezy/skills stay"]],
+  );
+  assert.ok(lexists(path.join(m2.hermesHome, "plugins", "oneezy")));
 });

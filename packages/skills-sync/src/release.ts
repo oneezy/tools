@@ -26,8 +26,11 @@ export interface ReleaseConfig {
   harnesses: string[] | null;
   /** machines.plugins: per harness id, or "*" for the rest, the plugin ids a machine installs; a harness named nowhere gets every one */
   plugins: Record<string, string[]>;
-  /** renderings: per harness id, the folder of the release that holds a rendering for it (Hermes's opt-in, tools#153); absent when the config has none */
-  renderings?: Record<string, string>;
+  /**
+   * the config's renderings opt-in (sources.ts's Config.renderings, the same shape): hermes is the library folder that
+   * holds the Hermes rendering of every package, which Hermes's form installs from; absent when the config has none
+   */
+  renderings?: { hermes?: string };
 }
 
 export interface Release {
@@ -170,11 +173,9 @@ export function parseConfig(text: string): ReleaseConfig | null {
     harnesses: ids(c.machines?.harnesses),
     plugins,
   };
-  if (c.renderings && typeof c.renderings === "object" && !Array.isArray(c.renderings))
-    config.renderings = Object.fromEntries(
-      Object.entries(c.renderings as Record<string, unknown>).filter(
-        (e): e is [string, string] => typeof e[1] === "string" && !!e[1],
-      ),
-    );
+  if (c.renderings && typeof c.renderings === "object" && !Array.isArray(c.renderings)) {
+    const hermes = (c.renderings as { hermes?: unknown }).hermes;
+    if (typeof hermes === "string" && hermes) config.renderings = { hermes };
+  }
   return config;
 }

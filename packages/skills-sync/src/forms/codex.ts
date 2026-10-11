@@ -313,7 +313,10 @@ function missing(loaded: string[], p: ReleasePlugin): string[] {
  * releases/latest after every push until the release job finishes), "same", or "unversioned" when the release's plugin
  * has no version and its skill set alone decides.
  */
-function versionGap(have: CliPlugin, p: ReleasePlugin): "behind" | "ahead" | "same" | "unversioned" {
+export function versionGap(
+  have: Pick<CliPlugin, "version">,
+  p: ReleasePlugin,
+): "behind" | "ahead" | "same" | "unversioned" {
   if (p.version === null) return "unversioned";
   if (have.version === p.version) return "same";
   const a = have.version === null ? null : plainVersion(have.version);

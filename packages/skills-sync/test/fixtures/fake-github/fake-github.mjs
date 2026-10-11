@@ -155,7 +155,8 @@ const readBody = (req) =>
 
 /**
  * Start the server on a free local port. `fixture.repo` is the one repository with releases; `fixture.releases` the
- * releases (the highest number is the latest); `fixture.contents[<ref>][<path>]` the files GET /contents serves;
+ * releases (the highest number is the latest); `fixture.contents[<ref>][<path>]` the files GET /contents serves (a
+ * path with files below it and none at it is a directory: the listing GitHub gives, one entry per child);
  * `fixture.token`, when set, is the only bearer token accepted. A release with `noReleaseJson: true` is cut without
  * its release.json asset.
  *
@@ -409,7 +410,25 @@ export async function startFakeGithub(fixture = fixtureLibrary()) {
     if (contents) {
       const ref = url.searchParams.get("ref") ?? "main";
       const text = fixture.contents?.[ref]?.[contents[1]];
-      if (text === undefined) return notFound();
+      if (text === undefined) {
+        const dir = contents[1].replace(/\/$/, "") + "/";
+        const children = [
+          ...new Set(
+            Object.keys(fixture.contents?.[ref] ?? {})
+              .filter((p) => p.startsWith(dir))
+              .map((p) => p.slice(dir.length).split("/")[0]),
+          ),
+        ].sort();
+        if (!children.length) return notFound();
+        return send(
+          200,
+          children.map((name) => ({
+            type: fixture.contents[ref][dir + name] === undefined ? "dir" : "file",
+            name,
+            path: dir + name,
+          })),
+        );
+      }
       const bytes = Buffer.from(text);
       return send(200, {
         type: "file",

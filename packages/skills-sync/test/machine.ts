@@ -12,7 +12,10 @@ import { createHash } from "node:crypto";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import YAML from "yaml";
+import { HERMES_PATH, renderHermes } from "../src/build.js";
 import { isLink, lexists, linkTarget, makeLink, samePath } from "../src/fs.js";
+import type { HermesActivation } from "../src/hermes.js";
 import { fixtureRelease, type FakeGithub, type FixtureRelease } from "./fixtures/fake-github/fake-github.mjs";
 
 const CLI = path.resolve(import.meta.dirname, "..", "dist", "src", "cli.js");
@@ -20,7 +23,7 @@ const FAKE_HARNESS = path.resolve(import.meta.dirname, "fixtures", "fake-harness
 const FAKE_WSL = path.resolve(import.meta.dirname, "fixtures", "fake-wsl", "fake-wsl.mjs");
 
 export type HarnessId = "claude-code" | "codex" | "hermes";
-export type CliName = "claude" | "codex";
+export type CliName = "claude" | "codex" | "hermes";
 
 export interface PretendMachine {
   base: string;
@@ -44,7 +47,7 @@ export interface PretendMachine {
 export interface MachineOptions {
   /** which harness config folders exist (default: Claude Code and Codex) */
   harnesses?: HarnessId[];
-  /** which fake CLIs are on PATH (default: both) */
+  /** which fake CLIs are on PATH (default: claude and codex) */
   clis?: CliName[];
   /** the fake GitHub the run talks to; null for a machine with no GitHub reachable */
   github?: FakeGithub | null;
@@ -108,6 +111,9 @@ export function pretendMachine(options: MachineOptions = {}): PretendMachine {
     HERMES_HOME: hermesHome,
     XDG_CONFIG_HOME: path.join(home, ".config"),
     FAKE_HARNESS_LOG: path.join(base, "calls.log"),
+    // the pretend GitHub checkouts the fake hermes clones from: <owner>/<repo>/<commit>/<subdir> (see hermesSource);
+    // apart from the fake codex's FAKE_HARNESS_GITHUB, whose checkouts are <owner>/<repo> at one revision
+    FAKE_HERMES_GITHUB: path.join(base, "github-hermes"),
     // a machine with no GitHub reachable points at a port nothing listens on
     SKILLS_SYNC_GITHUB_API: github?.url ?? "http://127.0.0.1:9",
     // the fake wsl.exe always: the real one, on a Windows host, would run the sync inside the host's own distros
@@ -727,4 +733,78 @@ export function codexPluginEnabled(m: PretendMachine, id: string, enabled: boole
   if (!state.plugins[id]) throw new Error(`${id}: not installed on the fake codex`);
   state.plugins[id].enabled = enabled;
   write(file, JSON.stringify(state, null, 2));
+}
+
+/**
+ * The release's Hermes renderings as GitHub would serve them to `hermes plugins install owner/repo/dist/hermes/<id>
+ * --ref <commit>`: <base>/github-hermes/<owner>/<repo>/<commit>/dist/hermes/<id>/ for every plugin of the release, built from
+ * the fixture's package files exactly as build does (renderHermes). Returns the checkout folder.
+ */
+export function hermesSource(m: PretendMachine, release: FixtureRelease, repo = "oneezy/skills"): string {
+  const checkout = path.join(m.env.FAKE_HERMES_GITHUB, ...repo.split("/"), release.commit);
+  // the fake GitHub's contents API answers for the same commit: the tool asks it whether dist/hermes is there at all
+  const contents = m.github ? ((m.github.fixture.contents ??= {})[release.commit] ??= {}) : null;
+  for (const [id, p] of Object.entries(release.plugins))
+    for (const [rel, bytes] of renderHermes(p.files)) {
+      write(path.join(checkout, ...HERMES_PATH.split("/"), id, ...rel.split("/")), bytes);
+      if (contents) contents[`${HERMES_PATH}/${id}/${rel}`] = bytes.toString("utf8");
+    }
+  return checkout;
+}
+
+/** Hermes's config.yaml on the pretend machine. */
+export function hermesConfig(m: PretendMachine): string {
+  return path.join(m.hermesHome, "config.yaml");
+}
+
+/**
+ * A plugin installed in Hermes as `hermes plugins install` leaves it: <hermesHome>/plugins/<id>/ holding the Hermes
+ * rendering of the plugin's files, its row in plugins/.install-metadata.json (default: the library's dist/hermes/<id>
+ * at `revision`, pinned) and its place in config.yaml's lists (`activation`, default enabled). `recorded: false` lays
+ * the folder down without a row, as a copy by hand would. Returns the plugin folder.
+ */
+export function hermesPlugin(
+  m: PretendMachine,
+  id: string,
+  p: PluginFiles & {
+    source?: string;
+    revision?: string;
+    pinned?: boolean;
+    activation?: HermesActivation;
+    recorded?: boolean;
+  } = {},
+): string {
+  const dir = path.join(m.hermesHome, "plugins", id);
+  const files =
+    p.files ??
+    fixtureRelease({
+      number: 0,
+      commit: "0".repeat(40),
+      plugins: { [id]: { version: p.version ?? null, skills: p.skills ?? [] } },
+    }).plugins[id].files;
+  for (const [rel, bytes] of renderHermes(files)) write(path.join(dir, ...rel.split("/")), bytes);
+  const metaFile = path.join(m.hermesHome, "plugins", ".install-metadata.json");
+  const meta: Record<string, unknown> = fs.existsSync(metaFile) ? JSON.parse(fs.readFileSync(metaFile, "utf8")) : {};
+  if (p.recorded === false) delete meta[id];
+  else
+    meta[id] = {
+      pinned: p.pinned ?? true,
+      revision: p.revision ?? "1717171717171717171717171717171717171717",
+      source: p.source ?? `https://github.com/oneezy/skills.git#${HERMES_PATH}/${id}`,
+    };
+  write(metaFile, JSON.stringify(meta, null, 2) + "\n");
+  const activation = p.activation ?? "enabled";
+  const configFile = hermesConfig(m);
+  const config = (fs.existsSync(configFile) ? YAML.parse(fs.readFileSync(configFile, "utf8")) : {}) ?? {};
+  config.plugins ??= {};
+  const enabled = new Set<string>(config.plugins.enabled ?? []);
+  const disabled = new Set<string>(config.plugins.disabled ?? []);
+  enabled.delete(id);
+  disabled.delete(id);
+  if (activation === "enabled") enabled.add(id);
+  if (activation === "disabled") disabled.add(id);
+  config.plugins.enabled = [...enabled].sort();
+  config.plugins.disabled = [...disabled].sort();
+  write(configFile, YAML.stringify(config));
+  return dir;
 }

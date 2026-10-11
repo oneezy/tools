@@ -132,6 +132,16 @@ export function isDir(p: string): boolean {
   }
 }
 
+/** The skill folder names under <dir>/skills (a folder with a SKILL.md), sorted; none when there is no skills folder. */
+export function skillsIn(dir: string): string[] {
+  const skills = path.join(dir, "skills");
+  if (!isDir(skills)) return [];
+  return fs
+    .readdirSync(skills)
+    .filter((n) => isSkillDir(path.join(skills, n)))
+    .sort();
+}
+
 export function copyDir(src: string, dst: string): void {
   if (fs.existsSync(dst)) fs.rmSync(dst, { recursive: true, force: true });
   fs.mkdirSync(path.dirname(dst), { recursive: true });

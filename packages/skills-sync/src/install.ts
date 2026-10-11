@@ -247,13 +247,67 @@ const codex: Driver = {
 
 const DRIVERS: Record<string, Driver> = { "claude-code": claude, codex };
 
+/** A user plugin as `hermes plugins list --json --no-bundled` prints it. */
+export interface HermesListed {
+  name: string;
+  /** enabled, disabled, or not enabled */
+  status: string;
+  version: string | null;
+  /** `git pinned@<sha8>` for a --ref install, the catalog annotation, else user or git */
+  source: string | null;
+}
+
+/**
+ * Hermes's plugin commands (`hermes plugins ...`), through the same runner. Hermes has no marketplace: a plugin is
+ * installed straight from a GitHub repository path (`owner/repo/sub/dir`), pinned to a commit with --ref (a full sha),
+ * switched on with `enable` (plugins.enabled in config.yaml), moved with `install --force --ref` (`hermes plugins update`
+ * refuses a pinned install, so there is no update here) and dropped with `remove` (for `unlink`, tools#154).
+ * `list --json --no-bundled` is the harness's own view of its user plugins. Nothing here is a Driver: the old
+ * library-based plugin step never serves Hermes.
+ */
+export const hermes = {
+  bin: "hermes",
+  /** does this hermes have plugin commands? asked through --help only */
+  supports(run: Run): boolean {
+    const r = run(["plugins", "--help"]);
+    return r.ok && /install/.test(r.out + r.err);
+  },
+  list(run: Run): HermesListed[] | null {
+    const r = run(["plugins", "list", "--json", "--no-bundled"]);
+    const v = r.ok ? json(r.out) : null;
+    if (!Array.isArray(v)) return null;
+    return v
+      .filter((p) => str(p?.name))
+      .map((p) => ({
+        name: p.name as string,
+        status: str(p.status) ?? "not enabled",
+        // the CLI prints manifest.get("version", "") (older builds str(None)) for a manifest without a version
+        version: str(p.version) && p.version !== "None" ? (p.version as string) : null,
+        source: str(p.source),
+      }));
+  },
+  /** --no-enable: the enable is a step of its own, so a failed one is told apart; --force replaces this tool's own install */
+  install(run: Run, identifier: string, options: { ref?: string; force?: boolean } = {}): boolean {
+    return run([
+      "plugins",
+      "install",
+      identifier,
+      "--no-enable",
+      ...(options.ref ? ["--ref", options.ref] : []),
+      ...(options.force ? ["--force"] : []),
+    ]).ok;
+  },
+  enable: (run: Run, name: string) => run(["plugins", "enable", name]).ok,
+  remove: (run: Run, name: string) => run(["plugins", "remove", name]).ok,
+};
+
 /** The plugin CLI of a harness that has one: its name, and where PATH has it (null when it is not installed). */
 export function harnessCli(
   h: Harness,
   env: NodeJS.ProcessEnv = process.env,
 ): { bin: string; file: string | null } | null {
-  const d = DRIVERS[h.id];
-  return d ? { bin: d.bin, file: which(d.bin, env) } : null;
+  const bin = DRIVERS[h.id]?.bin ?? (h.id === "hermes" ? hermes.bin : null);
+  return bin ? { bin, file: which(bin, env) } : null;
 }
 
 /** What the harness lists as installed, account plugins included; null when it cannot list. */

@@ -11,8 +11,9 @@ import os from "node:os";
 import path from "node:path";
 import { globalFile, readBlock, repoBlocks, type BlockState, type RepoBlock } from "./block.js";
 import { LOCAL_NAME } from "./config.js";
-import { isDir, isLink, isSkillDir, lexists, linkTarget, real, under } from "./fs.js";
+import { isDir, isLink, isSkillDir, lexists, linkTarget, real, skillsIn, under } from "./fs.js";
 import { detected, RESERVED, type Harness } from "./harnesses.js";
+import { githubRepo, hermesPlugins, type HermesActivation, type HermesInstall } from "./hermes.js";
 import { readHook, type HookState } from "./hooks.js";
 import {
   codexPluginSkills,
@@ -43,7 +44,11 @@ export interface AccountPlugin {
   enabled: boolean;
 }
 
-/** A plugin installed through the harness's CLI: <id>@<marketplace>. */
+/**
+ * A plugin installed through the harness's CLI: <id>@<marketplace>. Hermes has no marketplaces: its `marketplace` is
+ * `<owner>-<repo>` of the GitHub repository hermes recorded as the install's source (the library's catalog name for a
+ * library install), `hermes` for a folder hermes did not record.
+ */
 export interface CliPlugin {
   id: string;
   marketplace: string;
@@ -53,6 +58,10 @@ export interface CliPlugin {
   enabled: boolean;
   /** where the harness reads it from, when it says */
   path: string | null;
+  /** Hermes: the row hermes plugins install recorded (null: nobody installed it through hermes) */
+  install?: HermesInstall | null;
+  /** Hermes: enabled, disabled (plugins.disabled wins) or not enabled (in neither list) */
+  activation?: HermesActivation;
 }
 
 export interface LooseLink {
@@ -206,8 +215,10 @@ function probeHarness(h: Harness, env: NodeJS.ProcessEnv, roots: string[], globa
   const cli = harnessCli(h, env);
   if (cli) {
     state.cli = cli.file;
+    // Hermes is not asked: its plugins are read below from its files (its list command resolves the plugin catalog
+    // over the network on every call)
     if (!cli.file) state.note = `no ${cli.bin} on PATH`;
-    else {
+    else if (h.id !== "hermes") {
       const run = runner(cli.file);
       const listed = supportsPlugins(run) ? listInstalled(h, run) : null;
       if (!listed) state.note = `${cli.bin} cannot list its plugins`;
@@ -238,6 +249,18 @@ function probeHarness(h: Harness, env: NodeJS.ProcessEnv, roots: string[], globa
   }
   // the account plugins are folders claude.ai wrote: without the CLI they are read from there
   if (h.id === "claude-code" && state.note) state.synced = scanSynced(h.configDir);
+  // Hermes's plugins are folders under <home>/plugins with hermes's own install rows and activation lists beside them
+  if (h.id === "hermes")
+    state.installed = hermesPlugins(h.configDir).map((p) => ({
+      id: p.id,
+      marketplace: p.install ? (githubRepo(p.install.url)?.replace("/", "-") ?? p.install.url) : "hermes",
+      version: p.version,
+      skills: p.skills,
+      enabled: p.activation === "enabled",
+      path: p.path,
+      install: p.install,
+      activation: p.activation,
+    }));
   for (const dir of [h.userSkills, ...(h.legacyUserSkills ?? [])]) {
     if (!isDir(dir)) continue;
     for (const name of fs.readdirSync(dir).sort()) {
@@ -249,16 +272,6 @@ function probeHarness(h: Harness, env: NodeJS.ProcessEnv, roots: string[], globa
     }
   }
   return state;
-}
-
-/** The skill folder names under <dir>/skills, sorted. */
-export function skillsIn(dir: string): string[] {
-  const skills = path.join(dir, "skills");
-  if (!isDir(skills)) return [];
-  return fs
-    .readdirSync(skills)
-    .filter((n) => isSkillDir(path.join(skills, n)))
-    .sort();
 }
 
 function readJson(file: string): Record<string, unknown> | null {
