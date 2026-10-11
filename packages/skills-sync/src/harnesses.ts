@@ -22,11 +22,11 @@ export interface Harness {
   note?: string;
 }
 
-export function harnessTable(home = os.homedir(), env = process.env): Harness[] {
+export function harnessTable(home = os.homedir(), env = process.env, platform = process.platform): Harness[] {
   const codexHome = env.CODEX_HOME?.trim() || path.join(home, ".codex");
   const claudeHome = env.CLAUDE_CONFIG_DIR?.trim() || path.join(home, ".claude");
   const configHome = env.XDG_CONFIG_HOME?.trim() || path.join(home, ".config");
-  const hermesHome = env.HERMES_HOME?.trim() || path.join(home, ".hermes");
+  const hermesHome = hermesHomeDir(home, env, platform);
   return [
     {
       id: "claude-code",
@@ -59,6 +59,8 @@ export function harnessTable(home = os.homedir(), env = process.env): Harness[] 
       universal: false,
     },
     {
+      // Hermes reads skills/ and plugins/ under its home; it has no global instructions file this tool knows of, so no
+      // userInstructions and no block (docs/research/hermes-plugin-format.md in oneezy/skills)
       id: "hermes",
       name: "Hermes",
       configDir: hermesHome,
@@ -67,6 +69,27 @@ export function harnessTable(home = os.homedir(), env = process.env): Harness[] 
       universal: false,
     },
   ];
+}
+
+/**
+ * Hermes's home, as Hermes itself resolves it (hermes_constants.py): HERMES_HOME when set, else the platform default:
+ * %LOCALAPPDATA%\hermes on Windows (~/AppData/Local/hermes when LOCALAPPDATA is unset), ~/.hermes elsewhere, with
+ * HERMES_DATA_DIR_SUFFIX appended to the default's folder name. A named profile (hermes -p <id>) is <home>/profiles/<id>,
+ * a complete home of its own; this tool serves the default profile, which is the home itself.
+ */
+export function hermesHomeDir(
+  home = os.homedir(),
+  env: NodeJS.ProcessEnv = process.env,
+  platform: NodeJS.Platform = process.platform,
+): string {
+  const set = env.HERMES_HOME?.trim();
+  if (set) return set;
+  const suffix = env.HERMES_DATA_DIR_SUFFIX ?? "";
+  if (platform === "win32") {
+    const local = env.LOCALAPPDATA?.trim();
+    return path.join(local || path.join(home, "AppData", "Local"), `hermes${suffix}`);
+  }
+  return path.join(home, `.hermes${suffix}`);
 }
 
 export function detected(table: Harness[]): Harness[] {

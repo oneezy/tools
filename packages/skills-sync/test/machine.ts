@@ -9,14 +9,17 @@ import { createHash } from "node:crypto";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import YAML from "yaml";
+import { HERMES_PATH, renderHermes } from "../src/build.js";
 import { isLink, lexists, linkTarget, makeLink } from "../src/fs.js";
-import { fixtureRelease, type FakeGithub } from "./fixtures/fake-github/fake-github.mjs";
+import type { HermesActivation } from "../src/hermes.js";
+import { fixtureRelease, type FakeGithub, type FixtureRelease } from "./fixtures/fake-github/fake-github.mjs";
 
 const CLI = path.resolve(import.meta.dirname, "..", "dist", "src", "cli.js");
 const FAKE_HARNESS = path.resolve(import.meta.dirname, "fixtures", "fake-harness", "fake-harness.mjs");
 
 export type HarnessId = "claude-code" | "codex" | "hermes";
-export type CliName = "claude" | "codex";
+export type CliName = "claude" | "codex" | "hermes";
 
 export interface PretendMachine {
   base: string;
@@ -36,7 +39,7 @@ export interface PretendMachine {
 export interface MachineOptions {
   /** which harness config folders exist (default: Claude Code and Codex) */
   harnesses?: HarnessId[];
-  /** which fake CLIs are on PATH (default: both) */
+  /** which fake CLIs are on PATH (default: claude and codex) */
   clis?: CliName[];
   /** the fake GitHub the run talks to; null for a machine with no GitHub reachable */
   github?: FakeGithub | null;
@@ -94,6 +97,8 @@ export function pretendMachine(options: MachineOptions = {}): PretendMachine {
     HERMES_HOME: hermesHome,
     XDG_CONFIG_HOME: path.join(home, ".config"),
     FAKE_HARNESS_LOG: path.join(base, "calls.log"),
+    // the pretend GitHub checkouts the fake hermes clones from: <owner>/<repo>/<commit>/<subdir> (see hermesSource)
+    FAKE_HERMES_GITHUB: path.join(base, "github"),
     // a machine with no GitHub reachable points at a port nothing listens on
     SKILLS_SYNC_GITHUB_API: github?.url ?? "http://127.0.0.1:9",
     ...options.env,
@@ -407,4 +412,88 @@ export function oldLocalFile(m: PretendMachine, local: Record<string, unknown>):
     JSON.stringify({ agents: ["claude-code", "codex"], global: true, mode: "link", wsl: [], ...local }, null, 2) + "\n",
   );
   return file;
+}
+
+/**
+ * The release's Hermes renderings as GitHub would serve them to `hermes plugins install owner/repo/dist/hermes/<id>
+ * --ref <commit>`: <base>/github/<owner>/<repo>/<commit>/dist/hermes/<id>/ for every plugin of the release, built from
+ * the fixture's package files exactly as build does (renderHermes). Returns the checkout folder.
+ */
+export function hermesSource(m: PretendMachine, release: FixtureRelease, repo = "oneezy/skills"): string {
+  const checkout = path.join(m.base, "github", ...repo.split("/"), release.commit);
+  for (const [id, p] of Object.entries(release.plugins))
+    for (const [rel, bytes] of renderHermes(p.files))
+      write(path.join(checkout, ...HERMES_PATH.split("/"), id, ...rel.split("/")), bytes);
+  return checkout;
+}
+
+/** Hermes's config.yaml on the pretend machine. */
+export function hermesConfig(m: PretendMachine): string {
+  return path.join(m.hermesHome, "config.yaml");
+}
+
+/**
+ * A plugin installed in Hermes as `hermes plugins install` leaves it: <hermesHome>/plugins/<id>/ holding the Hermes
+ * rendering of the plugin's files, its row in plugins/.install-metadata.json (default: the library's dist/hermes/<id>
+ * at `revision`, pinned) and its place in config.yaml's lists (`activation`, default enabled). `recorded: false` lays
+ * the folder down without a row, as a copy by hand would. Returns the plugin folder.
+ */
+export function hermesPlugin(
+  m: PretendMachine,
+  id: string,
+  p: PluginFiles & {
+    source?: string;
+    revision?: string;
+    pinned?: boolean;
+    activation?: HermesActivation;
+    recorded?: boolean;
+  } = {},
+): string {
+  const dir = path.join(m.hermesHome, "plugins", id);
+  const files =
+    p.files ??
+    fixtureRelease({
+      number: 0,
+      commit: "0".repeat(40),
+      plugins: { [id]: { version: p.version ?? null, skills: p.skills ?? [] } },
+    }).plugins[id].files;
+  for (const [rel, bytes] of renderHermes(files)) write(path.join(dir, ...rel.split("/")), bytes);
+  const metaFile = path.join(m.hermesHome, "plugins", ".install-metadata.json");
+  const meta: Record<string, unknown> = fs.existsSync(metaFile) ? JSON.parse(fs.readFileSync(metaFile, "utf8")) : {};
+  if (p.recorded === false) delete meta[id];
+  else
+    meta[id] = {
+      pinned: p.pinned ?? true,
+      revision: p.revision ?? "1717171717171717171717171717171717171717",
+      source: p.source ?? `https://github.com/oneezy/skills.git#${HERMES_PATH}/${id}`,
+    };
+  write(metaFile, JSON.stringify(meta, null, 2) + "\n");
+  const activation = p.activation ?? "enabled";
+  const configFile = hermesConfig(m);
+  const config = (fs.existsSync(configFile) ? YAML.parse(fs.readFileSync(configFile, "utf8")) : {}) ?? {};
+  config.plugins ??= {};
+  const enabled = new Set<string>(config.plugins.enabled ?? []);
+  const disabled = new Set<string>(config.plugins.disabled ?? []);
+  enabled.delete(id);
+  disabled.delete(id);
+  if (activation === "enabled") enabled.add(id);
+  if (activation === "disabled") disabled.add(id);
+  config.plugins.enabled = [...enabled].sort();
+  config.plugins.disabled = [...disabled].sort();
+  write(configFile, YAML.stringify(config));
+  return dir;
+}
+
+/**
+ * A skill folder inside a pretend clone of the library (a skills-sync.json naming oneezy/skills at its root), the kind
+ * of target a loose link this tool made points at. Returns the folder, for looseLink's `target`.
+ */
+export function libraryCopy(m: PretendMachine, name: string, group = "oneezy"): string {
+  const root = path.join(m.base, "library");
+  const config = path.join(root, "skills-sync.json");
+  if (!fs.existsSync(config))
+    write(config, JSON.stringify({ version: 1, library: { name: "skills", owner: "oneezy" } }, null, 2) + "\n");
+  const folder = path.join(root, "skills", group, name);
+  if (!fs.existsSync(folder)) write(path.join(folder, "SKILL.md"), skillMd(name));
+  return folder;
 }

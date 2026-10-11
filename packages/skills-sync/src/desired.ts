@@ -1,6 +1,7 @@
 // One form per harness (ADR-0007): the plugin form wherever the harness has a plugin route, the loose-skill form only
 // where it has none. Claude Code gets the account plugins claude.ai delivers, Codex the library's marketplace from
-// GitHub, Hermes loose skills until its plugin probe passes. Goose is dropped. desired() turns the release and the probe
+// GitHub, Hermes the library's plugins straight from GitHub (hermes plugins install owner/repo/path, oneezy/skills#68
+// said go). Goose is dropped. desired() turns the release and the probe
 // into the plan sync applies: per harness the managed block in its global instructions file (ADR-0011), a cleanup line
 // for every block an older skills-sync left in a repository, and, outside the cloud, whatever the harness's form module
 // in src/forms/ asks for. --plan and apply share this one code path; only apply() differs.
@@ -26,7 +27,7 @@ export function formOf(harnessId: string): MachineForm | null {
     case "codex":
       return "github-plugins";
     case "hermes":
-      return "loose";
+      return "github-plugins";
     default:
       return null;
   }
@@ -36,12 +37,16 @@ export function formOf(harnessId: string): MachineForm | null {
  * A harness's form module (src/forms/<harness>.ts): from the release (null when GitHub could not be read), the
  * harness's probed state and the machine, the actions that bring the harness to its form. Never called in the cloud,
  * where the block is the whole sync (ADR-0007: claude.ai delivers the account plugins; nothing else is installed).
+ * `plan`: --plan, so a form runs no harness command that changes anything and records what it would run instead;
+ * apply() does the same for the file actions it returns.
  */
-export type FormFn = (release: Release | null, state: HarnessState, machine: Machine) => Action[];
+export type FormFn = (release: Release | null, state: HarnessState, machine: Machine, plan: boolean) => Action[];
 
 export interface DesiredOptions {
   /** only these harness ids (--agents); every detected one when unset */
   agents?: string[];
+  /** --plan: the forms run nothing that changes a harness */
+  plan?: boolean;
 }
 
 /** The plan: what every harness on this machine should have, against what the probe found. Pure; nothing written. */
@@ -62,7 +67,7 @@ export function desired(
         path: old.file,
         note: `skills-sync block (${old.ids.join(", ")}) outside the global file; remove it by hand, the block lives only in ${state.harness.name}'s global file now`,
       });
-    if (!machine.cloud) for (const a of forms[id]?.(release, state, machine) ?? []) report.add(a);
+    if (!machine.cloud) for (const a of forms[id]?.(release, state, machine, options.plan ?? false) ?? []) report.add(a);
   }
   return report;
 }
