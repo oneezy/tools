@@ -712,13 +712,8 @@ test("a plugin of the same name from another marketplace is left alone and its s
   assert.deepEqual(Object.keys(installed(claudeHome)).sort(), ["matt-pocock@oneezy-skills", "oneezy@elsewhere"]);
 });
 
-test("without built plugins, and in a cloud session, sync is the links-only sync it always was and asks no harness anything", () => {
-  const cloud = cli([], { CLAUDE_CODE_REMOTE: "true" });
-  assert.equal(cloud.status, 0, cloud.stderr);
-  assert.deepEqual(cloud.calls, []);
-  for (const s of [...PLUGIN_SKILLS, "solo"]) assert.ok(linked(claudeSkills(), s), s);
-  assert.equal(JSON.parse(fs.readFileSync(path.join(root, "skills-sync.local.json"), "utf8")).form, undefined);
-
+// a cloud session no longer links anything: it writes the global block and stops (test/sync-machine.test.ts)
+test("without built plugins, sync is the links-only sync it always was and asks no harness anything", () => {
   fs.rmSync(path.join(root, ".claude-plugin"), { recursive: true });
   fs.rmSync(path.join(root, ".agents", "plugins"), { recursive: true });
   fs.rmSync(path.join(root, "plugins"), { recursive: true });

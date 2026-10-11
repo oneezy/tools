@@ -1,13 +1,17 @@
 // The probe: which harnesses this machine has and what each one holds right now, read on every run and never written
 // down (ADR-0012). Per harness: the account plugins claude.ai delivered (<id>@synced), the plugins installed through the
 // harness's own CLI (from the library's catalog, or from anywhere else), the loose links in its user skills folder and
-// where they point, and the real skill folders there. The plugin CLIs are asked through install.ts's runner, read-only
-// listings only; when a CLI is missing, the account plugins are read from their folders instead.
+// where they point, the real skill folders there, the state of the managed block in its global instructions file, and
+// the blocks an older skills-sync left in repository files. The plugin CLIs are asked through install.ts's runner,
+// read-only listings only; when a CLI is missing, the account plugins are read from their folders instead.
 import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
-import { isDir, isLink, isSkillDir, linkTarget } from "./fs.js";
+import { globalFile, readBlock, repoBlocks, type BlockState, type RepoBlock } from "./block.js";
+import { isDir, isLink, isSkillDir, linkTarget, samePath } from "./fs.js";
 import { detected, RESERVED, type Harness } from "./harnesses.js";
 import { codexPluginSkills, harnessCli, listInstalled, runner, supportsPlugins } from "./install.js";
+import { homeLibrary } from "./library.js";
 
 /** The library's catalog name: the marketplace a plugin this tool installed comes from, on Claude Code and Codex. */
 export const LIBRARY_MARKETPLACE = "oneezy-skills";
@@ -59,6 +63,10 @@ export interface HarnessState {
   installed: CliPlugin[];
   loose: LooseLink[];
   folders: SkillFolder[];
+  /** the managed block in the harness's global instructions file; null when its table row names no such file */
+  block: BlockState | null;
+  /** blocks an older skills-sync wrote into repository instruction files: reported, never edited (ADR-0011) */
+  repoBlocks: RepoBlock[];
 }
 
 export interface Machine {
@@ -67,12 +75,42 @@ export interface Machine {
   harnesses: HarnessState[];
 }
 
-export function probe(table: Harness[], env: NodeJS.ProcessEnv = process.env): Machine {
-  return { cloud: env.CLAUDE_CODE_REMOTE === "true", harnesses: detected(table).map((h) => probeHarness(h, env)) };
+/**
+ * `cwd` is where the run happens: a repository's instruction files there are looked at for old blocks, beside the
+ * projects the old local file (~/.skills-sync/skills-sync.local.json) remembers, which is where the old tool wrote them.
+ */
+export function probe(table: Harness[], env: NodeJS.ProcessEnv = process.env, cwd = process.cwd()): Machine {
+  const found = detected(table);
+  const roots = [...oldProjects(), path.resolve(cwd)].filter((r, i, all) => all.findIndex((x) => samePath(x, r)) === i);
+  const globals = found.map(globalFile).filter((f): f is string => !!f);
+  return {
+    cloud: env.CLAUDE_CODE_REMOTE === "true",
+    harnesses: found.map((h) => probeHarness(h, env, roots, globals)),
+  };
 }
 
-function probeHarness(h: Harness, env: NodeJS.ProcessEnv): HarnessState {
-  const state: HarnessState = { harness: h, cli: null, synced: [], installed: [], loose: [], folders: [] };
+/** The projects the old local file names (dev + projects), read leniently: an unreadable file is no project at all. */
+function oldProjects(home = os.homedir()): string[] {
+  const local = readJson(path.join(homeLibrary(home), "skills-sync.local.json"));
+  if (typeof local?.dev !== "string" || !Array.isArray(local.projects)) return [];
+  return (local.projects as unknown[])
+    .filter((n): n is string => typeof n === "string" && !!n)
+    .map((n) => path.resolve(local.dev as string, n))
+    .filter(isDir);
+}
+
+function probeHarness(h: Harness, env: NodeJS.ProcessEnv, roots: string[], globals: string[]): HarnessState {
+  const file = globalFile(h);
+  const state: HarnessState = {
+    harness: h,
+    cli: null,
+    synced: [],
+    installed: [],
+    loose: [],
+    folders: [],
+    block: file ? readBlock(file) : null,
+    repoBlocks: repoBlocks(roots, h.projectInstructions ?? [], globals),
+  };
   const cli = harnessCli(h, env);
   if (cli) {
     state.cli = cli.file;

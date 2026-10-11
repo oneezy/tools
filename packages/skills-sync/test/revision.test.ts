@@ -6,6 +6,10 @@ import { spawnSync } from "node:child_process";
 import { test } from "vite-plus/test";
 import { verifyLibraryRevision } from "../src/library.js";
 
+// a cloud session (CLAUDE_CODE_REMOTE=true, which the session running these tests may be) writes only the global block;
+// these tests run the library-based sync, so the flag never reaches the CLI children
+delete process.env.CLAUDE_CODE_REMOTE;
+
 for (const scenario of ["current", "wrong-head", "moved-remote", "dirty-source", "dirty-template"])
   test(`pinned rollout ${scenario} verifies local and remote source before any instruction write`, () => {
     const base = fs.mkdtempSync(path.join(os.tmpdir(), "skills-sync-revision-"));

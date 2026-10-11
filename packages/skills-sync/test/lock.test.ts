@@ -10,6 +10,10 @@ import os from "node:os";
 import path from "node:path";
 import { afterAll, beforeAll, beforeEach, test } from "vite-plus/test";
 
+// a cloud session (CLAUDE_CODE_REMOTE=true, which the session running these tests may be) writes only the global block;
+// these tests run the library-based sync, so the flag never reaches the CLI children
+delete process.env.CLAUDE_CODE_REMOTE;
+
 let base: string;
 let root: string;
 let homeDir: string;

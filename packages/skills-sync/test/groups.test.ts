@@ -11,6 +11,10 @@ import { EMPTY_LOCK, findLibrary, Library, looksLikeLibrary } from "../src/libra
 import { apply, Report } from "../src/plan.js";
 import { home, layers, status } from "../src/steps.js";
 
+// a cloud session (CLAUDE_CODE_REMOTE=true, which the session running these tests may be) writes only the global block;
+// these tests run the library-based sync, so the flag never reaches the CLI children
+delete process.env.CLAUDE_CODE_REMOTE;
+
 let base: string;
 let lib: Library;
 let homeDir: string;
