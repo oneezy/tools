@@ -10,10 +10,6 @@ import os from "node:os";
 import path from "node:path";
 import { afterAll, beforeAll, beforeEach, test } from "vite-plus/test";
 
-// a cloud session (CLAUDE_CODE_REMOTE=true, which the session running these tests may be) writes only the global block;
-// these tests run the library-based sync, so the flag never reaches the CLI children
-delete process.env.CLAUDE_CODE_REMOTE;
-
 let base: string;
 let root: string;
 let homeDir: string;
@@ -247,7 +243,7 @@ test("a source without tags takes the version of the nearest plugin or package m
   assert.equal(json(LOCK).sources.pstack.version, "0.15.10");
 });
 
-test("a version 1 skills-lock.json (what 0.4.0 wrote) is read in memory by a frozen sync, which writes no lock; check reports it as one problem; refresh migrates it once (pin and rename kept, version resolved), removes it and says so in one line; a second refresh reports nothing; an npx skills lock without commits is never touched", () => {
+test("a version 1 skills-lock.json (what 0.4.0 wrote) is read in memory by refresh --frozen, which writes no lock; check reports it as one problem; refresh migrates it once (pin and rename kept, version resolved), removes it and says so in one line; a second refresh reports nothing; an npx skills lock without commits is never touched", () => {
   const hashes = () => ({
     a: recipeHash(path.join(up.dir, "skills", "a")),
     b: recipeHash(path.join(up.dir, "skills", "b")),
@@ -277,23 +273,14 @@ test("a version 1 skills-lock.json (what 0.4.0 wrote) is read in memory by a fro
     ) + "\n";
   fs.writeFileSync(path.join(root, OLD_LOCK), v1);
 
-  const sync = cli(
-    "--quiet",
-    "--json",
-    "--no-pull",
-    "--no-projects",
-    "--no-wsl",
-    "--no-global",
-    "--agents",
-    "claude-code",
-  );
-  assert.equal(sync.status, 0, sync.stderr);
+  const frozen = cli("refresh", "--frozen", "--quiet", "--json");
+  assert.equal(frozen.status, 0, frozen.stderr);
   assert.ok(
     fs.readFileSync(path.join(root, ".agents", "skills", "a", "SKILL.md"), "utf8").includes("do the thing"),
     "a at its pin, read from the version 1 lock",
   );
   assert.ok(fs.readFileSync(path.join(root, ".agents", "skills", "up-b", "SKILL.md"), "utf8").includes("one"));
-  assert.ok(!fs.existsSync(path.join(root, LOCK)), "a frozen sync writes no lock");
+  assert.ok(!fs.existsSync(path.join(root, LOCK)), "a frozen refresh writes no lock");
   assert.equal(fs.readFileSync(path.join(root, OLD_LOCK), "utf8"), v1, "and leaves the old one as it is");
 
   const checked = cli("check");

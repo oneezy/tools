@@ -11,9 +11,9 @@
 # The guard (oneezy/skills ADR-0008): every machine runs `@oneezy/skills-sync@latest`, so a broken version on npm
 # would reach all of them at once. Before publishing, the new build runs against a fresh checkout of oneezy/skills
 # main, the library it serves: `refresh --frozen` installs the lock, `build --check` and `check` prove that the
-# committed plugins and generated files are what this version builds, and `sync --plan` on an empty pretend machine
-# proves that a first sync plans without error (a plan writes nothing). A failing step fails the job under its own
-# name, and nothing publishes.
+# committed plugins and generated files are what this version builds, and `sync --plan` on an empty pretend machine,
+# against the latest release on GitHub, proves that a first machine sync plans without error (a plan writes nothing).
+# A failing step fails the job under its own name, and nothing publishes.
 #
 # One-time setup on npmjs.com (works from a phone): @oneezy/skills-sync -> Settings -> Trusted Publisher ->
 # GitHub Actions, organization or user `oneezy`, repository `tools`, workflow filename `publish-skills-sync.yml`,
@@ -143,20 +143,22 @@ jobs:
         run: node dist/src/cli.js check --repo "$LIBRARY"
 
       # An empty pretend machine: a home under the runner's temp folder with bare .claude and .codex folders and no
-      # claude or codex CLI on PATH, like a fresh PC. --plan prints what a first sync would do and writes nothing; the
-      # flags keep the run inside that home (no projects, no WSL distros, no library pull, no ~/.skills-sync link, no
-      # instruction blocks). HOME is for the tool, USERPROFILE for Node on Windows, the two config folders for the
-      # harness table. The CLI runs on the real node binary, as the tests do (process.execPath): a version manager's
-      # node shim would look for its runtime under the pretend home. A conflict in the plan exits 1, as for a user.
+      # claude or codex CLI on PATH, like a fresh PC. The machine sync reads the latest release of oneezy/skills on
+      # GitHub (the token keeps it off the anonymous rate limit) and --plan prints what a first sync would do, writing
+      # nothing; the sync needs no library and keeps nothing on the machine. HOME is for the tool, USERPROFILE for Node
+      # on Windows, the two config folders for the harness table. The CLI runs on the real node binary, as the tests do
+      # (process.execPath): a version manager's node shim would look for its runtime under the pretend home. A conflict
+      # in the plan (GitHub unreachable, a bad release) exits 1, as for a user.
       - name: Guard, sync --plan on an empty machine
         if: steps.version.outputs.guard == 'true'
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
         run: |
           machine="$RUNNER_TEMP/skills-sync-machine"
           mkdir -p "$machine/.claude" "$machine/.codex"
           node_bin="$(node -p 'process.execPath')"
           HOME="$machine" USERPROFILE="$machine" CLAUDE_CONFIG_DIR="$machine/.claude" CODEX_HOME="$machine/.codex" \
-            "$node_bin" dist/src/cli.js sync --plan --repo "$LIBRARY" --agents claude-code,codex \
-              --no-projects --no-pull --no-wsl --no-remember --no-entrypoints -y --json
+            "$node_bin" dist/src/cli.js sync --plan --json
 
       - name: Publish (prepublishOnly builds and runs the tests)
         if: steps.version.outputs.publish == 'true'

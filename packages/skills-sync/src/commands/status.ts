@@ -1,17 +1,20 @@
 // status: this machine against the latest release of the library, per harness. Lines a user reads, and a --json object
 // /oneezy-status reads with the same facts. Red lines: a plugin behind the release (version or skill set), a plugin
 // this tool installed where the form is account plugins, nothing installed at all, a skill name listed twice. Exit 1
-// when any line is red. Nothing is written, no library is looked for. Later tickets add the hook, the global block and
-// the checkouts to the same report.
-import { FORM_LABEL, formOf, type MachineForm } from "../desired.js";
+// when any line is red. Nothing is written, no library is looked for; what an older version left on the machine (the
+// clone at ~/.skills-sync, its answers file) is one note each. The release's skills-sync.json names the catalog the
+// library's plugins come from and which harnesses are served (ADR-0012). Later tickets add the hook, the global block
+// and the checkouts to the same report.
+import { catalogOf, FORM_LABEL, formOf, serves, type MachineForm } from "../desired.js";
 import { github } from "../github.js";
 import { harnessTable } from "../harnesses.js";
 import {
-  LIBRARY_MARKETPLACE,
+  oldStateNotes,
   probe,
   type HarnessState,
   type LooseLink,
   type Machine,
+  type OldLibrary,
   type SkillFolder,
 } from "../machine.js";
 import { latestRelease, type Release, type ReleasePlugin } from "../release.js";
@@ -68,8 +71,12 @@ export interface StatusReport {
   /** why the release could not be read, when it could not */
   error?: string;
   cloud: boolean;
+  /** ~/.skills-sync when an older version left it: the old clone or the link to it; nothing reads it */
+  oldLibrary: OldLibrary | null;
+  /** the old tool's answers file beside that clone, when it is there; nothing reads it */
+  oldLocalFile: string | null;
   harnesses: Record<string, StatusHarness>;
-  /** lines about the machine as a whole: the release line */
+  /** lines about the machine as a whole: the release line, the leftovers, a harness the release does not serve */
   lines: StatusLine[];
   ok: boolean;
 }
@@ -115,10 +122,20 @@ export function statusReport(
       ? green(`latest: ${release.repo} ${release.tag} (${release.commit.slice(0, 7)})`)
       : red(`latest release of ${repo}: ${error ?? "not read"}`),
   ];
+  for (const old of oldStateNotes(machine)) lines.push(note(old.text));
   const harnesses: Record<string, StatusHarness> = {};
   for (const state of machine.harnesses) {
     const form = formOf(state.harness.id);
-    if (form) harnesses[state.harness.id] = harnessReport(state, form, release);
+    if (!form) continue;
+    if (!serves(release, state.harness.id)) {
+      lines.push(
+        note(
+          `${state.harness.name}: not served; the release's skills-sync.json names harnesses ${release!.config!.harnesses!.join(", ")}`,
+        ),
+      );
+      continue;
+    }
+    harnesses[state.harness.id] = harnessReport(state, form, release);
   }
   const all = [...lines, ...Object.values(harnesses).flatMap((h) => h.lines)];
   return {
@@ -127,6 +144,8 @@ export function statusReport(
       : null,
     ...(error ? { error } : {}),
     cloud: machine.cloud,
+    oldLibrary: machine.oldLibrary,
+    oldLocalFile: machine.oldLocalFile,
     harnesses,
     lines,
     ok: all.every((l) => l.ok),
@@ -207,7 +226,7 @@ function harnessReport(state: HarnessState, form: MachineForm, release: Release 
   }
   for (const p of byId(state.installed)) {
     if (p.enabled) for (const s of p.skills ?? []) place(s, `${p.id}@${p.marketplace}`);
-    if (p.marketplace !== LIBRARY_MARKETPLACE) {
+    if (p.marketplace !== catalogOf(release)) {
       other.push({ id: p.id, marketplace: p.marketplace, scope: "installed", version: p.version, skills: p.skills });
       continue;
     }

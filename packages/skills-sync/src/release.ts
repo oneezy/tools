@@ -1,8 +1,10 @@
 // The latest release of the skills library, read from GitHub: what every machine should have. The release's
 // release.json asset (schema 3, written by .github/scripts/release.mjs in oneezy/skills) names each plugin with its
-// version and the sha256 of every file it carries; the skills are the files matching skills/<name>/SKILL.md. Read once
-// per run, passed down, never written to disk: there is no library on a machine.
-import type { GitHub } from "./github.js";
+// version and the sha256 of every file it carries; the skills are the files matching skills/<name>/SKILL.md. The
+// library's committed skills-sync.json at the release's commit is read beside it (ADR-0012): the settings a machine
+// takes from the release, which harnesses to serve and which plugins each gets, and the catalog name the library's
+// build gives its marketplaces. Read once per run, passed down, never written to disk: there is no library on a machine.
+import { GitHubError, type GitHub } from "./github.js";
 
 export const DEFAULT_REPO = "oneezy/skills";
 
@@ -16,6 +18,16 @@ export interface ReleasePlugin {
   files: Record<string, string>;
 }
 
+/** What a machine takes from the library's skills-sync.json at the release's commit. */
+export interface ReleaseConfig {
+  /** the catalog name the library's build gives its two marketplaces, <owner>-<name>; null when the config names no library */
+  catalog: string | null;
+  /** machines.harnesses: the harness ids the machine commands serve; null for every detected one */
+  harnesses: string[] | null;
+  /** machines.plugins: per harness id, or "*" for the rest, the plugin ids a machine installs; a harness named nowhere gets every one */
+  plugins: Record<string, string[]>;
+}
+
 export interface Release {
   repo: string;
   /** release-17 */
@@ -26,6 +38,8 @@ export interface Release {
   /** the @oneezy/skills-sync version the release was built with (release-18 on); null before, or when unversioned */
   tool: string | null;
   plugins: Record<string, ReleasePlugin>;
+  /** the library's skills-sync.json at `commit`; null when the commit has none (or the commit is unknown) */
+  config: ReleaseConfig | null;
 }
 
 interface GitHubRelease {
@@ -59,7 +73,14 @@ export async function latestRelease(gh: GitHub, repo = DEFAULT_REPO): Promise<Re
   if (!asset || typeof asset.id !== "number")
     throw new Error(`${repo} ${tag || "latest release"}: no release.json asset`);
   const bytes = await gh.download(`/repos/${repo}/releases/assets/${asset.id}`);
-  return parseRelease(repo, tag, typeof latest.target_commitish === "string" ? latest.target_commitish : "", bytes);
+  const release = parseRelease(
+    repo,
+    tag,
+    typeof latest.target_commitish === "string" ? latest.target_commitish : "",
+    bytes,
+  );
+  release.config = await releaseConfig(gh, repo, release.commit);
+  return release;
 }
 
 /** release.json as the library's release script writes it, into the plugins a machine is compared with. */
@@ -95,5 +116,51 @@ export function parseRelease(repo: string, tag: string, fallbackCommit: string, 
     };
   }
   const tool = typeof json.tool?.version === "string" && json.tool.version ? json.tool.version : null;
-  return { repo, tag: release, number, commit, tool, plugins };
+  return { repo, tag: release, number, commit, tool, plugins, config: null };
+}
+
+/**
+ * The library's skills-sync.json at `commit`, through the contents API (base64 in a JSON envelope); null when the
+ * commit has no such file, or no commit is known. Any other failure is the release's: it propagates.
+ */
+export async function releaseConfig(gh: GitHub, repo: string, commit: string): Promise<ReleaseConfig | null> {
+  if (!commit) return null;
+  let file: { content?: unknown; encoding?: unknown };
+  try {
+    file = await gh.getJson(`/repos/${repo}/contents/skills-sync.json?ref=${encodeURIComponent(commit)}`);
+  } catch (error) {
+    if (error instanceof GitHubError && error.status === 404) return null;
+    throw error;
+  }
+  if (typeof file?.content !== "string") return null;
+  return parseConfig(Buffer.from(file.content, file.encoding === "base64" ? "base64" : "utf8").toString("utf8"));
+}
+
+/**
+ * The machine settings in a skills-sync.json, read leniently: a key that is not the shape expected counts as absent,
+ * so an older or newer library config never stops a sync. Null when the text is not a JSON object at all.
+ */
+export function parseConfig(text: string): ReleaseConfig | null {
+  let json: unknown;
+  try {
+    json = JSON.parse(text);
+  } catch {
+    return null;
+  }
+  if (!json || typeof json !== "object" || Array.isArray(json)) return null;
+  const c = json as {
+    library?: { owner?: unknown; name?: unknown };
+    machines?: { harnesses?: unknown; plugins?: unknown };
+  };
+  const owner = typeof c.library?.owner === "string" ? c.library.owner : "";
+  const name = typeof c.library?.name === "string" ? c.library.name : "";
+  const ids = (v: unknown): string[] | null =>
+    Array.isArray(v) ? v.filter((x): x is string => typeof x === "string" && !!x) : null;
+  const plugins: Record<string, string[]> = {};
+  if (c.machines?.plugins && typeof c.machines.plugins === "object" && !Array.isArray(c.machines.plugins))
+    for (const [harness, list] of Object.entries(c.machines.plugins as Record<string, unknown>)) {
+      const l = ids(list);
+      if (l) plugins[harness] = l;
+    }
+  return { catalog: owner && name ? `${owner}-${name}` : null, harnesses: ids(c.machines?.harnesses), plugins };
 }

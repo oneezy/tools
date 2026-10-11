@@ -204,3 +204,57 @@ export function repoBlocks(roots: string[], names: string[], except: string[] = 
   }
   return out;
 }
+
+/**
+ * `text` without its managed blocks: every well-formed block, whatever its id, and the line ending that closed its end
+ * marker; everything else byte for byte. Throws when the markers are broken (a human's to sort out). unlink's half.
+ */
+export function withoutBlock(text: string): string {
+  const blocks = findBlocks(text);
+  if (!blocks) throw new Error("duplicate or incomplete managed block; left alone");
+  let out = "";
+  let at = 0;
+  for (const b of blocks) {
+    out += text.slice(at, b.start);
+    at = b.end;
+    if (text.startsWith("\r\n", at)) at += 2;
+    else if (text.startsWith("\n", at)) at += 1;
+  }
+  return out + text.slice(at);
+}
+
+/**
+ * The action that takes the managed block out of `file`: a write of the text around it (checked against the file's
+ * hash at apply time), a delete when the file held nothing else, a conflict when it cannot be read or its markers are
+ * broken; null when there is no file or no block, so a second unlink has nothing to do.
+ */
+export function blockRemoval(file: string): Action | null {
+  const conflict = (note: string): Action => ({ kind: "conflict", path: file, note });
+  if (!lexists(file)) return null;
+  if (hasLinkedParent(file)) return conflict("linked instruction file or parent; left alone");
+  let bytes: Buffer;
+  try {
+    if (!fs.statSync(file).isFile()) return conflict("not a file; left alone");
+    bytes = fs.readFileSync(file);
+  } catch (error) {
+    return conflict(`unreadable (${error instanceof Error ? error.message : String(error)}); left alone`);
+  }
+  const text = bytes.toString("utf8");
+  if (!Buffer.from(text).equals(bytes) || text.includes("\0")) return conflict("not UTF-8 text; left alone");
+  const ids = blockIds(text);
+  if (!ids.length) return null;
+  let next: string;
+  try {
+    next = withoutBlock(text);
+  } catch (error) {
+    return conflict(error instanceof Error ? error.message : String(error));
+  }
+  if (next === "") return { kind: "delete", path: file, note: `held only the skills-sync block (${ids.join(", ")})` };
+  return {
+    kind: "write",
+    path: file,
+    payload: next,
+    expectedHash: toHash(bytes),
+    note: `skills-sync block (${ids.join(", ")}) removed`,
+  };
+}

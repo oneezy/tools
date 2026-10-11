@@ -1,5 +1,4 @@
 import assert from "node:assert/strict";
-import { spawnSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -10,10 +9,6 @@ import { makeLink } from "../src/fs.js";
 import { Library } from "../src/library.js";
 import { apply, Report } from "../src/plan.js";
 import { check } from "../src/check.js";
-
-// a cloud session (CLAUDE_CODE_REMOTE=true, which the session running these tests may be) writes only the global block;
-// these tests run the library-based sync, so the flag never reaches the CLI children
-delete process.env.CLAUDE_CODE_REMOTE;
 
 let base: string;
 let lib: Library;
@@ -197,55 +192,6 @@ test("unselected projects and generated folders stay untouched; status planning 
   assert.equal(report.changes().length, 0);
 });
 
-test("CLI plan and apply use the same workflow, a plan after apply verifies, and an instruction conflict exits nonzero", () => {
-  const cli = path.resolve(import.meta.dirname, "..", "dist", "src", "cli.js");
-  const args = [
-    "--repo",
-    lib.root,
-    "--agents",
-    "codex,claude-code",
-    "--no-global",
-    "--no-remember",
-    "--no-pull",
-    "--no-restore",
-    "--no-wsl",
-    "--dev",
-    path.dirname(project),
-    "--projects",
-    "app",
-    "--json",
-    "-y",
-  ];
-  const run = (...extra: string[]) => spawnSync(process.execPath, [cli, ...extra, ...args], { encoding: "utf8" });
-  const preview = run("--plan");
-  assert.equal(preview.status, 0, preview.stderr);
-  assert.equal(fs.existsSync(path.join(project, "AGENTS.md")), false);
-  const applied = run();
-  assert.equal(applied.status, 0, applied.stderr);
-  assert.ok(JSON.parse(applied.stdout).entrypoints.every((item: { state: string }) => item.state === "current"));
-  const repeated = run();
-  assert.equal(repeated.status, 0, repeated.stderr);
-  assert.equal(
-    JSON.parse(repeated.stdout).actions.filter(
-      (action: { note?: string; kind: string }) => action.kind === "write" && action.note?.includes("instructions"),
-    ).length,
-    0,
-  );
-  // a plan after the apply verifies every destination without writing: all current, nothing planned
-  const verified = run("--plan");
-  assert.equal(verified.status, 0, verified.stderr);
-  assert.ok(JSON.parse(verified.stdout).entrypoints.every((item: { state: string }) => item.state === "current"));
-  const selected = spawnSync(process.execPath, [cli, "--plan", ...args, "--no-projects"], {
-    encoding: "utf8",
-  });
-  assert.equal(selected.status, 0, selected.stderr);
-  assert.deepEqual(JSON.parse(selected.stdout).entrypoints, []);
-  write(path.join(project, "AGENTS.md"), start);
-  const conflict = run();
-  assert.equal(conflict.status, 1);
-  assert.equal(read(path.join(project, "AGENTS.md")), start);
-});
-
 test("an apply I/O failure leaves dependent actions blocked while an independent instruction destination completes", () => {
   const bad = path.join(base, "failed", "AGENTS.md");
   const good = path.join(base, "healthy", "CLAUDE.md");
@@ -279,62 +225,6 @@ test("readback cannot claim a current route when installed Brain instructions ar
     statuses.some((item) => item.state === "conflict" && item.reason?.includes("installed instructions differ")),
   );
 });
-
-for (const variant of ["stale", "identical-unowned"])
-  test(`CLI refuses ${variant} Brain before writing affected instructions; independent Claude completes`, () => {
-    const cli = path.resolve(import.meta.dirname, "..", "dist", "src", "cli.js");
-    const own = path.join(lib.own, "oneezy", "oneezy-brain");
-    const external = path.join(base, "unowned-brain");
-    fs.cpSync(own, external, { recursive: true });
-    if (variant === "stale") write(path.join(external, "SKILL.md"), "stale GitHub Brain");
-    makeLink(external, path.join(userDir, ".agents", "skills", "oneezy-brain"));
-    makeLink(own, path.join(userDir, ".claude", "skills", "oneezy-brain"));
-    const affected = path.join(userDir, ".codex", "AGENTS.md");
-    const healthy = path.join(userDir, ".claude", "CLAUDE.md");
-    write(affected, "# Preserve me\r\n@pinned.md\r\n");
-    write(healthy, "# Claude rules\n");
-    const before = fs.readFileSync(affected);
-    const args = [
-      "--repo",
-      lib.root,
-      "--agents",
-      "codex,claude-code",
-      "--global",
-      "--no-projects",
-      "--no-wsl",
-      "--no-pull",
-      "--no-remember",
-      "--no-restore",
-      "--no-layers",
-      "--json",
-      "-y",
-    ];
-    const env = {
-      ...process.env,
-      HOME: userDir,
-      USERPROFILE: userDir,
-      CODEX_HOME: path.join(userDir, ".codex"),
-      CLAUDE_CONFIG_DIR: path.join(userDir, ".claude"),
-    };
-    for (const extra of [["--plan"], []]) {
-      const result = spawnSync(process.execPath, [cli, ...extra, ...args], { encoding: "utf8", env });
-      assert.equal(result.status, 1, result.stderr);
-      const report = JSON.parse(result.stdout);
-      assert.ok(
-        report.actions.some(
-          (action: { kind: string; path: string }) =>
-            action.kind === "conflict" && action.path.includes("oneezy-brain"),
-        ),
-      );
-      assert.ok(
-        !report.actions.some(
-          (action: { kind: string; path: string }) => action.kind === "write" && action.path === affected,
-        ),
-      );
-      assert.deepEqual(fs.readFileSync(affected), before);
-    }
-    assert.ok(read(healthy).includes(start));
-  });
 
 test("required-reference edits after planning block instruction writes", () => {
   const hosts = harnessTable(userDir, {}).filter((host) => ["codex", "claude-code"].includes(host.id));

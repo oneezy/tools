@@ -70,7 +70,7 @@ A Group or a Source's skills packaged for a Harness's plugin system, with its ow
 _Avoid_: package, bundle
 
 **Form**:
-How a Harness on a Host gets the Library's skills, one per Harness (ADR-0007): `account plugins` (Claude Code: the Plugins enabled on the claude.ai account, delivered as `<id>@synced`), `plugins from GitHub` (Codex: the Library's marketplace added from GitHub) or `loose skills` (Hermes: one link per skill in its User folder). Never two on one Harness, so no skill name is listed twice. `sync` still moves between the older `plugin` and `links` pair until the account-plugin and Codex tickets land.
+How a Harness on a Host gets the Library's skills, one per Harness (ADR-0007): `account plugins` (Claude Code: the Plugins enabled on the claude.ai account, delivered as `<id>@synced`), `plugins from GitHub` (Codex: the Library's marketplace added from GitHub) or `loose skills` (Hermes: one link per skill in its User folder). Never two on one Harness, so no skill name is listed twice. The older `plugin` and `links` pair is gone with the library-based run.
 _Avoid_: mode (that is a project's link or copy), install mode
 
 **Account plugin**:
@@ -78,7 +78,7 @@ A Plugin claude.ai syncs into Claude Code for the account, listed by `claude plu
 _Avoid_: synced plugin (the harness's word), cloud plugin
 
 **Machine command**:
-A run that acts on this Host against the latest Release on GitHub and needs no Library on disk: `status` and `sync` today, then `hook`, `branches` and `unlink` as they move over. The opposite is a library command (`update`, `versions`, `add`, `build`, `check`), which runs inside a checkout; `sync --repo <path>` is still one until the old run is retired.
+A run that acts on this Host against the latest Release on GitHub and keeps nothing of its own on the Host (ADR-0012): no Library clone, no answers file, nothing remembered between runs; settings come from the Release's `skills-sync.json`, Host facts (the Harnesses, their plugins and links, the WSL distros) are detected on every run. `sync`, `status`, `branches` and `unlink`, then `hook`. It takes `--plan`, `--json`, `--quiet` and `--library`; an older flag is accepted, does nothing and is named once on stderr. The opposite is a library command (`update`, `refresh`, `versions`, `add`, `build`, `check`, the brain and alias migrations), which runs inside a checkout named by `--repo` or found above the current folder and keeps every flag it had.
 _Avoid_: remote command, online command
 
 **Global block**:

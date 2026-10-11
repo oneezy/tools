@@ -509,7 +509,12 @@ test("--library names another release repo; a token from the environment is sent
     );
     assert.deepEqual(
       r.requests.map((q) => q.path),
-      ["/repos/someone/library/releases/latest", "/repos/someone/library/releases/assets/3001", "/_download/3001"],
+      [
+        "/repos/someone/library/releases/latest",
+        "/repos/someone/library/releases/assets/3001",
+        "/_download/3001",
+        "/repos/someone/library/contents/skills-sync.json?ref=0303030303030303030303030303030303030303",
+      ],
     );
     const viaGh = await cli(m, ["status", "--json", "--library", "someone/library"], { GH_TOKEN: "fixture-token" });
     assert.equal(viaGh.status, 0, viaGh.stdout);

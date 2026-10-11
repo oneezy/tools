@@ -9,10 +9,6 @@ import os from "node:os";
 import path from "node:path";
 import { afterAll, beforeAll, beforeEach, test } from "vite-plus/test";
 
-// a cloud session (CLAUDE_CODE_REMOTE=true, which the session running these tests may be) writes only the global block;
-// these tests run the library-based sync, so the flag never reaches the CLI children
-delete process.env.CLAUDE_CODE_REMOTE;
-
 let base: string;
 let root: string;
 let homeDir: string;
@@ -162,7 +158,7 @@ test("update <source> moves only that source to the tip of its ref; every other 
   assert.equal(text("skills-sync.json"), cfg);
 });
 
-test("a version held in skills-sync.json (the schema admits it) is where update takes that source: the release tag's commit, not the tip, while an unheld source moves to latest; a plain sync after an upstream commit installs exactly what the lock says", () => {
+test("a version held in skills-sync.json (the schema admits it) is where update takes that source: the release tag's commit, not the tip, while an unheld source moves to latest; a frozen refresh after an upstream commit installs exactly what the lock says", () => {
   const at = releases(up);
   const other = new Upstream(path.join(base, "other"));
   other.skill("a", "other one");
@@ -186,8 +182,8 @@ test("a version held in skills-sync.json (the schema admits it) is where update 
   up.skill("a", "past everything");
   up.commit("later");
   const lock = text(LOCK);
-  const sync = cli("--quiet", "--no-pull", "--no-projects", "--no-wsl", "--no-global", "--agents", "claude-code");
-  assert.equal(sync.status, 0, sync.stderr);
+  const frozen = cli("refresh", "--frozen", "--quiet");
+  assert.equal(frozen.status, 0, frozen.stderr);
   assert.ok(working("a").includes("release 1.1.0"), "frozen at the lock");
   assert.equal(text(LOCK), lock);
 });

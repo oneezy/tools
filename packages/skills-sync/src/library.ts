@@ -1,16 +1,17 @@
-// The skills library: a folder with skills/ (own skills, flat or grouped by plugin) beside the committed config
+// The skills library: a checkout with skills/ (own skills, flat or grouped by plugin) beside the committed config
 // skills-sync.json (third-party sources, plugins; its lock is skills-sync.lock.json) or the npx skills lock
-// skills-lock.json alone (what is installed, in the npx skills format).
+// skills-lock.json alone. Only the library commands (update, refresh, versions, add, build, check and the brain and alias
+// migrations) run in one, named by --repo or found above the current folder; a machine command never looks for a library
+// and never clones one (ADR-0007). ~/.skills-sync, where older versions kept their clone, is only ever detected now.
 import { spawnSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import YAML from "yaml";
 import { CONFIG_NAME, configKind, LOCAL_NAME } from "./config.js";
 import { isDir, isSkillDir, real } from "./fs.js";
 import { RESERVED } from "./harnesses.js";
-import { LOCK_NAME, lockedNames, npxLockEntries, NPX_LOCK_NAME, readLock, type Lock } from "./lock.js";
-import { cmp, readConfig, type LockEntry } from "./sources.js";
+import { LOCK_NAME, NPX_LOCK_NAME, readLock, type Lock } from "./lock.js";
+import { readConfig } from "./sources.js";
 
 export class Library {
   constructor(public root: string) {}
@@ -33,7 +34,7 @@ export class Library {
   get configFile(): string {
     return path.join(this.root, CONFIG_NAME);
   }
-  /** This machine's answers, gitignored. */
+  /** The checkout's gitignored local file: the skills an update found gone upstream. */
   get localFile(): string {
     return path.join(this.root, LOCAL_NAME);
   }
@@ -121,12 +122,6 @@ export class Library {
     return out;
   }
 
-  /** Working-set names the lock records: a config library's lock (a version 1 lock read in memory), else the npx skills lock. */
-  lockedSkills(): string[] {
-    if (!this.hasConfig()) return Object.keys(this.npxLockEntries()).sort(cmp);
-    return lockedNames(this.lock());
-  }
-
   /** A config library's lock, a version 1 lock read in memory when there is no other; null without one, or when the config is invalid. */
   lock(): Lock | null {
     try {
@@ -134,67 +129,6 @@ export class Library {
     } catch {
       return null;
     }
-  }
-
-  /** Lock entries with no folder in .agents/skills yet. */
-  missingFromLock(): string[] {
-    return this.lockedSkills().filter((n) => !isSkillDir(path.join(this.agents, n)));
-  }
-
-  /** The npx skills lock's entries, which restore reads in a library without a config. */
-  npxLockEntries(): Record<string, LockEntry> {
-    return npxLockEntries(this.root);
-  }
-
-  /**
-   * Restore missing lock entries into .agents/skills: one shallow clone per source, then each skill
-   * copied from its recorded path, or found by folder name when upstream moved it. Entries whose
-   * source no longer has the skill are reported, never invented. (`npx skills experimental_install`
-   * clones once per skill and stops at the first stale path, which is why this exists.)
-   */
-  restore(log: (s: string) => void, only?: string[]): RestoreResult {
-    const result: RestoreResult = { restored: [], moved: [], missing: [], failed: [] };
-    const wanted = new Set(only ?? this.missingFromLock());
-    const bySource = new Map<string, Array<[string, LockEntry]>>();
-    for (const [name, e] of Object.entries(this.npxLockEntries())) {
-      if (!wanted.has(name)) continue;
-      const url = cloneUrl(e);
-      if (!url) {
-        result.failed.push(`${name}: source type ${e.sourceType} is not restorable`);
-        continue;
-      }
-      const key = `${url}#${e.ref ?? ""}`;
-      bySource.set(key, [...(bySource.get(key) ?? []), [name, e]]);
-    }
-    for (const [key, entries] of bySource) {
-      const [url, ref] = key.split("#");
-      const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "skills-sync-src-"));
-      log(`cloning ${url}${ref ? "@" + ref : ""} for ${entries.length} skill(s)`);
-      const args = ["clone", "--quiet", "--depth", "1", ...(ref ? ["--branch", ref] : []), url, tmp];
-      const r = spawnSync("git", args, { encoding: "utf8" });
-      if (r.status !== 0) {
-        result.failed.push(`${url}: ${(r.stderr ?? "").trim().split("\n").pop()}`);
-        fs.rmSync(tmp, { recursive: true, force: true });
-        continue;
-      }
-      for (const [name, e] of entries) {
-        const recorded = e.skillPath ? path.join(tmp, path.dirname(e.skillPath)) : null;
-        let src = recorded && isSkillDir(recorded) ? recorded : null;
-        if (!src) {
-          src = findSkillByName(tmp, name);
-          if (src) result.moved.push(`${name}: now at ${path.relative(tmp, src).replace(/\\/g, "/")}`);
-        }
-        if (!src) {
-          result.missing.push(`${name}: not in ${url} any more (was ${e.skillPath ?? "?"})`);
-          continue;
-        }
-        fs.mkdirSync(this.agents, { recursive: true });
-        fs.cpSync(src, path.join(this.agents, name), { recursive: true });
-        result.restored.push(name);
-      }
-      fs.rmSync(tmp, { recursive: true, force: true });
-    }
-    return result;
   }
 }
 
@@ -223,49 +157,17 @@ function folders(dir: string): string[] {
 
 export type { LockEntry } from "./sources.js";
 
-export interface RestoreResult {
-  restored: string[];
-  moved: string[];
-  missing: string[];
-  failed: string[];
-}
-
-function cloneUrl(e: LockEntry): string | null {
-  if (e.sourceType === "github")
-    return `https://github.com/${e.source.replace(/^https?:\/\/github\.com\//, "").replace(/\.git$/, "")}.git`;
-  if (e.sourceType === "git" || e.sourceType === "gitlab") return e.sourceUrl ?? null;
-  return null;
-}
-
-function findSkillByName(root: string, name: string): string | null {
-  const stack = [root];
-  while (stack.length) {
-    const dir = stack.pop()!;
-    for (const ent of fs.readdirSync(dir, { withFileTypes: true })) {
-      if (!ent.isDirectory() || ent.name === ".git" || ent.name === "node_modules") continue;
-      const full = path.join(dir, ent.name);
-      if (ent.name === name && isSkillDir(full)) return full;
-      stack.push(full);
-    }
-  }
-  return null;
-}
-
-export const DEFAULT_LIBRARY = "oneezy/skills";
-
-/** ~/.skills-sync: the library itself, or a link to wherever the library really lives. */
+/** ~/.skills-sync: where older versions kept the library clone, or a link to it. Detected by the probe; never read or made. */
 export function homeLibrary(home = os.homedir()): string {
   return path.join(home, ".skills-sync");
 }
 
 /**
- * Where the library is, in this order: --repo, $SKILLS_REPO, ~/.skills-sync (a clone or a link),
- * a library folder above the current directory. null when none exists yet.
+ * Where the library is, for a library command run without --repo: $SKILLS_REPO, else a library folder above the
+ * current directory. null when there is none. ~/.skills-sync is not looked at: nothing keeps a clone there any more.
  */
-export function findLibrary(from: string, env = process.env, home = os.homedir()): string | null {
+export function findLibrary(from: string, env = process.env): string | null {
   if (env.SKILLS_REPO && looksLikeLibrary(env.SKILLS_REPO)) return path.resolve(env.SKILLS_REPO);
-  const hl = homeLibrary(home);
-  if (looksLikeLibrary(hl)) return real(hl);
   let dir = path.resolve(from);
   for (;;) {
     // the walk-up never accepts a dot-folder: ~/.claude has a skills/ subfolder too
@@ -275,20 +177,6 @@ export function findLibrary(from: string, env = process.env, home = os.homedir()
     dir = parent;
   }
   return null;
-}
-
-/** Clone `owner/repo` (or a URL) into ~/.skills-sync. */
-export function cloneLibrary(
-  source: string,
-  home = os.homedir(),
-  log: (s: string) => void = () => undefined,
-): { ok: boolean; root: string; error?: string } {
-  const root = homeLibrary(home);
-  const url = /^(https?:|git@|ssh:)/.test(source) ? source : `https://github.com/${source.replace(/\.git$/, "")}.git`;
-  log(`no skills library here yet; cloning ${url} into ${root}`);
-  const r = spawnSync("git", ["clone", "--quiet", url, root], { encoding: "utf8" });
-  if (r.status !== 0) return { ok: false, root, error: (r.stderr ?? "").trim().split("\n").pop() };
-  return { ok: true, root };
 }
 
 /** Verify a clean instruction source at the exact, currently advertised remote revision. */
@@ -319,48 +207,6 @@ export function verifyLibraryRevision(root: string, expected?: string, ref = "re
   return null;
 }
 
-/**
- * Fast-forward only a clean library at most once per `minutes`.
- * Generated locks are user work too: sync preserves their exact dirty bytes.
- */
-export function pullLibrary(
-  root: string,
-  minutes: number,
-  log: (s: string) => void,
-  _regenerated: string[] = [],
-): "pulled" | "skipped" | "dirty" | "failed" | "throttled" {
-  const stamp = path.join(root, ".git", "skills-sync-pulled");
-  try {
-    const last = fs.statSync(stamp).mtimeMs;
-    if (Date.now() - last < minutes * 60_000) return "throttled";
-  } catch {
-    /* never pulled */
-  }
-  if (!fs.existsSync(path.join(root, ".git"))) return "skipped";
-  const status = spawnSync("git", ["-C", root, "status", "--porcelain", "--untracked-files=no"], { encoding: "utf8" });
-  if (status.status !== 0) return "skipped";
-  // porcelain v1: two status letters, a space, the path (relative to the repository root, which the library is)
-  const changed = status.stdout
-    .split("\n")
-    .filter(Boolean)
-    .map((l) => l.slice(3).trim());
-  if (changed.length) return "dirty";
-  const r = spawnSync("git", ["-c", "core.autocrlf=false", "-C", root, "pull", "--ff-only", "--quiet"], {
-    encoding: "utf8",
-    timeout: 20_000,
-  });
-  try {
-    fs.writeFileSync(stamp, new Date().toISOString());
-  } catch {
-    /* stamp is best-effort */
-  }
-  if (r.status !== 0) {
-    log(`library pull skipped: ${(r.stderr ?? "").trim().split("\n").pop()}`);
-    return "failed";
-  }
-  return "pulled";
-}
-
 /** The files that mark a library, any one beside skills/: the committed config, the npx skills lock, or the lock. */
 export const LIBRARY_MARKERS = [CONFIG_NAME, NPX_LOCK_NAME, LOCK_NAME];
 
@@ -371,31 +217,4 @@ export const LIBRARY_MARKERS = [CONFIG_NAME, NPX_LOCK_NAME, LOCK_NAME];
 export function looksLikeLibrary(dir: string): boolean {
   const abs = path.resolve(dir);
   return isDir(path.join(abs, "skills")) && LIBRARY_MARKERS.some((m) => fs.existsSync(path.join(abs, m)));
-}
-
-/** An empty npx skills lock, for a library without a config that has no third-party skills yet. */
-export const EMPTY_LOCK = JSON.stringify({ version: 1, skills: {} }, null, 2) + "\n";
-
-/**
- * Codex reads policy from agents/openai.yaml next to SKILL.md. Derive it from the Claude frontmatter
- * of an own skill so one file is the source of truth. Returns the yaml text, or null when nothing to say.
- */
-export function sidecarFor(skillDir: string): string | null {
-  const md = fs.readFileSync(path.join(skillDir, "SKILL.md"), "utf8");
-  const m = /^---\r?\n([\s\S]*?)\r?\n---/.exec(md);
-  if (!m) return null;
-  let fm: Record<string, unknown>;
-  try {
-    fm = (YAML.parse(m[1]) as Record<string, unknown>) ?? {};
-  } catch {
-    return null;
-  }
-  const manual = fm["disable-model-invocation"] === true;
-  const desc = typeof fm.description === "string" ? fm.description : "";
-  const short = desc.length > 80 ? desc.slice(0, 77).trimEnd() + "..." : desc;
-  const doc: Record<string, unknown> = {
-    interface: { display_name: String(fm.name ?? path.basename(skillDir)), short_description: short },
-  };
-  if (manual) doc.policy = { allow_implicit_invocation: false };
-  return "# generated by skills-sync from SKILL.md frontmatter; edit SKILL.md, not this file\n" + YAML.stringify(doc);
 }
