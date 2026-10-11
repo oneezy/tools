@@ -21,7 +21,7 @@ export interface ManualStep {
 }
 
 /** The setup script line the cloud environment should run (ADR-0008), and the one it ran before the repair. */
-export const CLOUD_SETUP_LINE = "npx --yes @oneezy/skills-sync@latest --quiet";
+const CLOUD_SETUP_LINE = "npx --yes @oneezy/skills-sync@latest --quiet";
 const OLD_CLOUD_FLAGS = "-y --agents claude-code --global --no-projects --no-wsl --quiet";
 
 /** How many items a step spells out before "and N more": a step is read on a phone. */

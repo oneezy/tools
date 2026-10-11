@@ -10,9 +10,11 @@
 // no hook or checkout exists, so status shows the block lines and the manual steps only, and reads no release: a
 // session there must not go red over a GitHub it cannot reach.
 import { spawnSync } from "node:child_process";
+import type { BlockState } from "../block.js";
 import { FORM_LABEL, formOf, type MachineForm } from "../desired.js";
 import { github } from "../github.js";
 import { harnessTable } from "../harnesses.js";
+import type { HookState } from "../hooks.js";
 import {
   LIBRARY_MARKETPLACE,
   probe,
@@ -24,8 +26,6 @@ import {
 import { latestRelease, type Release, type ReleasePlugin } from "../release.js";
 import { findCheckouts } from "./hook.js";
 import { manualSteps, type ManualStep } from "./status-steps.js";
-
-export type { ManualStep } from "./status-steps.js";
 
 export interface StatusLine {
   ok: boolean;
@@ -255,7 +255,7 @@ function harnessReport(state: HarnessState, form: MachineForm, release: Release 
   const places = new Map<string, string[]>();
   const place = (skill: string, where: string) => places.set(skill, [...(places.get(skill) ?? []), where]);
   const v = (x: string | null) => x ?? "no version";
-  /** the plugin, duplicate and folder lines: everything but the block, which the cloud also shows */
+  /** a line about the machine's own plugins, hook and folders, which a cloud session leaves out (the block is its own) */
   const machineLine = (l: StatusLine) => {
     if (!cloud) lines.push(l);
   };
@@ -315,8 +315,8 @@ function harnessReport(state: HarnessState, form: MachineForm, release: Release 
   for (const d of duplicates)
     machineLine(red(`${d.skill} listed ${d.in.length === 2 ? "twice" : `${d.in.length} times`}: ${d.in.join(", ")}`));
 
-  const hook = hookReport(state, cloud ? null : lines);
-  const block = blockReport(state, lines);
+  if (state.hook) machineLine(hookLine(state.harness.id, state.hook));
+  if (state.block) lines.push(blockLine(state.block));
   for (const old of state.repoBlocks)
     lines.push(
       red(
@@ -347,45 +347,44 @@ function harnessReport(state: HarnessState, form: MachineForm, release: Release 
     loose: state.loose,
     folders: state.folders,
     duplicates,
-    hook,
-    block,
+    hook: state.hook ? hookFacts(state.hook) : null,
+    block: state.block ? blockFacts(state.block) : null,
     repoBlocks: state.repoBlocks.map((b) => ({ file: b.file, ids: b.ids })),
     lines,
   };
 }
 
 /**
- * The session hook's facts and, outside the cloud (`lines` null there: a cloud session never reads user hooks), its
- * line: red when the entry is missing, when the old sync-dev.sh entry is still there, or when the file cannot be worked
- * on; green when present. A present Codex entry the person has not trusted yet is green here and a manual step below:
- * the machine is right, the trust is the person's. Harnesses are told apart by their id, never by `trusted`.
+ * The session hook's line: red when the entry is missing, when the old sync-dev.sh entry is still there, or when the
+ * file cannot be worked on; green when present. A present Codex entry the person has not trusted yet is green here and
+ * a manual step below: the machine is right, the trust is the person's. Harnesses are told apart by their id, never by
+ * `trusted`.
  */
-function hookReport(state: HarnessState, lines: StatusLine[] | null): StatusHook | null {
-  const h = state.hook;
-  if (!h) return null;
+function hookLine(harnessId: string, h: HookState): StatusLine {
   // readHook's note is a file problem when the entry is not there, and the Codex trust step when it is
-  const problem = !h.present && h.note ? h.note : null;
-  const current = h.present && !h.old;
-  if (lines) {
-    if (problem) lines.push(red(`session hook in ${h.file}: ${problem}`));
-    else if (!h.present) lines.push(red(`no session hook entry in ${h.file}; run sync`));
-    else if (h.old) lines.push(red(`old sync-dev.sh hook still in ${h.file}; run sync`));
-    else if (state.harness.id === "codex" && h.trusted === false)
-      lines.push(green(`session hook in ${h.file}, not trusted in Codex yet (manual step below)`));
-    else lines.push(green(`session hook in ${h.file}`));
-  }
-  return { file: h.file, present: h.present, current, trusted: h.trusted };
+  if (!h.present && h.note) return red(`session hook in ${h.file}: ${h.note}`);
+  if (!h.present) return red(`no session hook entry in ${h.file}; run sync`);
+  if (h.old) return red(`old sync-dev.sh hook still in ${h.file}; run sync`);
+  if (harnessId === "codex" && h.trusted === false)
+    return green(`session hook in ${h.file}, not trusted in Codex yet (manual step below)`);
+  return green(`session hook in ${h.file}`);
 }
 
-/** The global block's facts and its line: green when current, red when missing, stale (an older block's text) or a conflict. */
-function blockReport(state: HarnessState, lines: StatusLine[]): StatusBlock | null {
-  const b = state.block;
-  if (!b) return null;
-  if (b.status === "current") lines.push(green(`global block in ${b.file} current`));
-  else if (b.status === "missing") lines.push(red(`global block in ${b.file} is missing; run sync`));
-  else if (b.status === "outdated")
-    lines.push(red(`global block in ${b.file} is stale (${b.ids.join(", ")}); run sync`));
-  else lines.push(red(`global block in ${b.file}: ${b.reason ?? "cannot be written"}`));
+/** The session hook's facts for --json: current is present with the old entry gone. */
+function hookFacts(h: HookState): StatusHook {
+  return { file: h.file, present: h.present, current: h.present && !h.old, trusted: h.trusted };
+}
+
+/** The global block's line: green when current, red when missing, stale (an older block's text) or a conflict. */
+function blockLine(b: BlockState): StatusLine {
+  if (b.status === "current") return green(`global block in ${b.file} current`);
+  if (b.status === "missing") return red(`global block in ${b.file} is missing; run sync`);
+  if (b.status === "outdated") return red(`global block in ${b.file} is stale (${b.ids.join(", ")}); run sync`);
+  return red(`global block in ${b.file}: ${b.reason ?? "cannot be written"}`);
+}
+
+/** The global block's facts for --json: present is a managed block of any id in the file. */
+function blockFacts(b: BlockState): StatusBlock {
   return {
     file: b.file,
     present: b.status === "current" || b.ids.length > 0,
@@ -400,7 +399,7 @@ function blockReport(state: HarnessState, lines: StatusLine[]): StatusBlock | nu
  * hook's (the repository `cwd` is in and the folders beside it, by origin URL); nothing is fetched or moved, so a
  * checkout is judged as it is. Git runs without prompting and with 30 s per call.
  */
-export function readCheckouts(cwd: string, env: NodeJS.ProcessEnv = process.env): StatusCheckout[] {
+function readCheckouts(cwd: string, env: NodeJS.ProcessEnv = process.env): StatusCheckout[] {
   const git = (dir: string, args: string[]): string => {
     const r = spawnSync("git", args, {
       cwd: dir,
