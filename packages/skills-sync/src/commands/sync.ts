@@ -24,7 +24,7 @@ export const FORMS: Record<string, FormFn> = { "claude-code": claudeCode, codex,
  * machine sync, or it would link their skills and register the library folder again. #149 and #153 add theirs; #154
  * removes this with the old run.
  */
-export const BUILT_FORMS: ReadonlySet<string> = new Set(["codex"]);
+export const BUILT_FORMS: ReadonlySet<string> = new Set(["claude-code", "codex"]);
 
 export interface SyncOptions {
   /** the release repo, owner/repo */

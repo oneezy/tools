@@ -11,6 +11,8 @@
 // into <CODEX_HOME>/.tmp/marketplaces/<name> as the real CLI does; `marketplace upgrade` re-clones when the revision
 // moved and reinstalls every plugin from it; `plugin add` copies the plugin into <CODEX_HOME>/plugins/cache/<mkt>/<id>/
 // <version>; FAKE_HARNESS_FAIL_ADD=<ids> makes `plugin add` of those ids fail. The JSON shapes are the real CLI's.
+// FAKE_HARNESS_FAIL_LIST=<claude,codex> makes `plugin list` fail (a CLI that cannot list its plugins);
+// FAKE_HARNESS_FAIL_UNINSTALL=<id,...> makes `plugin uninstall <id>` (Codex: `plugin remove <id>`) fail for those ids.
 import fs from "node:fs";
 import path from "node:path";
 import {spawnSync} from "node:child_process";
@@ -196,6 +198,7 @@ if (args[0] === "plugin" && args.includes("--help")) {
   if (args.includes("--json")) out({ selectedMarketplaces: names, upgradedRoots: upgraded, errors: [] });
   else for (const name of names) out(upgraded.includes(state.marketplaces[name]) ? `Upgraded marketplace \`${name}\`.` : `Marketplace \`${name}\` is already up to date.`);
 } else if (cmd === "plugin list") {
+  if (has(process.env.FAKE_HARNESS_FAIL_LIST, host)) fail("fixture plugin list failed");
   const rows = Object.entries(state.plugins);
   out(
     host === "claude"
@@ -273,6 +276,7 @@ if (args[0] === "plugin" && args.includes("--help")) {
   save();
   out({ outcome: "ok", pluginId: words[2] });
 } else if ((host === "claude" && cmd === "plugin uninstall") || (host === "codex" && cmd === "plugin remove")) {
+  if (has(process.env.FAKE_HARNESS_FAIL_UNINSTALL, words[2])) fail(`fixture uninstall denied: ${words[2]}`);
   if (!state.plugins[words[2]]) fail(`plugin ${words[2]} not found in installed plugins`);
   const p = state.plugins[words[2]];
   delete state.plugins[words[2]];

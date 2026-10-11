@@ -334,6 +334,22 @@ export function skillFolder(m: PretendMachine, harness: HarnessId, name: string,
 }
 
 /**
+ * The pretend old library clone under the machine (where `looseLink` points by default), marked as a checkout of
+ * `repo`: a skills-sync.json naming library.owner and library.name, as the real library's does. A link into it is then
+ * a link to a library copy, which the tool made and may remove (ADR-0007). Nothing makes ~/.skills-sync point at it, so
+ * the old library-based run does not find it. Returns the clone's root.
+ */
+export function libraryCopy(m: PretendMachine, repo = "oneezy/skills"): string {
+  const root = path.join(m.base, "old-library");
+  const [owner, name] = repo.split("/");
+  write(
+    path.join(root, "skills-sync.json"),
+    JSON.stringify({ version: 1, library: { name, owner, homepage: `https://github.com/${repo}` } }, null, 2) + "\n",
+  );
+  return root;
+}
+
+/**
  * The old ~/.skills-sync link to a library clone (default: a pretend clone under the machine, with the `brain`
  * instruction entrypoint the real library had, so the old run would write that block). Returns the link.
  */
@@ -462,7 +478,7 @@ export function libraryCheckout(
  * A real folder in the harness's user skills folder (or `dir`) holding the release's own bytes of the skill's
  * SKILL.md: the copy an older sync or Codex's skill installer left. Returns the folder.
  */
-export function libraryCopy(
+export function releaseCopy(
   m: PretendMachine,
   harness: HarnessId,
   name: string,

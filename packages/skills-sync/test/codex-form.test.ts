@@ -25,7 +25,7 @@ import {
   githubClone,
   installedPlugin,
   libraryCheckout,
-  libraryCopy,
+  releaseCopy,
   looseLink,
   oldLibraryLink,
   pretendMachine,
@@ -269,7 +269,7 @@ test("library copies go only after the plugin carrying them verifies: a failed p
   const gone = path.join(m.base, "gone");
   const dangling = looseLink(m, "codex", "tdd", path.join(gone, "tdd"));
   fs.rmSync(gone, { recursive: true });
-  const copy = libraryCopy(m, "codex", "oneezy-merge", r17, codexLegacySkills(m));
+  const copy = releaseCopy(m, "codex", "oneezy-merge", r17, codexLegacySkills(m));
   for (const p of [viaHome, viaCheckout, dangling]) assert.ok(isLink(p), p);
 
   const failed = await cli(m, ["--json"], { FAKE_HARNESS_FAIL_ADD: "oneezy@oneezy-skills" });
@@ -323,7 +323,7 @@ test("each skill name is listed once afterwards: status shows no duplicate, no l
   oldSkillsSync(m);
   looseLink(m, "codex", "oneezy-status");
   looseLink(m, "codex", "grilling", undefined, codexLegacySkills(m));
-  libraryCopy(m, "codex", "tdd", r17, codexLegacySkills(m));
+  releaseCopy(m, "codex", "tdd", r17, codexLegacySkills(m));
   const before = await cli(m, ["status", "--json"]);
   assert.equal(before.status, 1);
   assert.ok((before.json as unknown as StatusJson).harnesses.codex.loose.length === 2);
@@ -463,7 +463,7 @@ test("--plan lists every action and changes nothing: no file, no link, no plugin
   const m = machine();
   oldSkillsSync(m);
   const link = looseLink(m, "codex", "oneezy-status");
-  const copy = libraryCopy(m, "codex", "grilling", r17, codexLegacySkills(m));
+  const copy = releaseCopy(m, "codex", "grilling", r17, codexLegacySkills(m));
   const own = skillFolder(m, "codex", "my-own", codexLegacySkills(m));
   const before = snapshot(m.home);
   const r = await cli(m, ["--plan", "--json"]);

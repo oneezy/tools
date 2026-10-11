@@ -384,6 +384,11 @@ export function installPlugin(h: Harness, run: Run, id: string): boolean {
   return DRIVERS[h.id]?.install(run, id) ?? false;
 }
 
+/** Uninstall one plugin (<id>@<marketplace>) through the harness's own command; false when it refused (run.failure says why). */
+export function uninstallPlugin(h: Harness, run: Run, id: string): boolean {
+  return DRIVERS[h.id]?.uninstall(run, id) ?? false;
+}
+
 export function nativePluginRoute(lib: Library, h: Harness, skill: string): boolean {
   const d = DRIVERS[h.id],
     catalog = readCatalog(lib, h);

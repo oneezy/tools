@@ -579,9 +579,13 @@ async function main(): Promise<void> {
   const choices = await decide(args, local, lib, table, cwd, interactive);
   if (!choices) return p.cancel("nothing changed");
   if (!args.plan) saveLocal(lib.root, choices);
-  // until #149, #153 and #154: a harness whose form the machine sync built is its alone; the old run would link its
-  // skills again and register the library folder as its marketplace. The answers above remember it all the same
-  if (machineSync) choices.agents = choices.agents.filter((h) => !BUILT_FORMS.has(h.id));
+  // until #153 and #154: a harness whose form the machine sync above built (Claude Code's account plugins, Codex's
+  // plugins from GitHub) is its alone; the old run would put the tool's plugins and links back there, so it serves the
+  // other harnesses only. The answers saved above remember every harness all the same
+  if (machineSync) {
+    choices.agents = choices.agents.filter((h) => !BUILT_FORMS.has(h.id));
+    if (!choices.agents.length) return printReport(setup, args, { entrypoints: [] });
+  }
 
   // 5. run
   await runOnce(lib, choices, args, cwd, setup);

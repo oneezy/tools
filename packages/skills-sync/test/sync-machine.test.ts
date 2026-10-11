@@ -136,11 +136,18 @@ test("sync on a machine with no library writes the skills block into both global
     r.stdout,
   );
   assert.equal(lines.at(-1), "2 changed, 0 already right, 0 left alone");
-  // the Claude Code form is named, not acted on, until its ticket lands; Codex's form has no codex to work with here
-  assert.ok(
-    lines.some((l) => l.startsWith(". note") && l.includes("Claude Code") && l.includes("form: account plugins")),
-    r.stdout,
-  );
+  // Claude Code's form is the account plugins: with none delivered, each of the release's plugins is a manual step
+  for (const id of ["matt-pocock", "oneezy", "play"])
+    assert.ok(
+      lines.some(
+        (l) =>
+          l.startsWith(". note") &&
+          l.includes("Claude Code") &&
+          l.includes(`${id}: not delivered by the claude.ai account yet; switch it on at claude.ai`),
+      ),
+      r.stdout,
+    );
+  // the other forms are named, not acted on, until their tickets land
   assert.ok(
     lines.some(
       (l) => l.startsWith(". note") && l.includes("Codex: plugins from GitHub") && l.includes("no codex on PATH"),
@@ -475,17 +482,20 @@ test("--agents picks the harnesses; Hermes has no global instructions file in th
 });
 
 test("a PC with a library keeps the old library-based sync after the block, with the old instruction blocks off: one report, no brain block", async () => {
-  const m = machine();
+  // the old run's default harnesses are Claude Code and Codex, whose forms the machine sync built (tools#149, tools#150):
+  // it would have nothing left to do; Hermes, named, keeps the old run's links until tools#153
+  const m = machine({ harnesses: ["claude-code", "codex", "hermes"] });
+  const agents = ["--agents", "claude-code,codex,hermes"];
   const library = linkTarget(oldLibraryLink(m))!;
   globalBlock(m, "claude-code", "brain", "## Brain\nold");
-  const r = await cli(m, ["--no-wsl"]);
+  const r = await cli(m, ["--no-wsl", ...agents]);
   assert.equal(r.status, 0, r.stderr);
-  // the block first, then what the old run did: the user-folder links of the library's skills, as before
+  // the block first, then what the old run did: the user-folder links of the library's skills, as before, on every
+  // harness but Claude Code and Codex: no link, no plugin of the tool's there
   for (const h of ["claude-code", "codex"] as const) assertBlock(read(globalFile(m, h)));
-  const link = path.join(m.claudeHome, "skills", "oneezy-status");
-  assert.ok(isLink(link), link);
-  // Codex is the machine sync's (its form is built): the old run links nothing into its user folder any more
+  assert.equal(lexists(path.join(m.claudeHome, "skills")), false);
   assert.equal(lexists(path.join(m.home, ".agents", "skills", "oneezy-status")), false);
+  assert.ok(isLink(path.join(m.hermesHome, "skills", "oneezy-status")), r.stdout);
   const lines = r.stdout.trimEnd().split("\n");
   const write = lines.findIndex((l) => l.startsWith("+ write") && l.includes("CLAUDE.md"));
   const linked = lines.findIndex((l) => l.startsWith("+ link") && l.includes("oneezy-status"));
@@ -498,7 +508,7 @@ test("a PC with a library keeps the old library-based sync after the block, with
       const text = read(path.join(f.parentPath, f.name));
       assert.ok(!text.includes("skills-sync:brain"), `${f.name}: ${text}`);
     }
-  const again = await cli(m, ["--no-wsl"]);
+  const again = await cli(m, ["--no-wsl", ...agents]);
   assert.equal(again.status, 0, again.stderr);
   assert.ok(again.stdout.trimEnd().split("\n").at(-1)?.startsWith("0 changed"), again.stdout);
 });
