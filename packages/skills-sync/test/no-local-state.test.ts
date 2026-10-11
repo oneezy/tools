@@ -146,32 +146,27 @@ test("no run creates or changes ~/.skills-sync or a local file: sync, status, un
   );
 });
 
-test("an existing ~/.skills-sync link and its local file are reported by sync and status as leftovers to delete by hand, and never touched; a real clone folder the same", async () => {
+test("an existing ~/.skills-sync is reported by sync and status as a leftover and never touched: a link to a library checkout (whose local file the library commands run there still use), a link to anything else, the clone itself with the old answers file", async () => {
   const m = machine();
   const link = oldLibraryLink(m);
   const target = linkTarget(link)!;
-  // the answers file lives in the clone; the tool names it under the link, where the old tool wrote it
+  // the PC: the old tool pointed ~/.skills-sync at the working checkout, whose answers file update/refresh/add still use
   oldLocalFile(m, { dev: path.join(m.base, "dev"), projects: ["app"] });
   const local = path.join(link, "skills-sync.local.json");
+  const CHECKOUT =
+    "the old library link; machine commands no longer use it; delete the link by hand, the checkout stays; its skills-sync.local.json is still used by library commands run inside that checkout";
   const libraryBefore = snapshot(target);
   const homeBefore = snapshot(m.home);
   const r = await cli(m, []);
   assert.equal(r.status, 0, r.stderr);
   assert.equal(r.stderr, "");
-  const noted = notes(r);
   assert.ok(
-    noted.some(
-      (l) =>
-        l.includes(`${link} -> ${target}`) &&
-        l.includes("(the old library link; nothing reads it any more, delete it by hand)"),
-    ),
+    notes(r).some((l) => l.includes(`${link} -> ${target}`) && l.includes(`(${CHECKOUT})`)),
     r.stdout,
   );
-  assert.ok(
-    noted.some((l) => l.includes(local) && l.includes("the old tool's answers file; nothing reads it any more")),
-    r.stdout,
-  );
-  // the library and its file as they were; the home gained only the two global files (no link is ever followed into it)
+  // the checkout's local file is the library commands' there, not a leftover: no line of its own
+  assert.ok(!notes(r).some((l) => l.includes(local)), r.stdout);
+  // the checkout and its file as they were; the home gained only the global files (no link is ever followed into it)
   assert.deepEqual(snapshot(target), libraryBefore);
   assert.deepEqual(added(homeBefore, snapshot(m.home)), GLOBALS);
   assert.equal(linkTarget(link), target);
@@ -183,37 +178,55 @@ test("an existing ~/.skills-sync link and its local file are reported by sync an
   assert.deepEqual(status.oldLibrary, { path: link, kind: "link", target });
   assert.equal(status.oldLocalFile, local);
   const text = await cli(m, ["status"]);
-  assert.ok(
-    text.stdout.includes(
-      `. ${link} (link -> ${target}) is the old library clone; nothing reads it any more, delete it by hand\n`,
-    ),
-    text.stdout,
-  );
-  assert.ok(
-    text.stdout.includes(`. ${local} is the old tool's answers file; nothing reads it any more, delete it by hand\n`),
-    text.stdout,
-  );
+  assert.ok(text.stdout.includes(`. ${link} (link -> ${target}) is ${CHECKOUT}\n`), text.stdout);
+  assert.ok(!text.stdout.includes(local), text.stdout);
   // --quiet: the notes are neither changes nor problems, so a session start prints nothing about them
   const quiet = await cli(m, ["--quiet"]);
   assert.equal(quiet.stdout + quiet.stderr, "");
   assert.deepEqual(snapshot(target), libraryBefore);
 
-  // the clone itself at ~/.skills-sync, not a link to one
+  // a link to something that is not a library: the link is the leftover, nothing else
+  const m3 = machine();
+  const elsewhere = path.join(m3.base, "elsewhere");
+  fs.mkdirSync(elsewhere, { recursive: true });
+  const link3 = oldLibraryLink(m3, elsewhere);
+  const r3 = await cli(m3, ["--json"]);
+  assert.equal(r3.status, 0, r3.stderr);
+  const j3 = r3.json as unknown as SyncJson;
+  assert.deepEqual(
+    j3.actions.filter((a) => a.path === link3).map((a) => [a.kind, a.note]),
+    [["note", "the old library link; nothing reads it any more, delete it by hand"]],
+  );
+  assert.equal(j3.oldLocalFile, null);
+
+  // the clone itself at ~/.skills-sync, the old answers file inside: two leftovers
   const m2 = machine();
   const clone = path.join(m2.home, ".skills-sync");
   write(path.join(clone, "skills-lock.json"), JSON.stringify({ version: 1, skills: {} }) + "\n");
   write(path.join(clone, "skills", "oneezy-status", "SKILL.md"), "---\nname: oneezy-status\ndescription: s\n---\n");
+  write(path.join(clone, "skills-sync.local.json"), JSON.stringify({ agents: ["codex"] }) + "\n");
   const cloneBefore = snapshot(clone);
   const r2 = await cli(m2, ["--json"]);
   assert.equal(r2.status, 0, r2.stderr);
   const j2 = r2.json as unknown as SyncJson;
   assert.deepEqual(j2.oldLibrary, { path: clone, kind: "folder" });
-  assert.equal(j2.oldLocalFile, null);
-  assert.ok(
-    j2.actions.some((a) => a.kind === "note" && a.path === clone && a.note?.startsWith("the old library clone;")),
-    JSON.stringify(j2.actions),
+  assert.equal(j2.oldLocalFile, path.join(clone, "skills-sync.local.json"));
+  assert.deepEqual(
+    j2.actions.filter((a) => a.kind === "note" && a.path.startsWith(clone)).map((a) => [a.path, a.note]),
+    [
+      [clone, "the old library clone; nothing reads it any more, delete it by hand"],
+      [
+        path.join(clone, "skills-sync.local.json"),
+        "the old tool's answers file; nothing reads it any more, delete it by hand",
+      ],
+    ],
   );
   assert.deepEqual(snapshot(clone), cloneBefore);
+  const t2 = await cli(m2, ["status"]);
+  assert.ok(
+    t2.stdout.includes(`. ${clone} (folder) is the old library clone; nothing reads it any more, delete it by hand\n`),
+    t2.stdout,
+  );
 });
 
 for (const [name, line] of [
@@ -397,6 +410,40 @@ test("a release whose commit has no skills-sync.json, or one that is not JSON, s
   assert.equal((bad.json as unknown as SyncJson).release?.config, null);
 });
 
+test("a release config with keys this version does not know syncs: exit 0, nothing on stderr, the known settings applied, renderings carried for the forms", async () => {
+  gh.fixture.contents![R17]["skills-sync.json"] = fixtureConfig("oneezy/skills", "0.43.1", {
+    renderings: { hermes: "dist/hermes" },
+    future: { anything: true },
+    machines: { harnesses: ["claude-code"], extra: "ignored" },
+  });
+  const m = machine();
+  const r = await cli(m, ["--json"]);
+  assert.equal(r.status, 0, r.stderr + r.stdout);
+  assert.equal(r.stderr, "");
+  const s = r.json as unknown as SyncJson;
+  assert.deepEqual(s.release?.config, {
+    catalog: "oneezy-skills",
+    harnesses: ["claude-code"],
+    plugins: {},
+    renderings: { hermes: "dist/hermes" },
+  });
+  assert.ok(!s.actions.some((a) => a.kind === "conflict"), JSON.stringify(s.actions));
+  assert.ok(s.actions.some((a) => a.kind === "write" && a.path.endsWith("CLAUDE.md")));
+  assert.ok(!s.actions.some((a) => a.path.endsWith("AGENTS.md")), "Codex not served, as the known key says");
+  const plan = await cli(m, ["--plan"]);
+  assert.equal(plan.status, 0, plan.stderr);
+  assert.equal(plan.stderr, "");
+  // read as leniently as the rest: a renderings key of another shape is absent, an entry that is not a string dropped
+  assert.deepEqual(parseConfig(JSON.stringify({ renderings: ["x"], machines: {} })), {
+    catalog: null,
+    harnesses: null,
+    plugins: {},
+  });
+  assert.deepEqual(parseConfig(JSON.stringify({ renderings: { hermes: "dist/hermes", bad: 1 } }))?.renderings, {
+    hermes: "dist/hermes",
+  });
+});
+
 test("a harness that disappears is absent from the next run's report: nothing is remembered about it", async () => {
   const m = machine();
   const first = await cli(m, ["--json"]);
@@ -460,6 +507,12 @@ test("on Windows the machine sync runs itself inside every WSL distro through np
     ],
   );
   assert.equal(s.wsl[0].output, JSON.stringify({ plan: true, actions: [] }));
+  // --library travels too: each distro syncs against the release repo the host was given
+  const other = await cli(m, ["--quiet", "--library", "acme/skills"]);
+  assert.deepEqual(
+    other.wsl.map((w) => w[1]),
+    [`${command} --quiet --library acme/skills`, `${command} --quiet --library acme/skills`],
+  );
   // SKILLS_SYNC_WSL_BIN names another command inside the distro (a development build)
   const own = await cli(m, ["--quiet"], {
     SKILLS_SYNC_WSL_BIN: "node /mnt/v/dev/tools/packages/skills-sync/dist/src/cli.js",
@@ -487,6 +540,13 @@ test("on Windows the machine sync runs itself inside every WSL distro through np
     const other = await cli(m, [...args], env);
     assert.deepEqual(other.wsl, [], args.join(" "));
   }
+  // a line of wsl.exe's that is not a distro name (a message: distro names have no whitespace) is never run as one
+  const chatty = machine({ wsl: ["Ubuntu", "Windows Subsystem for Linux has no installed distributions."] });
+  const c = await cli(chatty, ["--quiet"]);
+  assert.deepEqual(
+    c.wsl.map((w) => w[0]),
+    ["Ubuntu"],
+  );
   // a machine without WSL (every non-Windows host, a PC without distros) fans out to nothing
   const none = machine();
   const plain = await cli(none, []);

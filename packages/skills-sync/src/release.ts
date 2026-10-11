@@ -26,6 +26,8 @@ export interface ReleaseConfig {
   harnesses: string[] | null;
   /** machines.plugins: per harness id, or "*" for the rest, the plugin ids a machine installs; a harness named nowhere gets every one */
   plugins: Record<string, string[]>;
+  /** renderings: per harness id, the folder of the release that holds a rendering for it (Hermes's opt-in, tools#153); absent when the config has none */
+  renderings?: Record<string, string>;
 }
 
 export interface Release {
@@ -151,6 +153,7 @@ export function parseConfig(text: string): ReleaseConfig | null {
   const c = json as {
     library?: { owner?: unknown; name?: unknown };
     machines?: { harnesses?: unknown; plugins?: unknown };
+    renderings?: unknown;
   };
   const owner = typeof c.library?.owner === "string" ? c.library.owner : "";
   const name = typeof c.library?.name === "string" ? c.library.name : "";
@@ -162,5 +165,16 @@ export function parseConfig(text: string): ReleaseConfig | null {
       const l = ids(list);
       if (l) plugins[harness] = l;
     }
-  return { catalog: owner && name ? `${owner}-${name}` : null, harnesses: ids(c.machines?.harnesses), plugins };
+  const config: ReleaseConfig = {
+    catalog: owner && name ? `${owner}-${name}` : null,
+    harnesses: ids(c.machines?.harnesses),
+    plugins,
+  };
+  if (c.renderings && typeof c.renderings === "object" && !Array.isArray(c.renderings))
+    config.renderings = Object.fromEntries(
+      Object.entries(c.renderings as Record<string, unknown>).filter(
+        (e): e is [string, string] => typeof e[1] === "string" && !!e[1],
+      ),
+    );
+  return config;
 }

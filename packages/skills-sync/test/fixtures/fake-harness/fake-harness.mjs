@@ -167,6 +167,7 @@ if (args[0] === "plugin" && args.includes("--help")) {
   save();
   out(host === "claude" ? { outcome: "ok", marketplace: name } : { marketplaceName: name, installedRoot: root, alreadyAdded: false });
 } else if (cmd === "plugin marketplace remove") {
+  if (has(process.env.FAKE_HARNESS_NO_WRITE_JSON, host) && args.includes("--json")) fail("unknown option '--json'");
   if (!state.marketplaces[words[3]])
     fail(host === "codex" ? `Error: marketplace \`${words[3]}\` is not configured or installed` : `marketplace ${words[3]} is not configured`);
   const root = state.marketplaces[words[3]];
@@ -289,6 +290,7 @@ if (args[0] === "plugin" && args.includes("--help")) {
   save();
   out({ outcome: "ok", pluginId: words[2] });
 } else if ((host === "claude" && cmd === "plugin uninstall") || (host === "codex" && cmd === "plugin remove")) {
+  if (has(process.env.FAKE_HARNESS_NO_WRITE_JSON, host) && args.includes("--json")) fail("unknown option '--json'");
   if (has(process.env.FAKE_HARNESS_FAIL_UNINSTALL, words[2])) fail(`fixture uninstall denied: ${words[2]}`);
   if (!state.plugins[words[2]]) fail(`plugin ${words[2]} not found in installed plugins`);
   const p = state.plugins[words[2]];

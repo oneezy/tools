@@ -29,7 +29,10 @@ function spawnWsl(exe: string, args: string[], encoding: "utf8" | "utf16le") {
     : spawnSync(exe, args, { encoding, windowsHide: true, timeout: 600_000 });
 }
 
-/** The installed distros, docker-desktop's excluded; none where wsl is not available or lists nothing. */
+/**
+ * The installed distros, docker-desktop's excluded; none where wsl is not available or lists nothing. A line with
+ * whitespace in it is a message of wsl.exe's (no distro name has any), never run as a distro.
+ */
 export function wslDistros(env: NodeJS.ProcessEnv = process.env): string[] {
   const exe = wslExe(env);
   if (!exe) return [];
@@ -38,7 +41,7 @@ export function wslDistros(env: NodeJS.ProcessEnv = process.env): string[] {
   return r.stdout
     .split(/\r?\n/)
     .map((s) => s.replace(/\0/g, "").trim())
-    .filter((s) => s && !s.startsWith("docker-desktop"));
+    .filter((s) => s && !/\s/.test(s) && !s.startsWith("docker-desktop"));
 }
 
 /** Run the machine sync inside a distro with the flags given (--plan, --json, --quiet). */

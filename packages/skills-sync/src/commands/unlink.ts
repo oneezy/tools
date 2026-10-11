@@ -5,18 +5,19 @@
 // harness's user hooks file (hooks.ts; the file itself when it held nothing else); the skills block in its global
 // instructions file (likewise). Account plugins, plugins from other marketplaces, real skill folders, links to anywhere
 // else, other hook entries, Codex's trust record and blocks in repository files are never touched. Offline: no release
-// is read, so the catalog name is the library's constant and the library is --library's repo or the default. Hermes's
-// plugins (tools#153) join here when its module lands. Under --plan no plugin command that changes anything runs and
-// apply() writes nothing; the caller exits 1 when anything is red.
+// is read, so the library is --library's repo or the default, and the catalog name is the one its build gives its
+// marketplaces (<owner>-<name>). A harness that cannot list its plugins keeps its registration: on Claude Code removing
+// it would take every plugin from it, unseen. Hermes's plugins (tools#153) join here when its module lands. Under --plan
+// no plugin command that changes anything runs and apply() writes nothing; the caller exits 1 when anything is red.
 import os from "node:os";
 import path from "node:path";
 import { blockRemoval } from "../block.js";
-import { formOf } from "../desired.js";
+import { catalogFor, formOf } from "../desired.js";
 import { lexists } from "../fs.js";
 import { harnessTable } from "../harnesses.js";
 import { hookRemoval } from "../hooks.js";
 import { listMarketplaces, refused, removeMarketplace, runner, supportsPlugins, uninstallPlugin } from "../install.js";
-import { libraryCopy, LIBRARY_MARKETPLACE, oldStateNotes, probe, type HarnessState, type Machine } from "../machine.js";
+import { libraryCopy, oldStateNotes, probe, type HarnessState, type Machine } from "../machine.js";
 import { apply, Report, type Action } from "../plan.js";
 
 export interface UnlinkOptions {
@@ -41,9 +42,10 @@ export function runUnlink(options: UnlinkOptions): UnlinkResult {
   const home = os.homedir();
   for (const state of machine.harnesses) {
     if (!formOf(state.harness.id)) continue;
-    for (const a of plugins(state, options.plan)) report.add(a);
+    for (const a of plugins(state, options.repo, options.plan)) report.add(a);
     for (const l of state.loose)
-      if (libraryCopy(l.target, options.repo, home))
+      if (!l.target) report.add({ kind: "note", path: l.path, note: "a link whose target cannot be read; left alone" });
+      else if (libraryCopy(l.target, options.repo, home))
         report.add({
           kind: "remove",
           path: l.path,
@@ -68,10 +70,10 @@ export function runUnlink(options: UnlinkOptions): UnlinkResult {
  * plugin from it is left (Claude Code's remove takes the catalog's plugins with it, so never while one stays). A
  * refusal turns the action into a conflict with the CLI's own words; the next plugin is still tried.
  */
-function plugins(state: HarnessState, plan: boolean): Action[] {
+function plugins(state: HarnessState, repo: string, plan: boolean): Action[] {
   const out: Action[] = [];
   if (!state.cli) return out;
-  const catalog = LIBRARY_MARKETPLACE;
+  const catalog = catalogFor(repo);
   const bin = path.basename(state.cli).replace(/\.(cmd|bat|exe)$/i, "");
   const run = runner(state.cli);
   const where = (what: string) => `${state.harness.name}: ${what}`;
@@ -85,6 +87,16 @@ function plugins(state: HarnessState, plan: boolean): Action[] {
     else refused(a, run, `${bin} could not uninstall it`);
   }
   if (remaining || !supportsPlugins(run)) return out;
+  // the probe could not list the plugins: whatever is installed from the catalog was never seen, so its registration
+  // stays (Claude Code's remove would take every plugin from it)
+  if (state.note?.endsWith("cannot list its plugins")) {
+    out.push({
+      kind: "note",
+      path: where(`marketplace ${catalog}`),
+      note: "plugins could not be listed; marketplace left (removing it would take every plugin from it, unseen)",
+    });
+    return out;
+  }
   const markets = listMarketplaces(state.harness, run);
   if (markets === null) {
     out.push({

@@ -1,8 +1,8 @@
 // The harnesses' plugin CLIs (claude, codex): one driver per harness with the read-only listings the probe asks for
-// (plugins, marketplaces, Codex's loaded skills) and the plugin commands the forms and unlink run (install, update,
-// uninstall, marketplace add and remove), each through the harness's own command, never a settings edit by this tool.
-// pluginDependency and nativePluginRoute serve the library commands that still verify a plugin's copy of a skill from a
-// checkout (adopt-brain, migrate-aliases, check).
+// (plugins, marketplaces, Codex's loaded skills) and the plugin commands the forms and unlink run (install, uninstall,
+// marketplace add, remove and upgrade), each through the harness's own command, never a settings edit by this tool.
+// pluginDependency serves migrate-aliases, which still verifies a plugin's copy of a skill from a checkout before it
+// retires an alias.
 import { spawnSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
@@ -79,7 +79,6 @@ interface Driver {
   /** Codex: refresh a Git marketplace's snapshot and reinstall its plugins; the errors it reported, null when it failed */
   upgradeMarketplace?: (run: Run, name: string) => { errors: string[] } | null;
   install: (run: Run, id: string) => boolean;
-  update: (run: Run, id: string) => boolean;
   uninstall: (run: Run, id: string) => boolean;
   /** the names of the given plugins that resolve at least one of their skills */
   resolving: (run: Run, plugins: Built[], marketplace: string) => Set<string>;
@@ -165,7 +164,6 @@ const claude: Driver = {
     claudeWrite(run, ["plugin", "marketplace", "add"], [root]) ? { name: null, alreadyAdded: false } : null,
   removeMarketplace: (run, name) => claudeWrite(run, ["plugin", "marketplace", "remove"], [name]),
   install: (run, id) => claudeWrite(run, ["plugin", "install"], [id, "--scope", "user"]),
-  update: (run, id) => claudeWrite(run, ["plugin", "update"], [id, "--scope", "user"]),
   uninstall: (run, id) => claudeWrite(run, ["plugin", "uninstall"], [id, "--scope", "user"]),
   resolving(run, plugins, marketplace) {
     const out = new Set<string>();
@@ -221,7 +219,6 @@ const codex: Driver = {
   removeMarketplace: (run, name) => run(["plugin", "marketplace", "remove", name, "--json"]).ok,
   upgradeMarketplace: codexMarketplaceUpgrade,
   install: (run, id) => run(["plugin", "add", id, "--json"]).ok,
-  update: (run, id) => run(["plugin", "add", id, "--json"]).ok,
   uninstall: (run, id) => run(["plugin", "remove", id, "--json"]).ok,
   resolving(run, plugins) {
     const out = new Set<string>();
@@ -364,13 +361,6 @@ export function installPlugin(h: Harness, run: Run, id: string): boolean {
 /** Uninstall one plugin (<id>@<marketplace>) through the harness's own command; false when it refused (run.failure says why). */
 export function uninstallPlugin(h: Harness, run: Run, id: string): boolean {
   return DRIVERS[h.id]?.uninstall(run, id) ?? false;
-}
-
-export function nativePluginRoute(lib: Library, h: Harness, skill: string): boolean {
-  const d = DRIVERS[h.id],
-    catalog = readCatalog(lib, h);
-  const file = d && which(d.bin);
-  return !!file && !!catalog?.plugins.some((item) => item.skills.includes(skill)) && supportsPlugins(runner(file));
 }
 
 /** Resolve the exact installed skill, not merely any skill supplied by a matching plugin version. */

@@ -108,7 +108,11 @@ test("--help lists the machine commands, the library commands and every flag; an
   // what the machine commands promise: nothing of their own on the machine, settings from the release, old flags named
   assert.match(help, /no library clone, no\nanswers file, nothing remembered between runs/);
   assert.match(help, /named in one line on stderr/);
-  assert.match(help, /\n  --plan\s+show what would change, touch nothing \(every command\)/);
+  assert.match(
+    help,
+    /\n  --plan\s+show what would change, touch nothing: sync, unlink, branches and the library commands/,
+  );
+  assert.match(help, /status only reads, hook refuses it/);
   // the old flags are not documented as options any more
   for (const gone of ["--agents <ids>", "--global / --no-global", "--no-pull", "--watch", "-y, --yes", "--ask"])
     assert.ok(!help.split("\n").some((l) => l.startsWith(`  ${gone}`)), `${gone} still listed`);
@@ -122,6 +126,18 @@ test("--help lists the machine commands, the library commands and every flag; an
   assert.equal(unknown.status, 2);
   assert.ok(unknown.stderr.includes(`unknown command frobnicate\n${help}`));
   assert.equal(unknown.stdout, "");
+  // a word a machine command does not expect is refused in one line, exit 2 (branches takes repos)
+  for (const args of [
+    ["sync", "extra"],
+    ["status", "x", "y"],
+    ["unlink", "now"],
+    ["hook", "x"],
+  ]) {
+    const r = cli(...args);
+    assert.equal(r.status, 2, args.join(" "));
+    assert.equal(r.stderr, `${args[0]}: takes no argument (got ${args.slice(1).join(" ")})\n`);
+    assert.equal(r.stdout, "");
+  }
   const retired = cli("projects");
   assert.equal(retired.status, 2);
   assert.equal(retired.stdout, "");

@@ -11,6 +11,7 @@ import path from "node:path";
 import { afterAll, afterEach, beforeAll, test } from "vite-plus/test";
 import { lexists } from "../src/fs.js";
 import { HOOK_COMMAND } from "../src/hooks.js";
+import { libraryCopy as isLibraryCopy } from "../src/machine.js";
 import { startFakeGithub, type FakeGithub } from "./fixtures/fake-github/fake-github.mjs";
 import {
   blockIn,
@@ -267,4 +268,88 @@ test("without the harness CLIs only the links and the blocks go: nothing is unin
       .some((l) => l.startsWith("!") && l.includes(claudeMd) && l.includes("incomplete managed block")),
     r.stdout,
   );
+});
+
+test("when a harness cannot list its plugins, unlink leaves its marketplace registration (Claude Code's remove would take every plugin from it, unseen) and says so; the other harness still goes", async () => {
+  const m = machine();
+  installedPlugin(m, "claude-code", "oneezy", { version: "1.0.0", skills: ["a"] });
+  installedPlugin(m, "codex", "play", { version: "1.0.0", skills: ["b"] });
+  const r = await cli(m, ["unlink", "--json"], { FAKE_HARNESS_FAIL_LIST: "claude" });
+  assert.equal(r.status, 0, r.stderr + r.stdout);
+  const actions = (r.json as { actions: ActionJson[] }).actions;
+  assert.deepEqual(
+    actions.filter((a) => a.path.startsWith("Claude Code")).map((a) => [a.kind, a.path, a.note]),
+    [
+      [
+        "note",
+        "Claude Code: marketplace oneezy-skills",
+        "plugins could not be listed; marketplace left (removing it would take every plugin from it, unseen)",
+      ],
+    ],
+  );
+  assert.ok(!r.calls.some((c) => c[0] === "claude" && c.includes("remove")), JSON.stringify(r.calls));
+  assert.deepEqual(Object.keys(state(m.claudeHome).plugins), ["oneezy@oneezy-skills"]);
+  assert.deepEqual(Object.keys(state(m.claudeHome).marketplaces), ["oneezy-skills"]);
+  assert.deepEqual(Object.keys(state(m.codexHome).plugins), []);
+  assert.deepEqual(Object.keys(state(m.codexHome).marketplaces), []);
+});
+
+test("unlink --library acme/skills takes the acme-skills plugins and registration and the links into an acme checkout; the oneezy-skills ones stay", async () => {
+  const m = machine();
+  libraryCopy(m, "acme/skills");
+  installedPlugin(m, "claude-code", "x", { marketplace: "acme-skills", version: "1.0.0", skills: ["x"] });
+  installedPlugin(m, "claude-code", "oneezy", { version: "1.0.0", skills: ["a"] });
+  const link = looseLink(m, "claude-code", "x");
+  const r = await cli(m, ["unlink", "--library", "acme/skills", "--json"]);
+  assert.equal(r.status, 0, r.stderr + r.stdout);
+  assert.equal(r.stderr, "");
+  const actions = (r.json as { actions: ActionJson[] }).actions;
+  assert.deepEqual(
+    actions.filter((a) => a.kind !== "note").map((a) => [a.kind, a.path]),
+    [
+      ["uninstall", "Claude Code: plugin x@acme-skills"],
+      ["uninstall", "Claude Code: marketplace acme-skills"],
+      ["remove", link],
+    ],
+  );
+  assert.deepEqual(Object.keys(state(m.claudeHome).plugins), ["oneezy@oneezy-skills"]);
+  assert.deepEqual(Object.keys(state(m.claudeHome).marketplaces), ["oneezy-skills"]);
+  assert.equal(lexists(link), false);
+});
+
+test("an older claude whose write commands take no --json: unlink asks each command's help once and sends the uninstall and the marketplace remove without it", async () => {
+  const m = machine({ clis: ["claude"] });
+  installedPlugin(m, "claude-code", "oneezy", { version: "1.0.0", skills: ["a"] });
+  const r = await cli(m, ["unlink"], { FAKE_HARNESS_NO_WRITE_JSON: "claude" });
+  assert.equal(r.status, 0, r.stderr + r.stdout);
+  const writes = r.calls.filter((c) => c[0] === "claude" && pluginWrite(c));
+  assert.deepEqual(writes, [
+    ["claude", "plugin", "uninstall", "oneezy@oneezy-skills", "--scope", "user"],
+    ["claude", "plugin", "marketplace", "remove", "oneezy-skills"],
+  ]);
+  assert.ok(
+    r.calls.some((c) => c.slice(0, 4).join(" ") === "claude plugin uninstall --help"),
+    JSON.stringify(r.calls),
+  );
+  assert.ok(
+    r.calls.some((c) => c.slice(0, 5).join(" ") === "claude plugin marketplace remove --help"),
+    JSON.stringify(r.calls),
+  );
+  assert.deepEqual(Object.keys(state(m.claudeHome).plugins), []);
+  assert.deepEqual(Object.keys(state(m.claudeHome).marketplaces), []);
+});
+
+test("a block sync appended to a file goes with the blank line sync put before it, so the file is as it was; a link whose target cannot be read is nobody's leftover", async () => {
+  const m = machine({ clis: [] });
+  const agents = globalFile(m, "codex");
+  write(agents, "mine\n");
+  const synced = await cli(m, ["--quiet"]);
+  assert.equal(synced.status, 0, synced.stderr + synced.stdout);
+  assert.ok(read(agents).startsWith(`mine\n\n${START}`), read(agents));
+  const r = await cli(m, ["unlink", "--quiet"]);
+  assert.equal(r.status, 0, r.stderr + r.stdout);
+  assert.equal(read(agents), "mine\n");
+  // the rule unlink and the forms share: an empty target (the link could not be read) is never a dangling link
+  assert.equal(isLibraryCopy("", "oneezy/skills", m.home), false);
+  assert.equal(isLibraryCopy(path.join(m.base, "nowhere"), "oneezy/skills", m.home), true);
 });

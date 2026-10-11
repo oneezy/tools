@@ -23,7 +23,7 @@ import {
   supportsPlugins,
   type Marketplace,
 } from "./install.js";
-import { homeLibrary } from "./library.js";
+import { homeLibrary, looksLikeLibrary } from "./library.js";
 import type { Action } from "./plan.js";
 
 /** The library's catalog name when the release's config names none: the marketplace a plugin this tool installed comes from. */
@@ -135,45 +135,51 @@ function oldLibrary(hl: string): OldLibrary | null {
 }
 
 /**
- * One note each for what an older version left behind: the clone (or link) at ~/.skills-sync and the answers file
- * beside it. Nothing reads them any more; deleting them is a human's. `text` is the line status prints.
+ * One note each for what an older version left behind: the clone (or link) at ~/.skills-sync and the answers file in
+ * it. Machine commands never read them; deleting them is a human's. A link to a library checkout (the PC: the old tool
+ * pointed ~/.skills-sync at --repo) is the one leftover there: the checkout is the user's, and the library commands run
+ * inside it still keep its skills-sync.local.json (unavailable, links), so that file gets no line of its own. `text` is
+ * the line status prints.
  */
 export function oldStateNotes(machine: Machine): Array<{ action: Action; text: string }> {
   const out: Array<{ action: Action; text: string }> = [];
   const lib = machine.oldLibrary;
-  const tail = "nothing reads it any more, delete it by hand";
+  const gone = "nothing reads it any more, delete it by hand";
+  const checkout = lib?.kind === "link" && !!lib.target && looksLikeLibrary(lib.target);
   if (lib) {
     const how = lib.kind === "link" ? `link -> ${lib.target}` : "folder";
+    const what = checkout
+      ? "the old library link; machine commands no longer use it; delete the link by hand, the checkout stays; its skills-sync.local.json is still used by library commands run inside that checkout"
+      : lib.kind === "link"
+        ? `the old library link; ${gone}`
+        : `the old library clone; ${gone}`;
     out.push({
-      action: {
-        kind: "note",
-        path: lib.path,
-        ...(lib.target ? { target: lib.target } : {}),
-        note: `the old library ${lib.kind === "link" ? "link" : "clone"}; ${tail}`,
-      },
-      text: `${lib.path} (${how}) is the old library clone; ${tail}`,
+      action: { kind: "note", path: lib.path, ...(lib.target ? { target: lib.target } : {}), note: what },
+      text: `${lib.path} (${how}) is ${what}`,
     });
   }
-  if (machine.oldLocalFile)
+  if (machine.oldLocalFile && !checkout)
     out.push({
-      action: { kind: "note", path: machine.oldLocalFile, note: `the old tool's answers file; ${tail}` },
-      text: `${machine.oldLocalFile} is the old tool's answers file; ${tail}`,
+      action: { kind: "note", path: machine.oldLocalFile, note: `the old tool's answers file; ${gone}` },
+      text: `${machine.oldLocalFile} is the old tool's answers file; ${gone}`,
     });
   return out;
 }
 
 /**
  * Is `target`, where a loose link points, a copy the tool made? Inside a checkout or clone of the library (a
- * skills-sync.json naming the release repo's owner and name at some ancestor), inside ~/.skills-sync or what it points
- * at, or gone (a clone that moved or was deleted leaves its links dangling). Anything else is the user's. The one
- * definition of "the tool's leftover" for a link, for the forms and for unlink.
+ * skills-sync.json naming the release repo's owner and name at the target or an ancestor), inside ~/.skills-sync or
+ * what it points at (the real paths compared too: a Windows short name is the same folder), or gone (a clone that moved
+ * or was deleted leaves its links dangling). An empty target (the link could not be read) is nobody's: never removed.
+ * Anything else is the user's. The one definition of "the tool's leftover" for a link, for the forms and for unlink.
  */
 export function libraryCopy(target: string, repo: string, home = os.homedir()): boolean {
+  if (!target) return false;
   if (!lexists(target)) return true;
   const hl = homeLibrary(home);
-  if (under(target, hl) || under(target, real(hl))) return true;
+  if (under(target, hl) || under(target, real(hl)) || under(real(target), real(hl))) return true;
   const [owner, name] = repo.toLowerCase().split("/");
-  for (let dir = path.dirname(target); ; dir = path.dirname(dir)) {
+  for (let dir = target; ; dir = path.dirname(dir)) {
     const lib = readJson(path.join(dir, "skills-sync.json"))?.library as Record<string, unknown> | undefined;
     if (lib && String(lib.owner).toLowerCase() === owner && String(lib.name).toLowerCase() === name) return true;
     if (path.dirname(dir) === dir) return false;

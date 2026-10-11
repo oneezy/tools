@@ -51,9 +51,17 @@ export interface FormOptions {
  */
 export type FormFn = (release: Release | null, state: HarnessState, machine: Machine, options: FormOptions) => Action[];
 
-/** The catalog name the library's plugins come from on Claude Code and Codex: the release's config names it, else the constant. */
+/** The catalog name a library's build gives its marketplaces when its config names none: <owner>-<name> of the repo. */
+export function catalogFor(repo: string): string {
+  return repo.replace("/", "-");
+}
+
+/**
+ * The catalog name the library's plugins come from on Claude Code and Codex: the release's config names it, else the
+ * release repo's <owner>-<name>; the constant only when no release was read at all.
+ */
 export function catalogOf(release: Release | null): string {
-  return release?.config?.catalog ?? LIBRARY_MARKETPLACE;
+  return release?.config?.catalog ?? (release ? catalogFor(release.repo) : LIBRARY_MARKETPLACE);
 }
 
 /** Whether the release's config serves this harness: every detected one, unless machines.harnesses names a list. */

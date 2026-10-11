@@ -38,8 +38,9 @@ One skills library, every harness on this machine. Run it anywhere; it keeps not
 
 Machine commands act on this machine against the latest release of ${DEFAULT_REPO} on GitHub: no library clone, no
 answers file, nothing remembered between runs. Settings come from the release's skills-sync.json; machine facts (the
-harnesses, their plugins and links, the WSL distros) are detected on every run. They take --plan, --json, --quiet and
---library; an older flag is accepted, does nothing, and is named once on stderr.
+harnesses, their plugins and links, the WSL distros) are detected on every run. They take --json, --quiet and
+--library, and --plan where they would write (sync, unlink, branches; status only reads, hook refuses it); an older
+flag is accepted, does nothing, and is named once on stderr; a word they do not expect is refused (exit 2).
 
 Usage: skills-sync [command] [options]
 
@@ -78,7 +79,8 @@ Commands
                    harness skills folder (to a library copy, or dangling), its session hook entry in each harness's user
                    hooks file, the skills block in each global instructions file (either file too when it held nothing
                    else). Account plugins, other marketplaces, real folders, other links, other hook entries, Codex's
-                   trust record and repository files are never touched. Offline; exit 1 on a conflict
+                   trust record and repository files are never touched. Offline; exit 1 on a conflict. This machine
+                   only: on Windows run it inside each WSL distro too (the sync there put a block and a hook entry)
   adopt-brain      explicitly adopt only this host's two historical Brain links; propagate verified instructions only
   rollback-brain   restore the exact preserved links in --receipt; refuse later destination edits
   migrate-aliases  back up only explicit historical Skills/Status aliases after verifying installed native replacements
@@ -139,7 +141,7 @@ Update, refresh and add
   --plugin <id>          add: the plugin entry's id (default: the source id); --no-plugin declares none
 
 Options
-  --plan                 show what would change, touch nothing (every command)
+  --plan                 show what would change, touch nothing: sync, unlink, branches and the library commands
   --quiet                for scripts: print only changes and problems
   --json                 machine output
   --library <owner/repo> machine commands: the release repo to read (default ${DEFAULT_REPO})
@@ -352,6 +354,11 @@ async function machineCommand(args: Args): Promise<void> {
     process.stderr.write("hook takes no flags but --library\n");
     process.exit(2);
   }
+  // a word none of them expects (branches takes repos) is a mistake, not something to drop silently
+  if (args.command !== "branches" && args.positional.length) {
+    process.stderr.write(`${args.command}: takes no argument (got ${args.positional.join(" ")})\n`);
+    process.exit(2);
+  }
   if (args.given.length)
     process.stderr.write(
       `ignored: ${args.given.join(", ")} (settings come from the release's skills-sync.json; machine facts are detected on every run)\n`,
@@ -394,10 +401,12 @@ async function machineCommand(args: Args): Promise<void> {
  * (its last line), a note when the distro has no Node to run it with, a conflict when it failed.
  */
 function fanOut(report: Report, args: Args): WslRun[] {
+  // this run's flags travel: the distro plans, prints and reads the same release repo as the host
   const flags = [
     ...(args.plan ? ["--plan"] : []),
     ...(args.json ? ["--json"] : []),
     ...(args.quiet ? ["--quiet"] : []),
+    ...(args.library ? ["--library", args.library] : []),
   ];
   const runs: WslRun[] = [];
   for (const distro of wslDistros()) {
@@ -490,35 +499,13 @@ async function libraryCommand(args: Args): Promise<void> {
       const changedRevision = verifyLibraryRevision(lib.root, args.expectRevision, args.remoteRef);
       if (changedRevision) report.add({ kind: "conflict", path: lib.root, note: changedRevision });
       else {
-        entrypoints(
-          lib,
-          hosts,
-          true,
-          [],
-          instructions,
-          true,
-          args.plan ? report : undefined,
-          false,
-          false,
-          "oneezy-brain",
-        );
+        entrypoints(lib, hosts, true, [], instructions, true, args.plan ? report : undefined, false, "oneezy-brain");
         apply(instructions, args.plan);
         report.merge(instructions);
       }
     }
     const verified = args.entrypoints
-      ? entrypoints(
-          lib,
-          hosts,
-          true,
-          [],
-          new Report(),
-          true,
-          args.plan ? report : undefined,
-          false,
-          false,
-          "oneezy-brain",
-        )
+      ? entrypoints(lib, hosts, true, [], new Report(), true, args.plan ? report : undefined, false, "oneezy-brain")
       : [];
     if (report.conflicts().length || (!args.plan && verified.some((item) => item.state !== "current")))
       process.exitCode = 1;

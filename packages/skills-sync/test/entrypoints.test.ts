@@ -93,7 +93,6 @@ test("scoped Brain propagation leaves unrelated configured instruction blocks un
     false,
     undefined,
     false,
-    false,
     "oneezy-brain",
   );
   apply(report, false);

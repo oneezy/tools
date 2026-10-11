@@ -220,7 +220,11 @@ export function withoutBlock(text: string): string {
     if (text.startsWith("\r\n", at)) at += 2;
     else if (text.startsWith("\n", at)) at += 1;
   }
-  return out + text.slice(at);
+  const rest = text.slice(at);
+  // a block that ended the file was appended after one blank line (blockAction's gap): that line goes with it, so the
+  // file is as it was before the block came
+  if (!rest) for (const nl of ["\r\n", "\n"]) if (out.endsWith(nl + nl)) return out.slice(0, -nl.length);
+  return out + rest;
 }
 
 /**
