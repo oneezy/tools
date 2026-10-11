@@ -7,7 +7,8 @@
 // whose names the plugin carries, and whose targets are a library copy or gone, come out; a real folder or a foreign
 // link of that name is reported and left. A plugin behind the release is re-installed at the new commit with --force
 // (that is how a pinned install moves; `update` refuses one). A failed step is a conflict and the loose links stay;
-// nothing hermes did not install for this library is ever touched. --plan runs no hermes command that changes anything.
+// nothing hermes did not install for this library is ever touched. --plan runs no hermes command that changes anything;
+// a steady-state sync (every plugin current, nothing redundant) asks hermes nothing but its --help probe.
 // Hermes lists a plugin's skills as agent-plugin-<id>-<sha256(id)[:8]>:<skill>; the bare /<skill> is a loose skill's.
 import fs from "node:fs";
 import path from "node:path";
@@ -28,7 +29,7 @@ export const hermes: FormFn = (release, state, _machine, { plan }) => {
   if (!release)
     return [{ kind: "note", path: h.name, note: `${h.name}: plugins not compared; the latest release was not read` }];
   if (!state.cli)
-    return [{ kind: "note", path: h.userSkills, note: `${h.name}: no ${cli.bin} on PATH; loose links kept` }];
+    return [{ kind: "conflict", path: where("plugins"), note: `no ${cli.bin} on PATH; nothing installed, loose links kept` }];
   const run = runner(state.cli);
   if (!cli.supports(run))
     return [
@@ -110,9 +111,16 @@ export const hermes: FormFn = (release, state, _machine, { plan }) => {
 
   /** skill -> the plugin that carries it, once that plugin is verified (on plan: would be, after the installs) */
   const carried = new Map<string, string>();
+  // hermes is asked to list only when something hinges on it: a plugin was installed or enabled this run, or a loose
+  // link or folder of a plugin's skill is there to judge; a steady-state sync asks nothing (list resolves the catalog
+  // over the network on every call)
+  const changed = out.some((a) => a.kind === "install");
+  const redundant = candidates.some((p) =>
+    p.skills.some((s) => state.loose.some((l) => l.name === s) || state.folders.some((f) => f.name === s)),
+  );
   if (plan) {
     for (const p of candidates) for (const s of p.skills) carried.set(s, p.id);
-  } else if (candidates.length) {
+  } else if (candidates.length && (changed || redundant)) {
     // verify before any link goes: hermes's own listing says enabled, and the folder is the release's package
     const listed = cli.list(run);
     const now = listed ? hermesPlugins(home) : [];

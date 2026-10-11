@@ -249,9 +249,10 @@ export interface HermesListed {
 /**
  * Hermes's plugin commands (`hermes plugins ...`), through the same runner. Hermes has no marketplace: a plugin is
  * installed straight from a GitHub repository path (`owner/repo/sub/dir`), pinned to a commit with --ref (a full sha),
- * switched on with `enable` (plugins.enabled in config.yaml), moved with `install --force --ref` (`update` refuses a
- * pinned install) and dropped with `remove`. `list --json --no-bundled` is the harness's own view of its user plugins.
- * Nothing here is a Driver: the old library-based plugin step never serves Hermes.
+ * switched on with `enable` (plugins.enabled in config.yaml), moved with `install --force --ref` (`hermes plugins update`
+ * refuses a pinned install, so there is no update here) and dropped with `remove` (for `unlink`, tools#154).
+ * `list --json --no-bundled` is the harness's own view of its user plugins. Nothing here is a Driver: the old
+ * library-based plugin step never serves Hermes.
  */
 export const hermes = {
   bin: "hermes",
@@ -286,7 +287,6 @@ export const hermes = {
     ]).ok;
   },
   enable: (run: Run, name: string) => run(["plugins", "enable", name]).ok,
-  update: (run: Run, name: string) => run(["plugins", "update", name]).ok,
   remove: (run: Run, name: string) => run(["plugins", "remove", name]).ok,
 };
 

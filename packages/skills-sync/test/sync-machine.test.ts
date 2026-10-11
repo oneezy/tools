@@ -459,19 +459,16 @@ test("--library names the release repo as owner/repo: another repo is asked for,
   assertBlock(read(globalFile(m, "claude-code")));
 });
 
-test("--agents picks the harnesses; Hermes has no global instructions file in the table, so it gets a form line and no block", async () => {
+test("--agents picks the harnesses; Hermes has no global instructions file in the table, so it gets no block, and without hermes on PATH its plugin form is one red line and nothing in its home", async () => {
   const m = machine({ harnesses: ["claude-code", "codex", "hermes"] });
   const before = snapshot(m.home);
   const r = await cli(m, ["--agents", "codex,hermes"]);
-  assert.equal(r.status, 0, r.stderr);
+  assert.equal(r.status, 1, r.stderr + r.stdout);
   assert.deepEqual(added(before, snapshot(m.home)), [".codex/AGENTS.md"]);
   assert.ok(!r.stdout.includes("Claude Code"), r.stdout);
-  assert.ok(
-    r.stdout
-      .split("\n")
-      .some((l) => l.startsWith(". note") && l.includes("Hermes") && l.includes("form: loose skills")),
-    r.stdout,
-  );
+  const reds = r.stdout.split("\n").filter((l) => l.startsWith("!"));
+  assert.equal(reds.length, 1, r.stdout);
+  assert.ok(reds[0].includes("Hermes: plugins") && reds[0].includes("no hermes on PATH"), reds[0]);
   assert.deepEqual(fs.readdirSync(m.hermesHome), []);
 });
 

@@ -266,7 +266,8 @@ test("a flow.yaml that breaks a rule fails with its path and the rule: a duplica
 test("check fails on generated-file drift, the computation of build --check: a hand-edited plugin copy, a missing catalog, a stale package, a package that cannot be built, each with its path and reason; artifacts/ is never drift; with generate.plugins false the plugin form is ignored", () => {
   write("artifacts/anything.zip", "not looked at");
   assert.equal(cli("check").status, 0, "artifacts/ is not part of the drift");
-  assert.match(cli("check").stdout, /^check: clean, 3 own skills, 1 flow, 17 generated files as built$/m);
+  // 17 package and catalog files, and the 10 of the two Hermes renderings under dist/hermes/ (tools#153)
+  assert.match(cli("check").stdout, /^check: clean, 3 own skills, 1 flow, 27 generated files as built$/m);
 
   write(
     "plugins/up/skills/a/SKILL.md",

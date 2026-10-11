@@ -299,6 +299,10 @@ test("two builds of the same input give byte-identical archives and record, from
     `delete artifacts/oneezy-${v1}.zip`,
     `write artifacts/oneezy-${v3}.zip`,
     "write artifacts/releases.json",
+    // the Hermes rendering moves with its package (tools#153); the archive is made from the package alone
+    "write dist/hermes/oneezy/NOTICE.md",
+    "write dist/hermes/oneezy/plugin.json",
+    "write dist/hermes/oneezy/skills/own-one/SKILL.md",
     "write plugins/oneezy/.codex-plugin/plugin.json",
     "write plugins/oneezy/NOTICE.md",
     "write plugins/oneezy/plugin.json",

@@ -15,7 +15,8 @@
 // source: "<url>#<subdir>" } per name) and config.yaml (plugins.enabled, plugins.disabled). `install` refuses a name whose
 // plugins/<name> is a link, an existing name without --force, a --ref that is not a 40-hex sha; FAKE_HARNESS_FAIL_INSTALL=
 // <names> makes those installs fail; FAKE_HARNESS_CAUTION=<names> gives them a caution scan verdict, which without --force
-// and without a TTY aborts. `list --json` prints the rows the real CLI prints, a bundled one included unless --no-bundled.
+// and without a TTY aborts; FAKE_HARNESS_FAIL_ENABLE=<names> makes `enable` fail for those names and FAKE_HARNESS_FAIL_LIST
+// (with hermes in it) makes `list` fail. `list --json` prints the rows the real CLI prints, a bundled one unless --no-bundled.
 import fs from "node:fs";
 import path from "node:path";
 import {spawnSync} from "node:child_process";
@@ -279,6 +280,7 @@ function hermes() {
   if (args[0] === "plugins" && args.includes("--help")) {
     out("usage: hermes plugins [-h] {list,search,install,enable,disable,update,remove,show,capabilities} ...");
   } else if (cmd === "plugins list") {
+    if (has(process.env.FAKE_HARNESS_FAIL_LIST, host)) fail("fixture plugin list failed");
     const meta = readMeta();
     const rows = discovered().map((p) => {
       const pin = meta[p.name]?.pinned === true && typeof meta[p.name].revision === "string" ? meta[p.name].revision : null;
@@ -354,6 +356,7 @@ function hermes() {
   } else if (cmd === "plugins enable" || cmd === "plugins disable") {
     const p = find(words[2] ?? "");
     if (!p) fail(`Plugin '${words[2]}' not found.`);
+    if (cmd === "plugins enable" && has(process.env.FAKE_HARNESS_FAIL_ENABLE, p.name)) fail(`fixture enable denied: ${p.name}`);
     setLists(p.name, cmd === "plugins enable");
     out(`✓ Plugin ${p.name} ${cmd === "plugins enable" ? "enabled" : "disabled"}.`);
   } else if (cmd === "plugins update") {

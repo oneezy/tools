@@ -70,8 +70,12 @@ A Group or a Source's skills packaged for a Harness's plugin system, with its ow
 _Avoid_: package, bundle
 
 **Form**:
-How a Harness on a Host gets the Library's skills, one per Harness (ADR-0007): `account plugins` (Claude Code: the Plugins enabled on the claude.ai account, delivered as `<id>@synced`), `plugins from GitHub` (Codex: the Library's marketplace added from GitHub) or `loose skills` (Hermes: one link per skill in its User folder). Never two on one Harness, so no skill name is listed twice. Claude Code is on `account plugins`; `sync` still moves the other harnesses between the older `plugin` and `links` pair until the Codex and Hermes tickets land.
+How a Harness on a Host gets the Library's skills, one per Harness (ADR-0007): `account plugins` (Claude Code: the Plugins enabled on the claude.ai account, delivered as `<id>@synced`) or `plugins from GitHub` (Codex: the Library's marketplace added from GitHub; Hermes: each Plugin's Hermes rendering installed from the Release's commit through `hermes plugins install`). `loose skills` (one link per skill in the User folder) is no Harness's form any more. Never two on one Harness, so no skill name is listed twice. Claude Code and Hermes are on their forms; `sync` still moves Codex between the older `plugin` and `links` pair until its ticket lands.
 _Avoid_: mode (that is a project's link or copy), install mode
+
+**Hermes rendering**:
+The copy of a Plugin that Hermes loads, written by `build` at `dist/hermes/<id>/` beside `plugins/<id>/`: the package without the Claude and Codex manifests, each skill's `SKILL.md` with `name` set to its folder and `metadata` cut to string entries (Hermes's portable loader rejects the boolean `metadata.internal` the package carries), every other file byte for byte the package's. Installed with `hermes plugins install <owner>/<name>/dist/hermes/<id> --ref <commit>`; not recorded in the Release's `release.json`, whose `files` digests (the shared `NOTICE.md` among them) verify an installed copy.
+_Avoid_: Hermes package, Hermes plugin (that is the installed copy under Hermes's home)
 
 **Account plugin**:
 A Plugin claude.ai syncs into Claude Code for the account, listed by `claude plugin list` as `<id>@synced` and kept under `~/.claude/plugins/synced/`. The tool never installs or removes one; `status` compares it with the Release, and `sync` removes what hides or duplicates one once `claude` lists it present and switched on.

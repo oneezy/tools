@@ -143,7 +143,7 @@ Options
                          session): the library's built plugins installed through the harness's own commands (never a
                          settings edit by this tool), verified (listed, and a skill resolving), and only then the loose
                          links of their skills removed. links: one loose link per skill, and the plugins this tool
-                         installed uninstalled. Goose, Hermes and projects always get links. Either flag is
+                         installed uninstalled. Goose and projects always get links. Either flag is
                          remembered in ${LOCAL_NAME}
   --projects <names|*>   repos under --dev to sync; "*" for all; --no-projects for none
   --dev <dir>            folder whose git repos are offered (default: here, or the parent when here is a repo)
@@ -579,10 +579,10 @@ async function main(): Promise<void> {
   const choices = await decide(args, local, lib, table, cwd, interactive);
   if (!choices) return p.cancel("nothing changed");
   if (!args.plan) saveLocal(lib.root, choices);
-  // until #154: Claude Code's form is the account plugins (ADR-0007), which the machine sync above served; the old run
-  // would put the tool's plugins and links back there, so it serves the other harnesses only
+  // until #154: Claude Code's form is the account plugins and Hermes's the plugins from GitHub (ADR-0007), which the
+  // machine sync above served; the old run would put the tool's plugins and links back there, so it serves the others only
   if (machineSync) {
-    choices.agents = choices.agents.filter((h) => h.id !== "claude-code");
+    choices.agents = choices.agents.filter((h) => h.id !== "claude-code" && h.id !== "hermes");
     if (!choices.agents.length) return printReport(setup, args, { entrypoints: [] });
   }
 

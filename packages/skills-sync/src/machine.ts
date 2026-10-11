@@ -14,8 +14,6 @@ import { githubRepo, hermesPlugins, type HermesActivation, type HermesInstall } 
 import { codexPluginSkills, harnessCli, listInstalled, runner, supportsPlugins } from "./install.js";
 import { homeLibrary } from "./library.js";
 
-export { skillsIn };
-
 /** The library's catalog name: the marketplace a plugin this tool installed comes from, on Claude Code and Codex. */
 export const LIBRARY_MARKETPLACE = "oneezy-skills";
 
@@ -130,10 +128,10 @@ function probeHarness(h: Harness, env: NodeJS.ProcessEnv, roots: string[], globa
   const cli = harnessCli(h, env);
   if (cli) {
     state.cli = cli.file;
+    // Hermes is not asked: its plugins are read below from its files (its list command resolves the plugin catalog
+    // over the network on every call)
     if (!cli.file) state.note = `no ${cli.bin} on PATH`;
-    else if (h.id === "hermes") {
-      /* read below from hermes's files: its list command resolves the plugin catalog over the network on every call */
-    } else {
+    else if (h.id !== "hermes") {
       const run = runner(cli.file);
       const listed = supportsPlugins(run) ? listInstalled(h, run) : null;
       if (!listed) state.note = `${cli.bin} cannot list its plugins`;
