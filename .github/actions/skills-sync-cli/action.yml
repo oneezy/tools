@@ -21,6 +21,9 @@ runs:
       uses: actions/setup-node@v5
       with:
         node-version: 24
+        # setup-node v5 turns on a package-manager cache from the checkout's packageManager field (pnpm here), and
+        # fails when pnpm is not on PATH; this action installs one package with npm and caches nothing
+        package-manager-cache: false
 
     - name: Install @oneezy/skills-sync@latest from npm
       id: install
