@@ -7,6 +7,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { afterAll, afterEach, beforeAll, test } from "vite-plus/test";
 import { lexists, linkTarget } from "../src/fs.js";
+import { VERSION } from "../src/version.js";
 import { fixtureRelease, startFakeGithub, type FakeGithub } from "./fixtures/fake-github/fake-github.mjs";
 import {
   cli,
@@ -501,7 +502,8 @@ test("--library names another release repo; a token from the environment is sent
     });
     assert.ok(
       r.requests.every(
-        (q) => q.headers.authorization === "Bearer fixture-token" && q.headers["user-agent"] === "skills-sync/0.7.6",
+        (q) =>
+          q.headers.authorization === "Bearer fixture-token" && q.headers["user-agent"] === `skills-sync/${VERSION}`,
       ),
       JSON.stringify(r.requests),
     );
