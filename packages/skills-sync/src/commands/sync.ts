@@ -21,8 +21,8 @@ export const FORMS: Record<string, FormFn> = { "claude-code": claudeCode, codex,
 
 /**
  * The harnesses whose form is built (not a placeholder note): the old library-based run in cli.ts leaves them to the
- * machine sync, or it would link their skills and register the library folder again. #149 and #153 add theirs; #154
- * removes this with the old run.
+ * machine sync, or it would link their skills and register the library folder again. #153 adds Hermes; #154 removes
+ * this with the old run.
  */
 export const BUILT_FORMS: ReadonlySet<string> = new Set(["claude-code", "codex"]);
 

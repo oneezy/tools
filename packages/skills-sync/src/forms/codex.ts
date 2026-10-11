@@ -25,18 +25,9 @@ import {
   type Run,
 } from "../install.js";
 import { homeLibrary } from "../library.js";
-import { LIBRARY_MARKETPLACE, type HarnessState } from "../machine.js";
+import { LIBRARY_MARKETPLACE, type CliPlugin, type HarnessState } from "../machine.js";
 import type { Action } from "../plan.js";
 import type { ReleasePlugin } from "../release.js";
-
-/** One plugin as Codex lists it right now, with the skills its prompt input shows it loading (null: not readable). */
-interface Have {
-  name: string;
-  marketplace: string;
-  version: string | null;
-  enabled: boolean;
-  skills: string[] | null;
-}
 
 export const codex: FormFn = (release, state, _machine, options) => {
   const plan = options.plan;
@@ -51,7 +42,9 @@ export const codex: FormFn = (release, state, _machine, options) => {
   if (!release)
     return [{ kind: "note", path: where(form), note: "latest release not read; nothing installed, nothing removed" }];
   if (!state.cli)
-    return [{ kind: "note", path: where(form), note: `no codex on PATH; nothing installed, nothing removed` }];
+    return [{ kind: "note", path: where(form), note: "no codex on PATH; nothing installed, nothing removed" }];
+  // the probe's note for a codex that cannot list its plugins; its other note (the prompt input) leaves the listing
+  // usable, and shows per plugin at verification
   if (state.note?.endsWith("cannot list its plugins")) {
     conflict(form, `${state.note}; nothing installed, nothing removed`);
     return out;
@@ -107,22 +100,22 @@ export const codex: FormFn = (release, state, _machine, options) => {
 
   // 2. the plugins: every plugin of the release, until tools#154 reads the selection from skills-sync.json at the release
   const wanted = Object.values(release.plugins).sort((a, b) => a.id.localeCompare(b.id));
-  let have = marketplaceChanged && !plan ? inventory(h, run) : fromProbe(state);
+  const have = marketplaceChanged && !plan ? inventory(h, run) : state.installed;
   if (!have) {
     conflict(form, "codex could not list its plugins after the marketplace change; nothing installed, nothing removed");
     return out;
   }
-  const mine = (list: Have[], p: ReleasePlugin) => list.find((x) => x.name === p.id && x.marketplace === mkt);
-  const v = (x: string | null) => x ?? "no version";
+  const mine = (list: CliPlugin[], p: ReleasePlugin) => list.find((x) => x.id === p.id && x.marketplace === mkt);
+  const shown = (version: string | null) => version ?? "no version";
   /** plugins whose install or upgrade is only planned: under --plan they count as verified, so the plan lists every removal */
   const assumed = new Set<string>();
   /** plugins not to verify: a failed add, or left disabled */
   const skipped = new Set<string>();
-  const behind: ReleasePlugin[] = [];
+  const behind: Array<{ p: ReleasePlugin; now: CliPlugin }> = [];
   let wrote = false;
   for (const p of wanted) {
     const id = `${p.id}@${mkt}`;
-    for (const other of have.filter((x) => x.name === p.id && x.marketplace !== mkt))
+    for (const other of have.filter((x) => x.id === p.id && x.marketplace !== mkt))
       out.push({
         kind: "note",
         path: where(`plugin ${p.id}@${other.marketplace}`),
@@ -143,13 +136,13 @@ export const codex: FormFn = (release, state, _machine, options) => {
       out.push({
         kind: "note",
         path: where(`plugin ${id}`),
-        note: `installed but disabled; left as it is, its copies stay`,
+        note: "installed but disabled; left as it is, its copies stay",
       });
       skipped.add(p.id);
       continue;
     }
-    if (isBehind(current, p)) behind.push(p);
-    else out.push({ kind: "skip", path: where(`plugin ${id}`), note: `installed ${v(current.version)}` });
+    if (isBehind(current, p)) behind.push({ p, now: current });
+    else out.push({ kind: "skip", path: where(`plugin ${id}`), note: `installed ${shown(current.version)}` });
   }
 
   // 3. one upgrade for the harness when any plugin is behind, or right after the marketplace moved from a folder to
@@ -158,24 +151,30 @@ export const codex: FormFn = (release, state, _machine, options) => {
   if (behind.length || replaced) {
     const what = behind.length
       ? behind
-          .map((p) => {
-            const now = mine(have!, p)!;
-            return p.version !== null && now.version !== p.version
-              ? `${p.id} ${v(now.version)} -> ${p.version}`
-              : `${p.id} missing ${missing(now.skills ?? [], p).join(", ")}`;
-          })
+          .map(({ p, now }) =>
+            p.version !== null && now.version !== p.version
+              ? `${p.id} ${shown(now.version)} -> ${p.version}`
+              : `${p.id} missing ${missing(now.skills ?? [], p).join(", ")}`,
+          )
           .join(", ")
       : "caches reinstalled from GitHub";
     out.push({ kind: "install", path: where(`marketplace ${mkt}`), note: `upgrade: ${what}` });
-    if (plan) for (const p of behind) assumed.add(p.id);
-    else if (upgradeMarketplace(h, run, mkt)) wrote = true;
+    if (plan) for (const { p } of behind) assumed.add(p.id);
     else {
-      conflict(
-        `marketplace ${mkt}`,
-        "codex plugin marketplace upgrade failed; the plugins behind the release and their copies stay",
-        run,
-      );
-      for (const p of behind) skipped.add(p.id);
+      const upgraded = upgradeMarketplace(h, run, mkt);
+      if (!upgraded) {
+        conflict(
+          `marketplace ${mkt}`,
+          "codex plugin marketplace upgrade failed; the plugins behind the release and their copies stay",
+          run,
+        );
+        for (const { p } of behind) skipped.add(p.id);
+      } else {
+        wrote = true;
+        // a plugin it could not reinstall fails verification below, and keeps its copies
+        if (upgraded.errors.length)
+          conflict(`marketplace ${mkt}`, `codex plugin marketplace upgrade reported: ${upgraded.errors.join("; ")}`);
+      }
     }
   }
 
@@ -199,7 +198,7 @@ export const codex: FormFn = (release, state, _machine, options) => {
       : !now.enabled
         ? "codex lists it disabled"
         : p.version !== null && now.version !== p.version
-          ? `installed ${v(now.version)}, the release has ${p.version}`
+          ? `installed ${shown(now.version)}, the release has ${p.version}`
           : now.skills === null
             ? "codex cannot list its plugin skills"
             : missing(now.skills, p).length
@@ -258,28 +257,21 @@ export const codex: FormFn = (release, state, _machine, options) => {
   return out;
 };
 
-/** What the probe found Codex listing, as the form compares it. */
-function fromProbe(state: HarnessState): Have[] {
-  return state.installed.map((p) => ({
-    name: p.id,
-    marketplace: p.marketplace,
-    version: p.version,
-    enabled: p.enabled,
-    skills: p.skills,
-  }));
-}
-
-/** Codex's listing right now, with the skills its prompt input shows each plugin loading; null when it cannot list. */
-function inventory(h: HarnessState["harness"], run: Run): Have[] | null {
+/**
+ * Codex's listing right now, as the probe shapes it, with the skills its prompt input shows each plugin loading (null
+ * when it cannot render them); null when Codex cannot list.
+ */
+function inventory(h: HarnessState["harness"], run: Run): CliPlugin[] | null {
   const listed = listInstalled(h, run);
   if (!listed) return null;
   const skills = listed.length ? codexPluginSkills(run) : new Map<string, string[]>();
   return listed.map((i) => ({
-    name: i.name,
+    id: i.name,
     marketplace: i.marketplace,
     version: i.version,
     enabled: i.enabled,
     skills: skills ? (skills.get(i.name) ?? []) : null,
+    path: i.folder,
   }));
 }
 
@@ -292,7 +284,7 @@ function missing(loaded: string[], p: ReleasePlugin): string[] {
  * Behind the release: another version (a plain string compare, Codex installs exactly the manifest's), or, for a plugin
  * without a version, or one whose skills were read, a release skill it does not load.
  */
-function isBehind(have: Have, p: ReleasePlugin): boolean {
+function isBehind(have: CliPlugin, p: ReleasePlugin): boolean {
   if (p.version !== null && have.version !== p.version) return true;
   return have.skills !== null && missing(have.skills, p).length > 0;
 }

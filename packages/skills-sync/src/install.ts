@@ -88,8 +88,11 @@ interface Driver {
   settings: (h: Harness) => string;
   marketplaces: (run: Run) => Marketplace[] | null;
   installed: (run: Run) => Installed[] | null;
-  addMarketplace: (run: Run, root: string) => boolean;
+  /** register a marketplace from a local folder (or, Codex, owner/repo on GitHub); null when the command failed */
+  addMarketplace: (run: Run, source: string) => MarketplaceAdded | null;
   removeMarketplace: (run: Run, name: string) => boolean;
+  /** Codex: refresh a Git marketplace's snapshot and reinstall its plugins; the errors it reported, null when it failed */
+  upgradeMarketplace?: (run: Run, name: string) => { errors: string[] } | null;
   install: (run: Run, id: string) => boolean;
   update: (run: Run, id: string) => boolean;
   uninstall: (run: Run, id: string) => boolean;
@@ -173,7 +176,7 @@ const claude: Driver = {
         ...(str(p.scope) ? { scope: p.scope as string } : {}),
       }));
   },
-  addMarketplace: (run, root) => claudeWrite(run, ["plugin", "marketplace", "add"], [root]),
+  addMarketplace: (run, root) => (claudeWrite(run, ["plugin", "marketplace", "add"], [root]) ? { name: null } : null),
   removeMarketplace: (run, name) => claudeWrite(run, ["plugin", "marketplace", "remove"], [name]),
   install: (run, id) => claudeWrite(run, ["plugin", "install"], [id, "--scope", "user"]),
   update: (run, id) => claudeWrite(run, ["plugin", "update"], [id, "--scope", "user"]),
@@ -228,8 +231,9 @@ const codex: Driver = {
         folder: null,
       }));
   },
-  addMarketplace: (run, root) => !!codexMarketplaceAdd(run, root),
+  addMarketplace: codexMarketplaceAdd,
   removeMarketplace: (run, name) => run(["plugin", "marketplace", "remove", name, "--json"]).ok,
+  upgradeMarketplace: codexMarketplaceUpgrade,
   install: (run, id) => run(["plugin", "add", id, "--json"]).ok,
   update: (run, id) => run(["plugin", "add", id, "--json"]).ok,
   uninstall: (run, id) => run(["plugin", "remove", id, "--json"]).ok,
@@ -324,18 +328,30 @@ export function codexPluginSkills(run: Run): Map<string, string[]> | null {
   return out;
 }
 
-/** What a marketplace add answered: the name the harness gave the marketplace (Codex says it) and whether it was there already. */
+/** What a marketplace add answered: the name the harness gave the marketplace (Codex says it; Claude Code does not). */
 export interface MarketplaceAdded {
   name: string | null;
-  alreadyAdded: boolean;
 }
 
-/** `codex plugin marketplace add <source> --json`: its JSON when it worked, null when it failed (run.failure says why). */
+/** `codex plugin marketplace add <source> --json`: its answer when it worked, null when it failed (run.failure says why). */
 function codexMarketplaceAdd(run: Run, source: string): MarketplaceAdded | null {
   const r = run(["plugin", "marketplace", "add", source, "--json"]);
   if (!r.ok) return null;
-  const v = json(r.out) as { marketplaceName?: unknown; alreadyAdded?: unknown } | null;
-  return { name: str(v?.marketplaceName), alreadyAdded: v?.alreadyAdded === true };
+  const v = json(r.out) as { marketplaceName?: unknown } | null;
+  return { name: str(v?.marketplaceName) };
+}
+
+/**
+ * `codex plugin marketplace upgrade <name> --json`: refreshes a Git marketplace's snapshot when the remote moved and
+ * force-reinstalls every plugin installed from it (the first upgrade after an add reinstalls even when nothing moved).
+ * The errors it reported, as strings; null when the command failed (run.failure says why).
+ */
+function codexMarketplaceUpgrade(run: Run, name: string): { errors: string[] } | null {
+  const r = run(["plugin", "marketplace", "upgrade", name, "--json"]);
+  if (!r.ok) return null;
+  const v = json(r.out) as { errors?: unknown } | null;
+  const errors = Array.isArray(v?.errors) ? v.errors.map((e) => (typeof e === "string" ? e : JSON.stringify(e))) : [];
+  return { errors };
 }
 
 /** The marketplaces the harness's CLI lists; null when it cannot list them. */
@@ -345,13 +361,10 @@ export function listMarketplaces(h: Harness, run: Run): Marketplace[] | null {
 
 /**
  * Register a marketplace from `source`: a local folder, or for Codex `owner/repo` on GitHub (and a Git URL). Null when the
- * command failed (run.failure holds the diagnostic); Claude Code names no marketplace in its answer.
+ * command failed (run.failure holds the diagnostic) or the harness has no driver.
  */
 export function addMarketplace(h: Harness, run: Run, source: string): MarketplaceAdded | null {
-  const d = DRIVERS[h.id];
-  if (!d) return null;
-  if (h.id === "codex") return codexMarketplaceAdd(run, source);
-  return d.addMarketplace(run, source) ? { name: null, alreadyAdded: false } : null;
+  return DRIVERS[h.id]?.addMarketplace(run, source) ?? null;
 }
 
 /** Unregister a marketplace by name. Codex keeps the plugins installed from it; Claude Code uninstalls them with it. */
@@ -360,23 +373,11 @@ export function removeMarketplace(h: Harness, run: Run, name: string): boolean {
 }
 
 /**
- * Codex: `codex plugin marketplace upgrade <name> --json` refreshes a Git marketplace's snapshot when the remote moved
- * and force-reinstalls every plugin installed from it. The roots it upgraded (empty when it was up to date; the first
- * upgrade after an add reports one even when nothing moved) and its errors; null when the command failed, or for a
- * harness without the command.
+ * Upgrade a marketplace (Codex: refresh its Git snapshot and reinstall its plugins). The errors the command reported;
+ * null when it failed, or for a harness without the command.
  */
-export function upgradeMarketplace(
-  h: Harness,
-  run: Run,
-  name: string,
-): { upgradedRoots: string[]; errors: string[] } | null {
-  if (h.id !== "codex") return null;
-  const r = run(["plugin", "marketplace", "upgrade", name, "--json"]);
-  if (!r.ok) return null;
-  const v = json(r.out) as { upgradedRoots?: unknown; errors?: unknown } | null;
-  const strings = (x: unknown) =>
-    Array.isArray(x) ? x.map((e) => (typeof e === "string" ? e : JSON.stringify(e))) : [];
-  return { upgradedRoots: strings(v?.upgradedRoots), errors: strings(v?.errors) };
+export function upgradeMarketplace(h: Harness, run: Run, name: string): { errors: string[] } | null {
+  return DRIVERS[h.id]?.upgradeMarketplace?.(run, name) ?? null;
 }
 
 /** Install `<id>@<marketplace>` through the harness's CLI (Codex's add is idempotent). False when the command failed. */
