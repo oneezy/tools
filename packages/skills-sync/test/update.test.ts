@@ -31,6 +31,7 @@ function cli(...args: string[]): { status: number | null; stdout: string; stderr
     TMPDIR: tmpDir,
   };
   for (const k of HARNESS_ENV) delete env[k];
+  delete env.GITHUB_ACTIONS; // the same lines on a laptop and in CI
   return spawnSync(process.execPath, [CLI, ...args, "--repo", root], { encoding: "utf8", cwd: root, env });
 }
 
@@ -719,4 +720,148 @@ test("a source committed in UTC is locked with its date spelled Z, whatever git 
   assert.equal(json(LOCK).sources.up.date, "2026-10-06T06:44:34Z");
   const check = cli("check");
   assert.equal(check.status, 0, check.stdout + check.stderr);
+});
+
+test("a listed source names every upstream skill folder it does not select: one 'not selected upstream' line per source on stderr (with --json and --quiet too) and `unselected` in --json, exit 0; a skill upstream adds later joins the line, never the lock; the line stands on an update with nothing new, and after an older snapshot that recorded no listing", () => {
+  const other = new Upstream(path.join(base, "other"));
+  other.skill("a", "other one");
+  other.skill("b", "other two");
+  other.commit("one");
+  config({ up: source(up), other: source(other, { skills: { a: "other-a" } }) });
+  const r = cli("update", "--json");
+  assert.equal(r.status, 0, r.stderr);
+  assert.deepEqual(JSON.parse(r.stdout).unselected, ["other:b", "up:c"]);
+  assert.match(r.stderr, /^other: not selected upstream: b\b/m);
+  assert.match(r.stderr, /^up: not selected upstream: c\b/m);
+
+  up.skill("poteto-help", "new upstream");
+  up.commit("a new skill");
+  const t = cli("update", "--quiet");
+  assert.equal(t.status, 0, t.stderr);
+  assert.match(t.stderr, /^up: not selected upstream: c, poteto-help \(select them in skills-sync\.json/m);
+  assert.ok(!("poteto-help" in json(LOCK).sources.up.skills), "a listed source never takes an unselected skill");
+  assert.ok(!fs.existsSync(path.join(root, ".agents", "skills", "poteto-help")));
+
+  const again = cli("update", "--json");
+  assert.equal(again.status, 0, again.stderr);
+  assert.deepEqual(
+    JSON.parse(again.stdout).unselected,
+    ["other:b", "up:c", "up:poteto-help"],
+    "nothing moved, still named",
+  );
+
+  const metaFile = path.join(root, "upstream", "up", ".snapshot.json");
+  const meta = JSON.parse(fs.readFileSync(metaFile, "utf8"));
+  assert.deepEqual(
+    meta.upstream,
+    ["a", "b", "c", "poteto-help"],
+    "the snapshot records what upstream has at its commit",
+  );
+  delete meta.upstream;
+  fs.writeFileSync(metaFile, JSON.stringify(meta, null, 2) + "\n");
+  const old = cli("update", "--json");
+  assert.equal(old.status, 0, old.stderr);
+  assert.deepEqual(
+    JSON.parse(old.stdout).unselected,
+    ["other:b", "up:c", "up:poteto-help"],
+    "an older snapshot is listed again",
+  );
+  assert.deepEqual(json(path.join("upstream", "up", ".snapshot.json")).upstream, ["a", "b", "c", "poteto-help"]);
+
+  config({ up: source(up, { skills: ["a", "b", "c", "poteto-help"] }), other: source(other, { skills: "*" }) });
+  const all = cli("update", "--json");
+  assert.equal(all.status, 0, all.stderr);
+  assert.deepEqual(JSON.parse(all.stdout).unselected, []);
+  assert.doesNotMatch(all.stderr, /not selected upstream/);
+});
+
+test("under GitHub Actions the not-selected line is a ::warning:: workflow command, so the daily update flags it on the run page while it still lands", () => {
+  config({ up: source(up) });
+  const env: NodeJS.ProcessEnv = {
+    ...process.env,
+    HOME: homeDir,
+    USERPROFILE: homeDir,
+    TMP: tmpDir,
+    TEMP: tmpDir,
+    TMPDIR: tmpDir,
+    GITHUB_ACTIONS: "true",
+  };
+  for (const k of HARNESS_ENV) delete env[k];
+  const r = spawnSync(process.execPath, [CLI, "update", "--json", "--repo", root], {
+    encoding: "utf8",
+    cwd: root,
+    env,
+  });
+  assert.equal(r.status, 0, r.stderr);
+  assert.match(r.stderr, /^::warning title=skills-sync update::up: not selected upstream: c /m);
+});
+
+test('"skills": "*" selects every skill folder under the root with "rename" for renames: a skill upstream adds is taken on the next update, one it removes leaves the working set and the lock; --frozen restores the lock; build packages them; add --skills "*" writes the form', () => {
+  config({ up: source(up, { skills: "*", rename: { b: "x-b" } }) });
+  const r = cli("update", "--json");
+  assert.equal(r.status, 0, r.stderr);
+  assert.deepEqual(JSON.parse(r.stdout).unselected, []);
+  assert.deepEqual(Object.keys(json(LOCK).sources.up.skills), ["a", "c", "x-b"]);
+  assert.equal(json(LOCK).sources.up.skills["x-b"].path, "skills/b");
+  assert.ok(working("x-b").startsWith("---\nname: x-b\n"));
+  assert.ok(!fs.existsSync(path.join(root, ".agents", "skills", "b")));
+
+  up.skill("poteto-help", "new upstream");
+  fs.rmSync(path.join(up.dir, "skills", "c"), { recursive: true });
+  const head = up.commit("one in, one out");
+  const t = cli("update", "--json");
+  assert.equal(t.status, 0, t.stderr);
+  assert.deepEqual(JSON.parse(t.stdout).gone, [], "a skill upstream removed is not gone: it is no longer selected");
+  assert.equal(json(LOCK).sources.up.commit, head);
+  assert.deepEqual(Object.keys(json(LOCK).sources.up.skills), ["a", "poteto-help", "x-b"]);
+  assert.equal(working("poteto-help"), "---\nname: poteto-help\ndescription: poteto-help skill\n---\nnew upstream\n");
+  assert.ok(!fs.existsSync(path.join(root, ".agents", "skills", "c")));
+  assert.ok(!fs.existsSync(path.join(root, "upstream", "up", "skills", "c")));
+  const check = cli("check");
+  assert.equal(check.status, 0, check.stdout + check.stderr);
+
+  fs.rmSync(path.join(root, ".agents"), { recursive: true });
+  up.skill("later");
+  up.commit("after the lock");
+  const frozen = cli("refresh", "--frozen", "--quiet");
+  assert.equal(frozen.status, 0, frozen.stderr);
+  assert.deepEqual(fs.readdirSync(path.join(root, ".agents", "skills")).sort(), ["a", "poteto-help", "x-b"]);
+
+  const cfg = JSON.parse(text("skills-sync.json"));
+  cfg.generate = { skills: true, plugins: true };
+  cfg.plugins = { up: { displayName: "Up", source: "up" } };
+  fs.writeFileSync(path.join(root, "skills-sync.json"), JSON.stringify(cfg, null, 2) + "\n");
+  const b = cli("build", "--plugins", "--quiet");
+  assert.equal(b.status, 0, b.stdout + b.stderr);
+  assert.deepEqual(fs.readdirSync(path.join(root, "plugins", "up", "skills")).sort(), ["a", "poteto-help", "x-b"]);
+  assert.match(text("plugins/up/NOTICE.md"), /x-b \(renamed from b\)/);
+
+  const other = new Upstream(path.join(base, "other"));
+  other.skill("p");
+  other.skill("q");
+  other.commit("one");
+  const added = cli("add", other.dir, "--id", "every", "--skills", "*", "--as", "p=every-p", "--no-plugin", "--json");
+  assert.equal(added.status, 0, added.stderr);
+  const entry = JSON.parse(text("skills-sync.json")).sources.every;
+  assert.equal(entry.skills, "*");
+  assert.deepEqual(entry.rename, { p: "every-p" });
+  assert.deepEqual(Object.keys(json(LOCK).sources.every.skills), ["every-p", "q"]);
+});
+
+test('the config schema admits "skills": "*" and a "rename" map beside it; "rename" beside a list or a map, and any other string, are refused naming the path', () => {
+  const run = (skills: unknown, extra: Record<string, unknown> = {}) => {
+    config({ up: source(up, { skills, ...extra }) });
+    return cli("update", "--quiet");
+  };
+  const ok = run("*", { rename: { b: "x-b" } });
+  assert.equal(ok.status, 0, ok.stderr);
+  const all = run("all");
+  assert.equal(all.status, 1);
+  assert.match(all.stderr, /\$\.sources\.up\.skills/);
+  const listed = run(["a"], { rename: { a: "x-a" } });
+  assert.equal(listed.status, 1);
+  assert.match(listed.stderr, /\$\.sources\.up\.skills: must be "\*" \(beside rename\)/);
+  const mapped = run({ a: "a" }, { rename: { a: "x-a" } });
+  assert.equal(mapped.status, 1);
+  assert.match(mapped.stderr, /\$\.sources\.up\.skills: must be "\*" \(beside rename\)/);
 });

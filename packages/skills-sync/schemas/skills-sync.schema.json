@@ -172,6 +172,15 @@
       "type": "object",
       "required": ["repo", "ref", "skills"],
       "additionalProperties": false,
+      "dependentSchemas": {
+        "rename": {
+          "properties": {
+            "skills": {
+              "const": "*"
+            }
+          }
+        }
+      },
       "properties": {
         "repo": {
           "description": "owner/repo on GitHub, a git URL, or a local path.",
@@ -193,7 +202,7 @@
           "type": "string"
         },
         "skills": {
-          "description": "Selected skill folder names: a list, or a map from upstream name to working-set name for renames.",
+          "description": "Selected skill folder names: a list, a map from upstream name to working-set name for renames, or \"*\" for every skill folder under root (renames then go in rename). With a list or a map, update names every upstream skill folder the source does not select.",
           "oneOf": [
             {
               "type": "array",
@@ -210,8 +219,22 @@
                   "$ref": "#/$defs/name"
                 }
               }
+            },
+            {
+              "description": "Every skill folder under root at the source's commit: a skill upstream adds is taken on the next update, one it removes leaves. Renames go in rename.",
+              "const": "*"
             }
           ]
+        },
+        "rename": {
+          "description": "Beside \"skills\": \"*\" only: upstream folder name -> working-set name, for the skills taken under another name (tdd -> pstack-tdd). With a list nothing is renamed, and a map in skills says each name already.",
+          "type": "object",
+          "additionalProperties": false,
+          "patternProperties": {
+            "^[A-Za-z0-9][A-Za-z0-9._-]*$": {
+              "$ref": "#/$defs/name"
+            }
+          }
         },
         "pins": {
           "description": "Per-skill commits (by upstream folder name) that hold a skill while its siblings follow ref; edit the commit to move it.",

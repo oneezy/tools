@@ -46,8 +46,10 @@ export interface Source {
   version?: string;
   /** where skill folders live in the repo; the repo root when omitted */
   root?: string;
-  /** selected folder names, or a map upstream name -> working-set name */
-  skills: string[] | Record<string, string>;
+  /** selected folder names, a map upstream name -> working-set name, or "*": every skill folder under root at the commit */
+  skills: string[] | Record<string, string> | "*";
+  /** beside "skills": "*" only: upstream name -> working-set name for the skills taken under another name */
+  rename?: Record<string, string>;
   /** per-skill commits (by upstream folder name) that hold a skill while its siblings follow ref */
   pins?: Record<string, string>;
   /** upstream paths of the LICENSE and README files to carry */
@@ -81,9 +83,36 @@ export interface Selected {
   name: string;
 }
 
-export function selection(s: Source): Selected[] {
-  const pairs = Array.isArray(s.skills) ? s.skills.map((n) => [n, n] as const) : Object.entries(s.skills);
+/** Whether a source selects every skill folder under its root ("skills": "*"), so what it takes is what upstream has. */
+export function selectsAll(s: Source): boolean {
+  return s.skills === "*";
+}
+
+/**
+ * The skills a source selects, sorted by upstream name. A list or a map is the selection itself. "*" selects every name
+ * in `upstream` (the skill folders under the root at the source's commit as refresh lists them, or the ones a lock or a
+ * snapshot holds) and every pinned one, each under its "rename" name when it has one; `upstream` is unused otherwise.
+ */
+export function selection(s: Source, upstream: Iterable<string> = []): Selected[] {
+  const pairs: Array<readonly [string, string]> =
+    s.skills === "*"
+      ? [...new Set([...upstream, ...Object.keys(s.pins ?? {})])].map((n) => [n, s.rename?.[n] ?? n] as const)
+      : Array.isArray(s.skills)
+        ? s.skills.map((n) => [n, n] as const)
+        : Object.entries(s.skills);
   return pairs.map(([upstream, name]) => ({ upstream, name })).sort((a, b) => cmp(a.upstream, b.upstream));
+}
+
+/** The upstream folder names of a locked source's skills (each path's last segment): a "*" selection as the lock has it. */
+export function lockedUpstream(skills: Record<string, { path: string }> | undefined): string[] {
+  return Object.values(skills ?? {}).map((k) => path.posix.basename(k.path));
+}
+
+/** A source's renames, working-set name -> upstream name: the map form's, or "rename" beside "*". */
+export function renamesOf(s: Source): Map<string, string> {
+  const pairs =
+    s.skills === "*" ? Object.entries(s.rename ?? {}) : Array.isArray(s.skills) ? [] : Object.entries(s.skills);
+  return new Map(pairs.filter(([upstream, name]) => upstream !== name).map(([upstream, name]) => [name, upstream]));
 }
 
 /** The config, validated against the shipped schema, with the switches, sources and plugins filled in when absent; throws with every problem listed. */
