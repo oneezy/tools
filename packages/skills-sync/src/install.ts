@@ -444,13 +444,17 @@ export function which(bin: string, env: NodeJS.ProcessEnv = process.env): string
   return null;
 }
 
-/** Run a harness CLI with no TTY: a .cmd shim (npm's, on Windows) through the shell, anything else directly. */
+/**
+ * Run a harness CLI with no TTY: a .cmd shim (npm's, on Windows) through the shell, anything else directly. The shell
+ * gets one command line, quoted here for cmd.exe, never an args array: Node warns on stderr (DEP0190) for that pair, and
+ * a sync must print nothing it did not mean to.
+ */
 export function runner(file: string, onFailure?: (diagnostic: NonNullable<Action["diagnostic"]>) => void): Run {
   const shell = process.platform === "win32" && /\.(cmd|bat)$/i.test(file);
   const quote = (s: string) => (/[\s&|<>^()%!"]/.test(s) ? `"${s.replace(/"/g, "")}"` : s);
   const run: Run = (args) => {
     const r = shell
-      ? spawnSync(quote(file), args.map(quote), {
+      ? spawnSync([file, ...args].map(quote).join(" "), {
           shell: true,
           encoding: "utf8",
           cwd: os.homedir(),
