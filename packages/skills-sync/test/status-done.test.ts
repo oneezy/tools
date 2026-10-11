@@ -279,7 +279,7 @@ test("a stale global block (an older block's text) is one red line and exit 1; a
     file,
     present: true,
     current: false,
-    status: "stale",
+    status: "outdated",
     ids: ["brain"],
     stamp: null,
     latest: { release: "release-17", sha256: BUILT_IN },

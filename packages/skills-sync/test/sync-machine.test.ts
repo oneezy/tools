@@ -40,6 +40,8 @@ interface SyncJson {
   cloud: boolean;
 }
 
+/** The start marker of the built-in text written when the release cannot be read. */
+const BUILT_IN_START = `<!-- skills-sync:skills:start built-in sha256:${createHash("sha256").update(`${BLOCK_BODY}\n`).digest("hex")} -->`;
 /** The start marker sync writes here: the fixture library's latest release has no SHARED.md, so the built-in text. */
 const START = `<!-- skills-sync:skills:start release-17 sha256:${createHash("sha256").update(`${BLOCK_BODY}\n`).digest("hex")} -->`;
 const END = "<!-- skills-sync:skills:end -->";
@@ -258,7 +260,9 @@ test("a marker mentioned in prose, or inline in a fenced example, is not a marke
   const claude = globalFile(m, "claude-code");
   // a marker is a whole line: one quoted mid-sentence, or sharing its line with other text, is prose
   const mine =
-    "The tool writes `<!-- skills-sync:skills:start -->` markers.\n\n```\n<!-- skills-sync:brain:start --> routing <!-- skills-sync:brain:end -->\n```\n";
+    "The tool writes `<!-- skills-sync:skills:start -->` markers.\n\n```\n<!-- skills-sync:brain:start --> routing <!-- skills-sync:brain:end -->\n```\n" +
+    // whole-line markers with an id that is not the tool's (skills, brain): an example of the user's, text like any other
+    "```\n<!-- skills-sync:example:start -->\nmine\n<!-- skills-sync:example:end -->\n```\n";
   write(claude, mine);
   const r = await cli(m, []);
   assert.equal(r.status, 0, r.stderr);
@@ -270,7 +274,7 @@ test("a marker mentioned in prose, or inline in a fenced example, is not a marke
 test("a file with two managed blocks is left alone and red; the other harness's file is still written", async () => {
   const m = machine();
   globalBlock(m, "claude-code", "brain", "one");
-  globalBlock(m, "claude-code", "other", "two");
+  globalBlock(m, "claude-code", "skills", "two");
   const text = read(globalFile(m, "claude-code"));
   const r = await cli(m, []);
   assert.equal(r.status, 1, r.stderr);
@@ -281,7 +285,7 @@ test("a file with two managed blocks is left alone and red; the other harness's 
     .split("\n")
     .filter((l) => l.startsWith("!"));
   assert.equal(reds.length, 1, r.stdout);
-  assert.ok(reds[0].includes("CLAUDE.md") && reds[0].includes("2 managed blocks (brain, other)"), reds[0]);
+  assert.ok(reds[0].includes("CLAUDE.md") && reds[0].includes("2 managed blocks (brain, skills)"), reds[0]);
   assert.equal(r.stdout.trimEnd().split("\n").at(-1), "3 changed, 0 already right, 1 left alone");
 });
 
@@ -398,19 +402,20 @@ for (const [name, line] of [
     assert.equal(again.stderr, warning);
   });
 
-test("in the cloud with no GitHub reachable the plain line still exits 0 and prints nothing red: no block is written, one line says so", async () => {
+test("in the cloud with no GitHub reachable the plain line still exits 0 and prints nothing red: both blocks get the built-in text, one line says why", async () => {
   const m = machine({ github: null });
   const r = await cli(m, PLAIN_LINE, CLOUD);
   assert.equal(r.status, 0, r.stderr);
   assert.equal(r.stderr, "");
-  // --quiet with nothing changed prints the one line about the block's text and nothing else
+  // --quiet: the two writes, the one line about the block's text, the summary; nothing red
   const lines = r.stdout.trimEnd().split("\n");
-  assert.equal(lines.length, 1, r.stdout);
+  assert.equal(lines.filter((l) => l.startsWith("+ write")).length, 2, r.stdout);
+  assert.ok(!lines.some((l) => l.startsWith("!")), r.stdout);
   assert.match(
-    lines[0],
-    /^\. note\s+SHARED\.md {2}\(not read: latest release not read: .*; every global block kept as it is\)$/,
+    lines.find((l) => l.includes("SHARED.md")) ?? "",
+    /^\. note\s+SHARED\.md {2}\(not read: latest release not read: .*; blocks already there kept as they are, a missing one gets the built-in text\)$/,
   );
-  for (const h of ["claude-code", "codex"] as const) assert.equal(fs.existsSync(globalFile(m, h)), false);
+  for (const h of ["claude-code", "codex"] as const) assert.ok(read(globalFile(m, h)).startsWith(BUILT_IN_START));
   // --json names the error, and nothing is a conflict
   const j = await cli(m, ["--json"], CLOUD);
   assert.equal(j.status, 0, j.stderr);
@@ -470,18 +475,20 @@ test("--plan writes nothing and says what would change, in text and --json", asy
   assert.deepEqual(snapshot(m.home), before);
 });
 
-test("GitHub unreachable: no block is written or changed, one note says so beside the one red line naming the release, exit 1", async () => {
+test("GitHub unreachable: a missing block gets the built-in text, one note says why beside the one red line naming the release, exit 1", async () => {
   const m = machine({ github: null });
   const r = await cli(m, []);
   assert.equal(r.status, 1, r.stderr);
-  for (const h of ["claude-code", "codex"] as const) assert.equal(fs.existsSync(globalFile(m, h)), false);
+  for (const h of ["claude-code", "codex"] as const) assert.ok(read(globalFile(m, h)).startsWith(BUILT_IN_START));
   const out = r.stdout.trimEnd().split("\n");
   const reds = out.filter((l) => l.startsWith("!"));
   assert.equal(reds.length, 1, r.stdout);
   assert.ok(reds[0].includes("oneezy/skills") && reds[0].includes("latest release not read"), reds[0]);
-  assert.equal(out.filter((l) => l.includes("SHARED.md")).length, 1, r.stdout);
-  // the two hook entries need no release
-  assert.equal(out.at(-1), "2 changed, 0 already right, 1 left alone");
+  assert.equal(out.filter((l) => l.includes("SHARED.md  (not read:")).length, 1, r.stdout);
+  // each written block names its text
+  assert.equal(out.filter((l) => l.includes("skills block (built-in text; SHARED.md not read)")).length, 2, r.stdout);
+  // the two blocks and the two hook entries need no release
+  assert.equal(out.at(-1), "4 changed, 0 already right, 1 left alone");
   const j = await cli(m, ["--json"]);
   assert.equal(j.status, 1, j.stderr);
   const s = j.json as unknown as SyncJson;
@@ -507,9 +514,9 @@ test("--library names the release repo as owner/repo: another repo is asked for,
     other.requests.some((q) => q.path === "/repos/other/library/releases/latest"),
     JSON.stringify(other.requests),
   );
-  // the fake has no such repo: red, and without its release there is no block text to write
+  // the fake has no such repo: red, and without its release the block gets the built-in text
   assert.equal(other.status, 1, other.stderr);
-  assert.equal(fs.existsSync(globalFile(m, "claude-code")), false);
+  assert.ok(read(globalFile(m, "claude-code")).startsWith(BUILT_IN_START));
 });
 
 test("--agents picks nothing any more: every detected harness is served and the flag is named once; Hermes has no global instructions file in the table, so it gets a form line and no block", async () => {

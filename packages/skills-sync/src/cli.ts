@@ -51,8 +51,9 @@ Commands
                    SHARED.md at the release's commit, verbatim, its start marker stamped with the release and the
                    text's sha256 (a release without SHARED.md: the tool's built-in text). Before a file's content
                    changes it is copied beside itself (CLAUDE-backup-<UTC yyyymmdd-HHMMSS>.md, AGENTS-backup-...),
-                   never over an earlier backup. GitHub or SHARED.md out of reach keeps every block as it is: one
-                   line, not a conflict. Never a repository file; a block an older version left in one is reported,
+                   never over an earlier backup. GitHub or SHARED.md out of reach keeps a block already there as it
+                   is and gives a missing one the built-in text: one line, not a conflict. HTTPS_PROXY and NO_PROXY
+                   are honoured. Never a repository file; a block an older version left in one is reported,
                    as is the clone an older version kept at ~/.skills-sync. Outside the cloud
                    also one session-start hook entry per harness (~/.claude/settings.json, ~/.codex/hooks.json) running
                    \`npx --yes @oneezy/skills-sync@latest hook\`; other entries are never touched, the old sync-dev.sh

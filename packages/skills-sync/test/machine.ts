@@ -189,6 +189,12 @@ export async function cli(
     "GH_TOKEN",
     "NODE_USE_ENV_PROXY",
     "SKILLS_SYNC_WSL_BIN",
+    "HTTPS_PROXY",
+    "https_proxy",
+    "HTTP_PROXY",
+    "http_proxy",
+    "NO_PROXY",
+    "no_proxy",
   ])
     delete env[k];
   // only the fake CLIs (and git when asked); on Windows the .cmd shims still run, because the shell comes from ComSpec

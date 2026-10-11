@@ -248,7 +248,7 @@ test("GitHub unreachable: the sync's red line goes to stderr, the kept block's o
   const blockLine = lines(r.stdout)[0];
   assert.match(
     blockLine,
-    /^\. note\s+SHARED\.md {2}\(not read: latest release not read: .*; every global block kept as it is\)$/,
+    /^\. note\s+SHARED\.md {2}\(not read: latest release not read: .*; blocks already there kept as they are, a missing one gets the built-in text\)$/,
   );
   assert.deepEqual(lines(r.stdout), [
     blockLine,

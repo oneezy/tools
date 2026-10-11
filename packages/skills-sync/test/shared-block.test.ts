@@ -236,7 +236,10 @@ test("GitHub out of reach: every block is kept as it is, one line says so; in th
   assert.equal(cloud.stderr, "");
   const only = lines(cloud.stdout);
   assert.equal(only.length, 1, cloud.stdout);
-  assert.match(only[0], /^\. note\s+SHARED\.md {2}\(not read: .*; every global block kept as it is\)$/);
+  assert.match(
+    only[0],
+    /^\. note\s+SHARED\.md {2}\(not read: .*; blocks already there kept as they are, a missing one gets the built-in text\)$/,
+  );
   // outside the cloud the block's line is a note too, never a conflict; the release's own red line is the plugins'
   const pc = await cli(m, ["--json"], down);
   assert.deepEqual(snapshot(m.home), before);
@@ -246,12 +249,36 @@ test("GitHub out of reach: every block is kept as it is, one line says so; in th
     about.map((a) => a.kind),
     ["note"],
   );
-  // a fresh machine with GitHub down gets no block at all, rather than a text the next sync would back up and replace
+});
+
+test("in the cloud with the release out of reach, a fresh machine gets the built-in text stamped built-in, exit 0, and status stays green; the next readable release replaces it after a backup", async () => {
   const fresh = machine(null);
   const r = await cli(fresh, ["--quiet"], CLOUD);
   assert.equal(r.status, 0, r.stdout + r.stderr);
-  for (const file of files(fresh)) assert.equal(fs.existsSync(file), false, file);
-  assert.equal(lines(r.stdout).length, 1, r.stdout);
+  for (const file of files(fresh)) assert.equal(read(file), `${block("built-in", `${BLOCK_BODY}\n`)}\n`);
+  const out = lines(r.stdout);
+  assert.equal(out.filter((l) => l.includes("SHARED.md  (not read:")).length, 1, r.stdout);
+  assert.equal(out.filter((l) => l.startsWith("+ write")).length, 2, r.stdout);
+  assert.ok(
+    out.every((l) => !l.startsWith("!")),
+    r.stdout,
+  );
+  // the block is there, its text not compared: a note, nothing red
+  const s = await cli(fresh, ["status"], CLOUD);
+  assert.equal(s.status, 0, s.stdout);
+  assert.ok(s.stdout.includes(": built-in text, not compared ("), s.stdout);
+  // a second offline start keeps it and writes nothing
+  const again = await cli(fresh, ["--quiet"], CLOUD);
+  assert.equal(again.status, 0);
+  assert.equal(lines(again.stdout).length, 1, again.stdout);
+  // GitHub back, with SHARED.md: replaced, one backup each
+  const gh = await library();
+  const back = await cli(fresh, ["--quiet"], { ...CLOUD, SKILLS_SYNC_GITHUB_API: gh.url });
+  assert.equal(back.status, 0, back.stdout);
+  for (const file of files(fresh)) {
+    assert.equal(read(file), `${block("release-17", SHARED_17)}\n`);
+    assert.equal(backups(file).length, 1);
+  }
 });
 
 test("SHARED.md alone failing (GitHub answers 500 for it) keeps the blocks, one note line, exit 0", async () => {
@@ -266,7 +293,10 @@ test("SHARED.md alone failing (GitHub answers 500 for it) keeps the blocks, one 
   assert.deepEqual(snapshot(m.home), before);
   const notes = lines(r.stdout).filter((l) => l.includes("SHARED.md"));
   assert.equal(notes.length, 1, r.stdout);
-  assert.match(notes[0], /^\. note\s+SHARED\.md {2}\(not read: .*500.*; every global block kept as it is\)$/);
+  assert.match(
+    notes[0],
+    /^\. note\s+SHARED\.md {2}\(not read: .*500.*; blocks already there kept as they are, a missing one gets the built-in text\)$/,
+  );
   assert.ok(!lines(r.stdout).some((l) => l.startsWith("!")), r.stdout);
   // status says so too, without calling the block stale or current
   const s = await cli(m, ["status", "--json"]);
@@ -318,7 +348,8 @@ test("status reads only and tells a current block from a stale and a hand-edited
     file: claude,
     present: true,
     current: false,
-    status: "stale",
+    // the --json value predates the word in the line, and its keys are stable
+    status: "outdated",
     ids: ["skills"],
     stamp: { release: "release-17", sha256: hash(SHARED_17) },
     latest: { release: "release-19", sha256: hash(SHARED_19) },

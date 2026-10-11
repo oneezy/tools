@@ -7,8 +7,10 @@
 // release that carries the same text is no change: nothing is rewritten for the stamp alone. Only the bytes between the
 // markers change; everything around them stays as the user wrote it, line endings included. A file whose content
 // changes is copied beside itself first (CLAUDE-backup-<UTC yyyymmdd-HHMMSS>.md), never over an earlier backup. When
-// the text cannot be read (GitHub or SHARED.md out of reach), the block stays as it is. Blocks an older skills-sync left
-// in repositories are found and reported here, never edited.
+// the text cannot be read (GitHub or SHARED.md out of reach), a block already there stays as it is and a file without
+// one gets BLOCK_BODY stamped `built-in`, so a session never starts without one. Only the `skills` and `brain` ids are
+// the tool's: a marker with another id is the user's text. Blocks an older skills-sync left in repositories are found
+// and reported here, never edited.
 import fs from "node:fs";
 import path from "node:path";
 import { hasLinkedParent, lexists, samePath, toHash } from "./fs.js";
@@ -44,11 +46,16 @@ For Brain capture, lookup, agenda, triage, task status or durable context, load 
 
 This delegation supersedes earlier Brain destinations in these instructions and their imports. Retain pinned sources, GitHub and Spaces as historical evidence. If the installed skill or its supported Drive route is unavailable, report that exact blocker and stop dependent Brain operations.`;
 
+/** The release a block written without one is stamped with: the built-in text, written while GitHub was out of reach. */
+export const BUILT_IN = "built-in";
+
 /**
- * A marker is a whole line (trailing blanks allowed), so a mention in prose or a fenced example is not one. A start
- * marker may carry words after its kind: the stamp, `release-26 sha256:<hex>`.
+ * A marker is a whole line (trailing blanks allowed), so a mention in prose is not one; a byte order mark may come
+ * before it (on line 1). Its id is the tool's, `skills` or the old tool's `brain`: a marker with any other id (a
+ * fenced example of the user's) is text like any other. A start marker may carry words after its kind: the stamp,
+ * `release-26 sha256:<hex>`.
  */
-const MARKER = /^<!-- skills-sync:([\w-]+):(start|end)((?: [\w.:-]+)*) -->(?=[ \t]*\r?$)/gm;
+const MARKER = /^(\uFEFF?)<!-- skills-sync:(skills|brain):(start|end)((?: [\w.:-]+)*) -->(?=[ \t]*\r?$)/gm;
 
 export interface ManagedBlock {
   id: string;
@@ -69,14 +76,16 @@ export function findBlocks(text: string): ManagedBlock[] | null {
   const blocks: ManagedBlock[] = [];
   let open: { id: string; start: number; attrs: string; bodyStart: number } | null = null;
   for (const m of text.matchAll(MARKER)) {
-    const [whole, id, kind, attrs] = m;
+    const [whole, bom, id, kind, attrs] = m;
+    // the byte order mark stays where it is, outside the block
+    const at = m.index + bom.length;
     if (kind === "start") {
       if (open) return null;
       const eol = text.indexOf("\n", m.index + whole.length);
-      open = { id, start: m.index, attrs: attrs.trim(), bodyStart: eol < 0 ? text.length : eol + 1 };
+      open = { id, start: at, attrs: attrs.trim(), bodyStart: eol < 0 ? text.length : eol + 1 };
     } else {
       if (!open || open.id !== id) return null;
-      blocks.push({ ...open, end: m.index + whole.length, bodyEnd: m.index });
+      blocks.push({ ...open, end: m.index + whole.length, bodyEnd: at });
       open = null;
     }
   }
@@ -85,7 +94,7 @@ export function findBlocks(text: string): ManagedBlock[] | null {
 
 /** The ids the markers in `text` name, each once, whether or not they pair up. */
 export function blockIds(text: string): string[] {
-  return [...new Set([...text.matchAll(MARKER)].map((m) => m[1]))];
+  return [...new Set([...text.matchAll(MARKER)].map((m) => m[2]))];
 }
 
 /** What a start marker's stamp says: the release the text came from and the sha256 of the text. */
@@ -146,9 +155,15 @@ export function releaseSource(release: Release | null, error: string | null): So
   }
 }
 
-/** "release-26 SHARED.md", or for the built-in text what stands in for it. */
+/** "release-26 SHARED.md", or for the built-in text why it stands in. */
 export function sourceLabel(s: BlockSource): string {
+  if (s.release === BUILT_IN) return `built-in text; ${SHARED_FILE} not read`;
   return s.fallback ? `built-in text; ${s.release} has no ${SHARED_FILE}` : `${s.release} ${SHARED_FILE}`;
+}
+
+/** What a stamp's release names, for a line: "release-25 text", or "built-in text". */
+export function stampLabel(s: Stamp): string {
+  return s.release === BUILT_IN ? "built-in text" : `${s.release} text`;
 }
 
 /**
@@ -171,8 +186,11 @@ export function withBlock(text: string, source: BlockSource): string {
   return text + gap + block + newline;
 }
 
-/** current, stale (an older block, or another text than the latest release's), hand-edited, or unknown (no text read). */
-export type BlockStatus = "current" | "missing" | "stale" | "hand-edited" | "unknown" | "conflict";
+/**
+ * current; outdated (an older block, or another text than the latest release's: "stale" in the lines a user reads, the
+ * --json value kept from before); hand-edited; or unknown (the latest text could not be read).
+ */
+export type BlockStatus = "current" | "missing" | "outdated" | "hand-edited" | "unknown" | "conflict";
 
 /** The block in a global file as the probe finds it, before it is judged against a release's text. */
 export interface BlockState {
@@ -195,9 +213,9 @@ export function blockStatus(b: BlockState, source: BlockSource | null): BlockSta
   if (b.reason) return "conflict";
   if (!b.present) return "missing";
   if (b.handEdited) return "hand-edited";
-  if (!b.stamp || b.ids[0] !== BLOCK_ID) return "stale";
+  if (!b.stamp || b.ids[0] !== BLOCK_ID) return "outdated";
   if (!source) return "unknown";
-  return b.stamp.sha256 === source.sha256 ? "current" : "stale";
+  return b.stamp.sha256 === source.sha256 ? "current" : "outdated";
 }
 
 /** The harness's global instructions file; null for a harness whose table row names none (Hermes today). */
@@ -265,14 +283,15 @@ export function backupName(file: string, now: Date = new Date()): string {
 /**
  * The action that makes `file` carry `source`'s block: a write (checked against the file's hash at apply time, as
  * plan.ts does for every instruction write; an existing file is copied to `backup` first), a skip when it is current,
- * a conflict when it cannot be written. Without a source (the text was not read) only a conflict is worth an action:
- * the block stays as it is, and the run says why once (null).
+ * a conflict when it cannot be written. Without a source (the text was not read) a block already there stays as it is
+ * (null: the run says why once), and a file without one gets the built-in text, stamped `built-in`.
  */
-export function blockAction(file: string, source: BlockSource | null, now: Date = new Date()): Action | null {
+export function blockAction(file: string, given: BlockSource | null, now: Date = new Date()): Action | null {
   const { state, bytes, text } = inspect(file);
-  const status = blockStatus(state, source);
+  const status = blockStatus(state, given);
   if (status === "conflict") return { kind: "conflict", path: file, note: state.reason };
-  if (!source) return null;
+  if (!given && status !== "missing") return null;
+  const source = given ?? blockSource(BUILT_IN, null);
   if (status === "current") return { kind: "skip", path: file, note: "skills block current" };
   const label = sourceLabel(source);
   const why =

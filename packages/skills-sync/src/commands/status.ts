@@ -18,6 +18,7 @@ import {
   releaseSource,
   type BlockSource,
   type BlockState,
+  stampLabel,
   type SourceResult,
   type Stamp,
 } from "../block.js";
@@ -92,10 +93,11 @@ export interface StatusBlock {
   /** the block carries the latest release's text, as its stamp says and its text confirms */
   current: boolean;
   /**
-   * stale: an older block, or another text than the latest release's; hand-edited: its text no longer hashes to its
-   * stamp; unknown: the latest text could not be read, so it is not compared
+   * outdated (the line says stale; the value is kept from before, the keys are stable): an older block, or another text
+   * than the latest release's; hand-edited: its text no longer hashes to its stamp; unknown: the latest text could not
+   * be read, so it is not compared
    */
-  status: "current" | "missing" | "stale" | "hand-edited" | "unknown" | "conflict";
+  status: "current" | "missing" | "outdated" | "hand-edited" | "unknown" | "conflict";
   /** the ids of the managed blocks the file holds (the old tool wrote `brain`) */
   ids: string[];
   /** what the start marker's stamp says: the release the text came from, the text's sha256; null for none */
@@ -202,8 +204,8 @@ export function statusReport(
   checkouts: StatusCheckout[] = [],
 ): StatusReport {
   const lines: StatusLine[] = [];
-  // the cloud reads no release: the line would be red over a GitHub a session start cannot reach; and the old clone
-  // there is the cloud-setup step's evidence, not a note of its own
+  // no release line in the cloud, where the release is read for the block alone: it would be red over a GitHub a
+  // session start cannot reach; and the old clone there is the cloud-setup step's evidence, not a note of its own
   if (!machine.cloud) {
     lines.push(
       release
@@ -461,17 +463,19 @@ function blockLine(b: BlockState, source: BlockSource | null, unread: string | n
       return red(`${at} is missing; run sync`);
     case "hand-edited":
       return red(
-        `${at} is hand-edited (its text no longer matches its ${b.stamp?.release} stamp); run sync to restore it, a backup is made first`,
+        `${at} is hand-edited (its text no longer matches its ${b.stamp?.release ?? "?"} stamp); run sync to restore it, a backup is made first`,
       );
-    case "stale": {
+    case "outdated": {
       if (!b.stamp || !source) return red(`${at} is stale (an older block: ${b.ids.join(", ")}); run sync`);
       const latest = source.fallback
         ? `${source.release} has no SHARED.md, its built-in text differs`
         : `${source.release} has another SHARED.md`;
-      return red(`${at} is stale (${b.stamp.release} text; ${latest}); run sync`);
+      return red(`${at} is stale (${stampLabel(b.stamp)}; ${latest}); run sync`);
     }
     case "unknown":
-      return note(`${at}: ${b.stamp?.release} text, not compared (${unread ?? "the latest text was not read"})`);
+      return note(
+        `${at}: ${b.stamp ? stampLabel(b.stamp) : "its text"}, not compared (${unread ?? "the latest text was not read"})`,
+      );
     default:
       return red(`${at}: ${b.reason ?? "cannot be written"}`);
   }

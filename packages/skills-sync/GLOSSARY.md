@@ -114,11 +114,11 @@ The one managed block `sync` writes into a Harness's global instructions file (`
 _Avoid_: entrypoint (the older per-library manifest), instructions block, brain block (its old id)
 
 **Shared text**:
-`SHARED.md` at the root of the Library, the one canonical text of Justin's global instructions, read at the commit of the latest Release (the commit its Plugins come from) and written as the Global block. A Release without one gets the tool's built-in text instead. When it cannot be read, every Global block stays as it is and one line says so.
+`SHARED.md` at the root of the Library, the one canonical text of Justin's global instructions, read at the commit of the latest Release (the commit its Plugins come from) and written as the Global block. A Release without one gets the tool's built-in text instead. When it cannot be read, a Global block already there stays as it is, a file without one gets the built-in text (Stamp `built-in`), and one line says so.
 _Avoid_: brain routing (its Brain section replaced `brain-routing.md`), shared instructions file
 
 **Stamp**:
-What the Global block's start marker carries after its id: the Release its text was read at and the sha256 of that text (`<!-- skills-sync:skills:start release-26 sha256:<hex> -->`). The text decides: a Release with the same Shared text changes no block; a text that no longer hashes to its Stamp was edited by hand.
+What the Global block's start marker carries after its id: the Release its text was read at and the sha256 of that text (`<!-- skills-sync:skills:start release-26 sha256:<hex> -->`), or `built-in` for the built-in text written while the Shared text could not be read. The text decides: a Release with the same Shared text changes no block; a text that no longer hashes to its Stamp was edited by hand.
 _Avoid_: version marker, checksum
 
 **Backup**:
