@@ -26,8 +26,11 @@ export interface GitHub {
   readonly hasToken: boolean;
   /** GET a JSON resource under the base URL (`/repos/o/r/releases/latest`) */
   getJson<T = unknown>(path: string): Promise<T>;
-  /** GET every page of a list (`/repos/o/r/branches?per_page=100`), following the Link header's rel="next" */
-  getList<T = unknown>(path: string): Promise<T[]>;
+  /**
+   * GET every page of a list (`/repos/o/r/branches?per_page=100`), following the Link header's rel="next"; `signal`
+   * gives up sooner than the request timeout (the hook's deadline)
+   */
+  getList<T = unknown>(path: string, signal?: AbortSignal): Promise<T[]>;
   /** GET a binary resource as GitHub serves release assets: octet-stream, redirects followed */
   download(path: string): Promise<Buffer>;
   /** POST a JSON body (`/repos/o/r/git/refs`) and return the JSON answer */
@@ -58,7 +61,13 @@ export function github(env: NodeJS.ProcessEnv = process.env, fetchImpl: typeof f
     ...(body !== undefined ? { "content-type": "application/json" } : {}),
   });
   // the one place a request is made, so headers, the timeout and the error shape are the same for every call
-  const request = async (path: string, accept: string, method = "GET", body?: string): Promise<Response> => {
+  const request = async (
+    path: string,
+    accept: string,
+    method = "GET",
+    body?: string,
+    signal?: AbortSignal,
+  ): Promise<Response> => {
     const url = baseUrl + path;
     let res: Response;
     try {
@@ -67,7 +76,7 @@ export function github(env: NodeJS.ProcessEnv = process.env, fetchImpl: typeof f
         headers: headers(accept, body),
         body,
         redirect: "follow",
-        signal: AbortSignal.timeout(TIMEOUT_MS),
+        signal: signal ? AbortSignal.any([AbortSignal.timeout(TIMEOUT_MS), signal]) : AbortSignal.timeout(TIMEOUT_MS),
       });
     } catch (error) {
       const cause = (error as { cause?: { code?: string; message?: string } }).cause;
@@ -100,11 +109,11 @@ export function github(env: NodeJS.ProcessEnv = process.env, fetchImpl: typeof f
     async getJson<T>(path: string): Promise<T> {
       return json<T>(await request(path, JSON_ACCEPT), path);
     },
-    async getList<T>(path: string): Promise<T[]> {
+    async getList<T>(path: string, signal?: AbortSignal): Promise<T[]> {
       const items: T[] = [];
       let next: string | null = path;
       while (next) {
-        const res = await request(next, JSON_ACCEPT);
+        const res = await request(next, JSON_ACCEPT, "GET", undefined, signal);
         items.push(...(await json<T[]>(res, next)));
         const link = nextPage(res.headers.get("link"));
         if (!link) break;

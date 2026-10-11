@@ -167,7 +167,7 @@ function gitFolders(): string[] {
 }
 
 export function destroy(m: PretendMachine): void {
-  fs.rmSync(m.base, { recursive: true, force: true, maxRetries: 3 });
+  fs.rmSync(m.base, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 });
 }
 
 /**

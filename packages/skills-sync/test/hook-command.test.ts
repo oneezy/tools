@@ -1,9 +1,9 @@
 // hook, the command the session-start entry runs: the quiet sync, then the checkout duties on real local git
-// repositories (a bare origin per repository under the pretend machine, the clones beside each other, their GitHub
-// origin URL rewritten to the bare repository by url.insteadOf), then the drift line: the branches ahead of dev from
-// the bare origin's refs, the open pull requests from the fake GitHub. The built CLI runs on the pretend machine from
-// inside a checkout; the tests assert what a user sees: stdout, stderr, exit codes, and the checkouts' heads and trees
-// afterwards.
+// repositories, whoever owns them (a bare origin per repository under the pretend machine, the clones beside each
+// other, a GitHub origin URL rewritten to the bare repository by url.insteadOf, or a plain path), then the drift line:
+// the branches ahead of dev from the bare origin's refs, the open pull requests from the fake GitHub. The built CLI
+// runs on the pretend machine from inside a checkout; the tests assert what a user sees: stdout, stderr, exit codes,
+// and the checkouts' heads and trees afterwards.
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
@@ -12,6 +12,7 @@ import { repoOf } from "../src/commands/hook.js";
 import { sha, startFakeGithub, type FakeGithub } from "./fixtures/fake-github/fake-github.mjs";
 import {
   advanceOrigin,
+  bareOrigin,
   checkoutOf,
   cli,
   destroy,
@@ -100,12 +101,16 @@ test("the first run writes the blocks and the hook entries and says so; a clean 
     r.stdout,
   );
   assert.ok(!out.some((l) => l.startsWith("oneezy/tools:")), r.stdout);
-  // GitHub was asked one thing per repository, its open pull requests into dev; the branches were counted locally
+  // GitHub was asked one thing, the session repository's open pull requests into dev; the branches were counted
+  // locally, and the repository beside it gets no drift line and costs no request
   const paths = r.requests.map((q) => q.path);
-  for (const repo of ["oneezy/skills", "oneezy/tools"])
+  for (const [repo, n] of [
+    ["oneezy/skills", 1],
+    ["oneezy/tools", 0],
+  ] as const)
     assert.equal(
       paths.filter((p) => p.startsWith(`/repos/${repo}/pulls?state=open&base=dev`)).length,
-      1,
+      n,
       paths.join("\n"),
     );
   assert.ok(!paths.some((p) => p.includes("/branches") || p.includes("/compare/")), paths.join("\n"));
@@ -247,14 +252,19 @@ test("GitHub unreachable: the sync's red line goes to stderr, the pull requests 
   const err = lines(r.stderr);
   assert.equal(err.length, 1, r.stderr);
   assert.ok(err[0].startsWith("! conflict") && err[0].includes("latest release not read"), err[0]);
-  // the release is served but the repository's pull requests are not (not in the fixture): one stderr line
+  // the release is served but the repository's pull requests are not (not in the fixture): with a token, one stderr
+  // line; without one, a 404 is what a private repository answers anyone, so nothing is said
   const m = machine();
   const checkout = checkoutOf(m, "oneezy/skills");
   await cli(m, []);
-  const d = await cli(m, ["hook"], {}, checkout);
+  const d = await cli(m, ["hook"], { GITHUB_TOKEN: "t0ken" }, checkout);
   assert.equal(d.status, 0, d.stderr);
   assert.equal(d.stdout, "");
   assert.deepEqual(lines(d.stderr), ["oneezy/skills: open pull requests not read: 404 Not Found"]);
+  const anonymous = await cli(m, ["hook"], {}, checkout);
+  assert.equal(anonymous.status, 0, anonymous.stderr);
+  assert.equal(anonymous.stdout, "");
+  assert.equal(anonymous.stderr, "");
 });
 
 test("a conflict in the sync (a hooks file that is not JSON) is the one thing that exits 1, on stderr; the rest of the run still happens", async () => {
@@ -270,3 +280,324 @@ test("a conflict in the sync (a hooks file that is not JSON) is the one thing th
   assert.ok(lines(r.stdout).includes(`${skills}: dev fast-forwarded to ${moved.slice(0, 7)}`), r.stdout);
   assert.equal(fs.readFileSync(hooksFile(m, "claude-code"), "utf8"), "{ not json");
 });
+
+// Every repository in reach, whoever owns it (tools#145): the session's repository and the git repositories beside it,
+// or, outside any repository, the ones directly inside the folder the session starts in. One takes part in the dev flow
+// when it has a dev branch (its own or origin's) and an origin; one that does not is never mentioned.
+
+/** A git repository at `dir` with one commit on `branch` and no remote. Returns `dir`. */
+function localRepo(m: PretendMachine, dir: string, branch: string): string {
+  fs.mkdirSync(dir, { recursive: true });
+  git(m, dir, ["init", "--quiet"]);
+  git(m, dir, ["symbolic-ref", "HEAD", `refs/heads/${branch}`]);
+  write(path.join(dir, "README.md"), `# ${path.basename(dir)}\n`);
+  git(m, dir, ["add", "."]);
+  git(m, dir, ["commit", "--quiet", "-m", "first"]);
+  return dir;
+}
+
+/** A bare repository at <base>/elsewhere/<name>.git, origin of `dir`, holding `dir`'s `branch` as `as`. */
+function plainOrigin(m: PretendMachine, dir: string, name: string, branch: string, as = branch): string {
+  const bare = path.join(m.base, "elsewhere", `${name}.git`);
+  fs.mkdirSync(bare, { recursive: true });
+  git(m, bare, ["init", "--quiet", "--bare"]);
+  git(m, dir, ["remote", "add", "origin", bare]);
+  git(m, dir, ["push", "--quiet", "origin", `${branch}:${as}`]);
+  git(m, dir, ["fetch", "--quiet", "origin"]);
+  return bare;
+}
+
+/**
+ * The folder of repositories most tests use, `<base>/dev`, with the session's repository `alpha` (someone/alpha on
+ * GitHub) and beside it: beta (acme/beta on GitHub, clean on dev), fox (a clone whose origin is a path, not GitHub,
+ * clean on dev), tools (oneezy/tools, dirty on dev), delta (acme/delta, clean on a feature branch), echo (main only,
+ * here and on its origin, which then moves on), golf (dev with no origin), a linked worktree of alpha (its `.git` a
+ * file) and a folder that is no repository.
+ */
+function devFolder(m: PretendMachine) {
+  gh.fixture.repos = {
+    "someone/alpha": { branches: { ...quiet } },
+    "acme/beta": { branches: { ...quiet } },
+    "acme/delta": { branches: { ...quiet } },
+    "oneezy/tools": { branches: { ...quiet } },
+  };
+  const dev = path.join(m.base, "dev");
+  const alpha = checkoutOf(m, "someone/alpha");
+  const beta = checkoutOf(m, "acme/beta");
+  const fox = path.join(dev, "fox");
+  git(m, m.base, ["clone", "--quiet", bareOrigin(m, "lab/fox"), fox]);
+  const tools = checkoutOf(m, "oneezy/tools");
+  fs.appendFileSync(path.join(tools, "README.md"), "local edit\n");
+  const delta = checkoutOf(m, "acme/delta");
+  git(m, delta, ["checkout", "--quiet", "-b", "feat/x"]);
+  const echo = localRepo(m, path.join(dev, "echo"), "main");
+  const echoOrigin = plainOrigin(m, echo, "echo", "main");
+  const echoWork = path.join(m.base, "scratch-echo");
+  git(m, m.base, ["clone", "--quiet", "--branch", "main", echoOrigin, echoWork]);
+  write(path.join(echoWork, "CHANGES.md"), "moved\n");
+  git(m, echoWork, ["add", "."]);
+  git(m, echoWork, ["commit", "--quiet", "-m", "moved"]);
+  git(m, echoWork, ["push", "--quiet", "origin", "main"]);
+  const golf = localRepo(m, path.join(dev, "golf"), "dev");
+  const worktree = path.join(dev, "alpha-feature");
+  git(m, alpha, ["worktree", "add", "--quiet", "-b", "feat/wt", worktree]);
+  write(path.join(dev, "notes", "todo.md"), "nothing\n");
+  return { dev, alpha, beta, fox, tools, delta, echo, golf, worktree };
+}
+
+test("from inside a repository, it and every git repository beside it are tended, whoever owns them: a clean dev behind origin is fast-forwarded, a dirty one or one on another branch is named and left alone, one with no dev or no origin is never mentioned, a linked worktree beside it is no repository of its own", async () => {
+  const m = machine();
+  const d = devFolder(m);
+  await cli(m, []);
+  const movedAlpha = advanceOrigin(m, "someone/alpha");
+  const movedBeta = advanceOrigin(m, "acme/beta");
+  const movedFox = advanceOrigin(m, "lab/fox");
+  advanceOrigin(m, "oneezy/tools");
+  advanceOrigin(m, "acme/delta");
+  const untouched = ["tools", "delta", "echo", "golf", "worktree"] as const;
+  const before = untouched.map((k) => head(m, d[k]));
+  const echoTracking = git(m, d.echo, ["rev-parse", "origin/main"]);
+  const r = await cli(m, ["hook"], {}, d.alpha);
+  assert.equal(r.status, 0, r.stderr);
+  // the session's repository first, then the ones beside it by name
+  assert.deepEqual(lines(r.stdout), [
+    `${d.alpha}: dev fast-forwarded to ${movedAlpha.slice(0, 7)}`,
+    `${d.beta}: dev fast-forwarded to ${movedBeta.slice(0, 7)}`,
+    `${d.fox}: dev fast-forwarded to ${movedFox.slice(0, 7)}`,
+  ]);
+  assert.deepEqual(lines(r.stderr), [
+    `${d.delta}: on feat/x; left alone`,
+    `${d.tools}: on dev, dirty (1 file); left alone`,
+  ]);
+  assert.equal(head(m, d.alpha), movedAlpha);
+  assert.equal(head(m, d.beta), movedBeta);
+  assert.equal(head(m, d.fox), movedFox);
+  assert.deepEqual(
+    untouched.map((k) => head(m, d[k])),
+    before,
+  );
+  // nothing switched, nothing created, nothing thrown away
+  assert.equal(git(m, d.delta, ["rev-parse", "--abbrev-ref", "HEAD"]), "feat/x");
+  assert.equal(git(m, d.worktree, ["rev-parse", "--abbrev-ref", "HEAD"]), "feat/wt");
+  assert.equal(git(m, d.echo, ["branch", "--list", "dev"]), "");
+  assert.ok(fs.readFileSync(path.join(d.tools, "README.md"), "utf8").endsWith("local edit\n"));
+  // echo has no dev: not even fetched
+  assert.equal(git(m, d.echo, ["rev-parse", "origin/main"]), echoTracking);
+  // GitHub was asked for the open pull requests of the session's repository only
+  const pulls = r.requests.map((q) => q.path).filter((p) => p.includes("/pulls"));
+  assert.deepEqual(
+    pulls.map((p) => p.split("/pulls")[0]),
+    ["/repos/someone/alpha"],
+  );
+  // the next session start: nothing moved, so only the two left alone are named again
+  const again = await cli(m, ["hook"], {}, d.alpha);
+  assert.equal(again.status, 0, again.stderr);
+  assert.equal(again.stdout, "");
+  assert.deepEqual(lines(again.stderr), lines(r.stderr));
+});
+
+test("a session in a linked worktree tends the repository's main checkout and the repositories beside that, never the worktree", async () => {
+  const m = machine();
+  gh.fixture.repos = { "someone/alpha": { branches: { ...quiet } }, "acme/beta": { branches: { ...quiet } } };
+  const alpha = checkoutOf(m, "someone/alpha");
+  const beta = checkoutOf(m, "acme/beta");
+  // the task's worktree lives inside the main checkout, which ignores it as a real repository does
+  fs.appendFileSync(path.join(alpha, ".git", "info", "exclude"), ".claude/\n");
+  const task = path.join(alpha, ".claude", "worktrees", "task");
+  git(m, alpha, ["worktree", "add", "--quiet", "-b", "feat/task", task]);
+  await cli(m, []);
+  const movedAlpha = advanceOrigin(m, "someone/alpha");
+  const movedBeta = advanceOrigin(m, "acme/beta");
+  const taskHead = head(m, task);
+  const r = await cli(m, ["hook"], {}, task);
+  assert.equal(r.status, 0, r.stderr);
+  assert.equal(r.stderr, "");
+  assert.deepEqual(lines(r.stdout), [
+    `${alpha}: dev fast-forwarded to ${movedAlpha.slice(0, 7)}`,
+    `${beta}: dev fast-forwarded to ${movedBeta.slice(0, 7)}`,
+  ]);
+  assert.equal(head(m, alpha), movedAlpha);
+  assert.equal(head(m, task), taskHead);
+  assert.equal(git(m, task, ["rev-parse", "--abbrev-ref", "HEAD"]), "feat/task");
+});
+
+test("outside any repository, the git repositories directly inside the session's folder are tended, nothing deeper", async () => {
+  const m = machine();
+  const d = devFolder(m);
+  // a repository two levels down is not looked at
+  const deep = checkoutOf(m, "acme/deep", path.join(d.dev, "notes", "deep"));
+  gh.fixture.repos = { ...gh.fixture.repos, "acme/deep": { branches: { ...quiet } } };
+  await cli(m, []);
+  const movedAlpha = advanceOrigin(m, "someone/alpha");
+  const movedBeta = advanceOrigin(m, "acme/beta");
+  const deepHead = head(m, deep);
+  advanceOrigin(m, "acme/deep");
+  const r = await cli(m, ["hook"], {}, d.dev);
+  assert.equal(r.status, 0, r.stderr);
+  assert.deepEqual(lines(r.stdout), [
+    `${d.alpha}: dev fast-forwarded to ${movedAlpha.slice(0, 7)}`,
+    `${d.beta}: dev fast-forwarded to ${movedBeta.slice(0, 7)}`,
+  ]);
+  assert.deepEqual(lines(r.stderr), [
+    `${d.delta}: on feat/x; left alone`,
+    `${d.tools}: on dev, dirty (1 file); left alone`,
+  ]);
+  assert.equal(head(m, deep), deepHead);
+});
+
+test("a repository on dev whose origin has no dev is named and left alone; a fetch that hangs is cut off at the fetch timeout and named, and the others are still fast-forwarded", async () => {
+  const m = machine();
+  gh.fixture.repos = { "acme/beta": { branches: { ...quiet } } };
+  const dev = path.join(m.base, "dev");
+  const beta = checkoutOf(m, "acme/beta");
+  // hotel: dev here, main only on its origin
+  const hotel = localRepo(m, path.join(dev, "hotel"), "dev");
+  plainOrigin(m, hotel, "hotel", "dev", "main");
+  // india: an origin over ssh that never answers
+  const india = localRepo(m, path.join(dev, "india"), "dev");
+  git(m, india, ["remote", "add", "origin", "ssh://git@example.invalid/acme/india.git"]);
+  git(m, india, ["config", "core.sshCommand", "sleep 30;"]);
+  await cli(m, []);
+  const movedBeta = advanceOrigin(m, "acme/beta");
+  const started = Date.now();
+  const r = await cli(m, ["hook"], { SKILLS_SYNC_FETCH_TIMEOUT_MS: "1000" }, beta);
+  assert.ok(Date.now() - started < 15_000, "the hung fetch held the hook up");
+  assert.equal(r.status, 0, r.stderr);
+  assert.deepEqual(lines(r.stdout), [`${beta}: dev fast-forwarded to ${movedBeta.slice(0, 7)}`]);
+  const err = lines(r.stderr);
+  assert.equal(err.length, 2, r.stderr);
+  assert.equal(err[0], `${hotel}: origin has no dev; left alone`);
+  assert.ok(err[1].startsWith(`${india}: fetch of origin failed (timed out after 1 s)`), err[1]);
+  assert.equal(head(m, hotel), git(m, hotel, ["rev-parse", "origin/main"]));
+  // nothing the cut-off fetch started still holds the repository: it can be deleted at once, no retries
+  fs.rmSync(india, { recursive: true, force: true });
+  assert.ok(!fs.existsSync(india));
+});
+
+test("the drift line and the pull request request are the session's repository's only: a repository beside it with branches ahead and open pull requests, and a private one GitHub answers 404, say nothing but their fast-forward", async () => {
+  const m = machine();
+  const alpha = checkoutOf(m, "someone/alpha");
+  const beta = checkoutOf(m, "acme/beta");
+  const secret = checkoutOf(m, "acme/secret");
+  originBranch(m, "someone/alpha", "feat/a", 1);
+  originBranch(m, "acme/beta", "feat/b1", 1);
+  originBranch(m, "acme/beta", "feat/b2", 2);
+  originBranch(m, "acme/secret", "feat/s", 1);
+  // acme/secret is not in the fixture: GitHub answers 404, as it does a private repository to anyone without access
+  gh.fixture.repos = {
+    "someone/alpha": { branches: { ...quiet }, pulls: [{ number: 4, head: "feat/a" }] },
+    "acme/beta": {
+      branches: { ...quiet },
+      pulls: [
+        { number: 1, head: "feat/b1" },
+        { number: 2, head: "feat/b2" },
+      ],
+    },
+  };
+  await cli(m, []);
+  const movedBeta = advanceOrigin(m, "acme/beta");
+  const r = await cli(m, ["hook"], {}, alpha);
+  assert.equal(r.status, 0, r.stderr);
+  assert.equal(r.stderr, "");
+  assert.deepEqual(lines(r.stdout), [
+    `${beta}: dev fast-forwarded to ${movedBeta.slice(0, 7)}`,
+    "someone/alpha: 1 branch ahead of dev (feat/a), 1 open pull request (#4)",
+  ]);
+  const pulls = r.requests.map((q) => q.path).filter((p) => p.includes("/pulls"));
+  assert.deepEqual(
+    pulls.map((p) => p.split("/pulls")[0]),
+    ["/repos/someone/alpha"],
+  );
+  // the private one was still fetched: its branches are there, just not reported
+  assert.ok(git(m, secret, ["for-each-ref", "refs/remotes/origin/"]).includes("refs/remotes/origin/feat/s"));
+});
+
+test("a dev that cannot fast-forward is named and left as it was, nothing reset; a repository on main with a dev branch is named and main is not touched", async () => {
+  const m = machine();
+  gh.fixture.repos = { "acme/beta": { branches: { ...quiet } }, "acme/delta": { branches: { ...quiet } } };
+  const beta = checkoutOf(m, "acme/beta");
+  const delta = checkoutOf(m, "acme/delta");
+  await cli(m, []);
+  // beta: a commit of its own on dev, and origin's dev moved on: they diverged
+  write(path.join(beta, "LOCAL.md"), "mine\n");
+  git(m, beta, ["add", "."]);
+  git(m, beta, ["commit", "--quiet", "-m", "local"]);
+  const betaHead = head(m, beta);
+  const movedBeta = advanceOrigin(m, "acme/beta");
+  // delta: on main, with dev beside it
+  git(m, delta, ["checkout", "--quiet", "main"]);
+  const deltaMain = head(m, delta);
+  const deltaDev = git(m, delta, ["rev-parse", "refs/heads/dev"]);
+  advanceOrigin(m, "acme/delta");
+  const r = await cli(m, ["hook"], {}, beta);
+  assert.equal(r.status, 0, r.stderr);
+  assert.equal(r.stdout, "");
+  const err = lines(r.stderr);
+  assert.equal(err.length, 2, r.stderr);
+  assert.match(
+    err[0],
+    new RegExp(`^${escape(beta)}: dev does not fast-forward to origin/dev \\(exit \\d+\\).*; left alone$`),
+  );
+  assert.equal(err[1], `${delta}: on main; left alone`);
+  assert.equal(head(m, beta), betaHead);
+  assert.equal(git(m, beta, ["rev-parse", "origin/dev"]), movedBeta);
+  assert.equal(git(m, beta, ["status", "--porcelain"]), "");
+  assert.equal(git(m, beta, ["rev-parse", "--abbrev-ref", "HEAD"]), "dev");
+  assert.equal(head(m, delta), deltaMain);
+  assert.equal(git(m, delta, ["rev-parse", "refs/heads/dev"]), deltaDev);
+  assert.equal(git(m, delta, ["rev-parse", "--abbrev-ref", "HEAD"]), "main");
+});
+
+test("more repositories than are tended at once: every one is fast-forwarded, the lines in a fixed order (the session's first, then by name)", async () => {
+  const m = machine();
+  const dev = path.join(m.base, "dev");
+  const names = ["mike", "alpha", "kilo", "bravo", "juliet", "charlie", "lima", "delta", "echo"];
+  const dirs = names.map((n) => {
+    const dir = path.join(dev, n);
+    git(m, m.base, ["clone", "--quiet", bareOrigin(m, `lab/${n}`), dir]);
+    return dir;
+  });
+  await cli(m, []);
+  const moved = new Map(names.map((n) => [n, advanceOrigin(m, `lab/${n}`)]));
+  const r = await cli(m, ["hook"], {}, dirs[0]);
+  assert.equal(r.status, 0, r.stderr);
+  assert.equal(r.stderr, "");
+  const order = ["mike", ...names.filter((n) => n !== "mike").sort()];
+  assert.deepEqual(
+    lines(r.stdout),
+    order.map((n) => `${path.join(dev, n)}: dev fast-forwarded to ${(moved.get(n) ?? "").slice(0, 7)}`),
+  );
+  for (const n of names) assert.equal(head(m, path.join(dev, n)), moved.get(n), n);
+});
+
+test("past the hook's deadline no fetch starts and no drift is read: one stderr line counts the repositories not fetched, and they are left as they were", async () => {
+  const m = machine();
+  gh.fixture.repos = { "acme/beta": { branches: { ...quiet } }, "acme/delta": { branches: { ...quiet } } };
+  const beta = checkoutOf(m, "acme/beta");
+  const delta = checkoutOf(m, "acme/delta");
+  const tools = checkoutOf(m, "oneezy/tools");
+  fs.appendFileSync(path.join(tools, "README.md"), "local edit\n");
+  originBranch(m, "acme/beta", "feat/b", 1);
+  await cli(m, []);
+  const betaHead = head(m, beta);
+  const deltaHead = head(m, delta);
+  advanceOrigin(m, "acme/beta");
+  advanceOrigin(m, "acme/delta");
+  const r = await cli(m, ["hook"], { SKILLS_SYNC_HOOK_DEADLINE_MS: "1" }, beta);
+  assert.equal(r.status, 0, r.stderr);
+  assert.equal(r.stdout, "");
+  // the dirty one needs no fetch to be named, so it still is
+  assert.deepEqual(lines(r.stderr), [
+    `${tools}: on dev, dirty (1 file); left alone`,
+    "2 repositories not fetched: out of time (0.001 s since the hook started)",
+  ]);
+  assert.equal(head(m, beta), betaHead);
+  assert.equal(head(m, delta), deltaHead);
+  assert.equal(git(m, beta, ["rev-parse", "origin/dev"]), betaHead);
+  assert.ok(!r.requests.some((q) => q.path.includes("/pulls")));
+});
+
+/** `text` with every regular-expression character escaped. */
+function escape(text: string): string {
+  return text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
