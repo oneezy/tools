@@ -19,6 +19,8 @@ export interface Harness {
   universal: boolean;
   userInstructions?: string[];
   projectInstructions?: string[];
+  /** the harness's user-level hooks file, where the session hook lives (ADR-0010); unset for a harness without hooks */
+  userHooks?: string;
   note?: string;
 }
 
@@ -37,6 +39,7 @@ export function harnessTable(home = os.homedir(), env = process.env, platform = 
       universal: false,
       userInstructions: ["CLAUDE.md"],
       projectInstructions: ["CLAUDE.md", "CLAUDE.local.md", ".claude/CLAUDE.md"],
+      userHooks: path.join(claudeHome, "settings.json"),
     },
     {
       id: "codex",
@@ -49,6 +52,7 @@ export function harnessTable(home = os.homedir(), env = process.env, platform = 
       universal: true,
       userInstructions: ["AGENTS.md", "AGENTS.override.md"],
       projectInstructions: ["AGENTS.md", "AGENTS.override.md"],
+      userHooks: path.join(codexHome, "hooks.json"),
     },
     {
       id: "goose",

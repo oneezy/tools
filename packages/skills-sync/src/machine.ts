@@ -1,9 +1,10 @@
 // The probe: which harnesses this machine has and what each one holds right now, read on every run and never written
 // down (ADR-0012). Per harness: the account plugins claude.ai delivered (<id>@synced), the plugins installed through the
 // harness's own CLI (from the library's catalog, or from anywhere else), the loose links in its user skills folder and
-// where they point, the real skill folders there, the state of the managed block in its global instructions file, and
-// the blocks an older skills-sync left in repository files. The plugin CLIs are asked through install.ts's runner,
-// read-only listings only; when a CLI is missing, the account plugins are read from their folders instead.
+// where they point, the real skill folders there, the state of the managed block in its global instructions file, the
+// session hook entry in its user hooks file, and the blocks an older skills-sync left in repository files. The plugin
+// CLIs are asked through install.ts's runner, read-only listings only; when a CLI is missing, the account plugins are
+// read from their folders instead.
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -11,6 +12,7 @@ import { globalFile, readBlock, repoBlocks, type BlockState, type RepoBlock } fr
 import { isDir, isLink, isSkillDir, linkTarget, samePath, skillsIn } from "./fs.js";
 import { detected, RESERVED, type Harness } from "./harnesses.js";
 import { githubRepo, hermesPlugins, type HermesActivation, type HermesInstall } from "./hermes.js";
+import { readHook, type HookState } from "./hooks.js";
 import {
   codexPluginSkills,
   harnessCli,
@@ -86,6 +88,8 @@ export interface HarnessState {
   block: BlockState | null;
   /** blocks an older skills-sync left outside the global file (repository files, AGENTS.override.md): reported, never edited */
   repoBlocks: RepoBlock[];
+  /** the session hook entry in the harness's user hooks file (ADR-0010); null when its table row names no such file */
+  hook: HookState | null;
 }
 
 export interface Machine {
@@ -135,6 +139,7 @@ function probeHarness(h: Harness, env: NodeJS.ProcessEnv, roots: string[], globa
       ...repoBlocks(roots, h.projectInstructions ?? [], globals),
       ...repoBlocks([h.configDir], (h.userInstructions ?? []).slice(1), globals),
     ],
+    hook: readHook(h),
   };
   const cli = harnessCli(h, env);
   if (cli) {

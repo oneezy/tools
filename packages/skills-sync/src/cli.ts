@@ -13,6 +13,7 @@ import { entrypoints, instructionDependencies } from "./entrypoints.js";
 import { LOCAL_NAME, migrateAnswers, readLocal, writeLocal, type LinkMode, type Local } from "./config.js";
 import { gitExclude, isDir, isLink, lexists, linkMode, linkTarget, real, samePath, setLinkMode } from "./fs.js";
 import { runBranches } from "./commands/branches.js";
+import { runHook } from "./commands/hook.js";
 import { runStatus } from "./commands/status.js";
 import { BUILT_FORMS, runSync, syncFacts, type SyncResult } from "./commands/sync.js";
 import { isCloud } from "./machine.js";
@@ -47,6 +48,9 @@ One skills library, every harness, every project on this machine. Run it anywher
                                ~/.codex/AGENTS.md): how to call a skill per harness, never fetch a SKILL.md to run one.
                                Never a repository file; a block an older version left in one is reported
   cloud session                that block and nothing else (CLAUDE_CODE_REMOTE=true): no clone, no links, no plugins
+  outside the cloud            also one session-start hook entry per harness (~/.claude/settings.json, ~/.codex/hooks.json)
+                               running \`npx --yes @oneezy/skills-sync@latest hook\`; other entries are never touched, the
+                               old sync-dev.sh entry goes once the new one is in. Codex asks you to trust it once
   library present              also, until the plugin forms land: pull it, install the third-party skills its lock
                                records, rebuild its layers, install its built plugins on Claude Code and Codex, link
                                the user folders. sync clones nothing; --repo <path> runs that part alone
@@ -69,6 +73,13 @@ Commands
                    or the base of an open one stays. --plan lists every tag and delete without making them; --json
                    carries the same lists; a repository the token cannot read or write is reported and skipped. Exit 1
                    when anything was reported, 2 without a token to list your repositories
+  hook             what the session-start hook runs: the sync above, quietly (only what changed or went wrong is
+                   printed), then the checkouts of ${DEFAULT_REPO} and oneezy/tools in and beside the current repository:
+                   a clean one on dev is fast-forwarded to origin/dev, a dirty one or one on another branch is named and
+                   left alone, and one line per repository says which branches (counted from the fetch) and open pull
+                   requests (one GitHub request) are not in dev yet.
+                   Takes no flags but --library (--plan, --json, --quiet and --agents are refused, exit 2).
+                   Prints nothing when nothing changed; exit 0 unless the sync hit a conflict
   unlink           remove every link this tool made in the user folders, and every plugin and marketplace it installed
   adopt-brain      explicitly adopt only this host's two historical Brain links; propagate verified instructions only
   rollback-brain   restore the exact preserved links in --receipt; refuse later destination edits
@@ -351,11 +362,11 @@ async function main(): Promise<void> {
   const log = (m: string) => (args.json ? undefined : process.stderr.write(m + "\n"));
   const setup = new Report();
 
-  // Machine commands act on this machine against GitHub and never look for a library: status and sync (the block, and
-  // the form work as its tickets land) against the latest release, branches against the repositories' branch rules.
-  // unlink keeps the library-based run below until #154.
+  // Machine commands act on this machine against GitHub and never look for a library: status, sync (the block, the
+  // session hook, and the form work as its tickets land) and hook against the latest release, branches against the
+  // repositories' branch rules. unlink keeps the library-based run below until #154.
   const repo = args.library ?? DEFAULT_REPO;
-  if ((args.command === "status" || args.command === "sync") && !isRepoName(repo)) {
+  if (["status", "sync", "hook"].includes(args.command) && !isRepoName(repo)) {
     process.stderr.write(`${args.command}: --library names the release repo as owner/repo, not ${repo}\n`);
     process.exit(2);
   }
@@ -370,6 +381,15 @@ async function main(): Promise<void> {
       json: args.json,
       quiet: args.quiet,
     });
+    return;
+  }
+  if (args.command === "hook") {
+    // the entry runs it bare; a flag here is a mistake, and --plan on a run that must write would be a silent one
+    if (args.plan || args.json || args.quiet || args.agents) {
+      process.stderr.write("hook takes no flags but --library\n");
+      process.exit(2);
+    }
+    process.exitCode = await runHook({ repo, cwd });
     return;
   }
   // sync with --repo <path> is still the library-based run of that checkout alone (the publish guard plans against one),
