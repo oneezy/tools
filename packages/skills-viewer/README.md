@@ -97,4 +97,4 @@ pnpm fixture    # regenerate examples/mattpocock
 
 ## Source
 
-This package is the engine of branch `codex/tools-skills-viewer` at commit `f333cc6` ([#54](https://github.com/oneezy/tools/issues/54)), imported into the workspace by [#75](https://github.com/oneezy/tools/issues/75). The Phase 1 trials of the four existing tools and `research/RESULTS.md`, which compares them with this one, stay in `clis/skills-viewer/research/` on that branch.
+This package is the engine of commit [`f333cc6`](https://github.com/oneezy/tools/tree/f333cc625459a00d098c48088e37458a3666f8cb) ([#54](https://github.com/oneezy/tools/issues/54)), the head of branch `codex/tools-skills-viewer`, kept as the tag [`archive/codex/tools-skills-viewer`](https://github.com/oneezy/tools/tree/archive/codex/tools-skills-viewer) before the branch goes (the daily branch cleanup, ADR-0013 in `oneezy/skills`); imported into the workspace by [#75](https://github.com/oneezy/tools/issues/75). The Phase 1 trials of the four existing tools and `research/RESULTS.md`, which compares them with this one, stay in `clis/skills-viewer/research/` at that tag.

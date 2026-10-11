@@ -113,3 +113,7 @@ _Avoid_: protected branch (GitHub's own setting, which `branches` reads and leav
 **Archive tag**:
 The tag `archive/<branch>` that `branches` puts at the head of a branch whose pull request was closed without merging, before deleting the branch, so nothing is lost. A tag of that name at another commit stops the delete.
 _Avoid_: backup tag
+
+**Daily cleanup**:
+The scheduled run of `branches` in oneezy/tools (`.github/workflows/branches.yml`, 10:17 UTC) with the `PROJECT_PAT` secret over every repository its user owns, after a token check that names each repository the run will touch, skips one the token cannot write and refuses `layerdbiz/*` by name. A run by hand is a plan unless told otherwise.
+_Avoid_: branch sweep, nightly GC
