@@ -28,6 +28,7 @@ import { homeLibrary } from "../library.js";
 import { LIBRARY_MARKETPLACE, type CliPlugin, type HarnessState } from "../machine.js";
 import type { Action } from "../plan.js";
 import type { ReleasePlugin } from "../release.js";
+import { compareVersions, plainVersion } from "../versions.js";
 
 export const codex: FormFn = (release, state, _machine, options) => {
   const plan = options.plan;
@@ -76,7 +77,8 @@ export const codex: FormFn = (release, state, _machine, options) => {
         return out;
       }
     }
-    out.push({ kind: "install", path: where(`marketplace ${mkt}`), note: `from GitHub ${release.repo}` });
+    const add: Action = { kind: "install", path: where(`marketplace ${mkt}`), note: `from GitHub ${release.repo}` };
+    out.push(add);
     if (!plan) {
       const added = addMarketplace(h, run, release.repo);
       if (!added) {
@@ -94,8 +96,12 @@ export const codex: FormFn = (release, state, _machine, options) => {
         );
         return out;
       }
-    }
-    marketplaceChanged = true;
+      // registered already, from this source (the probe's listing failed, or said nothing of it): nothing changed
+      if (added.alreadyAdded) {
+        add.kind = "skip";
+        add.note = `from GitHub ${release.repo} (already registered)`;
+      } else marketplaceChanged = true;
+    } else marketplaceChanged = true;
   }
 
   // 2. the plugins: every plugin of the release, until tools#154 reads the selection from skills-sync.json at the release
@@ -141,7 +147,16 @@ export const codex: FormFn = (release, state, _machine, options) => {
       skipped.add(p.id);
       continue;
     }
-    if (isBehind(current, p)) behind.push({ p, now: current });
+    const gap = versionGap(current, p);
+    if (gap === "ahead")
+      // the marketplace snapshot is main, which runs ahead of releases/latest after every push: nothing to upgrade to
+      out.push({
+        kind: "note",
+        path: where(`plugin ${id}`),
+        note: `${p.id} ${shown(current.version)} is ahead of the latest release (${p.version}); nothing to do`,
+      });
+    else if (gap === "behind" || (current.skills !== null && missing(current.skills, p).length))
+      behind.push({ p, now: current });
     else out.push({ kind: "skip", path: where(`plugin ${id}`), note: `installed ${shown(current.version)}` });
   }
 
@@ -197,7 +212,7 @@ export const codex: FormFn = (release, state, _machine, options) => {
       ? "codex does not list it"
       : !now.enabled
         ? "codex lists it disabled"
-        : p.version !== null && now.version !== p.version
+        : versionGap(now, p) === "behind"
           ? `installed ${shown(now.version)}, the release has ${p.version}`
           : now.skills === null
             ? "codex cannot list its plugin skills"
@@ -211,10 +226,14 @@ export const codex: FormFn = (release, state, _machine, options) => {
     verified.add(p.id);
   }
 
-  // 5. the copies: links to a library copy and real copies of the release's SKILL.md go once their plugin verified;
-  // everything else in Codex's skill folders is Justin's to adopt or delete
+  // 5. the copies: links to a library copy and real folders holding exactly the release's files for the skill go once
+  // their plugin verified; everything else in Codex's skill folders is Justin's to adopt or delete
   const carrier = (skill: string) => wanted.find((p) => p.skills.includes(skill));
   for (const l of state.loose) {
+    if (!l.target) {
+      out.push({ kind: "note", path: l.path, note: "a link whose target cannot be read; left alone" });
+      continue;
+    }
     const copy = libraryCopy(l.target, release.repo);
     if (!copy) {
       out.push({
@@ -229,7 +248,10 @@ export const codex: FormFn = (release, state, _machine, options) => {
       out.push({
         kind: "note",
         path: l.path,
-        note: `links into a library copy, but no plugin in ${release.tag} carries ${l.name}; left alone`,
+        note:
+          copy === "dangling"
+            ? `dangling link; no plugin in ${release.tag} carries ${l.name}; left alone`
+            : `links into a library copy, but no plugin in ${release.tag} carries ${l.name}; left alone`,
       });
       continue;
     }
@@ -242,8 +264,15 @@ export const codex: FormFn = (release, state, _machine, options) => {
   }
   for (const f of state.folders) {
     const p = carrier(f.name);
-    const sha = p?.files[`skills/${f.name}/SKILL.md`];
-    if (!p || !sha || fileHash(path.join(f.path, "SKILL.md")) !== sha) {
+    if (!p) {
+      out.push({
+        kind: "note",
+        path: f.path,
+        note: `not in the latest release; adopt it into ${release.repo} or delete it by hand`,
+      });
+      continue;
+    }
+    if (!sameFiles(f.path, p, `skills/${f.name}/`)) {
       out.push({
         kind: "note",
         path: f.path,
@@ -281,18 +310,64 @@ function missing(loaded: string[], p: ReleasePlugin): string[] {
 }
 
 /**
- * Behind the release: another version (a plain string compare, Codex installs exactly the manifest's), or, for a plugin
- * without a version, or one whose skills were read, a release skill it does not load.
+ * The installed plugin's version against the release's: "behind" (semver precedence when both parse; otherwise any
+ * difference, Codex installs exactly the manifest's), "ahead" (the marketplace snapshot is main, which runs ahead of
+ * releases/latest after every push until the release job finishes), "same", or "unversioned" when the release's plugin
+ * has no version and its skill set alone decides.
  */
-function isBehind(have: CliPlugin, p: ReleasePlugin): boolean {
-  if (p.version !== null && have.version !== p.version) return true;
-  return have.skills !== null && missing(have.skills, p).length > 0;
+function versionGap(have: CliPlugin, p: ReleasePlugin): "behind" | "ahead" | "same" | "unversioned" {
+  if (p.version === null) return "unversioned";
+  if (have.version === p.version) return "same";
+  const a = have.version === null ? null : plainVersion(have.version);
+  const b = plainVersion(p.version);
+  if (a === null || b === null) return "behind";
+  const c = compareVersions(a, b);
+  return c < 0 ? "behind" : c > 0 ? "ahead" : "same";
 }
 
-/** `https://github.com/oneezy/skills.git`, `git@github.com:oneezy/skills.git` or `oneezy/skills` name the same repo. */
+/**
+ * `https://github.com/oneezy/skills.git`, `git@github.com:oneezy/skills.git`, `ssh://git@github.com/oneezy/skills` or
+ * `oneezy/skills` name the same repo; another host never does.
+ */
 function sameRepo(source: string, repo: string): boolean {
-  const m = /(?:github\.com[/:])?([\w.-]+\/[\w.-]+?)(?:\.git)?\/?$/i.exec(source.trim());
+  const m = /^(?:(?:https?:\/\/|ssh:\/\/(?:git@)?|git@)github\.com[/:])?([\w.-]+\/[\w.-]+?)(?:\.git)?\/?$/i.exec(
+    source.trim(),
+  );
   return !!m && m[1].toLowerCase() === repo.toLowerCase();
+}
+
+/**
+ * Does the folder hold exactly the release's files for the skill (the plugin's `skills/<name>/...` entries), each with
+ * the release's sha256: nothing missing, nothing added, nothing edited. Anything else is the user's.
+ */
+function sameFiles(folder: string, p: ReleasePlugin, prefix: string): boolean {
+  const want = new Map(
+    Object.entries(p.files)
+      .filter(([rel]) => rel.startsWith(prefix))
+      .map(([rel, sha]) => [rel.slice(prefix.length), sha]),
+  );
+  if (!want.size) return false;
+  const have = filesIn(folder);
+  if (!have || have.length !== want.size) return false;
+  return have.every((rel) => fileHash(path.join(folder, ...rel.split("/"))) === want.get(rel));
+}
+
+/** Every file under `dir`, as `/`-joined paths relative to it; null when something there is neither a file nor a folder. */
+function filesIn(dir: string): string[] | null {
+  const out: string[] = [];
+  const walk = (d: string, rel: string): boolean => {
+    for (const e of fs.readdirSync(d, { withFileTypes: true })) {
+      const r = rel ? `${rel}/${e.name}` : e.name;
+      if (e.isFile()) out.push(r);
+      else if (!e.isDirectory() || !walk(path.join(d, e.name), r)) return false;
+    }
+    return true;
+  };
+  try {
+    return walk(dir, "") ? out : null;
+  } catch {
+    return null;
+  }
 }
 
 /**

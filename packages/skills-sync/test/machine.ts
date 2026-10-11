@@ -475,8 +475,8 @@ export function libraryCheckout(
 }
 
 /**
- * A real folder in the harness's user skills folder (or `dir`) holding the release's own bytes of the skill's
- * SKILL.md: the copy an older sync or Codex's skill installer left. Returns the folder.
+ * A real folder in the harness's user skills folder (or `dir`) holding exactly the release's own files of the skill:
+ * the copy an older sync or Codex's skill installer left. Returns the folder.
  */
 export function releaseCopy(
   m: PretendMachine,
@@ -485,11 +485,12 @@ export function releaseCopy(
   release: FixtureRelease,
   dir = userSkills(m, harness),
 ): string {
-  const file = `skills/${name}/SKILL.md`;
-  const plugin = Object.values(release.plugins).find((p) => p.files.has(file));
+  const prefix = `skills/${name}/`;
+  const plugin = Object.values(release.plugins).find((p) => p.files.has(`${prefix}SKILL.md`));
   if (!plugin) throw new Error(`${name}: no plugin of ${release.tag} carries it`);
   const folder = path.join(dir, name);
-  write(path.join(folder, "SKILL.md"), plugin.files.get(file)!);
+  for (const [rel, bytes] of plugin.files)
+    if (rel.startsWith(prefix)) write(path.join(folder, ...rel.slice(prefix.length).split("/")), bytes);
   return folder;
 }
 
@@ -508,7 +509,7 @@ export function fakeCli(
   m: PretendMachine,
   host: CliName,
   args: string[],
-): { status: number | null; stdout: string; json: Record<string, unknown> | null } {
+): { status: number | null; stdout: string; stderr: string; json: Record<string, unknown> | null } {
   const r = spawnSync(process.execPath, [FAKE_HARNESS, host, ...args], {
     encoding: "utf8",
     env: { ...process.env, ...m.env, FAKE_HARNESS_LOG: "" },
@@ -519,7 +520,7 @@ export function fakeCli(
   } catch {
     /* text, or a failure the caller reads from status */
   }
-  return { status: r.status, stdout: r.stdout, json };
+  return { status: r.status, stdout: r.stdout, stderr: r.stderr, json };
 }
 
 /** Switch a plugin the fake codex has installed on or off, as the user would through Codex. */
