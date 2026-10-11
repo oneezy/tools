@@ -62,6 +62,9 @@ function toolsRepo(): FixtureRepo {
       ...core,
       // merged, and all its commits are in dev: kept by its name alone
       "spike-keep": { sha: sha("e"), ahead: 0 },
+      // research and prototype branches are kept by their prefix, merged or not
+      "research/agent-standards": { sha: sha("h"), ahead: 0 },
+      "prototype/ui": { sha: sha("i"), ahead: 0 },
       // its pull request was squash-merged into dev: deleted although compare says it is ahead
       "feat/merged": { sha: sha("1") },
       // no pull request, every commit is in dev
@@ -86,6 +89,7 @@ function toolsRepo(): FixtureRepo {
     },
     pulls: [
       { number: 1, head: "spike-keep", merged: true },
+      { number: 13, head: "research/agent-standards", merged: true },
       { number: 2, head: "feat/merged", merged: true },
       { number: 3, head: "feat/closed", state: "closed" },
       { number: 4, head: "feat/both", state: "closed" },
@@ -112,7 +116,7 @@ function neverCore(requests: RecordedRequest[], names = ["main", "dev"]): void {
     assert.doesNotMatch(p, new RegExp(`[?&]base=(${alt})(&|$)`), p);
     assert.doesNotMatch(p, new RegExp(`/compare/[^?]*\\.\\.\\.(${alt})(\\?|$)`), p);
     assert.doesNotMatch(p, new RegExp(`/tags/archive/(${alt})(/|\\?|$)`), p);
-    assert.ok(!p.includes("spike-keep"), p);
+    for (const k of ["spike-keep", "research/agent-standards", "prototype/ui"]) assert.ok(!p.includes(k), p);
     const ref = (r.body as { ref?: unknown } | null)?.ref;
     if (typeof ref === "string") assert.doesNotMatch(ref, new RegExp(`/(${alt}|spike-keep)$`), ref);
   }
@@ -152,7 +156,7 @@ test("every rule holds: main, dev and the merged -keep branch are kept; merged a
   assert.equal(j.repos.length, 1);
   const t = j.repos[0];
   assert.equal(t.repo, "oneezy/tools");
-  assert.deepEqual(t.kept, ["dev", "main", "spike-keep"]);
+  assert.deepEqual(t.kept, ["dev", "main", "prototype/ui", "research/agent-standards", "spike-keep"]);
   assert.deepEqual(t.deleted, expectedDeleted);
   assert.deepEqual(t.archived, expectedArchived);
   assert.deepEqual(t.left, expectedLeft);
@@ -170,6 +174,8 @@ test("every rule holds: main, dev and the merged -keep branch are kept; merged a
     "feat/stack-top",
     "fix/to-main",
     "main",
+    "prototype/ui",
+    "research/agent-standards",
     "spike-keep",
   ]);
   assert.deepEqual(repo.tags, { "archive/feat/closed": sha("3") });
@@ -217,8 +223,8 @@ test("--plan lists every tag and delete without a single write request, and --js
       ". feat/stack-base  left: base of open pull request #11",
       ". feat/stack-top  left: open pull request #11",
       ". fix/to-main  left: pull request #8 merged into main, 1 commit not in dev",
-      "= kept: dev, main, spike-keep",
-      "plan: 4 to delete, 1 to tag, 7 left alone, 3 kept",
+      "= kept: dev, main, prototype/ui, research/agent-standards, spike-keep",
+      "plan: 4 to delete, 1 to tag, 7 left alone, 5 kept",
       "",
     ].join("\n"),
   );
@@ -226,7 +232,7 @@ test("--plan lists every tag and delete without a single write request, and --js
   assert.equal(r.status, 0, r.stderr);
   const j = r.json as unknown as BranchesJson;
   assert.equal(j.plan, true);
-  assert.deepEqual(j.repos[0].kept, ["dev", "main", "spike-keep"]);
+  assert.deepEqual(j.repos[0].kept, ["dev", "main", "prototype/ui", "research/agent-standards", "spike-keep"]);
   assert.deepEqual(j.repos[0].deleted, expectedDeleted);
   assert.deepEqual(j.repos[0].archived, expectedArchived);
   assert.deepEqual(j.repos[0].left, expectedLeft);

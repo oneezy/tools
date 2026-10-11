@@ -1,10 +1,11 @@
 // branches: the branch rules of ADR-0013, applied through GitHub REST to each repository named (default: the ones the
-// token owns). main, dev, the repository's default branch and any branch ending in -keep are never deleted and never
-// the target of a request. A branch whose pull request was merged into dev, or whose commits are all in dev, is
-// deleted. A branch whose pull request was closed without merging gets a tag archive/<name> at its head, then is
-// deleted. Every other branch is left alone and listed with why. Pull requests are never touched: a branch that is the
-// head or the base of an open one stays. --plan lists every tag and delete without making them; --json carries the same
-// lists. A repository the token cannot read or write is reported and skipped; the others still run.
+// token owns). main, dev, the repository's default branch, any branch ending in -keep and any research/ or prototype/
+// branch are never deleted and never the target of a request. A branch whose pull request was merged into dev, or whose
+// commits are all in dev, is deleted. A branch whose pull request was closed without merging gets a tag archive/<name>
+// at its head, then is deleted. Every other branch is left alone and listed with why. Pull requests are never touched:
+// a branch that is the head or the base of an open one stays. --plan lists every tag and delete without making them;
+// --json carries the same lists. A repository the token cannot read or write is reported and skipped; the others still
+// run.
 import { github, GitHubError, type GitHub } from "../github.js";
 import { isRepoName } from "../release.js";
 
@@ -16,7 +17,7 @@ export interface BranchLine {
 
 export interface RepoReport {
   repo: string;
-  /** main, dev, the default branch and *-keep: never deleted, never asked about */
+  /** main, dev, the default branch, *-keep, research/* and prototype/*: never deleted, never asked about */
   kept: string[];
   deleted: Array<{ branch: string; reason: string }>;
   /** the archive tags made before a delete; `reused` when a tag at the same commit was there already */
@@ -89,11 +90,17 @@ interface Job {
 }
 
 /**
- * The branch names the rules never delete: the two core branches and the one keep marker (ADR-0013). Exact and
- * case-sensitive on purpose: `Main`, `DEV` or `-Keep` are other branches, and a rule that guesses is a rule nobody
- * can predict.
+ * The branch names the rules never delete: the two core branches, the keep marker, and research and prototype work
+ * (ADR-0013; Justin, 2026-10-11: research/ and prototype/ branches are kept, merged or not). Exact and case-sensitive
+ * on purpose: `Main`, `DEV`, `-Keep` or `Research/x` are other branches, and a rule that guesses is a rule nobody can
+ * predict.
  */
-const isKeptName = (name: string): boolean => name === "main" || name === "dev" || name.endsWith("-keep");
+const isKeptName = (name: string): boolean =>
+  name === "main" ||
+  name === "dev" ||
+  name.endsWith("-keep") ||
+  name.startsWith("research/") ||
+  name.startsWith("prototype/");
 
 /** A ref name in a URL path: each segment encoded, the slashes kept, as GitHub's ref routes expect. */
 const refPath = (name: string): string => name.split("/").map(encodeURIComponent).join("/");

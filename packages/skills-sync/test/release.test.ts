@@ -96,9 +96,9 @@ test("--help lists the machine commands, the library commands and every flag; an
   assert.match(help, /locked upstream version/);
   assert.match(help, /exit 1 on any, 0 when clean/);
   // what the branch rules promise: the names never deleted, the archive tag, that --plan writes nothing
-  assert.match(help, /main, dev and any \*-keep branch are never deleted/);
-  assert.match(help, /tagged archive\/<name> at its head,\s+then deleted/);
-  assert.match(help, /--plan lists every tag and delete without making\s+them/);
+  assert.match(help, /main, dev and any \*-keep, research\/\* or prototype\/\* branch are never\s+deleted/);
+  assert.match(help, /tagged\s+archive\/<name> at its head, then deleted/);
+  assert.match(help, /--plan lists every tag and delete\s+without making them/);
   // what the session hook promises: silent when nothing changed, a dirty checkout left alone
   assert.match(help, /Prints nothing when nothing changed; exit 0 unless the sync hit a conflict/);
   assert.match(help, /a dirty one or one on another branch is named and\s+left alone/);
