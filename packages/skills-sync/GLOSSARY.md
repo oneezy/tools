@@ -70,7 +70,7 @@ A Group or a Source's skills packaged for a Harness's plugin system, with its ow
 _Avoid_: package, bundle
 
 **Form**:
-How a Harness on a Host gets the Library's skills, one per Harness (ADR-0007): `account plugins` (Claude Code: the Plugins enabled on the claude.ai account, delivered as `<id>@synced`) or `plugins from GitHub` (Codex: the Library's marketplace added from GitHub; Hermes: each Plugin's Hermes rendering installed from the Release's commit through `hermes plugins install`). `loose skills` (one link per skill in the User folder) is no Harness's form any more. Never two on one Harness, so no skill name is listed twice. Claude Code and Hermes are on their forms; `sync` still moves Codex between the older `plugin` and `links` pair until its ticket lands.
+How a Harness on a Host gets the Library's skills, one per Harness (ADR-0007): `account plugins` (Claude Code: the Plugins enabled on the claude.ai account, delivered as `<id>@synced`) or `plugins from GitHub` (Codex: the Library's marketplace added from GitHub; Hermes: each Plugin's Hermes rendering installed from the Release's commit through `hermes plugins install`). `loose skills` (one link per skill in the User folder) is no Harness's form any more. Never two on one Harness, so no skill name is listed twice. Claude Code, Codex and Hermes are on their forms; the older `plugin` and `links` pair in `sync` serves only Goose until the old run is retired.
 _Avoid_: mode (that is a project's link or copy), install mode
 
 **Hermes rendering**:
