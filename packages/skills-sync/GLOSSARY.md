@@ -87,3 +87,13 @@ _Avoid_: marketplace (the Harness's word for where a Catalog is added)
 
 **Release**:
 A numbered cut of the Library (`release-<n>`) carrying one upload archive per Plugin.
+
+### Branches
+
+**Keep branch**:
+A branch whose name ends in `-keep`: `branches` never deletes it, as it never deletes `main`, `dev` and the repository's default branch. The suffix is the only keep marker (ADR-0013 in oneezy/skills), matched exactly.
+_Avoid_: protected branch (GitHub's own setting, which `branches` reads and leaves alone too)
+
+**Archive tag**:
+The tag `archive/<branch>` that `branches` puts at the head of a branch whose pull request was closed without merging, before deleting the branch, so nothing is lost. A tag of that name at another commit stops the delete.
+_Avoid_: backup tag

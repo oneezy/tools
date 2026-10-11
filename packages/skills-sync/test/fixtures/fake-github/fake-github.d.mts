@@ -44,13 +44,55 @@ export interface FixtureRelease {
   noReleaseJson?: boolean;
 }
 
+export interface FixtureBranch {
+  sha: string;
+  protected?: boolean;
+  /** what compare dev...<branch> answers as ahead_by (default: 0 when the sha is dev's, else 1) */
+  ahead?: number;
+  /** the sha GET /git/ref/heads/<branch> answers while the listing still says `sha`: a push between the two */
+  movedTo?: string;
+}
+
+export interface FixturePull {
+  number: number;
+  /** the head branch name */
+  head: string;
+  /** the base branch name (default: dev) */
+  base?: string;
+  /** default: "closed" when merged, else "open" */
+  state?: "open" | "closed";
+  merged?: boolean;
+  /** the head sha the pull request records (default: the head branch's current sha) */
+  sha?: string;
+  title?: string;
+}
+
+/** A repository `branches` works on. The server mutates `branches` and `tags` as writes come in. */
+export interface FixtureRepo {
+  branches: Record<string, FixtureBranch>;
+  pulls?: FixturePull[];
+  /** "archive/<name>" -> sha */
+  tags?: Record<string, string>;
+  /** false: every write answers 403 */
+  writable?: boolean;
+  /** listed as archived by GET /user/repos and GET /repos/:o/:r */
+  archived?: boolean;
+  /** GET /repos/:o/:r default_branch (default: main) */
+  defaultBranch?: string;
+}
+
 export interface Fixture {
+  /** the one repository with releases */
   repo: string;
   releases: FixtureRelease[];
   /** GET /repos/:o/:r/contents/:path?ref=<ref>: ref -> path -> text */
   contents?: Record<string, Record<string, string>>;
+  /** the repositories `branches` works on, "owner/name" -> state */
+  repos?: Record<string, FixtureRepo>;
   /** when set, the only bearer token accepted */
   token?: string;
+  /** when set, lists come in pages of at most this many items, so the client has to turn pages */
+  pageSize?: number;
 }
 
 export interface RecordedRequest {
@@ -58,6 +100,8 @@ export interface RecordedRequest {
   /** the path with its query string, as the client sent it */
   path: string;
   headers: { accept?: string; authorization?: string; "user-agent"?: string };
+  /** the JSON body of a write; null for a GET or a body that is not JSON */
+  body: unknown;
 }
 
 export interface FakeGithub {
@@ -80,5 +124,8 @@ export function fixtureRelease(options: {
 }): FixtureRelease;
 
 export function fixtureLibrary(repo?: string): Fixture;
+
+/** A 40-character commit sha a test can read: the seed repeated. */
+export function sha(seed: string): string;
 
 export function startFakeGithub(fixture?: Fixture): Promise<FakeGithub>;
