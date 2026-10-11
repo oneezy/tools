@@ -177,7 +177,8 @@ test("one sync leaves only the account plugins for every skill they carry: the t
     out.some((l) => l.startsWith(". note") && l.includes(`play: ${NOT_DELIVERED}`)),
     r.stdout,
   );
-  assert.equal(out.at(-1), "7 changed, 0 already right, 0 left alone");
+  // the block, the session hook (tools#151) and the six plugin and link actions
+  assert.equal(out.at(-1), "8 changed, 0 already right, 0 left alone");
   // status agrees: each skill name once, everything green
   const s = await cli(m, ["status", "--json"]);
   assert.equal(s.status, 0, s.stdout);
@@ -194,7 +195,8 @@ test("a second sync changes nothing: no plugin command that writes, nothing on d
   const before = snapshot(m.home);
   const r = await cli(m, []);
   assert.equal(r.status, 0, r.stderr);
-  assert.equal(lines(r).at(-1), "0 changed, 1 already right, 0 left alone");
+  // the block and the session hook are current
+  assert.equal(lines(r).at(-1), "0 changed, 2 already right, 0 left alone");
   assert.deepEqual(snapshot(m.home), before);
   assert.equal(r.calls.filter(pluginWrite).length, 0, JSON.stringify(r.calls));
   const quiet = await cli(m, ["--quiet"]);
@@ -316,8 +318,8 @@ for (const [name, options, extra] of [
     const before = snapshot(m.home);
     const r = await cli(m, [], extra);
     assert.equal(r.status, 1, r.stderr + r.stdout);
-    // the block is written; the links, the plugin and the marketplace are as they were
-    assert.deepEqual(added(before, snapshot(m.home)), [".claude/CLAUDE.md"]);
+    // the block and the session hook are written; the links, the plugin and the marketplace are as they were
+    assert.deepEqual(added(before, snapshot(m.home)), [".claude/CLAUDE.md", ".claude/settings.json"]);
     assert.deepEqual(Object.keys(fakeState(m).plugins), ["oneezy@oneezy-skills"]);
     assert.equal(r.calls.filter(pluginWrite).length, 0, JSON.stringify(r.calls));
     const reds = lines(r).filter((l) => l.startsWith("!"));
@@ -395,6 +397,7 @@ test("--plan lists every removal and changes nothing: no plugin command that wri
     planned.map((a) => [a.kind, path.basename(a.path)]),
     [
       ["write", "CLAUDE.md"],
+      ["write", "settings.json"],
       ["remove", "grilling"],
       ["remove", "tdd"],
       ["uninstall", "Claude Code: plugin oneezy@oneezy-skills"],
@@ -410,7 +413,7 @@ test("--plan lists every removal and changes nothing: no plugin command that wri
       name,
     );
   const text = await cli(m, ["--plan"]);
-  assert.equal(lines(text).at(-1), "plan: 7 would change, 0 already right, 0 left alone");
+  assert.equal(lines(text).at(-1), "plan: 8 would change, 0 already right, 0 left alone");
   assert.deepEqual(snapshot(m.home), before);
   // the real run is the plan carried out
   const real = await cli(m, ["--json"]);
