@@ -37,7 +37,8 @@
 #   issue reopened or labeled needs-changes  -> In Progress
 #   backfill                             -> closed: Done; open and assigned: Next Up from Todo or none;
 #                                           open and unassigned with no Status: Todo; everything else kept
-# A PR's linked issues are its closing references plus the issue its branch is named after.
+# A PR's linked issues are its closing references plus the issue its branch is named after, when that number is an
+# issue of this repository: a branch named after another repo's issue or after a pull request is skipped, not failed on.
 # Closed issues are never moved except to Done or Complete; wayfinder maps and phases are never moved.
 # Milestones are never touched: a task joins a phase by taking the phase's Milestone (oneezy/tools#77).
 # Needs: gh with a token that can write the project (PROJECT_PAT in CI). No jq: gh's --jq does the parsing.
@@ -145,14 +146,35 @@ branch_issue() { # branch_issue <ref>: the n in <type>/<n>-<slug>, or nothing
   printf '%s\n' "$1" | sed -nE 's#^[A-Za-z][A-Za-z0-9_-]*/([0-9]+)(-.*)?$#\1#p'
 }
 
-linked_issues() { # linked_issues <pr>: closing references plus the branch's issue, unique, ascending
+# is_issue <n>: true when #n is an issue of REPO, open or closed, that is, when issue_info can read it. A branch may
+# be named after an issue of another repository or after a pull request; GraphQL's issue(number:) answers "Could not
+# resolve to an Issue" for both, which would otherwise fail the run. Any other failure (token, network) still stops it.
+is_issue() {
+  local err
+  err=$(issue_info "$1" 2>&1 >/dev/null) && return 0
+  case "$err" in *"Could not resolve to an Issue"*) return 1 ;; esac
+  die "$err"
+}
+
+skip_branch() { # skip_branch <n> <ref>: the line for a branch number that is not an issue here
+  say "skipped #$1: not an issue of $REPO (branch $2)"
+}
+
+linked_issues() { # linked_issues <pr>: closing references plus the branch's issue when it is one of REPO's, unique, ascending
+  # GitHub validated the closing references; the branch's number goes through is_issue, and a skipped one is
+  # reported on stderr because stdout is the list.
+  local line n
   {
     gh api graphql -f owner="$OWNER" -f name="$NAME" -F number="$1" -f query='
       query($owner:String!,$name:String!,$number:Int!){ repository(owner:$owner,name:$name){
         pullRequest(number:$number){ headRefName closingIssuesReferences(first:20){ nodes{ number } } } } }' \
       --jq '.data.repository.pullRequest | (.closingIssuesReferences.nodes[].number), .headRefName' \
     | while IFS= read -r line; do
-        case "$line" in ''|*[!0-9]*) branch_issue "$line" ;; *) printf '%s\n' "$line" ;; esac
+        case "$line" in
+          ''|*[!0-9]*) n=$(branch_issue "$line"); [ -n "$n" ] || continue
+                       if is_issue "$n"; then printf '%s\n' "$n"; else skip_branch "$n" "$line" >&2; fi ;;
+          *) printf '%s\n' "$line" ;;
+        esac
       done
   } | sort -un
 }
@@ -242,7 +264,9 @@ case "${EVENT:-}/${ACTION:-}" in
   create/*)
     [ "${REF_TYPE:-}" = "branch" ] || { say "kept: $REF_TYPE ${REF:-} is not a branch"; exit 0; }
     n=$(branch_issue "${REF:-}")
-    if [ -n "$n" ]; then move "$n" "In Progress" "-" Todo "Next Up"; else say "kept: branch ${REF:-} names no issue"; fi ;;
+    if [ -z "$n" ]; then say "kept: branch ${REF:-} names no issue"
+    elif ! is_issue "$n"; then skip_branch "$n" "${REF:-}"
+    else move "$n" "In Progress" "-" Todo "Next Up"; fi ;;
   pull_request/opened|pull_request/ready_for_review)
     if [ "${PR_DRAFT:-false}" = "true" ]; then for n in $(linked_issues "$PR"); do start_work "$n"; done
     else for n in $(linked_issues "$PR"); do to_review "$n"; done; fi ;;
