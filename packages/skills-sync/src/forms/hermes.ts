@@ -28,8 +28,11 @@ export const hermes: FormFn = (release, state, _machine, { plan }) => {
   const out: Action[] = [];
   if (!release)
     return [{ kind: "note", path: h.name, note: `${h.name}: plugins not compared; the latest release was not read` }];
+  // no hermes to run: a note, as Codex's form says it (the harness folder is there; whether Hermes is is not for this run)
   if (!state.cli)
-    return [{ kind: "conflict", path: where("plugins"), note: `no ${cli.bin} on PATH; nothing installed, loose links kept` }];
+    return [
+      { kind: "note", path: where("plugins"), note: `no ${cli.bin} on PATH; nothing installed, loose links kept` },
+    ];
   const run = runner(state.cli);
   if (!cli.supports(run))
     return [
@@ -101,7 +104,9 @@ export const hermes: FormFn = (release, state, _machine, { plan }) => {
     candidates.push(p);
   }
   // the names Hermes gives the skills a plugin brings, said once, when a plugin was (or would be) installed
-  const installs = out.filter((a) => a.kind === "install" && a.target).map((a) => a.path.slice(where("plugin ").length));
+  const installs = out
+    .filter((a) => a.kind === "install" && a.target)
+    .map((a) => a.path.slice(where("plugin ").length));
   if (installs.length)
     out.push({
       kind: "note",
@@ -183,7 +188,8 @@ export const hermes: FormFn = (release, state, _machine, { plan }) => {
  */
 function behind(have: CliPlugin | HermesPlugin, p: ReleasePlugin, release: Release): string | null {
   const subdir = `${HERMES_PATH}/${p.id}`;
-  if (have.install?.subdir !== subdir) return `installed from ${have.install?.subdir ?? "the repository root"}, not ${subdir}`;
+  if (have.install?.subdir !== subdir)
+    return `installed from ${have.install?.subdir ?? "the repository root"}, not ${subdir}`;
   if (have.version !== p.version) return `version ${have.version ?? "none"}, the release has ${p.version ?? "none"}`;
   const skills = have.skills ?? [];
   if (!sameSet(skills, p.skills)) {

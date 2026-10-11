@@ -265,7 +265,10 @@ test("build --plugins writes plugins/<id>/ for an own group and a refreshed sour
     "skills/b/SKILL.md",
     "skills/up-tdd/SKILL.md",
   ]);
-  assert.equal(read("dist/hermes/oneezy/skills/own-one/SKILL.md"), "---\nname: own-one\ndescription: mine\n---\nmine\n");
+  assert.equal(
+    read("dist/hermes/oneezy/skills/own-one/SKILL.md"),
+    "---\nname: own-one\ndescription: mine\n---\nmine\n",
+  );
   assert.equal(
     read("dist/hermes/oneezy/skills/own-two/SKILL.md"),
     "---\nname: own-two\ndescription: two\nmetadata:\n  author: justin\n---\ntwo\n",
@@ -457,7 +460,10 @@ test("build is idempotent and deterministic: a second build changes nothing byte
     read("plugins/oneezy/skills/own-one/SKILL.md"),
     "---\nname: own-one\ndescription: mine\nmetadata:\n  internal: true\n---\nmine, edited\n",
   );
-  assert.equal(read("dist/hermes/oneezy/skills/own-one/SKILL.md"), "---\nname: own-one\ndescription: mine\n---\nmine, edited\n");
+  assert.equal(
+    read("dist/hermes/oneezy/skills/own-one/SKILL.md"),
+    "---\nname: own-one\ndescription: mine\n---\nmine, edited\n",
+  );
   assert.equal(read("dist/hermes/oneezy/NOTICE.md"), read("plugins/oneezy/NOTICE.md"));
   assert.deepEqual(changes(cli("build", "--json")), [], "settled");
 
@@ -475,7 +481,9 @@ test("build is idempotent and deterministic: a second build changes nothing byte
   assert.ok(
     actions(pruned).some(
       (a) =>
-        a.kind === "delete" && a.path.endsWith(path.join("hermes", "old")) && /no longer in skills-sync\.json/.test(a.note ?? ""),
+        a.kind === "delete" &&
+        a.path.endsWith(path.join("hermes", "old")) &&
+        /no longer in skills-sync\.json/.test(a.note ?? ""),
     ),
     pruned.stdout,
   );
@@ -1194,7 +1202,10 @@ test("the Hermes rendering keeps only the string entries of a skill's metadata (
       "",
     ].join("\n"),
   );
-  assert.ok(read("plugins/oneezy/skills/own-three/SKILL.md").includes("name: Own Three"), "the package copy keeps its name");
+  assert.ok(
+    read("plugins/oneezy/skills/own-three/SKILL.md").includes("name: Own Three"),
+    "the package copy keeps its name",
+  );
   assert.ok(read("plugins/oneezy/skills/own-three/SKILL.md").includes("  internal: true"), "and is marked internal");
   assert.equal(
     read("dist/hermes/oneezy/skills/own-four/SKILL.md"),
@@ -1203,7 +1214,12 @@ test("the Hermes rendering keeps only the string entries of a skill's metadata (
   const notes = actions(r).filter((a) => a.kind === "note" && /Hermes would skip/.test(a.note ?? ""));
   assert.deepEqual(
     notes.map((a) => [path.relative(root, a.path).split("\\").join("/"), a.note]),
-    [["dist/hermes/oneezy/skills/own-four/SKILL.md", "Hermes would skip this skill: description must be 1 to 1024 characters"]],
+    [
+      [
+        "dist/hermes/oneezy/skills/own-four/SKILL.md",
+        "Hermes would skip this skill: description must be 1 to 1024 characters",
+      ],
+    ],
   );
   assert.equal(cli("build", "--check").status, 0, "the rendering is what --check expects");
   assert.deepEqual(changes(cli("build", "--json")), [], "and a second build rewrites nothing");

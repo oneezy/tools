@@ -67,9 +67,14 @@ export const PLUGIN_SCHEMA = "https://agent-plugins.org/schemas/1.0.0/plugin.sch
 export const HERMES_PATH = "dist/hermes";
 const SKILL_MD = /^skills\/([^/]+)\/SKILL\.md$/;
 
+/** dist/hermes under a library root. */
+function hermesRoot(root: string): string {
+  return path.join(root, ...HERMES_PATH.split("/"));
+}
+
 /** dist/hermes/<id> under a library root. */
 export function hermesDir(root: string, id: string): string {
-  return path.join(root, ...HERMES_PATH.split("/"), id);
+  return path.join(hermesRoot(root), id);
 }
 /** What the ChatGPT interface and the Codex catalog say every package is; the hosts enumerate neither value in their docs. */
 const CATEGORY = "Developer Tools";
@@ -214,7 +219,7 @@ export function build(lib: Library, opts: BuildOptions): BuildResult {
   }
   if (opts.plugins) {
     // packages, and Hermes renderings, for ids no longer in the config; a link there was not built here and is left alone
-    for (const root of [lib.plugins, path.dirname(hermesDir(lib.root, "x"))]) {
+    for (const root of [lib.plugins, hermesRoot(lib.root)]) {
       if (!isDir(root)) continue;
       for (const n of fs.readdirSync(root).sort(cmp)) {
         const p = path.join(root, n);
@@ -631,12 +636,12 @@ export function forHermes(md: string, folder: string): string {
   let named = false;
   for (let i = 0; i < lines.length; i++) {
     const l = lines[i];
-    if (/^name:/.test(l)) {
+    if (l.startsWith("name:")) {
       out.push(`name: ${folder}`);
       named = true;
       continue;
     }
-    if (!/^metadata:/.test(l)) {
+    if (!l.startsWith("metadata:")) {
       out.push(l);
       continue;
     }
@@ -658,12 +663,16 @@ export function forHermes(md: string, folder: string): string {
   return `---${open}${out.join(open)}${close}---` + md.slice(whole.length);
 }
 
-/** The lines of a block map's entries whose value is a string: the entry's key line and its continuation lines, as written. */
+/**
+ * The lines of a block map's entries whose value is a string: the entry's key line and its continuation lines, as
+ * written, comments between them included; nothing when no entry is left (a map of comments alone would read as null).
+ */
 function stringEntries(children: string[]): string[] {
   const out: string[] = [];
   if (!children.length) return out;
+  let entries = 0;
   const indent = /^\s*/.exec(children[0])![0].length;
-  for (let k = 0; k < children.length; ) {
+  for (let k = 0; k < children.length;) {
     const m = /^(\s+)([^\s#][^:]*?):(?:\s+(.*))?$/.exec(children[k]);
     // the entry runs until the next line at its own indent: a nested map, a list or a wrapped scalar belongs to it
     let e = k + 1;
@@ -677,9 +686,12 @@ function stringEntries(children: string[]): string[] {
     }
     const value = (m[3] ?? "").trim();
     if (m[2] === "internal" || value === "") continue;
-    if (/^[|>]/.test(value) || isYamlString(value)) out.push(...entry);
+    if (/^[|>]/.test(value) || isYamlString(value)) {
+      out.push(...entry);
+      entries++;
+    }
   }
-  return out;
+  return entries ? out : [];
 }
 
 /** A flow map `{a: b, c: 1}` cut to its string entries, as a flow map again; null when none is left. */

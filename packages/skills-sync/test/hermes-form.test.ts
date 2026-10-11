@@ -47,7 +47,13 @@ interface StatusJson {
     {
       form: string;
       plugins: {
-        installed: Array<{ id: string; marketplace: string; version: string | null; current: boolean; skills: string[] | null }>;
+        installed: Array<{
+          id: string;
+          marketplace: string;
+          version: string | null;
+          current: boolean;
+          skills: string[] | null;
+        }>;
         other: Array<{ id: string; marketplace: string | null }>;
       };
       loose: Array<{ name: string }>;
@@ -84,6 +90,7 @@ const latest = (github: FakeGithub = gh) => github.fixture.releases.find((r) => 
 const lines = (r: { stdout: string }) => r.stdout.trimEnd().split("\n");
 const actions = (r: { json: Record<string, unknown> | null }) => (r.json as unknown as SyncJson).actions;
 const brief = (a: ActionJson) => [a.kind, a.path, a.note];
+const byPath = (a: (string | undefined)[], b: (string | undefined)[]) => (a[0] ?? "").localeCompare(b[0] ?? "");
 /** A hermes call that changes something: install, enable, disable, update, remove (the --help probe and list are not). */
 const pluginWrite = (c: string[]) => c.some((w) => ["install", "enable", "disable", "update", "remove"].includes(w));
 const installCall = (id: string, commit: string, force = false) => [
@@ -116,7 +123,8 @@ const hermesSkills = (m: PretendMachine) => path.join(m.hermesHome, "skills");
 function migrating(m: PretendMachine): Record<string, string> {
   libraryCopy(m);
   const links: Record<string, string> = {};
-  for (const name of ["grilling", "oneezy-merge", "oneezy-status", "play-unslop"]) links[name] = looseLink(m, "hermes", name);
+  for (const name of ["grilling", "oneezy-merge", "oneezy-status", "play-unslop"])
+    links[name] = looseLink(m, "hermes", name);
   const gone = path.join(m.base, "gone");
   links.tdd = looseLink(m, "hermes", "tdd", path.join(gone, "tdd"));
   fs.rmSync(gone, { recursive: true, force: true });
@@ -138,7 +146,11 @@ test("one sync gives Hermes the release's plugins from GitHub at the release com
     "play",
   ]);
   assert.deepEqual(installs(m), {
-    "matt-pocock": { pinned: true, revision: r17.commit, source: `https://github.com/${REPO}.git#dist/hermes/matt-pocock` },
+    "matt-pocock": {
+      pinned: true,
+      revision: r17.commit,
+      source: `https://github.com/${REPO}.git#dist/hermes/matt-pocock`,
+    },
     oneezy: { pinned: true, revision: r17.commit, source: `https://github.com/${REPO}.git#dist/hermes/oneezy` },
     play: { pinned: true, revision: r17.commit, source: `https://github.com/${REPO}.git#dist/hermes/play` },
   });
@@ -182,9 +194,14 @@ test("one sync gives Hermes the release's plugins from GitHub at the release com
     ),
     r.stdout,
   );
-  assert.ok(out.some((l) => l.startsWith("+ install") && l.includes("Hermes: plugin oneezy  (enable)")), r.stdout);
   assert.ok(
-    out.some((l) => l.startsWith("- remove") && l.includes(links.grilling) && l.includes("(carried by plugin matt-pocock)")),
+    out.some((l) => l.startsWith("+ install") && l.includes("Hermes: plugin oneezy  (enable)")),
+    r.stdout,
+  );
+  assert.ok(
+    out.some(
+      (l) => l.startsWith("- remove") && l.includes(links.grilling) && l.includes("(carried by plugin matt-pocock)"),
+    ),
     r.stdout,
   );
   assert.ok(
@@ -241,16 +258,16 @@ test("a second sync changes nothing: every plugin is a skip, no hermes command t
   assert.deepEqual(snapshot(m.home), before);
   assert.equal(r.calls.filter(pluginWrite).length, 0, JSON.stringify(r.calls));
   // steady state asks hermes nothing but its --help probe: the probe reads Hermes's files
-  assert.ok(r.calls.every((c) => c.includes("--help")), JSON.stringify(r.calls));
-  const asJson = await cli(m, ["--json"]);
-  assert.deepEqual(
-    actions(asJson).map(brief),
-    [
-      ["skip", "Hermes: plugin matt-pocock", "installed, 1.3.1"],
-      ["skip", "Hermes: plugin oneezy", "installed, 0.43.1"],
-      ["skip", "Hermes: plugin play", "installed, 0.43.0"],
-    ],
+  assert.ok(
+    r.calls.every((c) => c.includes("--help")),
+    JSON.stringify(r.calls),
   );
+  const asJson = await cli(m, ["--json"]);
+  assert.deepEqual(actions(asJson).map(brief), [
+    ["skip", "Hermes: plugin matt-pocock", "installed, 1.3.1"],
+    ["skip", "Hermes: plugin oneezy", "installed, 0.43.1"],
+    ["skip", "Hermes: plugin play", "installed, 0.43.0"],
+  ]);
   const quiet = await cli(m, ["--quiet"]);
   assert.equal(quiet.status, 0, quiet.stderr);
   assert.equal(quiet.stdout, "");
@@ -264,7 +281,11 @@ test("a failed install is a conflict with hermes's stderr and that plugin's loos
   const links = migrating(m);
   const r = await cli(m, ["--json"], { FAKE_HARNESS_FAIL_INSTALL: "oneezy" });
   assert.equal(r.status, 1, r.stderr);
-  assert.deepEqual(fs.readdirSync(path.join(m.hermesHome, "plugins")).sort(), [".install-metadata.json", "matt-pocock", "play"]);
+  assert.deepEqual(fs.readdirSync(path.join(m.hermesHome, "plugins")).sort(), [
+    ".install-metadata.json",
+    "matt-pocock",
+    "play",
+  ]);
   assert.ok(isLink(links["oneezy-merge"]) && isLink(links["oneezy-status"]), "oneezy's links stay");
   for (const name of ["grilling", "tdd", "play-unslop"]) assert.equal(lexists(links[name]), false, name);
   assert.deepEqual(r.calls.filter(pluginWrite), [
@@ -279,13 +300,18 @@ test("a failed install is a conflict with hermes's stderr and that plugin's loos
   assert.equal(conflict.path, "Hermes: plugin oneezy");
   assert.ok(conflict.note?.startsWith("hermes could not install it; loose links kept."), conflict.note);
   assert.ok(
-    conflict.note?.endsWith(`run once by hand: hermes plugins install ${IDENTIFIER("oneezy")} --no-enable --ref ${r17.commit} --force`),
+    conflict.note?.endsWith(
+      `run once by hand: hermes plugins install ${IDENTIFIER("oneezy")} --no-enable --ref ${r17.commit} --force`,
+    ),
     conflict.note,
   );
   // the diagnostic names the command as run: the fake's path, then the arguments
   assert.deepEqual(conflict.diagnostic?.command.slice(1), installCall("oneezy", r17.commit).slice(1));
   assert.match(conflict.diagnostic?.stderr ?? "", /fixture install denied: oneezy/);
-  assert.ok(!actions(r).some((a) => a.kind === "remove" && /oneezy-(merge|status)/.test(a.path)), "no removal for oneezy's skills");
+  assert.ok(
+    !actions(r).some((a) => a.kind === "remove" && /oneezy-(merge|status)/.test(a.path)),
+    "no removal for oneezy's skills",
+  );
   // the next sync, with hermes willing, finishes the job
   const again = await cli(m, []);
   assert.equal(again.status, 0, again.stderr + again.stdout);
@@ -301,7 +327,10 @@ test("a caution verdict from hermes's security scan (no TTY to confirm it) is th
   assert.equal(r.status, 1, r.stderr);
   const conflict = actions(r).find((a) => a.kind === "conflict");
   assert.equal(conflict?.path, "Hermes: plugin play");
-  assert.ok(conflict?.note?.includes(`hermes plugins install ${IDENTIFIER("play")} --no-enable --ref ${r17.commit} --force`), conflict?.note);
+  assert.ok(
+    conflict?.note?.includes(`hermes plugins install ${IDENTIFIER("play")} --no-enable --ref ${r17.commit} --force`),
+    conflict?.note,
+  );
   assert.match(conflict?.diagnostic?.stderr ?? "", /Aborted/);
   assert.equal(lexists(pluginDir(m, "play")), false);
 });
@@ -324,19 +353,33 @@ test("a plugin behind a newer release is re-installed at the new commit with --f
       plugins: {
         oneezy: { version: "0.43.2", skills: ["oneezy-merge", "oneezy-status"] },
         "matt-pocock": { version: "1.3.1", skills: ["grilling", "tdd"] },
-        play: { version: "0.43.0", skills: ["play-unslop"], files: { "NOTICE.md": "# play\n\nBuilt by skills-sync from oneezy/skills.\n\n- Commit: 18\n" } },
+        play: {
+          version: "0.43.0",
+          skills: ["play-unslop"],
+          files: { "NOTICE.md": "# play\n\nBuilt by skills-sync from oneezy/skills.\n\n- Commit: 18\n" },
+        },
       },
     });
     github.addRelease(r18);
     hermesSource(m, r18);
     const r = await cli(m, []);
     assert.equal(r.status, 0, r.stderr + r.stdout);
-    assert.deepEqual(r.calls.filter(pluginWrite), [installCall("oneezy", r18.commit, true), installCall("play", r18.commit, true)]);
+    assert.deepEqual(r.calls.filter(pluginWrite), [
+      installCall("oneezy", r18.commit, true),
+      installCall("play", r18.commit, true),
+    ]);
     assert.equal(installs(m).oneezy.revision, r18.commit);
     assert.equal(installs(m).play.revision, r18.commit);
     assert.equal(installs(m)["matt-pocock"].revision, r17.commit);
-    assert.deepEqual(config(m), { enabled: ["matt-pocock", "oneezy", "play"], disabled: [] }, "a re-install keeps the enablement");
-    assert.equal(JSON.parse(fs.readFileSync(path.join(pluginDir(m, "oneezy"), "plugin.json"), "utf8")).version, "0.43.2");
+    assert.deepEqual(
+      config(m),
+      { enabled: ["matt-pocock", "oneezy", "play"], disabled: [] },
+      "a re-install keeps the enablement",
+    );
+    assert.equal(
+      JSON.parse(fs.readFileSync(path.join(pluginDir(m, "oneezy"), "plugin.json"), "utf8")).version,
+      "0.43.2",
+    );
     const out = lines(r);
     assert.ok(
       out.some(
@@ -348,7 +391,12 @@ test("a plugin behind a newer release is re-installed at the new commit with --f
       r.stdout,
     );
     assert.ok(
-      out.some((l) => l.startsWith("+ install") && l.includes("Hermes: plugin play ->") && l.includes("NOTICE.md is not release-18's")),
+      out.some(
+        (l) =>
+          l.startsWith("+ install") &&
+          l.includes("Hermes: plugin play ->") &&
+          l.includes("NOTICE.md is not release-18's"),
+      ),
       r.stdout,
     );
     assert.equal(out.at(-1), "2 changed, 1 already right, 0 left alone");
@@ -388,13 +436,13 @@ test("--plan records every install, enable and removal and runs no hermes comman
     actions(r)
       .filter((a) => a.kind === "remove")
       .map((a) => [a.path, a.note])
-      .sort(),
+      .sort(byPath),
     Object.entries(links)
       .map(([skill, link]) => [
         link,
         `carried by plugin ${skill === "play-unslop" ? "play" : skill.startsWith("oneezy") ? "oneezy" : "matt-pocock"}, once it verifies`,
       ])
-      .sort(),
+      .sort(byPath),
   );
   for (const link of Object.values(links)) assert.ok(isLink(link), link);
 });
@@ -414,8 +462,16 @@ test("what the tool did not make is never touched: a link to somewhere else and 
       .filter((a) => a.kind === "conflict")
       .map(brief),
     [
-      ["conflict", folder, "a real folder, and plugin matt-pocock also carries grilling; left alone (delete it by hand to keep grilling once)"],
-      ["conflict", link, `link points outside the library (${mine}) and plugin oneezy also carries oneezy-status; left alone`],
+      [
+        "conflict",
+        folder,
+        "a real folder, and plugin matt-pocock also carries grilling; left alone (delete it by hand to keep grilling once)",
+      ],
+      [
+        "conflict",
+        link,
+        `link points outside the library (${mine}) and plugin oneezy also carries oneezy-status; left alone`,
+      ],
     ],
   );
   const status = (await cli(m, ["status", "--json"])).json as unknown as StatusJson;
@@ -433,7 +489,10 @@ test("a plugin folder hermes did not install for this library is left alone with
   const links = ["grilling", "oneezy-status", "play-unslop"].map((n) => looseLink(m, "hermes", n));
   hermesPlugin(m, "oneezy", { files: r17.plugins.oneezy.files, recorded: false });
   hermesPlugin(m, "matt-pocock", { files: r17.plugins["matt-pocock"].files, activation: "disabled" });
-  hermesPlugin(m, "play", { files: r17.plugins.play.files, source: "https://github.com/someone/else.git#dist/hermes/play" });
+  hermesPlugin(m, "play", {
+    files: r17.plugins.play.files,
+    source: "https://github.com/someone/else.git#dist/hermes/play",
+  });
   const before = snapshot(m.hermesHome);
   const r = await cli(m, ["--json"]);
   assert.equal(r.status, 1, r.stderr);
@@ -445,9 +504,21 @@ test("a plugin folder hermes did not install for this library is left alone with
       .filter((a) => a.kind === "conflict")
       .map(brief),
     [
-      ["conflict", "Hermes: plugin matt-pocock", "installed but disabled (plugins.disabled in config.yaml); left alone, loose links kept"],
-      ["conflict", "Hermes: plugin oneezy", `${pluginDir(m, "oneezy")} was not installed through hermes plugins; left alone, loose links kept`],
-      ["conflict", "Hermes: plugin play", `installed from https://github.com/someone/else.git, not ${REPO}; left alone, loose links kept`],
+      [
+        "conflict",
+        "Hermes: plugin matt-pocock",
+        "installed but disabled (plugins.disabled in config.yaml); left alone, loose links kept",
+      ],
+      [
+        "conflict",
+        "Hermes: plugin oneezy",
+        `${pluginDir(m, "oneezy")} was not installed through hermes plugins; left alone, loose links kept`,
+      ],
+      [
+        "conflict",
+        "Hermes: plugin play",
+        `installed from https://github.com/someone/else.git, not ${REPO}; left alone, loose links kept`,
+      ],
     ],
   );
   // status: the unrecorded copy and the foreign one are other plugins; the disabled one is red
@@ -460,7 +531,9 @@ test("a plugin folder hermes did not install for this library is left alone with
     ],
   );
   assert.ok(
-    status.harnesses.hermes.lines.some((l) => !l.ok && l.text === "matt-pocock@oneezy-skills 1.3.1 installed but disabled"),
+    status.harnesses.hermes.lines.some(
+      (l) => !l.ok && l.text === "matt-pocock@oneezy-skills 1.3.1 installed but disabled",
+    ),
     JSON.stringify(status.harnesses.hermes.lines),
   );
   // plugins/<id> as a link: hermes would refuse it, so the tool does not ask
@@ -473,11 +546,19 @@ test("a plugin folder hermes did not install for this library is left alone with
   assert.equal(r2.status, 1);
   assert.ok(
     actions(r2).some(
-      (a) => a.kind === "conflict" && a.path === "Hermes: plugin oneezy" && a.note === `${pluginDir(m2, "oneezy")} is a link, not a plugin hermes installed; left alone, loose links kept`,
+      (a) =>
+        a.kind === "conflict" &&
+        a.path === "Hermes: plugin oneezy" &&
+        a.note === `${pluginDir(m2, "oneezy")} is a link, not a plugin hermes installed; left alone, loose links kept`,
     ),
     JSON.stringify(actions(r2)),
   );
-  assert.deepEqual(r2.calls.filter(pluginWrite), [installCall("matt-pocock", r17.commit), enableCall("matt-pocock"), installCall("play", r17.commit), enableCall("play")]);
+  assert.deepEqual(r2.calls.filter(pluginWrite), [
+    installCall("matt-pocock", r17.commit),
+    enableCall("matt-pocock"),
+    installCall("play", r17.commit),
+    enableCall("play"),
+  ]);
 });
 
 test("verification happens through hermes itself: when it lists the plugin as not enabled after the install, the plugin stays and its links stay, with one red line; when its listing fails, the same", async () => {
@@ -491,7 +572,12 @@ test("verification happens through hermes itself: when it lists the plugin as no
   assert.ok(isLink(links["oneezy-merge"]) && isLink(links["oneezy-status"]));
   assert.equal(lexists(links.grilling), false);
   assert.ok(
-    actions(r).some((a) => a.kind === "conflict" && a.path === "Hermes: plugin oneezy" && a.note === "hermes could not enable it; loose links kept"),
+    actions(r).some(
+      (a) =>
+        a.kind === "conflict" &&
+        a.path === "Hermes: plugin oneezy" &&
+        a.note === "hermes could not enable it; loose links kept",
+    ),
     JSON.stringify(actions(r)),
   );
   // the listing fails: installed, not verified, nothing removed
@@ -514,19 +600,16 @@ test("verification happens through hermes itself: when it lists the plugin as no
   );
 });
 
-test("without hermes on PATH the form is one red line and nothing is installed or removed; without the release (GitHub unreachable) the plugins are not compared and the links stay", async () => {
+test("without hermes on PATH the form is one note and nothing is installed or removed; without the release (GitHub unreachable) the plugins are not compared and the links stay", async () => {
   const m = machine({ clis: [] });
   const links = migrating(m);
   const before = snapshot(m.home);
   const r = await cli(m, ["--json"]);
-  assert.equal(r.status, 1, r.stderr);
+  assert.equal(r.status, 0, r.stderr);
   assert.deepEqual(snapshot(m.home), before);
-  assert.deepEqual(
-    actions(r)
-      .filter((a) => a.kind === "conflict")
-      .map(brief),
-    [["conflict", "Hermes: plugins", "no hermes on PATH; nothing installed, loose links kept"]],
-  );
+  assert.deepEqual(actions(r).map(brief), [
+    ["note", "Hermes: plugins", "no hermes on PATH; nothing installed, loose links kept"],
+  ]);
   for (const link of Object.values(links)) assert.ok(isLink(link));
 
   const offline = machine({ github: null });
@@ -537,22 +620,29 @@ test("without hermes on PATH the form is one red line and nothing is installed o
   assert.deepEqual(snapshot(offline.home), before2);
   assert.equal(r2.calls.filter(pluginWrite).length, 0);
   assert.ok(
-    actions(r2).some((a) => a.kind === "note" && a.note === "Hermes: plugins not compared; the latest release was not read"),
+    actions(r2).some(
+      (a) => a.kind === "note" && a.note === "Hermes: plugins not compared; the latest release was not read",
+    ),
     JSON.stringify(actions(r2)),
   );
   for (const link of Object.values(links2)) assert.ok(isLink(link));
 });
 
-test("on a PC with a library the old library-based run no longer links into Hermes's skills folder: the plugins are its form, and a sync leaves the folder empty while Codex still gets the old run's links", async () => {
-  const m = machine({ harnesses: ["hermes", "codex"], clis: ["hermes", "codex"] });
+test("on a PC with a library the old library-based run no longer links into Hermes's skills folder: the plugins are its form, and a sync leaves the folder empty (Codex, named too, is the machine sync's as well: nothing of the old run's there either)", async () => {
+  const m = machine({ harnesses: ["hermes", "codex"], clis: ["hermes"] });
   const r17 = latest();
   hermesSource(m, r17);
   oldLibraryLink(m);
-  const r = await cli(m, ["--no-wsl"]);
+  const r = await cli(m, ["--no-wsl", "--agents", "codex,hermes"]);
   assert.equal(r.status, 0, r.stderr + r.stdout);
   assert.equal(lexists(hermesSkills(m)), false, "no loose link from the old run, not even the folder");
-  assert.ok(isLink(path.join(m.home, ".agents", "skills", "oneezy-status")), "the old run still serves Codex until tools#150");
-  assert.deepEqual(fs.readdirSync(path.join(m.hermesHome, "plugins")).sort(), [".install-metadata.json", "matt-pocock", "oneezy", "play"]);
+  assert.equal(lexists(path.join(m.home, ".agents", "skills")), false, "nor for Codex");
+  assert.deepEqual(fs.readdirSync(path.join(m.hermesHome, "plugins")).sort(), [
+    ".install-metadata.json",
+    "matt-pocock",
+    "oneezy",
+    "play",
+  ]);
   assert.deepEqual(
     r.calls.filter((c) => c[0] === "hermes" && pluginWrite(c)).map((c) => c[2]),
     ["install", "enable", "install", "enable", "install", "enable"],
@@ -564,8 +654,14 @@ test("Hermes's home resolves as Hermes does: HERMES_HOME first, else %LOCALAPPDA
   const local = path.join("D:", "Local");
   assert.equal(hermesHomeDir(home, { LOCALAPPDATA: local }, "win32"), path.join(local, "hermes"));
   assert.equal(hermesHomeDir(home, {}, "win32"), path.join(home, "AppData", "Local", "hermes"));
-  assert.equal(hermesHomeDir(home, { LOCALAPPDATA: local, HERMES_DATA_DIR_SUFFIX: "-dev" }, "win32"), path.join(local, "hermes-dev"));
-  assert.equal(hermesHomeDir(home, { LOCALAPPDATA: local, HERMES_HOME: path.join("E:", "h") }, "win32"), path.join("E:", "h"));
+  assert.equal(
+    hermesHomeDir(home, { LOCALAPPDATA: local, HERMES_DATA_DIR_SUFFIX: "-dev" }, "win32"),
+    path.join(local, "hermes-dev"),
+  );
+  assert.equal(
+    hermesHomeDir(home, { LOCALAPPDATA: local, HERMES_HOME: path.join("E:", "h") }, "win32"),
+    path.join("E:", "h"),
+  );
   assert.equal(hermesHomeDir("/home/justin", { LOCALAPPDATA: local }, "linux"), "/home/justin/.hermes");
   assert.equal(hermesHomeDir("/home/justin", { HERMES_DATA_DIR_SUFFIX: "2" }, "darwin"), "/home/justin/.hermes2");
   assert.equal(hermesHomeDir("/home/justin", { HERMES_HOME: " /opt/hermes " }, "linux"), "/opt/hermes");

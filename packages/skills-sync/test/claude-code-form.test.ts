@@ -469,24 +469,26 @@ test("GitHub unreachable: nothing is compared or removed, one note says so besid
 test.skipIf(process.platform === "win32")(
   "on a PC with a library and a remembered WSL distro, the old run inside the distro is told which harnesses it serves, never Claude Code",
   async () => {
-    // Codex's form is built too (tools#150), so the old run serves neither default harness: Hermes, named, is what
-    // the distro is told about (no codex on PATH here, so Codex's form only notes it)
+    // Codex's and Hermes's forms are built too (tools#150, tools#153), so the old run serves none of them: Goose, named,
+    // is what the distro is told about (no codex or hermes on PATH here, so their forms only note it)
     const m = machine({ harnesses: ["claude-code", "codex", "hermes"], clis: ["claude"] });
+    fs.mkdirSync(path.join(m.home, ".config", "goose"), { recursive: true });
     oldLibraryLink(m);
     oldLocalFile(m, { wsl: ["ubuntu"] });
     const log = path.join(m.base, "wsl.log");
     const shim = path.join(m.bin, "wsl.exe");
     fs.writeFileSync(shim, `#!/bin/sh\nprintf '%s\\n' "$@" > "${log}"\n`);
     fs.chmodSync(shim, 0o755);
-    const r = await cli(m, ["--agents", "claude-code,codex,hermes"]);
+    const r = await cli(m, ["--agents", "claude-code,codex,hermes,goose"]);
     assert.equal(r.status, 0, r.stderr + r.stdout);
     assert.ok(fs.existsSync(log), "wsl.exe was not run");
     const argv = fs.readFileSync(log, "utf8").trimEnd().split("\n");
     assert.deepEqual(argv.slice(0, 5), ["-d", "ubuntu", "--", "bash", "-lic"]);
     const command = argv.slice(5).join("\n");
-    assert.ok(command.includes(" --agents hermes "), command);
-    assert.ok(!command.includes("claude-code") && !command.includes("codex"), command);
+    assert.ok(command.includes(" --agents goose "), command);
+    assert.ok(!command.includes("claude-code") && !command.includes("codex") && !command.includes("hermes"), command);
     assert.equal(lexists(path.join(m.claudeHome, "skills")), false);
     assert.equal(lexists(path.join(m.home, ".agents", "skills")), false);
+    assert.equal(lexists(path.join(m.hermesHome, "skills")), false);
   },
 );

@@ -117,9 +117,9 @@ export function githubRepo(url: string): string | null {
 /** The namespace Hermes gives a portable plugin's skills: agent-plugin-<slug>-<sha256(key)[:8]> (plugins_manifest.py). */
 export function hermesNamespace(id: string): string {
   const slug =
-    [...id.toLowerCase()]
-      .map((ch) => (/^[a-z0-9_-]$/.test(ch) ? ch : "-"))
-      .join("")
+    id
+      .toLowerCase()
+      .replace(/[^a-z0-9_-]/gu, "-")
       .replace(/^[-_]+|[-_]+$/g, "") || "plugin";
   return `agent-plugin-${slug}-${createHash("sha256").update(id, "utf8").digest("hex").slice(0, 8)}`;
 }
