@@ -52,7 +52,7 @@ export async function runSync(options: SyncOptions): Promise<SyncResult> {
     }
   const report = new Report();
   if (error) report.add({ kind: "conflict", path: options.repo, note: `latest release not read: ${error}` });
-  report.merge(desired(release, machine, FORMS, { agents: options.agents }));
+  report.merge(desired(release, machine, FORMS, { agents: options.agents, plan: options.plan }));
   apply(report, options.plan);
   return { report, release, error, machine };
 }
