@@ -14,6 +14,7 @@ import { LOCAL_NAME, migrateAnswers, readLocal, writeLocal, type LinkMode, type 
 import { gitExclude, isDir, isLink, lexists, linkMode, linkTarget, real, samePath, setLinkMode } from "./fs.js";
 import { runStatus } from "./commands/status.js";
 import { runSync, syncFacts, type SyncResult } from "./commands/sync.js";
+import { isCloud } from "./machine.js";
 import { detected, harnessTable, type Harness } from "./harnesses.js";
 import { plugins, removeOwned, pluginDependency, type Form, type Owned } from "./install.js";
 import {
@@ -353,7 +354,7 @@ async function main(): Promise<void> {
   }
   // sync with --repo <path> is still the library-based run of that checkout alone (the publish guard plans against one),
   // until #154 retires the flag; a cloud session never is: there the block is the whole sync (ADR-0007).
-  const cloud = process.env.CLAUDE_CODE_REMOTE === "true";
+  const cloud = isCloud();
   let machineSync: SyncResult | null = null;
   if (args.command === "sync" && (cloud || !args.repo)) {
     machineSync = await runSync({ repo, plan: args.plan, agents: args.agents, cwd });

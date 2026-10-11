@@ -377,7 +377,7 @@ export function globalBlock(m: PretendMachine, harness: "claude-code" | "codex",
 export function oldLocalFile(m: PretendMachine, local: Record<string, unknown>): string {
   const link = path.join(m.home, ".skills-sync");
   if (!lexists(link)) oldLibraryLink(m);
-  const file = path.join(fs.realpathSync(link), "skills-sync.local.json");
+  const file = path.join(linkTarget(link) ?? link, "skills-sync.local.json");
   write(
     file,
     JSON.stringify({ agents: ["claude-code", "codex"], global: true, mode: "link", wsl: [], ...local }, null, 2) + "\n",

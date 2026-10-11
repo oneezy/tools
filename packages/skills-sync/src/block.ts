@@ -9,6 +9,7 @@ import path from "node:path";
 import { hasLinkedParent, lexists, samePath, toHash } from "./fs.js";
 import type { Harness } from "./harnesses.js";
 import type { Action } from "./plan.js";
+import { DEFAULT_REPO } from "./release.js";
 
 /** The block's id in its markers: <!-- skills-sync:skills:start --> ... <!-- skills-sync:skills:end -->. */
 export const BLOCK_ID = "skills";
@@ -16,7 +17,7 @@ export const BLOCK_ID = "skills";
 /** The one block, without its markers. Short on purpose: an agent reads it at the start of every session. */
 export const BLOCK_BODY = `## Skills
 
-This block is written by skills-sync; edits here are overwritten. Skills come from the library oneezy/skills, installed into each harness in one form. Call one the way the harness you are in resolves it:
+This block is written by skills-sync; edits here are overwritten. Skills come from the library ${DEFAULT_REPO}, installed into each harness in one form. Call one the way the harness you are in resolves it:
 
 | Harness | How to call a skill |
 | --- | --- |
@@ -172,7 +173,7 @@ export function repoBlocks(roots: string[], names: string[], except: string[] = 
   for (const root of roots) {
     for (const name of names) {
       const file = path.join(root, name);
-      if (out.some((b) => samePath(b.file, file)) || except.some((e) => samePath(e, file))) continue;
+      if (except.some((e) => samePath(e, file))) continue;
       let text: string;
       try {
         if (!fs.statSync(file).isFile()) continue;

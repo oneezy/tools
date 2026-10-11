@@ -83,10 +83,12 @@ export function probe(table: Harness[], env: NodeJS.ProcessEnv = process.env, cw
   const found = detected(table);
   const roots = [...oldProjects(), path.resolve(cwd)].filter((r, i, all) => all.findIndex((x) => samePath(x, r)) === i);
   const globals = found.map(globalFile).filter((f): f is string => !!f);
-  return {
-    cloud: env.CLAUDE_CODE_REMOTE === "true",
-    harnesses: found.map((h) => probeHarness(h, env, roots, globals)),
-  };
+  return { cloud: isCloud(env), harnesses: found.map((h) => probeHarness(h, env, roots, globals)) };
+}
+
+/** A claude.ai cloud session: the container sets CLAUDE_CODE_REMOTE=true. */
+export function isCloud(env: NodeJS.ProcessEnv = process.env): boolean {
+  return env.CLAUDE_CODE_REMOTE === "true";
 }
 
 /** The projects the old local file names (dev + projects), read leniently: an unreadable file is no project at all. */

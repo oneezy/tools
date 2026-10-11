@@ -7,7 +7,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
 import { afterAll, afterEach, beforeAll, test } from "vite-plus/test";
-import { isLink, lexists } from "../src/fs.js";
+import { isLink, lexists, linkTarget, samePath } from "../src/fs.js";
 import { startFakeGithub, type FakeGithub } from "./fixtures/fake-github/fake-github.mjs";
 import {
   blockIn,
@@ -243,7 +243,14 @@ test("blocks the old tool wrote into repository files are reported, never edited
     .trimEnd()
     .split("\n")
     .filter((l) => l.startsWith(". note") && l.includes("skills-sync block (brain) in a repository file"));
-  assert.deepEqual(notes.map((l) => l.split(/\s+/)[2]).sort(), [...repoFiles].sort(), r.stdout);
+  // the line is `. note         <path>  (<note>)`; the path may hold spaces
+  const noted = notes.map((l) => /^\. note\s+(.*?)  \(/.exec(l)?.[1] ?? l);
+  assert.equal(noted.length, repoFiles.length, r.stdout);
+  for (const file of repoFiles)
+    assert.ok(
+      noted.some((p) => samePath(p, file)),
+      `${file} in ${noted.join(", ")}`,
+    );
   assert.ok(
     notes.every((l) => l.includes("remove it by hand")),
     r.stdout,
@@ -262,7 +269,7 @@ test("a repository block is also reported outside the cloud, and a global file i
   assert.equal(r.status, 0, r.stderr);
   const notes = r.stdout.split("\n").filter((l) => l.includes("in a repository file"));
   assert.equal(notes.length, 1, r.stdout);
-  assert.ok(notes[0].includes(file), notes[0]);
+  assert.ok(samePath(/^\. note\s+(.*?)  \(/.exec(notes[0])?.[1] ?? "", file), notes[0]);
   // run from inside ~/.codex: its AGENTS.md is the global file, written, not a repository leftover
   const again = await cli(m, [], {}, m.codexHome);
   assert.equal(again.status, 0, again.stderr);
@@ -276,7 +283,7 @@ for (const [name, line] of [
   test(`in the cloud, ${name} writes only the global block: no clone, no ~/.skills-sync, no links, no plugins, no local file, even with a library present`, async () => {
     const m = machine();
     // a library is on the machine (as the old setup script left it): the cloud run must not touch or use it
-    const library = fs.realpathSync(oldLibraryLink(m));
+    const library = linkTarget(oldLibraryLink(m))!;
     const libraryBefore = snapshot(library);
     const homeBefore = snapshot(m.home);
     const r = await cli(m, [...line], CLOUD);
@@ -308,7 +315,7 @@ for (const [name, line] of [
 
 test("in the cloud, --repo <checkout> does not bring the library-based run back: the block is the whole sync", async () => {
   const m = machine();
-  const library = fs.realpathSync(oldLibraryLink(m));
+  const library = linkTarget(oldLibraryLink(m))!;
   const before = snapshot(library);
   const homeBefore = snapshot(m.home);
   const r = await cli(m, ["--repo", library, "--json"], CLOUD);
@@ -408,7 +415,7 @@ test("--agents picks the harnesses; Hermes has no global instructions file in th
 
 test("a PC with a library keeps the old library-based sync after the block, with the old instruction blocks off: one report, no brain block", async () => {
   const m = machine();
-  const library = fs.realpathSync(oldLibraryLink(m));
+  const library = linkTarget(oldLibraryLink(m))!;
   globalBlock(m, "claude-code", "brain", "## Brain\nold");
   const r = await cli(m, ["--no-wsl"]);
   assert.equal(r.status, 0, r.stderr);
