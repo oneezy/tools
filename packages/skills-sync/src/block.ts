@@ -269,6 +269,38 @@ export function readBlock(file: string): BlockState {
   return inspect(file).state;
 }
 
+/** How old a temp file of a write must be before it counts as left behind by a run that died. */
+const TEMP_STALE_MS = 60_000;
+
+/**
+ * The temp files a write of `file` left beside it (`<name>.skills-sync.<pid>.<random>.tmp`) more than a minute ago,
+ * as delete actions: a run that died between writing its temp file and the rename. A younger one may be a run writing
+ * now and stays. None when the folder cannot be read.
+ */
+export function leftoverTemps(file: string, now: Date = new Date()): Action[] {
+  const dir = path.dirname(file);
+  const prefix = `${path.basename(file)}.skills-sync.`;
+  let names: string[];
+  try {
+    names = fs.readdirSync(dir);
+  } catch {
+    return [];
+  }
+  const out: Action[] = [];
+  for (const name of names.sort()) {
+    if (!name.startsWith(prefix) || !name.endsWith(".tmp")) continue;
+    const p = path.join(dir, name);
+    try {
+      const st = fs.lstatSync(p);
+      if (!st.isFile() || now.getTime() - st.mtimeMs < TEMP_STALE_MS) continue;
+    } catch {
+      continue;
+    }
+    out.push({ kind: "delete", path: p, note: "a temp file a skills-sync run left behind" });
+  }
+  return out;
+}
+
 /** `<name>-backup-<UTC yyyymmdd-HHMMSS><ext>` beside `file`: CLAUDE-backup-20261011-221500.md. */
 export function backupName(file: string, now: Date = new Date()): string {
   const ext = path.extname(file);

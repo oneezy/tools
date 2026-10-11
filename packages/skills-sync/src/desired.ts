@@ -9,7 +9,7 @@
 // harness's form module in src/forms/ asks for. The release's
 // skills-sync.json (ADR-0012) says which harnesses are served and which plugins each gets; pluginsFor() is the one place
 // a form reads its plugin list. --plan and apply share this one code path; only apply() differs.
-import { blockAction, releaseSource, SHARED_FILE } from "./block.js";
+import { blockAction, leftoverTemps, releaseSource, SHARED_FILE } from "./block.js";
 import type { GitHub } from "./github.js";
 import { hookActions } from "./hooks.js";
 import { LIBRARY_MARKETPLACE, oldStateNotes, type HarnessState, type Machine } from "./machine.js";
@@ -154,6 +154,7 @@ export async function desired(
     }
     const block = state.block ? blockAction(state.block.file, source) : null;
     if (block) report.add(block);
+    if (state.block) for (const a of leftoverTemps(state.block.file)) report.add(a);
     for (const old of state.repoBlocks)
       report.add({
         kind: "note",

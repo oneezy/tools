@@ -5,8 +5,9 @@
 // http_proxy) for an http one, NO_PROXY (or no_proxy) naming the hosts that are reached directly. An https request goes
 // through a CONNECT tunnel, TLS end to end with the host (so NODE_EXTRA_CA_CERTS and the host's certificate check apply
 // as they do without a proxy); an http one is sent to the proxy in absolute form. A user:password in the proxy URL is
-// sent as Proxy-Authorization. Redirects are followed here, each hop deciding afresh whether it goes through the proxy.
-// No proxy for a URL: the global fetch, as before.
+// sent as Proxy-Authorization. Redirects are followed here, each hop deciding afresh whether it goes through the proxy;
+// a hop to another origin goes without Authorization and Cookie, as Node's own fetch does (a release asset redirects to
+// a storage host that must never see the token). No proxy for a URL: the global fetch, as before.
 import http from "node:http";
 import https from "node:https";
 import net from "node:net";
@@ -93,14 +94,17 @@ export function proxyFetch(env: Env = process.env, direct: typeof fetch = fetch)
     let url = new URL(typeof input === "string" || input instanceof URL ? input : input.url);
     let method = init.method ?? "GET";
     let body = init.body;
+    let headers = init.headers;
     for (let hop = 0; hop < 10; hop++) {
       const proxy = proxyFor(url, env);
       // no proxy for this hop: the global fetch takes it from here, redirects and all
-      if (!proxy) return direct(url, { ...init, method, body, redirect: "follow" } as RequestInit);
-      const res = await viaProxy(url, proxy, { ...init, method, body });
+      if (!proxy) return direct(url, { ...init, headers, method, body, redirect: "follow" } as RequestInit);
+      const res = await viaProxy(url, proxy, { ...init, headers, method, body });
       const location = res.headers.get("location");
       if (![301, 302, 303, 307, 308].includes(res.status) || !location) return res;
-      url = new URL(location, url);
+      const next = new URL(location, url);
+      if (next.origin !== url.origin) headers = withoutCredentials(headers);
+      url = next;
       if (res.status === 303 || ((res.status === 301 || res.status === 302) && method === "POST")) {
         method = "GET";
         body = undefined;
@@ -108,6 +112,12 @@ export function proxyFetch(env: Env = process.env, direct: typeof fetch = fetch)
     }
     throw new TypeError("fetch failed", { cause: { message: "too many redirects" } });
   }) as typeof fetch;
+}
+
+/** The headers without Authorization and Cookie (any case): what a hop to another origin may carry. */
+function withoutCredentials(headers: Record<string, string> | undefined): Record<string, string> | undefined {
+  if (!headers) return headers;
+  return Object.fromEntries(Object.entries(headers).filter(([k]) => !/^(authorization|cookie)$/i.test(k)));
 }
 
 /** One request through `proxy`: CONNECT and TLS for https, the absolute form for http. */

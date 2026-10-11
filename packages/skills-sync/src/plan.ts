@@ -233,7 +233,10 @@ function write(a: Action): void {
 
 /**
  * The file's lock for this run: created exclusively, so only one run holds it. Taken by another run: false, unless
- * that lock is older than a minute (its run died), which is removed and taken.
+ * that lock is older than a minute (its run died). A stale lock is first renamed to a name of this run's own, and only
+ * the run whose rename succeeded removes it and tries again: two runs that both find it stale cannot both take it (the
+ * second one's rename finds nothing and it skips). Should the lock renamed aside turn out fresh (another run took the
+ * stale one over between this run's look and its rename), it is put back and this run skips.
  */
 function takeLock(file: string): string | false {
   const lock = `${file}.skills-sync.lock`;
@@ -251,7 +254,28 @@ function takeLock(file: string): string | false {
       continue; // released meanwhile: try again
     }
     if (age < LOCK_STALE_MS) return false;
-    fs.rmSync(lock, { force: true });
+    const aside = `${lock}.${process.pid}.${randomBytes(4).toString("hex")}.stale`;
+    try {
+      fs.renameSync(lock, aside);
+    } catch {
+      return false; // another run moved it first: that run takes it
+    }
+    let fresh = false;
+    try {
+      fresh = Date.now() - fs.statSync(aside).mtimeMs < LOCK_STALE_MS;
+    } catch {
+      // gone already: nothing to put back
+    }
+    if (fresh) {
+      try {
+        fs.linkSync(aside, lock); // back where it was, never over a lock made since
+      } catch {
+        // a lock is there again either way
+      }
+      fs.rmSync(aside, { force: true });
+      return false;
+    }
+    fs.rmSync(aside, { force: true });
   }
   return false;
 }

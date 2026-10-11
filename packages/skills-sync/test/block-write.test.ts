@@ -7,7 +7,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, test } from "vite-plus/test";
-import { BLOCK_BODY, blockAction, blockSource, readBlock, withBlock } from "../src/block.js";
+import { BLOCK_BODY, blockAction, blockSource, leftoverTemps, readBlock, withBlock } from "../src/block.js";
 import { toHash } from "../src/fs.js";
 import { apply, Report, writeInstruction } from "../src/plan.js";
 
@@ -130,4 +130,94 @@ test("only the skills and brain ids are the tool's: a user's example markers are
   assert.equal(fs.readFileSync(fresh, "utf8"), withBlock("", blockSource("built-in", null)));
   assert.ok(fs.readFileSync(fresh, "utf8").startsWith("<!-- skills-sync:skills:start built-in sha256:"));
   assert.ok(fs.readFileSync(fresh, "utf8").includes(BLOCK_BODY));
+});
+
+/** Make a stale lock (its run died two minutes ago) beside `file`; returns its path. */
+function staleLock(file: string): string {
+  const lock = `${file}.skills-sync.lock`;
+  fs.writeFileSync(lock, "4242\n");
+  const old = new Date(Date.now() - 120_000);
+  fs.utimesSync(lock, old, old);
+  return lock;
+}
+
+/** Run `body` with fs.renameSync of the lock (and only the lock) going through `onLock` first. */
+function onLockRename(lock: string, onLock: (rename: typeof fs.renameSync) => void, body: () => void): void {
+  const rename = fs.renameSync;
+  fs.renameSync = ((from: fs.PathLike, to: fs.PathLike) => {
+    if (String(from) === lock) onLock(rename);
+    return rename(from, to);
+  }) as typeof fs.renameSync;
+  try {
+    body();
+  } finally {
+    fs.renameSync = rename;
+  }
+}
+
+test("a stale lock another run moves aside first: this run's rename of it fails, so this run skips the file and never takes a lock of its own", () => {
+  const dir = folder();
+  const file = path.join(dir, "CLAUDE.md");
+  fs.writeFileSync(file, "mine\n");
+  const lock = staleLock(file);
+  let a: ReturnType<typeof run> | undefined;
+  // the other run renames the stale lock away just before this run does
+  onLockRename(
+    lock,
+    (rename) => rename(lock, path.join(dir, "elsewhere.stale")),
+    () => (a = run(file)),
+  );
+  assert.equal(a!.kind, "skip", a!.note);
+  assert.equal(fs.readFileSync(file, "utf8"), "mine\n");
+  assert.ok(!fs.existsSync(lock), "no lock of this run's own");
+  assert.deepEqual(others(dir, file), ["elsewhere.stale"]);
+});
+
+test("a stale lock replaced by another run's fresh one just before this run moves it aside: the fresh lock is put back and the file skipped", () => {
+  const dir = folder();
+  const file = path.join(dir, "CLAUDE.md");
+  fs.writeFileSync(file, "mine\n");
+  const lock = staleLock(file);
+  let a: ReturnType<typeof run> | undefined;
+  // between this run's look at the lock and its rename, the other run took the stale lock over: a fresh one is there
+  onLockRename(
+    lock,
+    () => {
+      fs.rmSync(lock);
+      fs.writeFileSync(lock, "other\n");
+    },
+    () => (a = run(file)),
+  );
+  assert.equal(a!.kind, "skip", a!.note);
+  assert.equal(fs.readFileSync(file, "utf8"), "mine\n");
+  assert.equal(fs.readFileSync(lock, "utf8"), "other\n");
+  assert.deepEqual(others(dir, file), ["CLAUDE.md.skills-sync.lock"]);
+});
+
+test("temp files a run left behind beside the file: those older than a minute are deleted, a fresh one (a run writing now) and other files stay", () => {
+  const dir = folder();
+  const file = path.join(dir, "CLAUDE.md");
+  fs.writeFileSync(file, "mine\n");
+  const old = path.join(dir, "CLAUDE.md.skills-sync.4242.0a1b2c3d.tmp");
+  const fresh = path.join(dir, "CLAUDE.md.skills-sync.4343.0a1b2c3e.tmp");
+  for (const p of [old, fresh, path.join(dir, "notes.tmp"), path.join(dir, "AGENTS.md.skills-sync.1.2.tmp")])
+    fs.writeFileSync(p, "half\n");
+  const twoMinutes = new Date(Date.now() - 120_000);
+  fs.utimesSync(old, twoMinutes, twoMinutes);
+  fs.utimesSync(path.join(dir, "notes.tmp"), twoMinutes, twoMinutes);
+  const actions = leftoverTemps(file);
+  assert.deepEqual(
+    actions.map((a) => [a.kind, a.path]),
+    [["delete", old]],
+  );
+  const report = new Report();
+  for (const a of actions) report.add(a);
+  apply(report, false);
+  assert.deepEqual(others(dir, file), [
+    "AGENTS.md.skills-sync.1.2.tmp",
+    "CLAUDE.md.skills-sync.4343.0a1b2c3e.tmp",
+    "notes.tmp",
+  ]);
+  // no folder, no file: nothing to delete
+  assert.deepEqual(leftoverTemps(path.join(dir, "nothere", "CLAUDE.md")), []);
 });

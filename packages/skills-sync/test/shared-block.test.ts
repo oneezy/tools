@@ -429,3 +429,28 @@ test("unlink takes out only the stamped block: the text around it stays, after a
   assert.equal(fs.existsSync(globalFile(m, "codex")), false);
   assert.deepEqual(backups(globalFile(m, "codex")), []);
 });
+
+test("sync deletes a temp file a run left beside the global file over a minute ago, under --plan only names it", async () => {
+  const gh = await library();
+  const m = machine(gh);
+  assert.equal((await cli(m, ["--quiet"])).status, 0);
+  const file = globalFile(m, "claude-code");
+  const left = `${file}.skills-sync.4242.0a1b2c3d.tmp`;
+  fs.writeFileSync(left, "half a block\n");
+  const old = new Date(Date.now() - 120_000);
+  fs.utimesSync(left, old, old);
+  const plan = await cli(m, ["--plan", "--json"]);
+  assert.equal(plan.status, 0, plan.stderr);
+  const del = (plan.json as { actions: Array<{ kind: string; path: string }> }).actions.filter(
+    (a) => a.kind === "delete",
+  );
+  assert.deepEqual(
+    del.map((a) => a.path),
+    [left],
+  );
+  assert.ok(fs.existsSync(left));
+  const r = await cli(m, []);
+  assert.equal(r.status, 0, r.stdout + r.stderr);
+  assert.ok(!fs.existsSync(left), r.stdout);
+  assert.ok(r.stdout.includes(left), r.stdout);
+});
