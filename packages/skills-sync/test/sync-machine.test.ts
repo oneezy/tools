@@ -61,8 +61,12 @@ afterEach(() => {
   for (const m of machines.splice(0)) destroy(m);
 });
 
+/**
+ * A machine with both harness folders, the fake claude on PATH and no codex: these tests are about the block, and with
+ * a codex on PATH the sync would also install Codex's plugins from GitHub (test/codex-form.test.ts covers that form).
+ */
 function machine(options: Parameters<typeof pretendMachine>[0] = {}): PretendMachine {
-  const m = pretendMachine({ github: gh, ...options });
+  const m = pretendMachine({ github: gh, clis: ["claude"], ...options });
   machines.push(m);
   return m;
 }
@@ -155,7 +159,9 @@ test("sync on a machine with no library writes the skills block into both global
   assert.ok(!r.stdout.includes("not delivered"), r.stdout);
   // the other forms are named, not acted on, until their tickets land
   assert.ok(
-    lines.some((l) => l.startsWith(". note") && l.includes("Codex") && l.includes("form: plugins from GitHub")),
+    lines.some(
+      (l) => l.startsWith(". note") && l.includes("Codex: plugins from GitHub") && l.includes("no codex on PATH"),
+    ),
     r.stdout,
   );
   // no library cloned or remembered, GitHub only read, no plugin command run

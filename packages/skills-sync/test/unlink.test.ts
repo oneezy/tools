@@ -18,6 +18,7 @@ import {
   codexLegacySkills,
   codexTrust,
   destroy,
+  githubClone,
   globalFile,
   hookEntry,
   installedPlugin,
@@ -94,6 +95,8 @@ async function seeded(): Promise<Seeded> {
   const m = machine();
   libraryCopy(m);
   const r17 = gh.fixture.releases.find((r) => r.number === 17)!;
+  // the library on the pretend GitHub: the sync after unlink gives Codex its plugins from there
+  githubClone(m, r17);
   // Claude Code: the account plugin (stays), the tool's plugin from the library's catalog, one from another marketplace
   syncedPlugin(m, "oneezy", { files: r17.plugins.oneezy.files });
   installedPlugin(m, "claude-code", "oneezy", { files: r17.plugins.oneezy.files });
@@ -215,7 +218,8 @@ test("unlink removes the tool's plugins, its marketplace registration, its links
   );
   const quiet = await cli(m, ["unlink", "--quiet"]);
   assert.equal(quiet.stdout + quiet.stderr, "");
-  // and a sync afterwards puts the blocks and the hook entries back, nothing else of the old state
+  // and a sync afterwards puts the blocks and the hook entries back (and Codex's plugins, from GitHub), nothing else of
+  // the old state
   const sync = await cli(m, ["--json"]);
   assert.equal(sync.status, 0, sync.stderr);
   assert.deepEqual(

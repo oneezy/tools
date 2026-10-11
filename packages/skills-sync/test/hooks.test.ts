@@ -49,8 +49,12 @@ afterEach(() => {
   for (const m of machines.splice(0)) destroy(m);
 });
 
+/**
+ * A machine with both harness folders, the fake claude on PATH and no codex: these tests are about the hook entries,
+ * and with a codex on PATH the sync would also install Codex's plugins from GitHub (test/codex-form.test.ts covers it).
+ */
 function machine(options: Parameters<typeof pretendMachine>[0] = {}): PretendMachine {
-  const m = pretendMachine({ github: gh, ...options });
+  const m = pretendMachine({ github: gh, clis: ["claude"], ...options });
   machines.push(m);
   return m;
 }

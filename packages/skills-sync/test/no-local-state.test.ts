@@ -13,10 +13,17 @@ import { lexists, linkTarget } from "../src/fs.js";
 import { parseConfig, parseRelease } from "../src/release.js";
 import { shippedSchema, validate } from "../src/schema.js";
 import { VERSION } from "../src/version.js";
-import { fixtureConfig, startFakeGithub, type FakeGithub } from "./fixtures/fake-github/fake-github.mjs";
+import {
+  fixtureConfig,
+  startFakeGithub,
+  type FakeGithub,
+  type FixtureRelease,
+} from "./fixtures/fake-github/fake-github.mjs";
 import {
   cli,
   destroy,
+  fakeCli,
+  githubClone,
   globalFile,
   names,
   oldLibraryLink,
@@ -58,10 +65,12 @@ const ignored = (...flags: string[]) =>
 const R17 = "1717171717171717171717171717171717171717";
 
 let gh: FakeGithub;
+let r17: FixtureRelease;
 const machines: PretendMachine[] = [];
 
 beforeAll(async () => {
   gh = await startFakeGithub();
+  r17 = gh.fixture.releases.find((r) => r.number === 17)!;
 });
 afterAll(async () => {
   await gh.close();
@@ -72,11 +81,24 @@ afterEach(() => {
   gh.fixture.contents![R17]["skills-sync.json"] = fixtureConfig("oneezy/skills", "0.43.1");
 });
 
+/**
+ * A machine with both harness folders and, by default, the fake claude alone on PATH: these tests are about what the
+ * tool keeps on the machine, and Codex's form (test/codex-form.test.ts) installs its plugins from GitHub. A test that
+ * wants that form too puts the fake codex on PATH and lays the library on the pretend GitHub with `githubClone`.
+ */
 function machine(options: Parameters<typeof pretendMachine>[0] = {}): PretendMachine {
-  const m = pretendMachine({ github: gh, ...options });
+  const m = pretendMachine({ github: gh, clis: ["claude"], ...options });
   machines.push(m);
   return m;
 }
+/**
+ * Codex's own plugin store under ~/.codex, which Codex writes when the tool installs through it (the marketplace
+ * snapshot, the plugin cache, the fake's state file): the harness's, not the tool's, and not a local file of the tool.
+ */
+const codexStore = (entry: string) =>
+  entry.startsWith(".codex/.tmp/") ||
+  entry.startsWith(".codex/plugins/") ||
+  entry.startsWith(".codex/fake-harness.json");
 
 const read = (file: string) => fs.readFileSync(file, "utf8");
 /** The paths `after` has that `before` had not; fails when any entry of `before` changed or went. */
@@ -92,22 +114,30 @@ const pluginWrite = (c: string[]) =>
   c.some((w) => ["install", "add", "uninstall", "remove", "update", "upgrade"].includes(w));
 const notes = (r: { stdout: string }) => r.stdout.split("\n").filter((l) => l.startsWith(". note"));
 
-test("no run creates or changes ~/.skills-sync or a local file: sync, status, unlink and their --plan leave the home as it was but for the global files", async () => {
-  const m = machine();
+test("no run creates or changes ~/.skills-sync or a local file: sync, status, unlink and their --plan leave the home as it was but for the global files and what Codex itself writes", async () => {
+  // both CLIs on PATH and the library on the pretend GitHub: the whole sync runs, Codex's plugins included
+  const m = machine({ clis: ["claude", "codex"] });
+  githubClone(m, r17);
   const before = snapshot(m.home);
   const first = await cli(m, []);
-  assert.equal(first.status, 0, first.stderr);
-  assert.deepEqual(added(before, snapshot(m.home)), GLOBALS);
+  assert.equal(first.status, 0, first.stderr + first.stdout);
+  const got = added(before, snapshot(m.home));
+  assert.deepEqual(
+    got.filter((e) => !codexStore(e)),
+    GLOBALS,
+  );
+  assert.ok(got.some(codexStore), "Codex installed the plugins into its own store");
   const after = snapshot(m.home);
   for (const args of [["status"], ["status", "--json"], ["--plan"], ["--json"], [], ["unlink", "--plan"], ["unlink"]]) {
     const r = await cli(m, args);
-    assert.ok(r.status === 0 || args[0] === "status", `${args.join(" ")}: ${r.stderr}`);
+    assert.ok(r.status === 0 || args[0] === "status", `${args.join(" ")}: ${r.stderr}${r.stdout}`);
     assert.equal(r.stderr, "", args.join(" "));
   }
-  // unlink took the blocks and the hook entries away (the files held nothing else); nothing else of the home moved
+  // unlink took the blocks and the hook entries away (the files held nothing else) and the plugins out of Codex's
+  // store, which is Codex's to keep as it likes; nothing else of the home moved
   assert.deepEqual(
-    snapshot(m.home),
-    after.filter((e) => !GLOBALS.some((g) => e.startsWith(g))),
+    snapshot(m.home).filter((e) => !codexStore(e)),
+    after.filter((e) => !codexStore(e) && !GLOBALS.some((g) => e.startsWith(g))),
   );
   assert.equal(lexists(path.join(m.home, ".skills-sync")), false);
   assert.equal(
@@ -303,8 +333,27 @@ test("the settings come from the release's skills-sync.json at its commit: the c
     JSON.stringify(status.lines),
   );
 
+  // and Codex's form takes that list: with the config naming one plugin for Codex, one is installed and nothing else
+  gh.fixture.contents![R17]["skills-sync.json"] = fixtureConfig("oneezy/skills", "0.43.1", {
+    machines: { plugins: { codex: ["play"] } },
+  });
+  const c = machine({ clis: ["claude", "codex"] });
+  githubClone(c, r17);
+  const codex = await cli(c, ["--json"]);
+  assert.equal(codex.status, 0, codex.stderr + codex.stdout);
+  assert.deepEqual(
+    (codex.json as unknown as SyncJson).actions
+      .filter((a) => a.kind === "install" && a.path.startsWith("Codex: plugin "))
+      .map((a) => a.path),
+    ["Codex: plugin play@oneezy-skills"],
+  );
+  const listed = fakeCli(c, "codex", ["plugin", "list", "--json"]).json as { installed: Array<{ pluginId: string }> };
+  assert.deepEqual(
+    listed.installed.map((p) => p.pluginId),
+    ["play@oneezy-skills"],
+  );
+
   // what a form sees, through the one function: the release's plugins narrowed per harness, sorted by id
-  const r17 = gh.fixture.releases.find((x) => x.number === 17)!;
   const release = parseRelease("oneezy/skills", r17.tag, r17.commit, Buffer.from(JSON.stringify(r17.json)));
   const ids = (list: Array<{ id: string }>) => list.map((p) => p.id);
   assert.deepEqual(ids(pluginsFor(release, "codex")), ["matt-pocock", "oneezy", "play"], "no config: every plugin");
