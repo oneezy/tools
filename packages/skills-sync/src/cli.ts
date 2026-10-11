@@ -14,7 +14,7 @@ import { LOCAL_NAME, migrateAnswers, readLocal, writeLocal, type LinkMode, type 
 import { gitExclude, isDir, isLink, lexists, linkMode, linkTarget, real, samePath, setLinkMode } from "./fs.js";
 import { runBranches } from "./commands/branches.js";
 import { runStatus } from "./commands/status.js";
-import { runSync, syncFacts, type SyncResult } from "./commands/sync.js";
+import { BUILT_FORMS, runSync, syncFacts, type SyncResult } from "./commands/sync.js";
 import { isCloud } from "./machine.js";
 import { detected, harnessTable, type Harness } from "./harnesses.js";
 import { plugins, removeOwned, pluginDependency, type Form, type Owned } from "./install.js";
@@ -579,6 +579,9 @@ async function main(): Promise<void> {
   const choices = await decide(args, local, lib, table, cwd, interactive);
   if (!choices) return p.cancel("nothing changed");
   if (!args.plan) saveLocal(lib.root, choices);
+  // until #149, #153 and #154: a harness whose form the machine sync built is its alone; the old run would link its
+  // skills again and register the library folder as its marketplace. The answers above remember it all the same
+  if (machineSync) choices.agents = choices.agents.filter((h) => !BUILT_FORMS.has(h.id));
 
   // 5. run
   await runOnce(lib, choices, args, cwd, setup);

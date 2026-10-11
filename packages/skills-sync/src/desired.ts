@@ -36,15 +36,27 @@ export function formOf(harnessId: string): MachineForm | null {
  * A harness's form module (src/forms/<harness>.ts): from the release (null when GitHub could not be read), the
  * harness's probed state and the machine, the actions that bring the harness to its form. Never called in the cloud,
  * where the block is the whole sync (ADR-0007: claude.ai delivers the account plugins; nothing else is installed).
+ * A form runs the harness's plugin commands itself and records them as install/uninstall actions; under `plan` it
+ * only records what it would run.
  */
-export type FormFn = (release: Release | null, state: HarnessState, machine: Machine) => Action[];
+export type FormFn = (release: Release | null, state: HarnessState, machine: Machine, options: FormOptions) => Action[];
+
+export interface FormOptions {
+  /** show the plan: no plugin command that changes anything is run */
+  plan: boolean;
+}
 
 export interface DesiredOptions {
   /** only these harness ids (--agents); every detected one when unset */
   agents?: string[];
+  /** --plan: the forms record their plugin commands without running them */
+  plan?: boolean;
 }
 
-/** The plan: what every harness on this machine should have, against what the probe found. Pure; nothing written. */
+/**
+ * The plan: what every harness on this machine should have, against what the probe found. Nothing is written here;
+ * outside the cloud a form may run its harness's plugin commands (recorded as actions), unless `plan` is set.
+ */
 export function desired(
   release: Release | null,
   machine: Machine,
@@ -62,7 +74,8 @@ export function desired(
         path: old.file,
         note: `skills-sync block (${old.ids.join(", ")}) outside the global file; remove it by hand, the block lives only in ${state.harness.name}'s global file now`,
       });
-    if (!machine.cloud) for (const a of forms[id]?.(release, state, machine) ?? []) report.add(a);
+    if (!machine.cloud)
+      for (const a of forms[id]?.(release, state, machine, { plan: options.plan ?? false }) ?? []) report.add(a);
   }
   return report;
 }

@@ -10,7 +10,15 @@ import path from "node:path";
 import { globalFile, readBlock, repoBlocks, type BlockState, type RepoBlock } from "./block.js";
 import { isDir, isLink, isSkillDir, linkTarget, samePath } from "./fs.js";
 import { detected, RESERVED, type Harness } from "./harnesses.js";
-import { codexPluginSkills, harnessCli, listInstalled, runner, supportsPlugins } from "./install.js";
+import {
+  codexPluginSkills,
+  harnessCli,
+  listInstalled,
+  listMarketplaces,
+  runner,
+  supportsPlugins,
+  type Marketplace,
+} from "./install.js";
 import { homeLibrary } from "./library.js";
 
 /** The library's catalog name: the marketplace a plugin this tool installed comes from, on Claude Code and Codex. */
@@ -61,6 +69,8 @@ export interface HarnessState {
   note?: string;
   synced: AccountPlugin[];
   installed: CliPlugin[];
+  /** the marketplaces the harness's CLI lists (Codex: the library's from GitHub or an old local folder); empty when it cannot */
+  marketplaces: Marketplace[];
   loose: LooseLink[];
   folders: SkillFolder[];
   /** the managed block in the harness's global instructions file; null when its table row names no such file */
@@ -108,6 +118,7 @@ function probeHarness(h: Harness, env: NodeJS.ProcessEnv, roots: string[], globa
     cli: null,
     synced: [],
     installed: [],
+    marketplaces: [],
     loose: [],
     folders: [],
     block: file ? readBlock(file) : null,
@@ -125,6 +136,7 @@ function probeHarness(h: Harness, env: NodeJS.ProcessEnv, roots: string[], globa
       const listed = supportsPlugins(run) ? listInstalled(h, run) : null;
       if (!listed) state.note = `${cli.bin} cannot list its plugins`;
       else {
+        state.marketplaces = listMarketplaces(h, run) ?? [];
         // Codex names no folder for a plugin; its loaded skills come from the prompt input it renders locally
         let codexSkills: Map<string, string[]> | null = null;
         if (h.id === "codex" && listed.length) {

@@ -1,11 +1,16 @@
 // A stand-in for the claude and codex CLIs' plugin commands, put on PATH by the install tests so they never touch
-// the machine's real harnesses. It answers with the shapes the real CLIs print (Claude Code 2.1.296, Codex 0.161.0),
+// the machine's real harnesses. It answers with the shapes the real CLIs print (Claude Code 2.1.296, Codex 0.162.1),
 // keeps its state in fake-harness.json in the harness's config folder (CLAUDE_CONFIG_DIR, CODEX_HOME), and appends
 // every call to FAKE_HARNESS_LOG. FAKE_HARNESS_OLD=<claude,codex> makes one a CLI without plugin commands;
 // FAKE_HARNESS_BROKEN=<claude,codex> one that installs but never resolves a plugin's skills. Claude also lists the
 // account plugins claude.ai synced into <CLAUDE_CONFIG_DIR>/plugins/synced/<bucket>/<name>/ as <name>@synced, exactly
 // as the real CLI does (version "unknown" unless the Claude manifest carries one), and answers details for them; a test
 // switches one off through the state file's `synced` map ({ "<name>@synced": { enabled: false } }).
+// Codex takes a marketplace from a local folder or from GitHub as `owner/repo`: the pretend GitHub is the folder
+// FAKE_HARNESS_GITHUB, where <owner>/<repo> is a checkout of the library (its `.git-revision` file is the commit), cloned
+// into <CODEX_HOME>/.tmp/marketplaces/<name> as the real CLI does; `marketplace upgrade` re-clones when the revision
+// moved and reinstalls every plugin from it; `plugin add` copies the plugin into <CODEX_HOME>/plugins/cache/<mkt>/<id>/
+// <version>; FAKE_HARNESS_FAIL_ADD=<ids> makes `plugin add` of those ids fail. The JSON shapes are the real CLI's.
 import fs from "node:fs";
 import path from "node:path";
 import {spawnSync} from "node:child_process";
@@ -38,12 +43,46 @@ const resolve = (id) => {
   const at = id.lastIndexOf("@");
   const [name, mkt] = [id.slice(0, at), id.slice(at + 1)];
   const root = state.marketplaces[mkt];
-  if (!root) fail(`marketplace ${mkt} is not configured`);
+  if (!root) fail(host === "codex" ? `Error: plugin \`${name}\` was not found in marketplace \`${mkt}\`` : `marketplace ${mkt} is not configured`);
   const entry = catalog(root).plugins.find((p) => p.name === name);
-  if (!entry) fail(`plugin ${name} was not found in marketplace ${mkt}`);
+  if (!entry) fail(host === "codex" ? `Error: plugin \`${name}\` was not found in marketplace \`${mkt}\`` : `plugin ${name} was not found in marketplace ${mkt}`);
   return { name, mkt, dir: path.resolve(root, entry.source) };
 };
-const codexVersion = (dir) => JSON.parse(fs.readFileSync(path.join(dir, ".codex-plugin", "plugin.json"), "utf8")).version;
+const codexVersion = (dir) => JSON.parse(fs.readFileSync(path.join(dir, ".codex-plugin", "plugin.json"), "utf8")).version ?? null;
+// Codex: where a marketplace was added from; a marketplace registered before this fake knew sources is a local folder
+const sourceOf = (name) => state.sources?.[name] ?? { sourceType: "local", source: state.marketplaces[name] };
+// the pretend GitHub: <FAKE_HARNESS_GITHUB>/<owner>/<repo> is the clone `owner/repo` or its Git URL would give
+const githubClone = (ownerRepo) => {
+  const m = /^(?:https:\/\/github\.com\/)?([\w.-]+)\/([\w.-]+?)(?:\.git)?(?:@[\w.-]+)?$/.exec(ownerRepo);
+  const base = process.env.FAKE_HARNESS_GITHUB;
+  if (!m || !base) return null;
+  const dir = path.join(base, m[1], m[2]);
+  return fs.existsSync(dir) ? { owner: m[1], repo: m[2], dir } : null;
+};
+const revisionOf = (clone) => {
+  try {
+    return fs.readFileSync(path.join(clone, ".git-revision"), "utf8").trim();
+  } catch {
+    return "0";
+  }
+};
+const snapshotOf = (name) => path.join(home, ".tmp", "marketplaces", name);
+const clone = (from, to) => {
+  fs.rmSync(to, { recursive: true, force: true });
+  fs.mkdirSync(path.dirname(to), { recursive: true });
+  fs.cpSync(from, to, { recursive: true });
+};
+// Codex installs a Git marketplace's plugin into its cache, keyed by the manifest's version, as the real CLI does; a
+// local marketplace's plugin is read in place here (the install tests compare paths with the library's built folder)
+const codexInstall = (p, enabled) => {
+  const version = codexVersion(p.dir);
+  let dir = p.dir;
+  if (sourceOf(p.mkt).sourceType === "git") {
+    dir = path.join(home, "plugins", "cache", p.mkt, p.name, version ?? "unversioned");
+    clone(p.dir, dir);
+  }
+  return { version, enabled, dir, skills: skillsOf(dir) };
+};
 // the account plugins: every folder under plugins/synced/<bucket>/, the bucket's manifest.json and *.meta.json skipped
 const synced = () => {
   const root = path.join(home, "plugins", "synced");
@@ -79,7 +118,12 @@ if (args[0] === "plugin" && args.includes("--help")) {
   out(
     host === "claude"
       ? rows.map(([name, p]) => ({ name, source: "directory", path: p, installLocation: p }))
-      : { marketplaces: rows.map(([name, p]) => ({ name, root: p })) },
+      : {
+          marketplaces: rows.map(([name, root]) => {
+            const { sourceType, source } = sourceOf(name);
+            return { name, root, marketplaceSource: { sourceType, source } };
+          }),
+        },
   );
 } else if (cmd === "plugin marketplace add") {
   if (has(process.env.FAKE_HARNESS_NO_WRITE_JSON, host) && args.includes("--json")) fail("unknown option '--json'");
@@ -87,19 +131,70 @@ if (args[0] === "plugin" && args.includes("--help")) {
     out("registry provider context");
     fail("fixture registry registration denied");
   }
-  const root = path.resolve(words[3]);
+  let root = path.resolve(words[3]);
+  let source = { sourceType: "local", source: root };
+  if (host === "codex" && !fs.existsSync(root)) {
+    // not a folder here: owner/repo (or a Git URL) on the pretend GitHub, snapshotted like the real CLI's git clone
+    const gh = githubClone(words[3]);
+    if (!gh) fail(`Error: failed to clone https://github.com/${words[3].replace(/\.git$/, "")}.git`);
+    const name = catalog(gh.dir).name;
+    if (state.marketplaces[name]) {
+      out({ marketplaceName: name, installedRoot: state.marketplaces[name], alreadyAdded: true });
+      process.exit(0);
+    }
+    root = snapshotOf(name);
+    clone(gh.dir, root);
+    // the revision is compared only by upgrade, so the first upgrade after an add re-clones (the real CLI does too)
+    source = { sourceType: "git", source: `https://github.com/${gh.owner}/${gh.repo}.git`, revision: null };
+  }
   const name = catalog(root).name;
+  if (host === "codex" && state.marketplaces[name]) {
+    out({ marketplaceName: name, installedRoot: state.marketplaces[name], alreadyAdded: true });
+    process.exit(0);
+  }
   state.marketplaces[name] = root;
+  if (host === "codex") (state.sources ??= {})[name] = source;
   save();
-  out({ outcome: "ok", marketplace: name });
+  out(host === "claude" ? { outcome: "ok", marketplace: name } : { marketplaceName: name, installedRoot: root, alreadyAdded: false });
 } else if (cmd === "plugin marketplace remove") {
-  if (!state.marketplaces[words[3]]) fail(`marketplace ${words[3]} is not configured`);
+  if (!state.marketplaces[words[3]])
+    fail(host === "codex" ? `Error: marketplace \`${words[3]}\` is not configured or installed` : `marketplace ${words[3]} is not configured`);
+  const root = state.marketplaces[words[3]];
   delete state.marketplaces[words[3]];
-  // Claude's remove cascades to the marketplace's plugins; Codex's does not
+  // Claude's remove cascades to the marketplace's plugins; Codex's does not: its [plugins] entries and caches stay
   if (host === "claude")
     for (const id of Object.keys(state.plugins)) if (id.endsWith(`@${words[3]}`)) delete state.plugins[id];
+  const source = sourceOf(words[3]);
+  if (state.sources) delete state.sources[words[3]];
   save();
-  out({ outcome: "ok" });
+  out(host === "claude" ? { outcome: "ok" } : { marketplaceName: words[3], installedRoot: source.sourceType === "git" ? root : null });
+} else if (host === "codex" && cmd === "plugin marketplace upgrade") {
+  // refresh every Git marketplace named (or all of them): a new revision on the pretend GitHub is cloned over the
+  // snapshot and every plugin installed from it is reinstalled from the new snapshot
+  const names = words[3] ? [words[3]] : Object.keys(state.marketplaces).filter((n) => sourceOf(n).sourceType === "git");
+  const upgraded = [];
+  for (const name of names) {
+    if (!state.marketplaces[name]) fail(`Error: marketplace \`${name}\` is not configured or installed`);
+    const src = sourceOf(name);
+    if (src.sourceType !== "git") fail(`Error: marketplace \`${name}\` is not configured as a Git marketplace`);
+    const gh = githubClone(src.source);
+    if (!gh) fail(`Error: failed to fetch ${src.source}`);
+    const revision = revisionOf(gh.dir);
+    if (revision === src.revision && !process.env.FAKE_HARNESS_UPGRADE_ALWAYS) continue;
+    clone(gh.dir, state.marketplaces[name]);
+    src.revision = revision;
+    state.sources[name] = src;
+    upgraded.push(state.marketplaces[name]);
+    for (const [id, p] of Object.entries(state.plugins)) {
+      if (!id.endsWith(`@${name}`)) continue;
+      const entry = catalog(state.marketplaces[name]).plugins.find((x) => x.name === id.slice(0, id.lastIndexOf("@")));
+      if (!entry) continue; // no longer in the catalog: the cache stays as it was
+      state.plugins[id] = codexInstall({ name: entry.name, mkt: name, dir: path.resolve(state.marketplaces[name], entry.source) }, p.enabled);
+    }
+  }
+  save();
+  if (args.includes("--json")) out({ selectedMarketplaces: names, upgradedRoots: upgraded, errors: [] });
+  else for (const name of names) out(upgraded.includes(state.marketplaces[name]) ? `Upgraded marketplace \`${name}\`.` : `Marketplace \`${name}\` is already up to date.`);
 } else if (cmd === "plugin list") {
   const rows = Object.entries(state.plugins);
   out(
@@ -110,19 +205,32 @@ if (args[0] === "plugin" && args.includes("--help")) {
           ...synced(),
         ]
       : {
-          installed: rows.map(([id, p]) => ({
-            pluginId: id,
-            name: id.slice(0, id.lastIndexOf("@")),
-            marketplaceName: id.slice(id.lastIndexOf("@") + 1),
-            version: p.version,
-            installed: true,
-            enabled: p.enabled,
-          })),
+          installed: rows.map(([id, p]) => {
+            const name = id.slice(0, id.lastIndexOf("@"));
+            const mkt = id.slice(id.lastIndexOf("@") + 1);
+            const { sourceType, source } = sourceOf(mkt);
+            return {
+              pluginId: id,
+              name,
+              marketplaceName: mkt,
+              version: p.version ?? null,
+              installed: true,
+              enabled: p.enabled,
+              source: { source: "local", path: p.source ?? p.dir },
+              marketplaceSource: { sourceType, source: source ?? null },
+              installPolicy: "AVAILABLE",
+              authPolicy: "ON_USE",
+            };
+          }),
           available: [],
         },
   );
 } else if ((host === "claude" && ["plugin install", "plugin update"].includes(cmd)) || (host === "codex" && cmd === "plugin add")) {
   if (has(process.env.FAKE_HARNESS_NO_WRITE_JSON, host) && args.includes("--json")) fail("unknown option '--json'");
+  if (host === "codex" && has(process.env.FAKE_HARNESS_FAIL_ADD, words[2])) {
+    out(`add provider context: ${words[2]}`);
+    fail(`Error: fixture add denied: ${words[2]}`);
+  }
   const p = resolve(words[2]);
   const at = state.plugins[words[2]];
   // Native Claude install leaves an existing cache untouched; only update rebuilds it.
@@ -140,13 +248,19 @@ if (args[0] === "plugin" && args.includes("--help")) {
       process.exit(0);
     }
   }
-  const version = host === "claude"
-      ? process.env.FAKE_HARNESS_CACHE
+  if (host === "codex") {
+    // idempotent: a second add answers the same JSON
+    const installed = codexInstall(p, at?.enabled ?? true);
+    state.plugins[words[2]] = { ...installed, source: p.dir };
+    save();
+    out({ pluginId: words[2], name: p.name, marketplaceName: p.mkt, version: installed.version, installedPath: installed.dir, authPolicy: "ON_USE" });
+    process.exit(0);
+  }
+  const version = process.env.FAKE_HARNESS_CACHE
         ? spawnSync("git", ["-C", state.marketplaces[p.mkt], "rev-parse", "--short=12", "HEAD"], {encoding:"utf8"}).stdout.trim()
-        : "c69993a67bba"
-      : codexVersion(p.dir);
+        : "c69993a67bba";
   let dir = p.dir;
-  if (host === "claude" && process.env.FAKE_HARNESS_CACHE) {
+  if (process.env.FAKE_HARNESS_CACHE) {
     dir = path.join(home, "cache", p.mkt, p.name, version);
     fs.cpSync(p.dir, dir, { recursive: true });
   }
@@ -160,9 +274,15 @@ if (args[0] === "plugin" && args.includes("--help")) {
   out({ outcome: "ok", pluginId: words[2] });
 } else if ((host === "claude" && cmd === "plugin uninstall") || (host === "codex" && cmd === "plugin remove")) {
   if (!state.plugins[words[2]]) fail(`plugin ${words[2]} not found in installed plugins`);
+  const p = state.plugins[words[2]];
   delete state.plugins[words[2]];
   save();
-  out({ outcome: "ok" });
+  if (host === "codex") {
+    // removes the [plugins] entry and the cache version folder
+    if (p.dir && p.dir.startsWith(path.join(home, "plugins", "cache"))) fs.rmSync(p.dir, { recursive: true, force: true });
+    const at = words[2].lastIndexOf("@");
+    out({ pluginId: words[2], name: words[2].slice(0, at), marketplaceName: words[2].slice(at + 1) });
+  } else out({ outcome: "ok" });
 } else if (host === "claude" && cmd === "plugin details") {
   if (has(process.env.FAKE_HARNESS_FAIL_DETAILS, args[2])) fail(`fixture details failed: ${args[2]}`);
   const account = synced().find((s) => s.id === words[2]);

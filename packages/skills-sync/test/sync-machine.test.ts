@@ -58,8 +58,12 @@ afterEach(() => {
   for (const m of machines.splice(0)) destroy(m);
 });
 
+/**
+ * A machine with both harness folders, the fake claude on PATH and no codex: these tests are about the block, and with
+ * a codex on PATH the sync would also install Codex's plugins from GitHub (test/codex-form.test.ts covers that form).
+ */
 function machine(options: Parameters<typeof pretendMachine>[0] = {}): PretendMachine {
-  const m = pretendMachine({ github: gh, ...options });
+  const m = pretendMachine({ github: gh, clis: ["claude"], ...options });
   machines.push(m);
   return m;
 }
@@ -132,13 +136,15 @@ test("sync on a machine with no library writes the skills block into both global
     r.stdout,
   );
   assert.equal(lines.at(-1), "2 changed, 0 already right, 0 left alone");
-  // the forms are named, not acted on, until their tickets land
+  // the Claude Code form is named, not acted on, until its ticket lands; Codex's form has no codex to work with here
   assert.ok(
     lines.some((l) => l.startsWith(". note") && l.includes("Claude Code") && l.includes("form: account plugins")),
     r.stdout,
   );
   assert.ok(
-    lines.some((l) => l.startsWith(". note") && l.includes("Codex") && l.includes("form: plugins from GitHub")),
+    lines.some(
+      (l) => l.startsWith(". note") && l.includes("Codex: plugins from GitHub") && l.includes("no codex on PATH"),
+    ),
     r.stdout,
   );
   // no library cloned or remembered, GitHub only read, no plugin command run
@@ -478,7 +484,8 @@ test("a PC with a library keeps the old library-based sync after the block, with
   for (const h of ["claude-code", "codex"] as const) assertBlock(read(globalFile(m, h)));
   const link = path.join(m.claudeHome, "skills", "oneezy-status");
   assert.ok(isLink(link), link);
-  assert.ok(isLink(path.join(m.home, ".agents", "skills", "oneezy-status")));
+  // Codex is the machine sync's (its form is built): the old run links nothing into its user folder any more
+  assert.equal(lexists(path.join(m.home, ".agents", "skills", "oneezy-status")), false);
   const lines = r.stdout.trimEnd().split("\n");
   const write = lines.findIndex((l) => l.startsWith("+ write") && l.includes("CLAUDE.md"));
   const linked = lines.findIndex((l) => l.startsWith("+ link") && l.includes("oneezy-status"));

@@ -49,6 +49,17 @@ export interface Installed {
   scope?: string;
 }
 
+/** One marketplace a harness has registered: where it reads it from, and the source it was added from. */
+export interface Marketplace {
+  name: string;
+  /** the folder the harness reads the catalog from (a Git snapshot under its config folder, or the local folder itself) */
+  root: string | null;
+  /** Codex: "git" for owner/repo or a Git URL, "local" for a folder; Claude Code: its source kind; null when unsaid */
+  sourceType: string | null;
+  /** the Git URL or local folder it was added from; null when unsaid */
+  source: string | null;
+}
+
 export interface Run {
   (args: string[]): { ok: boolean; out: string; err: string; exitCode: number | null };
   failure?: Action["diagnostic"];
@@ -75,7 +86,7 @@ interface Driver {
   catalog: string;
   /** the file a plugin install writes, named when the harness cannot install through a command */
   settings: (h: Harness) => string;
-  marketplaces: (run: Run) => Array<{ name: string; path: string }> | null;
+  marketplaces: (run: Run) => Marketplace[] | null;
   installed: (run: Run) => Installed[] | null;
   addMarketplace: (run: Run, root: string) => boolean;
   removeMarketplace: (run: Run, name: string) => boolean;
@@ -135,7 +146,15 @@ const claude: Driver = {
     const v = r.ok ? json(r.out) : null;
     if (!Array.isArray(v)) return null;
     return v
-      .map((m) => ({ name: str(m?.name) ?? "", path: str(m?.path) ?? str(m?.installLocation) ?? "" }))
+      .map((m) => {
+        const root = str(m?.path) ?? str(m?.installLocation);
+        return {
+          name: str(m?.name) ?? "",
+          root,
+          sourceType: str(m?.source) ?? str(m?.source?.source),
+          source: str(m?.source?.repo) ?? str(m?.source?.url) ?? str(m?.source?.path) ?? root,
+        };
+      })
       .filter((m) => m.name);
   },
   installed(run) {
@@ -186,7 +205,12 @@ const codex: Driver = {
     const v = (r.ok ? json(r.out) : null) as { marketplaces?: unknown } | null;
     if (!v || !Array.isArray(v.marketplaces)) return null;
     return v.marketplaces
-      .map((m) => ({ name: str(m?.name) ?? "", path: str(m?.root) ?? str(m?.marketplaceSource?.source) ?? "" }))
+      .map((m) => ({
+        name: str(m?.name) ?? "",
+        root: str(m?.root),
+        sourceType: str(m?.marketplaceSource?.sourceType),
+        source: str(m?.marketplaceSource?.source),
+      }))
       .filter((m) => m.name);
   },
   installed(run) {
@@ -204,7 +228,7 @@ const codex: Driver = {
         folder: null,
       }));
   },
-  addMarketplace: (run, root) => run(["plugin", "marketplace", "add", root, "--json"]).ok,
+  addMarketplace: (run, root) => !!codexMarketplaceAdd(run, root),
   removeMarketplace: (run, name) => run(["plugin", "marketplace", "remove", name, "--json"]).ok,
   install: (run, id) => run(["plugin", "add", id, "--json"]).ok,
   update: (run, id) => run(["plugin", "add", id, "--json"]).ok,
@@ -300,6 +324,66 @@ export function codexPluginSkills(run: Run): Map<string, string[]> | null {
   return out;
 }
 
+/** What a marketplace add answered: the name the harness gave the marketplace (Codex says it) and whether it was there already. */
+export interface MarketplaceAdded {
+  name: string | null;
+  alreadyAdded: boolean;
+}
+
+/** `codex plugin marketplace add <source> --json`: its JSON when it worked, null when it failed (run.failure says why). */
+function codexMarketplaceAdd(run: Run, source: string): MarketplaceAdded | null {
+  const r = run(["plugin", "marketplace", "add", source, "--json"]);
+  if (!r.ok) return null;
+  const v = json(r.out) as { marketplaceName?: unknown; alreadyAdded?: unknown } | null;
+  return { name: str(v?.marketplaceName), alreadyAdded: v?.alreadyAdded === true };
+}
+
+/** The marketplaces the harness's CLI lists; null when it cannot list them. */
+export function listMarketplaces(h: Harness, run: Run): Marketplace[] | null {
+  return DRIVERS[h.id]?.marketplaces(run) ?? null;
+}
+
+/**
+ * Register a marketplace from `source`: a local folder, or for Codex `owner/repo` on GitHub (and a Git URL). Null when the
+ * command failed (run.failure holds the diagnostic); Claude Code names no marketplace in its answer.
+ */
+export function addMarketplace(h: Harness, run: Run, source: string): MarketplaceAdded | null {
+  const d = DRIVERS[h.id];
+  if (!d) return null;
+  if (h.id === "codex") return codexMarketplaceAdd(run, source);
+  return d.addMarketplace(run, source) ? { name: null, alreadyAdded: false } : null;
+}
+
+/** Unregister a marketplace by name. Codex keeps the plugins installed from it; Claude Code uninstalls them with it. */
+export function removeMarketplace(h: Harness, run: Run, name: string): boolean {
+  return DRIVERS[h.id]?.removeMarketplace(run, name) ?? false;
+}
+
+/**
+ * Codex: `codex plugin marketplace upgrade <name> --json` refreshes a Git marketplace's snapshot when the remote moved
+ * and force-reinstalls every plugin installed from it. The roots it upgraded (empty when it was up to date; the first
+ * upgrade after an add reports one even when nothing moved) and its errors; null when the command failed, or for a
+ * harness without the command.
+ */
+export function upgradeMarketplace(
+  h: Harness,
+  run: Run,
+  name: string,
+): { upgradedRoots: string[]; errors: string[] } | null {
+  if (h.id !== "codex") return null;
+  const r = run(["plugin", "marketplace", "upgrade", name, "--json"]);
+  if (!r.ok) return null;
+  const v = json(r.out) as { upgradedRoots?: unknown; errors?: unknown } | null;
+  const strings = (x: unknown) =>
+    Array.isArray(x) ? x.map((e) => (typeof e === "string" ? e : JSON.stringify(e))) : [];
+  return { upgradedRoots: strings(v?.upgradedRoots), errors: strings(v?.errors) };
+}
+
+/** Install `<id>@<marketplace>` through the harness's CLI (Codex's add is idempotent). False when the command failed. */
+export function installPlugin(h: Harness, run: Run, id: string): boolean {
+  return DRIVERS[h.id]?.install(run, id) ?? false;
+}
+
 export function nativePluginRoute(lib: Library, h: Harness, skill: string): boolean {
   const d = DRIVERS[h.id],
     catalog = readCatalog(lib, h);
@@ -344,7 +428,7 @@ export function pluginDependency(
     if (hasLinkedParent(built) || !matchesFiles(built)) return null;
     const run = runner(file, onFailure);
     const market = d.marketplaces(run)?.find((item) => item.name === catalog.marketplace);
-    if (market && !samePath(market.path, lib.root)) return null;
+    if (market && !(market.root && samePath(market.root, lib.root))) return null;
     const id = `${b.name}@${catalog.marketplace}`;
     const installed = d.installed(run);
     if (!installed || installed.some((item) => item.name === b.name && item.id !== id)) return null;
@@ -577,10 +661,10 @@ function install(
     return { skills, owned };
   }
   const existing = markets.find((m) => m.name === mkt);
-  if (existing && !(existing.path && samePath(existing.path, lib.root))) {
+  if (existing && !(existing.root && samePath(existing.root, lib.root))) {
     fail(
       `marketplace ${mkt}`,
-      `already registered from ${existing.path || "another source"}, not this library; left alone, loose links kept`,
+      `already registered from ${existing.root || "another source"}, not this library; left alone, loose links kept`,
     );
     return { skills, owned };
   }
