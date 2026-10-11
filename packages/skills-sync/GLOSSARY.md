@@ -86,7 +86,7 @@ A Plugin claude.ai syncs into Claude Code for the account, listed by `claude plu
 _Avoid_: synced plugin (the harness's word), cloud plugin
 
 **Library copy**:
-A checkout or clone of the Library on a Host (a `skills-sync.json` naming the Library's owner and name at its root), or `~/.skills-sync`. A loose link into one, or whose target is gone, is the tool's own leftover and goes once a Plugin on that Harness carries the skill (ADR-0007). A link to anywhere else and a real skill folder are the user's and are only ever named.
+A checkout or clone of the Library on a Host (a `skills-sync.json` naming the Library's owner and name at its root), or `~/.skills-sync`. A loose link into one, or whose target is gone (a dangling link counts as the tool's leftover, whatever it once pointed at), is the tool's own leftover and goes once a Plugin on that Harness carries the skill (ADR-0007). A link to anywhere else and a real skill folder are the user's and are only ever named.
 _Avoid_: leftover, stale link
 
 **Machine command**:
