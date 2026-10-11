@@ -339,6 +339,22 @@ export function skillFolder(m: PretendMachine, harness: HarnessId, name: string,
 }
 
 /**
+ * The pretend old library clone under the machine (where `looseLink` points by default), marked as a checkout of
+ * `repo`: a skills-sync.json naming library.owner and library.name, as the real library's does. A link into it is then
+ * a link to a library copy, which the tool made and may remove (ADR-0007). Nothing makes ~/.skills-sync point at it, so
+ * the old library-based run does not find it. Returns the clone's root.
+ */
+export function libraryCopy(m: PretendMachine, repo = "oneezy/skills"): string {
+  const root = path.join(m.base, "old-library");
+  const [owner, name] = repo.split("/");
+  write(
+    path.join(root, "skills-sync.json"),
+    JSON.stringify({ version: 1, library: { name, owner, homepage: `https://github.com/${repo}` } }, null, 2) + "\n",
+  );
+  return root;
+}
+
+/**
  * The old ~/.skills-sync link to a library clone (default: a pretend clone under the machine, with the `brain`
  * instruction entrypoint the real library had, so the old run would write that block). Returns the link.
  */
@@ -482,18 +498,4 @@ export function hermesPlugin(
   config.plugins.disabled = [...disabled].sort();
   write(configFile, YAML.stringify(config));
   return dir;
-}
-
-/**
- * A skill folder inside a pretend clone of the library (a skills-sync.json naming oneezy/skills at its root), the kind
- * of target a loose link this tool made points at. Returns the folder, for looseLink's `target`.
- */
-export function libraryCopy(m: PretendMachine, name: string, group = "oneezy"): string {
-  const root = path.join(m.base, "library");
-  const config = path.join(root, "skills-sync.json");
-  if (!fs.existsSync(config))
-    write(config, JSON.stringify({ version: 1, library: { name: "skills", owner: "oneezy" } }, null, 2) + "\n");
-  const folder = path.join(root, "skills", group, name);
-  if (!fs.existsSync(folder)) write(path.join(folder, "SKILL.md"), skillMd(name));
-  return folder;
 }

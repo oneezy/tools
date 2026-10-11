@@ -6,6 +6,8 @@
 // account plugins claude.ai synced into <CLAUDE_CONFIG_DIR>/plugins/synced/<bucket>/<name>/ as <name>@synced, exactly
 // as the real CLI does (version "unknown" unless the Claude manifest carries one), and answers details for them; a test
 // switches one off through the state file's `synced` map ({ "<name>@synced": { enabled: false } }).
+// FAKE_HARNESS_FAIL_LIST=<claude,codex> makes `plugin list` fail (a CLI that cannot list its plugins);
+// FAKE_HARNESS_FAIL_UNINSTALL=<id,...> makes `plugin uninstall <id>` (Codex: `plugin remove <id>`) fail for those ids.
 //
 // The third host is hermes (`hermes plugins ...`, hermes-agent v0.21.6 shapes). Its state is Hermes's own files under
 // HERMES_HOME, the ones the real CLI writes and the tool reads: plugins/<name>/ (copied from a pretend GitHub checkout
@@ -117,6 +119,7 @@ if (args[0] === "plugin" && args.includes("--help")) {
   save();
   out({ outcome: "ok" });
 } else if (cmd === "plugin list") {
+  if (has(process.env.FAKE_HARNESS_FAIL_LIST, host)) fail("fixture plugin list failed");
   const rows = Object.entries(state.plugins);
   out(
     host === "claude"
@@ -175,6 +178,7 @@ if (args[0] === "plugin" && args.includes("--help")) {
   save();
   out({ outcome: "ok", pluginId: words[2] });
 } else if ((host === "claude" && cmd === "plugin uninstall") || (host === "codex" && cmd === "plugin remove")) {
+  if (has(process.env.FAKE_HARNESS_FAIL_UNINSTALL, words[2])) fail(`fixture uninstall denied: ${words[2]}`);
   if (!state.plugins[words[2]]) fail(`plugin ${words[2]} not found in installed plugins`);
   delete state.plugins[words[2]];
   save();

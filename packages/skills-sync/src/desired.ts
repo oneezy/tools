@@ -33,23 +33,32 @@ export function formOf(harnessId: string): MachineForm | null {
   }
 }
 
+/** What a form module is told about the run. */
+export interface FormOptions {
+  /** --plan: say what would be done, run no plugin command that changes anything (read-only listings are fine) */
+  plan: boolean;
+}
+
 /**
  * A harness's form module (src/forms/<harness>.ts): from the release (null when GitHub could not be read), the
  * harness's probed state and the machine, the actions that bring the harness to its form. Never called in the cloud,
  * where the block is the whole sync (ADR-0007: claude.ai delivers the account plugins; nothing else is installed).
- * `plan`: --plan, so a form runs no harness command that changes anything and records what it would run instead;
- * apply() does the same for the file actions it returns.
+ * Plugin commands go through install.ts's drivers from inside the form, outside --plan, and come back as install and
+ * uninstall actions (records of what ran, or would run); apply() runs the file actions (link, remove, write, ...).
  */
-export type FormFn = (release: Release | null, state: HarnessState, machine: Machine, plan: boolean) => Action[];
+export type FormFn = (release: Release | null, state: HarnessState, machine: Machine, options: FormOptions) => Action[];
 
 export interface DesiredOptions {
   /** only these harness ids (--agents); every detected one when unset */
   agents?: string[];
-  /** --plan: the forms run nothing that changes a harness */
+  /** --plan: the forms run no plugin command that changes anything */
   plan?: boolean;
 }
 
-/** The plan: what every harness on this machine should have, against what the probe found. Pure; nothing written. */
+/**
+ * The plan: what every harness on this machine should have, against what the probe found. Nothing is written here;
+ * outside --plan the form modules may run their harness's plugin commands (recorded as install/uninstall actions).
+ */
 export function desired(
   release: Release | null,
   machine: Machine,
@@ -67,7 +76,8 @@ export function desired(
         path: old.file,
         note: `skills-sync block (${old.ids.join(", ")}) outside the global file; remove it by hand, the block lives only in ${state.harness.name}'s global file now`,
       });
-    if (!machine.cloud) for (const a of forms[id]?.(release, state, machine, options.plan ?? false) ?? []) report.add(a);
+    if (!machine.cloud)
+      for (const a of forms[id]?.(release, state, machine, { plan: !!options.plan }) ?? []) report.add(a);
   }
   return report;
 }

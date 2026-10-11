@@ -21,7 +21,7 @@ import type { Action } from "../plan.js";
 import type { Release, ReleasePlugin } from "../release.js";
 import { dangling, isLibraryCopy } from "./library-copy.js";
 
-export const hermes: FormFn = (release, state, _machine, plan) => {
+export const hermes: FormFn = (release, state, _machine, { plan }) => {
   const h = state.harness;
   const where = (what: string) => `${h.name}: ${what}`;
   const out: Action[] = [];
