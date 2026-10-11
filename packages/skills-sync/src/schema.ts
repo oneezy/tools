@@ -51,6 +51,8 @@ export function validate(schema: Schema, value: unknown, at = "$", root: Schema 
     for (const k of schema.required ?? []) if (!(k in value)) errors.push(`${at}: missing ${k}`);
     for (const [k, needs] of Object.entries(schema.dependentRequired ?? {}))
       for (const n of needs as string[]) if (k in value && !(n in value)) errors.push(`${at}: ${k} needs ${n}`);
+    for (const [k, sub] of Object.entries(schema.dependentSchemas ?? {}))
+      if (k in value) errors.push(...validate(sub as Schema, value, at, root).map((e) => `${e} (beside ${k})`));
     for (const [k, v] of Object.entries(value)) {
       const here = `${at}.${k}`;
       const prop = schema.properties?.[k];

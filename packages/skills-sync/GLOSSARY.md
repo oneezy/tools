@@ -25,8 +25,12 @@ _Avoid_: sandbox, scratch
 ### Third-party skills
 
 **Source**:
-A third-party repo the Library takes skills from, declared in the config with its selection, renames and pins (`matt-pocock`, `pstack`, `anthropic`, `diagram-design`).
+A third-party repo the Library takes skills from, declared in the config with its Selection, renames and pins (`matt-pocock`, `pstack`, `anthropic`, `diagram-design`).
 _Avoid_: upstream, vendor, dependency
+
+**Selection**:
+Which of a Source's skill folders the Library takes: a list, a map that also renames, or `"*"`, every folder under the Source's root now and later (renames then go in `rename`). An update names every folder a list or a map leaves out as "not selected upstream".
+_Avoid_: whitelist, filter
 
 **Lock**:
 The committed record of what each Source is installed at: upstream version, commit, date, and each skill's content hash. A plain sync installs exactly the Lock.

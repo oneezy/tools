@@ -107,7 +107,11 @@ export function fromV1(entries: Record<string, LockEntry>, config: Config): Lock
   const sources: Record<string, LockedSource> = {};
   for (const id of Object.keys(config.sources).sort(cmp)) {
     const src = config.sources[id];
-    const mine = selection(src)
+    // a "*" source selects what its entries hold: each entry of this repo by its upstream folder
+    const held = Object.values(entries)
+      .filter((e) => e.source === lockSource(src) && e.skillPath)
+      .map((e) => path.posix.basename(path.posix.dirname(e.skillPath!)));
+    const mine = selection(src, held)
       .map((s) => [s, entries[s.name]] as const)
       .filter(([, e]) => e && e.source === lockSource(src) && e.commit && e.skillPath);
     if (!mine.length) continue;

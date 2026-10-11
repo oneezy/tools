@@ -27,7 +27,7 @@ import { byDirection, type Moved, type Position } from "./changelog.js";
 import { refresh, type RefreshResult } from "./refresh.js";
 import { DEFAULT_REPO, isRepoName } from "./release.js";
 import { lockedSource, readLock } from "./lock.js";
-import { cloneUrl, cmp, configText, readConfig } from "./sources.js";
+import { cloneUrl, cmp, configText, readConfig, renamesOf } from "./sources.js";
 import { discard } from "./stage.js";
 import { VERSION } from "./version.js";
 import { commitsPast, releasesOf, versionLabel } from "./versions.js";
@@ -95,6 +95,11 @@ Commands
                    skills-sync.lock.json (a skills-lock.json from 0.4.0 is migrated). A source not named keeps its lock
                    entry exactly. Reports each source that moved, from and to (version, commit, commits past it), and
                    the sections of its upstream CHANGELOG.md between the two versions (a downgrade: the ones it undoes).
+                   A source that selects by a list or a map gets one "not selected upstream: <names>" line naming every
+                   skill folder under its root it leaves out (also with --json and --quiet, \`unselected\` in --json, a
+                   ::warning:: under GitHub Actions; never an exit code). "skills": "*" takes every one instead, except
+                   a new name another source or an own skill already has: left out and named the same way
+                   (\`shadowed\`). Under --json every conflict is printed on stderr too.
                    Never writes skills-sync.json
   refresh          the same as update (kept for scripts and CI); refresh --frozen installs the lock as it is
   versions <source>
@@ -139,8 +144,9 @@ Update, refresh and add
   --retry                look again for skills an earlier run reported gone upstream
   --id <id>              add: the source id (default: owner-repo, or the repo's folder name)
   --root <path>          add: where the skill folders live in the repo (default: skills/ when it exists, else the root)
-  --skills <names|*>     add: which skills to take (default: all)
-  --as <old=new,...>     add: take a skill under another name (tdd=pstack-tdd)
+  --skills <names|*>     add: which skills to take (default: all found now, as a list); * writes "skills": "*", every
+                         skill under the root now and every one upstream adds later
+  --as <old=new,...>     add: take a skill under another name (tdd=pstack-tdd); with --skills * it is the "rename" map
   --plugin <id>          add: the plugin entry's id (default: the source id); --no-plugin declares none
 
 Options
@@ -558,6 +564,8 @@ function runUpdate(lib: Library, args: Args, log: (m: string) => void, report: R
     updated: r.updated,
     config: r.config,
     gone: r.gone,
+    unselected: r.unselected,
+    shadowed: r.shadowed,
     unlocked: r.unlocked,
     problems: r.problems,
   });
@@ -617,6 +625,18 @@ function reportRefresh(
       `${r.unlocked.length} selected skill(s) have no commit in ${path.basename(lib.lockFile)} (${r.unlocked.join(", ")}); run update to resolve them`,
     );
   for (const m of r.problems) log(`failed: ${m}`);
+  for (const [id, names] of bySource(r.unselected))
+    warn(
+      `skills-sync ${args.command}`,
+      `${id}: not selected upstream: ${names.join(", ")} (select them in ${path.basename(lib.configFile)}, or take every skill under the root with "skills": "*")`,
+    );
+  for (const [id, names] of bySource(r.shadowed))
+    warn(
+      `skills-sync ${args.command}`,
+      `${id}: not taken from upstream, the name is already another's: ${names.map((n) => `${n} (${r.shadowedBy[`${id}:${n}`]})`).join(", ")}; give each a "rename" to take it`,
+    );
+  // text output prints every conflict with the file actions; --json would carry them only in its actions
+  if (args.json) for (const a of r.report.conflicts()) warn(`skills-sync ${args.command}`, line(a).trim());
   const gone = r.gone.map((g) => g.split(":")[1]);
   const remembered = [...new Set([...unavailable, ...gone])];
   if (remembered.length && !args.quiet)
@@ -630,6 +650,26 @@ function reportRefresh(
     if (JSON.stringify(next) !== JSON.stringify(local)) writeLocal(lib.root, next);
   }
   return remembered;
+}
+
+/** source:name entries grouped by source, in the order given. */
+function bySource(entries: string[]): Map<string, string[]> {
+  const out = new Map<string, string[]>();
+  for (const e of entries) {
+    const at = e.indexOf(":");
+    const id = e.slice(0, at);
+    out.set(id, [...(out.get(id) ?? []), e.slice(at + 1)]);
+  }
+  return out;
+}
+
+/**
+ * A line that reaches the person whatever the flags (--json and --quiet included): on stderr, and under GitHub Actions as
+ * a ::warning:: workflow command, so the daily update run flags it on its page. It never sets the exit code.
+ */
+function warn(title: string, m: string): void {
+  const data = m.replace(/%/g, "%25").replace(/\r/g, "%0D").replace(/\n/g, "%0A");
+  process.stderr.write(process.env.GITHUB_ACTIONS === "true" ? `::warning title=${title}::${data}\n` : `${m}\n`);
 }
 
 /** versions: the releases of one source, highest first, the one the lock is at marked; reads only (a temp clone). */
@@ -688,10 +728,13 @@ function runAdd(lib: Library, args: Args, log: (m: string) => void, report: Repo
     log,
   });
   if (!r.ok) bail(r.error);
-  const names = Object.keys(r.entry.skills).length;
-  const renames = Array.isArray(r.entry.skills) ? [] : Object.entries(r.entry.skills).filter(([a, b]) => a !== b);
+  const taken =
+    r.entry.skills === "*"
+      ? `every one of ${r.found.size} skills (now and later)`
+      : `${Object.keys(r.entry.skills).length} of ${r.found.size} skills`;
+  const renames = [...renamesOf(r.entry)].map(([to, from]) => `${from} -> ${to}`);
   log(
-    `${r.id}: ${r.entry.repo}@${r.entry.ref} (${r.staged.commit.slice(0, 7)}), ${names} of ${r.found.size} skills under ${r.entry.root ?? "the root"}${renames.length ? `, renaming ${renames.map(([a, b]) => `${a} -> ${b}`).join(", ")}` : ""}`,
+    `${r.id}: ${r.entry.repo}@${r.entry.ref} (${r.staged.commit.slice(0, 7)}), ${taken} under ${r.entry.root ?? "the root"}${renames.length ? `, renaming ${renames.join(", ")}` : ""}`,
   );
   if (args.plan) {
     discard(r.staged);
@@ -721,6 +764,8 @@ function runAdd(lib: Library, args: Args, log: (m: string) => void, report: Repo
     sources: res.sources,
     updated: res.updated,
     gone: res.gone,
+    unselected: res.unselected,
+    shadowed: res.shadowed,
     unlocked: res.unlocked,
     problems: res.problems,
   });

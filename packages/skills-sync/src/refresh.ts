@@ -4,7 +4,9 @@
 // skills-sync.lock.json (a version 1 skills-lock.json is migrated to it and removed). It never writes skills-sync.json:
 // the change a --to needs is returned for the caller to land. Frozen: each skill at the commit the lock records (a
 // version 1 lock read in memory), nothing moves, no lock is written. A skill whose snapshot already holds the content of the commit it
-// resolves to is not fetched again, so a refresh with nothing new is silent and needs no clone.
+// resolves to is not fetched again, so a refresh with nothing new is silent and needs no clone. What upstream has under
+// a source's root at its commit is recorded in .snapshot.json: a "*" source selects all of it, and a source that selects
+// by a list or a map is told each folder it leaves out (`unselected`), so a skill upstream adds is never skipped in silence.
 import fs from "node:fs";
 import path from "node:path";
 import { moved, type Moved } from "./changelog.js";
@@ -18,6 +20,7 @@ import {
   lockedSource,
   lockText,
   readLock,
+  type Lock,
   type LockedSkill,
   type LockedSource,
 } from "./lock.js";
@@ -26,11 +29,15 @@ import {
   cmp,
   findSkills,
   isCommit,
+  lockedUpstream,
   readConfig,
   selection,
+  selectsAll,
   skillHash,
   withName,
+  type Config,
   type Selected,
+  type Source,
 } from "./sources.js";
 import { discard, git, moveTo, remoteTip, stage, type Staged } from "./stage.js";
 import {
@@ -64,6 +71,14 @@ export interface RefreshResult {
   sources: Record<string, SourceVersion & { commit: string; date: string; moved: boolean }>;
   /** selected skills not found upstream this run, as source:name */
   gone: string[];
+  /** per source resolved upstream that selects by a list or a map: every skill folder under its root at the commit that
+   *  it does not select, as source:upstream-name (a "*" source selects them all, so it never has any) */
+  unselected: string[];
+  /** folders a "*" source found upstream under a name another source already ships, or an own skill has: left out (a
+   *  name only "*" brings in never displaces one), as source:name; shadowedBy says whose name it is (a source id, or
+   *  "an own skill"), keyed the same */
+  shadowed: string[];
+  shadowedBy: Record<string, string>;
   /** selected skills the lock records no commit for, in frozen mode, as source:name */
   unlocked: string[];
   /** sources that could not be staged; their lock entries and snapshots are kept as they were */
@@ -88,6 +103,9 @@ interface SnapshotMeta {
   version?: string | null;
   ahead?: number | null;
   skills: Record<string, { path: string; hash: string; commit: string }>;
+  /** every skill folder name under the source's root at commit, selected or not: what a "*" source takes and what a
+   *  listed one is told it leaves out, known without a clone while the commit stands; absent before 0.10.0 */
+  upstream?: string[];
   /** attribution files copied, and those the config lists that upstream lacks at this commit */
   attribution: string[];
   absent: string[];
@@ -113,6 +131,9 @@ export function refresh(lib: Library, opts: RefreshOptions): RefreshResult {
     report: new Report(),
     sources: {},
     gone: [],
+    unselected: [],
+    shadowed: [],
+    shadowedBy: {},
     unlocked: [],
     problems: [],
     updated: [],
@@ -125,18 +146,24 @@ export function refresh(lib: Library, opts: RefreshOptions): RefreshResult {
   const found = new Map<string, Map<string, string>>(); // skills discovered per checkout
   const resolved: Resolved[] = [];
   const selected = new Set<string>();
+  const own = new Set(lib.scanOwn().skills.map((s) => s.name));
+  const claims = claimed(config, old, own);
   try {
     for (const id of Object.keys(config.sources).sort(cmp)) {
       const src = config.sources[id];
       const frozen = opts.frozen || (!!opts.only && !opts.only.includes(id));
-      const sel = selection(src);
-      for (const s of sel) selected.add(s.name);
-      const wanted = sel.filter((s) => !opts.unavailable.includes(s.name));
       const url = cloneUrl(src.repo);
       const snapDir = path.join(lib.upstream, id);
       const meta = readMeta(snapDir);
       // this source in the lock (only while it names the same repo); its skills by working-set name, each at its commit
       const prior = lockedSource(old, id, src);
+      // a "*" source selects what upstream has at its commit, known once the commit is (below); frozen, what the lock
+      // holds, or without a lock entry what the snapshot holds, so its working copies stay as a list source's do
+      const all = selectsAll(src);
+      const held = prior ? lockedUpstream(prior.skills) : Object.keys(meta?.skills ?? {});
+      let sel = all && !frozen ? [] : selection(src, held);
+      for (const s of sel) selected.add(s.name);
+      let wanted = sel.filter((s) => !opts.unavailable.includes(s.name));
       const mine = (s: Selected): Required<LockedSkill> | undefined => {
         const k = prior?.skills?.[s.name];
         return k ? { path: k.path, hash: k.hash, commit: k.commit ?? prior!.commit } : undefined;
@@ -155,9 +182,15 @@ export function refresh(lib: Library, opts: RefreshOptions): RefreshResult {
         return r.staged;
       };
       const keep = () => {
+        // a "*" source that did not resolve keeps every skill the lock (or the snapshot) has, working copies included
+        if (all) for (const s of selection(src, held)) selected.add(s.name);
         if (!prior) return;
-        const names = new Set(sel.map((s) => s.name));
+        const names = new Set(all ? Object.keys(prior.skills) : sel.map((s) => s.name));
         next[id] = { ...prior, skills: Object.fromEntries(Object.entries(prior.skills).filter(([n]) => names.has(n))) };
+      };
+      const listed = (co: Staged): string[] => {
+        if (!found.has(co.dir)) found.set(co.dir, findSkills(co.dir, src.root));
+        return [...found.get(co.dir)!.keys()].sort(cmp);
       };
 
       // 1. the source's commit: frozen takes the lock's; a version (--to, else the held one) that release's commit, found
@@ -166,7 +199,7 @@ export function refresh(lib: Library, opts: RefreshOptions): RefreshResult {
       let commit: string | null;
       if (frozen) {
         if (!prior || !wanted.some((s) => mine(s))) {
-          result.unlocked.push(...wanted.map((s) => `${id}:${s.name}`));
+          result.unlocked.push(...(all && !wanted.length ? [`${id}:*`] : wanted.map((s) => `${id}:${s.name}`)));
           keep();
           continue;
         }
@@ -198,6 +231,50 @@ export function refresh(lib: Library, opts: RefreshOptions): RefreshResult {
           result.problems.push(`${id}: cannot reach ${url} (${src.ref})`);
           keep();
           continue;
+        }
+      }
+
+      // 1b. what upstream has under the root at that commit: the snapshot's record while the commit stands, else a
+      //     checkout's (one the version or the move needs anyway). A "*" source selects it all (pins included, renames
+      //     applied); a list or a map is told every folder it leaves out. A frozen run lists nothing it lacks.
+      let listing: string[] | null = meta?.commit === commit && Array.isArray(meta.upstream) ? meta.upstream : null;
+      if (!listing && !frozen) {
+        const co = checkout(commit);
+        if (!co) {
+          keep();
+          continue;
+        }
+        listing = listed(co);
+      }
+      if (!frozen && listing) {
+        if (all) {
+          // a rename onto a name another upstream folder keeps (or two renames onto one name) gives two skills one name
+          const clash = renameClashes(id, src, listing);
+          if (clash.length) {
+            result.problems.push(...clash);
+            keep();
+            continue;
+          }
+          // a name only "*" brings in (not in this source's lock, not a rename or a pin the config asks for) never
+          // displaces another source's skill or an own skill: it is left out and named
+          const explicit = (s: Selected) =>
+            !!prior?.skills?.[s.name] || !!src.rename?.[s.upstream] || !!src.pins?.[s.upstream];
+          sel = selection(src, listing).filter((s) => {
+            const by = claims.get(s.name);
+            if (!by || by === id || explicit(s)) return true;
+            result.shadowed.push(`${id}:${s.name}`);
+            result.shadowedBy[`${id}:${s.name}`] = by;
+            return false;
+          });
+          for (const s of sel) selected.add(s.name);
+          wanted = sel.filter((s) => !opts.unavailable.includes(s.name));
+          // a rename for a folder upstream does not have is a name the config gives to nothing
+          for (const [from, to] of Object.entries(src.rename ?? {}))
+            if (!listing.includes(from) && !src.pins?.[from] && !opts.unavailable.includes(to))
+              result.gone.push(`${id}:${to}`);
+        } else {
+          const taken = new Set(sel.map((s) => s.upstream));
+          result.unselected.push(...listing.filter((n) => !taken.has(n)).map((n) => `${id}:${n}`));
         }
       }
 
@@ -345,6 +422,7 @@ export function refresh(lib: Library, opts: RefreshOptions): RefreshResult {
         version: v?.version,
         ahead: v ? v.ahead : undefined,
         skills,
+        upstream: listing ?? (co ? listed(co) : undefined),
         attribution: copied,
         absent,
       };
@@ -369,8 +447,8 @@ export function refresh(lib: Library, opts: RefreshOptions): RefreshResult {
     }
 
     // 6. the working set: one copy per resolved skill with its rename applied; copies no longer selected go.
-    // One name from two sources: the first source by id wins and owns the lock entry; the other is reported until the config renames it.
-    const own = new Set(lib.scanOwn().skills.map((s) => s.name));
+    // One name from two sources: the first source by id wins and owns the lock entry; the other is reported until the
+    // config renames it (a name only "*" brings in was left out above instead, so it never wins here).
     const taken = new Map<string, string>();
     for (const r of resolved.sort((a, b) => cmp(a.name, b.name) || cmp(a.source, b.source))) {
       const winner = taken.get(r.name);
@@ -413,9 +491,9 @@ export function refresh(lib: Library, opts: RefreshOptions): RefreshResult {
 }
 
 /**
- * The lock a refresh would write from the snapshots as they are, with no network: per source that has a snapshot, its
- * version, commit and date as the snapshot records them and one entry per selected skill the snapshot holds, hashed
- * from its folder there; a source without a snapshot keeps what the lock has for it, as a refresh that cannot reach it
+ * The lock a refresh would write from the snapshots as they are, with no network (a "*" source selects what its snapshot
+ * holds, or the lock without one): per source that has a snapshot, its version, commit and date as the snapshot
+ * records them and one entry per selected skill the snapshot holds, hashed from its folder there; a source without a snapshot keeps what the lock has for it, as a refresh that cannot reach it
  * does. One name from two sources goes to the first source by id, as in refresh. null when no source has a snapshot.
  */
 export function snapshotLock(lib: Library): Record<string, LockedSource> | null {
@@ -428,9 +506,11 @@ export function snapshotLock(lib: Library): Record<string, LockedSource> | null 
     const src = config.sources[id];
     const snapDir = path.join(lib.upstream, id);
     const meta = readMeta(snapDir);
-    const sel = selection(src).filter((s) => !taken.has(s.name));
+    const prior = lockedSource(old, id, src);
+    // a "*" source selects what the snapshot holds, or without one what the lock has
+    const held = meta ? Object.keys(meta.skills ?? {}) : lockedUpstream(prior?.skills);
+    const sel = selection(src, held).filter((s) => !taken.has(s.name));
     if (!meta) {
-      const prior = lockedSource(old, id, src);
       if (!prior) continue;
       next[id] = {
         ...prior,
@@ -528,6 +608,41 @@ function writeIfChanged(report: Report, file: string, text: string, note: string
   if (fs.existsSync(file) && lf(fs.readFileSync(file, "utf8")) === lf(text))
     report.add({ kind: "skip", path: file, note: "ok" });
   else report.add({ kind: "write", path: file, payload: text, note });
+}
+
+/**
+ * Every working-set name something already has, and whose it is: an own skill ("an own skill"), a name a list or a map
+ * selects, and a "*" source's locked names and rename targets (its source id). A name only "*" brings in is checked
+ * against these before it is taken.
+ */
+function claimed(config: Config, old: Lock | null, own: Set<string>): Map<string, string> {
+  const out = new Map<string, string>([...own].map((n) => [n, "an own skill"]));
+  for (const id of Object.keys(config.sources).sort(cmp)) {
+    const src = config.sources[id];
+    const names = selectsAll(src)
+      ? [...Object.keys(lockedSource(old, id, src)?.skills ?? {}), ...Object.values(src.rename ?? {})]
+      : selection(src).map((s) => s.name);
+    for (const n of names) if (!out.has(n)) out.set(n, id);
+  }
+  return out;
+}
+
+/** A "*" source's renames that give two of its upstream folders one name: onto a folder kept as it is, or two onto one. */
+function renameClashes(id: string, src: Source, listing: string[]): string[] {
+  const rename = src.rename ?? {};
+  const out: string[] = [];
+  const onto = new Map<string, string>();
+  for (const [from, to] of Object.entries(rename)) {
+    if (!listing.includes(from)) continue;
+    if (listing.includes(to) && !rename[to])
+      out.push(
+        `${id}: rename ${from} -> ${to} takes the name of the folder ${to} upstream also has; pick another name`,
+      );
+    const first = onto.get(to);
+    if (first) out.push(`${id}: rename ${first} -> ${to} and ${from} -> ${to} give two skills one name; pick another`);
+    else onto.set(to, from);
+  }
+  return out;
 }
 
 function readMeta(snapDir: string): SnapshotMeta | null {

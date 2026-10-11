@@ -16,7 +16,18 @@ import { isDir, isLink, isSkillDir, lexists } from "./fs.js";
 import { hermesNamespace } from "./hermes.js";
 import { Library } from "./library.js";
 import { apply, Report } from "./plan.js";
-import { cmp, githubSlug, isoDate, readConfig, selection, type Config, type Plugin, type Source } from "./sources.js";
+import {
+  cmp,
+  githubSlug,
+  isoDate,
+  lockedUpstream,
+  readConfig,
+  renamesOf,
+  selection,
+  type Config,
+  type Plugin,
+  type Source,
+} from "./sources.js";
 import { plainVersion } from "./versions.js";
 
 export { isoDate };
@@ -339,7 +350,8 @@ function resolvePackage(lib: Library, config: Config, id: string, report: Report
   }
   const skills = new Map<string, Map<string, Buffer>>();
   const perSkill: Record<string, string> = {};
-  for (const s of selection(src)) {
+  // a "*" source packages what the lock took from upstream
+  for (const s of selection(src, lockedUpstream(lock.skills))) {
     const copy = path.join(lib.agents, s.name);
     const entry = lock?.skills[s.name];
     if (!entry || isLink(copy) || !isSkillDir(copy)) {
@@ -538,14 +550,7 @@ function notice(pkg: Package, config: Config, head: Head): string {
     : o.kind === "own"
       ? "no LICENSE file in the library"
       : "no LICENSE among the source's attribution files";
-  const renamed =
-    o.kind === "source"
-      ? new Map(
-          selection(o.src)
-            .filter((s) => s.upstream !== s.name)
-            .map((s) => [s.name, s.upstream]),
-        )
-      : new Map<string, string>();
+  const renamed = o.kind === "source" ? renamesOf(o.src) : new Map<string, string>();
   const skills = [...pkg.skills.keys()].map((n) => {
     const notes = [
       renamed.has(n) ? `renamed from ${renamed.get(n)}` : "",
