@@ -1,21 +1,21 @@
 // unlink, a machine command: take away what this tool put on the machine, and only that. Per detected harness with a
-// form: the plugins installed from the library's catalog (installed[].marketplace is the catalog name) and the catalog's
-// registration once none of them remains, through the harness's own plugin commands; every loose link in its skills
-// folders (Codex's old folder too) that points into a library copy or at nothing; its session hook entry in the
+// form: the plugins installed from the library's catalog (installed[].marketplace is the catalog name) and the
+// catalog's registration once none of them remains, through the harness's own plugin commands; every loose link in its
+// skills folders (Codex's old folder too) that points into a library copy or at nothing; its session hook entry in the
 // harness's user hooks file (hooks.ts; the file itself when it held nothing else); the skills block in its global
 // instructions file (likewise). Account plugins, plugins from other marketplaces, real skill folders, links to anywhere
 // else, other hook entries, Codex's trust record and blocks in repository files are never touched. Offline: no release
 // is read, so the library is --library's repo or the default, and the catalog name is the one its build gives its
-// marketplaces (<owner>-<name>). A harness that cannot list its plugins keeps its registration: on Claude Code removing
-// it would take every plugin from it, unseen. Hermes has no marketplace: the tool's plugins there are the ones hermes
-// recorded as installed from the library repository (`hermes plugins install owner/repo/...`, read from its files by
-// the probe), removed with `hermes plugins remove <id>`; a folder hermes did not record, or one from another repository,
-// stays. Under --plan no plugin command that changes anything runs and apply() writes nothing; the caller exits 1 when
-// anything is red.
+// marketplaces (<owner>-<name>, compared without case). A harness that cannot list its plugins keeps its registration:
+// on Claude Code removing it would take every plugin from it, unseen. Hermes has no marketplace: the tool's plugins
+// there are the ones hermes recorded as installed from the library repository (`hermes plugins install owner/repo/...`,
+// read from its files by the probe), removed with `hermes plugins remove <id>`; a folder hermes did not record, or one
+// from another repository, stays. Under --plan no plugin command that changes anything runs and apply() writes nothing;
+// the caller exits 1 when anything is red.
 import os from "node:os";
 import path from "node:path";
 import { blockRemoval } from "../block.js";
-import { catalogFor, formOf } from "../desired.js";
+import { catalogFor, formOf, sameCatalog } from "../desired.js";
 import { lexists } from "../fs.js";
 import { harnessTable } from "../harnesses.js";
 import { githubRepo } from "../hermes.js";
@@ -93,7 +93,9 @@ function plugins(state: HarnessState, repo: string, plan: boolean): Action[] {
   const bin = path.basename(state.cli).replace(/\.(cmd|bat|exe)$/i, "");
   const run = runner(state.cli);
   const where = (what: string) => `${state.harness.name}: ${what}`;
-  const mine = state.installed.filter((p) => p.marketplace === catalog).sort((a, b) => a.id.localeCompare(b.id));
+  const mine = state.installed
+    .filter((p) => sameCatalog(p.marketplace, catalog))
+    .sort((a, b) => a.id.localeCompare(b.id));
   let remaining = mine.length;
   for (const p of mine) {
     const id = `${p.id}@${p.marketplace}`;
@@ -105,7 +107,7 @@ function plugins(state: HarnessState, repo: string, plan: boolean): Action[] {
   if (remaining || !supportsPlugins(run)) return out;
   // the probe could not list the plugins: whatever is installed from the catalog was never seen, so its registration
   // stays (Claude Code's remove would take every plugin from it)
-  if (state.note?.endsWith("cannot list its plugins")) {
+  if (!state.listed) {
     out.push({
       kind: "note",
       path: where(`marketplace ${catalog}`),
@@ -122,10 +124,12 @@ function plugins(state: HarnessState, repo: string, plan: boolean): Action[] {
     });
     return out;
   }
-  if (!markets.some((m) => m.name === catalog)) return out;
-  const a: Action = { kind: "uninstall", path: where(`marketplace ${catalog}`), note: "registered by this tool" };
+  // the registration under the name the CLI lists it by
+  const market = markets.find((m) => sameCatalog(m.name, catalog));
+  if (!market) return out;
+  const a: Action = { kind: "uninstall", path: where(`marketplace ${market.name}`), note: "registered by this tool" };
   out.push(a);
-  if (!plan && !removeMarketplace(state.harness, run, catalog)) refused(a, run, `${bin} could not remove it`);
+  if (!plan && !removeMarketplace(state.harness, run, market.name)) refused(a, run, `${bin} could not remove it`);
   return out;
 }
 

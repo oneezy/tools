@@ -14,7 +14,8 @@ export interface Config {
   /**
    * renderings of the packages for harnesses that cannot load plugins/<id>/ as built, each behind the folder it goes to
    * (library-relative, / separators); absent: build writes the packages and catalogs alone. hermes: the Hermes rendering
-   * at <folder>/<id>/ and the NOTICE paragraph that names it (tools#153); the machine sync installs from dist/hermes
+   * at <folder>/<id>/ and the NOTICE paragraph that names it (tools#153); the machine sync installs from the folder the
+   * release's skills-sync.json names here (dist/hermes when it names none)
    */
   renderings?: { hermes?: string };
   sources: Record<string, Source>;

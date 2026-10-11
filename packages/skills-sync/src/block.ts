@@ -207,7 +207,9 @@ export function repoBlocks(roots: string[], names: string[], except: string[] = 
 
 /**
  * `text` without its managed blocks: every well-formed block, whatever its id, and the line ending that closed its end
- * marker; everything else byte for byte. Throws when the markers are broken (a human's to sort out). unlink's half.
+ * marker; everything else byte for byte but one blank line: a block that ended the file takes the blank line before it
+ * (the gap blockAction appended it after, which cannot be told from a blank line a human left there). Throws when the
+ * markers are broken (a human's to sort out). unlink's half.
  */
 export function withoutBlock(text: string): string {
   const blocks = findBlocks(text);

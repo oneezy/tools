@@ -15,7 +15,13 @@ import { harnessTable, hermesHomeDir } from "../src/harnesses.js";
 import { hermesNamespace } from "../src/hermes.js";
 import { probe } from "../src/machine.js";
 import { parseRelease } from "../src/release.js";
-import { fixtureRelease, sha, startFakeGithub, type FakeGithub } from "./fixtures/fake-github/fake-github.mjs";
+import {
+  fixtureConfig,
+  fixtureRelease,
+  sha,
+  startFakeGithub,
+  type FakeGithub,
+} from "./fixtures/fake-github/fake-github.mjs";
 import {
   cli,
   destroy,
@@ -720,6 +726,91 @@ test("a release whose commit carries no Hermes rendering yet (the library before
     const plan = await cli(m, ["--plan", "--json"]);
     assert.equal(plan.status, 0, plan.stderr);
     assert.ok(!actions(plan).some((a) => a.kind === "install"), JSON.stringify(actions(plan)));
+  } finally {
+    await github.close();
+  }
+});
+
+test("a release whose config names another rendering folder (renderings.hermes: dist/hermes-x) installs from it: GitHub is asked about that folder, every install names it, and a plugin installed from dist/hermes is installed again from it", async () => {
+  const github = await startFakeGithub();
+  try {
+    const m = machine({}, github);
+    const r17 = latest(github);
+    const folder = "dist/hermes-x";
+    github.fixture.contents![r17.commit]["skills-sync.json"] = fixtureConfig(REPO, "0.43.1", {
+      renderings: { hermes: folder },
+    });
+    hermesSource(m, r17, REPO, folder);
+    // oneezy, current and enabled, but installed from dist/hermes/oneezy (the default folder) at the release commit
+    hermesPlugin(m, "oneezy", { files: r17.plugins.oneezy.files, revision: r17.commit });
+    const identifier = (id: string) => `${REPO}/${folder}/${id}`;
+    const install = (id: string, force = false) => [
+      "hermes",
+      "plugins",
+      "install",
+      identifier(id),
+      "--no-enable",
+      "--ref",
+      r17.commit,
+      ...(force ? ["--force"] : []),
+    ];
+    const r = await cli(m, []);
+    assert.equal(r.status, 0, r.stderr + r.stdout);
+    // the rendering question names the config's folder, once
+    assert.deepEqual(
+      r.requests
+        .filter((q) => q.path.includes("/contents/") && !q.path.includes("skills-sync.json"))
+        .map((q) => q.path),
+      [`/repos/${REPO}/contents/${folder}?ref=${r17.commit}`],
+    );
+    assert.deepEqual(r.calls.filter(pluginWrite), [
+      install("matt-pocock"),
+      enableCall("matt-pocock"),
+      install("oneezy", true),
+      install("play"),
+      enableCall("play"),
+    ]);
+    for (const id of ["matt-pocock", "oneezy", "play"])
+      assert.equal(installs(m)[id].source, `https://github.com/${REPO}.git#${folder}/${id}`, id);
+    assert.ok(
+      lines(r).some(
+        (l) =>
+          l.startsWith("+ install") &&
+          l.includes(`Hermes: plugin oneezy -> ${identifier("oneezy")}`) &&
+          l.includes(`installed from dist/hermes/oneezy, not ${folder}/oneezy`),
+      ),
+      r.stdout,
+    );
+    // and the next sync finds every plugin where the config says: nothing to do
+    const again = await cli(m, []);
+    assert.equal(again.status, 0, again.stderr + again.stdout);
+    assert.equal(lines(again).at(-1), "0 changed, 3 already right, 0 left alone");
+    assert.equal(again.calls.filter(pluginWrite).length, 0, JSON.stringify(again.calls));
+  } finally {
+    await github.close();
+  }
+});
+
+test("a release config that writes the library's name in another case (Oneezy/Skills) is the same catalog: status lists the plugins hermes installed from oneezy/skills as the library's, current", async () => {
+  const github = await startFakeGithub();
+  try {
+    const m = machine({}, github);
+    const r17 = latest(github);
+    github.fixture.contents![r17.commit]["skills-sync.json"] = fixtureConfig("Oneezy/Skills", "0.43.1");
+    for (const id of ["matt-pocock", "oneezy", "play"])
+      hermesPlugin(m, id, { files: r17.plugins[id].files, revision: r17.commit });
+    const s = await cli(m, ["status", "--json"]);
+    assert.equal(s.status, 0, s.stderr + s.stdout);
+    const hermes = (s.json as unknown as StatusJson).harnesses.hermes;
+    assert.deepEqual(hermes.plugins.other, []);
+    assert.deepEqual(
+      hermes.plugins.installed.map((p) => [p.id, p.marketplace, p.current]),
+      [
+        ["matt-pocock", "oneezy-skills", true],
+        ["oneezy", "oneezy-skills", true],
+        ["play", "oneezy-skills", true],
+      ],
+    );
   } finally {
     await github.close();
   }

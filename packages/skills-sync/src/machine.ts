@@ -81,6 +81,11 @@ export interface HarnessState {
   cli: string | null;
   /** why plugins, or their skills, could not be listed through the CLI, when they could not */
   note?: string;
+  /**
+   * the plugins were read: the CLI listed them (Hermes: the probe read its files); false without the CLI or when its
+   * listing failed, so `installed` and `marketplaces` say nothing about what is there
+   */
+  listed: boolean;
   synced: AccountPlugin[];
   installed: CliPlugin[];
   /** the marketplaces the harness's CLI lists (Codex: the library's from GitHub or an old local folder); empty when it cannot */
@@ -200,6 +205,7 @@ function probeHarness(h: Harness, env: NodeJS.ProcessEnv, roots: string[], globa
   const state: HarnessState = {
     harness: h,
     cli: null,
+    listed: false,
     synced: [],
     installed: [],
     marketplaces: [],
@@ -223,6 +229,7 @@ function probeHarness(h: Harness, env: NodeJS.ProcessEnv, roots: string[], globa
       const listed = supportsPlugins(run) ? listInstalled(h, run) : null;
       if (!listed) state.note = `${cli.bin} cannot list its plugins`;
       else {
+        state.listed = true;
         state.marketplaces = listMarketplaces(h, run) ?? [];
         // Codex names no folder for a plugin; its loaded skills come from the prompt input it renders locally
         let codexSkills: Map<string, string[]> | null = null;
@@ -250,7 +257,8 @@ function probeHarness(h: Harness, env: NodeJS.ProcessEnv, roots: string[], globa
   // the account plugins are folders claude.ai wrote: without the CLI they are read from there
   if (h.id === "claude-code" && state.note) state.synced = scanSynced(h.configDir);
   // Hermes's plugins are folders under <home>/plugins with hermes's own install rows and activation lists beside them
-  if (h.id === "hermes")
+  if (h.id === "hermes") {
+    state.listed = true;
     state.installed = hermesPlugins(h.configDir).map((p) => ({
       id: p.id,
       marketplace: p.install ? (githubRepo(p.install.url)?.replace("/", "-") ?? p.install.url) : "hermes",
@@ -261,6 +269,7 @@ function probeHarness(h: Harness, env: NodeJS.ProcessEnv, roots: string[], globa
       install: p.install,
       activation: p.activation,
     }));
+  }
   for (const dir of [h.userSkills, ...(h.legacyUserSkills ?? [])]) {
     if (!isDir(dir)) continue;
     for (const name of fs.readdirSync(dir).sort()) {

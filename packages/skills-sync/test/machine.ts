@@ -737,17 +737,23 @@ export function codexPluginEnabled(m: PretendMachine, id: string, enabled: boole
 
 /**
  * The release's Hermes renderings as GitHub would serve them to `hermes plugins install owner/repo/dist/hermes/<id>
- * --ref <commit>`: <base>/github-hermes/<owner>/<repo>/<commit>/dist/hermes/<id>/ for every plugin of the release, built from
- * the fixture's package files exactly as build does (renderHermes). Returns the checkout folder.
+ * --ref <commit>`: <base>/github-hermes/<owner>/<repo>/<commit>/<rendering>/<id>/ for every plugin of the release, built
+ * from the fixture's package files exactly as build does (renderHermes). `rendering` is the library folder the release's
+ * config names (renderings.hermes), dist/hermes by default. Returns the checkout folder.
  */
-export function hermesSource(m: PretendMachine, release: FixtureRelease, repo = "oneezy/skills"): string {
+export function hermesSource(
+  m: PretendMachine,
+  release: FixtureRelease,
+  repo = "oneezy/skills",
+  rendering = HERMES_PATH,
+): string {
   const checkout = path.join(m.env.FAKE_HERMES_GITHUB, ...repo.split("/"), release.commit);
-  // the fake GitHub's contents API answers for the same commit: the tool asks it whether dist/hermes is there at all
+  // the fake GitHub's contents API answers for the same commit: the tool asks it whether the rendering is there at all
   const contents = m.github ? ((m.github.fixture.contents ??= {})[release.commit] ??= {}) : null;
   for (const [id, p] of Object.entries(release.plugins))
     for (const [rel, bytes] of renderHermes(p.files)) {
-      write(path.join(checkout, ...HERMES_PATH.split("/"), id, ...rel.split("/")), bytes);
-      if (contents) contents[`${HERMES_PATH}/${id}/${rel}`] = bytes.toString("utf8");
+      write(path.join(checkout, ...rendering.split("/"), id, ...rel.split("/")), bytes);
+      if (contents) contents[`${rendering}/${id}/${rel}`] = bytes.toString("utf8");
     }
   return checkout;
 }
