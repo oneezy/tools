@@ -53,6 +53,22 @@ _Avoid_: install, refresh
 The run that moves a Source to its latest release, a Hold, or a version asked for (`--to`), and rewrites the Lock. Justin also says upgrade or downgrade.
 _Avoid_: refresh (the internal step), bump
 
+**Session hook**:
+The one `SessionStart` entry `sync` keeps in a Harness's user hooks file (`~/.claude/settings.json`, `~/.codex/hooks.json`) that runs `npx --yes @oneezy/skills-sync@latest hook` when a session starts or resumes (ADR-0010 in oneezy/skills). Known by its command, never by its position; every other entry is left alone. Codex runs it only once Justin has trusted it in the TUI, a manual step the report names.
+_Avoid_: startup hook, the old `sync-dev.sh`
+
+**Checkout**:
+A local clone of `oneezy/skills` or `oneezy/tools` the `hook` command tends: fetched, fast-forwarded on a clean `dev`, named and left alone when dirty or on another branch. Found on every run among the repository the session started in (its main worktree, when the session started in a linked one such as `<repo>/.claude/worktrees/<name>`) and the folders beside it, by its `origin` URL; a linked worktree is never a Checkout. `status` shows each one green on `dev` and clean, red otherwise, and red when git cannot read it.
+_Avoid_: worktree (a Remote sessions word), working copy
+
+**Red line**:
+A `status` line marked `!`: something the machine has wrong that `sync` or a cleanup fixes (a plugin behind the Release, a skill listed twice, a missing Session hook entry, a stale Global block, a block in a repository file, a dirty or off-`dev` Checkout, or one git cannot read). A plugin ahead of the Release is a note, not a red line. Any red line makes `status` exit 1; `/oneezy-status` is done when there is none.
+_Avoid_: error, failure (a failed action is a conflict)
+
+**Manual step**:
+Something only Justin can do, which `status` lists after the red lines as a numbered block of steps and counts in its summary: switch an Account plugin on at claude.ai, trust the Session hook in Codex, uninstall a ChatGPT plugin that doubles a Library one, adopt or delete what is left in Codex's skills folders, make the cloud run the new setup line when the old one ran in the session. Never a red line and never the exit code, and never hiding one.
+_Avoid_: todo, action item, warning
+
 **Working set**:
 One entry per skill the Library offers: a copy per third-party skill, a link per Own skill, under `.agents/skills/`.
 
@@ -70,16 +86,28 @@ A Group or a Source's skills packaged for a Harness's plugin system, with its ow
 _Avoid_: package, bundle
 
 **Form**:
-How a Harness on a Host gets the Library's skills, one per Harness (ADR-0007): `account plugins` (Claude Code: the Plugins enabled on the claude.ai account, delivered as `<id>@synced`), `plugins from GitHub` (Codex: the Library's marketplace added from GitHub) or `loose skills` (Hermes: one link per skill in its User folder). Never two on one Harness, so no skill name is listed twice. `sync` still moves between the older `plugin` and `links` pair until the account-plugin and Codex tickets land.
+How a Harness on a Host gets the Library's skills, one per Harness (ADR-0007): `account plugins` (Claude Code: the Plugins enabled on the claude.ai account, delivered as `<id>@synced`) or `plugins from GitHub` (Codex: the Library's marketplace added from GitHub; Hermes: each Plugin's Hermes rendering installed from the Release's commit through `hermes plugins install`). `loose skills` (one link per skill in the User folder) is no Harness's form any more. Never two on one Harness, so no skill name is listed twice. Claude Code, Codex and Hermes are on their forms; the older `plugin` and `links` pair is gone with the library-based run.
 _Avoid_: mode (that is a project's link or copy), install mode
 
+**Hermes rendering**:
+The copy of a Plugin that Hermes loads, written by `build` at `dist/hermes/<id>/` beside `plugins/<id>/` once the Library opts in (`renderings.hermes` in its config, naming the folder): the package without the Claude and Codex manifests, each skill's `SKILL.md` with `name` set to its folder and `metadata` cut to string entries (Hermes's portable loader rejects the boolean `metadata.internal` the package carries), every other file byte for byte the package's. Installed with `hermes plugins install <owner>/<name>/dist/hermes/<id> --ref <commit>`; not recorded in the Release's `release.json`, whose `files` digests (the shared `NOTICE.md` among them) verify an installed copy.
+_Avoid_: Hermes package, Hermes plugin (that is the installed copy under Hermes's home)
+
 **Account plugin**:
-A Plugin claude.ai syncs into Claude Code for the account, listed by `claude plugin list` as `<id>@synced` and kept under `~/.claude/plugins/synced/`. The tool never installs or removes one; `status` compares it with the Release.
+A Plugin claude.ai syncs into Claude Code for the account, listed by `claude plugin list` as `<id>@synced` and kept under `~/.claude/plugins/synced/`. The tool never installs or removes one; `status` compares it with the Release, and `sync` removes what hides or duplicates one once `claude` lists it present and switched on.
 _Avoid_: synced plugin (the harness's word), cloud plugin
 
+**Library copy**:
+A checkout or clone of the Library on a Host (a `skills-sync.json` naming the Library's owner and name at its root), or `~/.skills-sync`. A loose link into one, or whose target is gone (a dangling link counts as the tool's leftover, whatever it once pointed at; a link whose target cannot be read at all is nobody's and is left alone), is the tool's own leftover and goes once a Plugin on that Harness carries the skill (ADR-0007). A link to anywhere else is the user's and only ever named; so is a real skill folder, unless it holds exactly the Release's files for a skill (the copy an older sync or Codex's skill installer left), which goes the same way on Codex.
+_Avoid_: leftover, stale link
+
 **Machine command**:
-A run that acts on this Host against the latest Release on GitHub and needs no Library on disk: `status` first, then `sync`, `hook`, `branches` and `unlink` as they move over. The opposite is a library command (`update`, `versions`, `add`, `build`, `check`), which runs inside a checkout.
+A run that acts on this Host against the latest Release on GitHub and keeps nothing of its own on the Host (ADR-0012): no Library clone, no answers file, nothing remembered between runs; settings come from the Release's `skills-sync.json`, Host facts (the Harnesses, their plugins and links, the WSL distros) are detected on every run. `sync`, `status`, `hook`, `branches` and `unlink`. It takes `--plan`, `--json`, `--quiet` and `--library` (`hook` only `--library`); an older flag is accepted, does nothing and is named once on stderr. The opposite is a library command (`update`, `refresh`, `versions`, `add`, `build`, `check`, the brain and alias migrations), which runs inside a checkout named by `--repo` or found above the current folder and keeps every flag it had.
 _Avoid_: remote command, online command
+
+**Global block**:
+The one managed block `sync` writes into a Harness's global instructions file (`~/.claude/CLAUDE.md`, `~/.codex/AGENTS.md`), between `skills-sync` markers: how to call a skill in each Harness, and the rule that an agent never fetches a `SKILL.md` to run one (ADR-0011 in oneezy/skills). Never written into a repository; a block an older version left there is reported, not edited. In a cloud session it is the whole sync.
+_Avoid_: entrypoint (the older per-library manifest), instructions block, brain block (its old id)
 
 **Catalog**:
 A marketplace file listing the Library's Plugins, one per Harness format.
@@ -87,3 +115,17 @@ _Avoid_: marketplace (the Harness's word for where a Catalog is added)
 
 **Release**:
 A numbered cut of the Library (`release-<n>`) carrying one upload archive per Plugin.
+
+### Branches
+
+**Keep branch**:
+A branch whose name ends in `-keep`: `branches` never deletes it, as it never deletes `main`, `dev` and the repository's default branch. The suffix is the only keep marker (ADR-0013 in oneezy/skills), matched exactly.
+_Avoid_: protected branch (GitHub's own setting, which `branches` reads and leaves alone too)
+
+**Archive tag**:
+The tag `archive/<branch>` that `branches` puts at the head of a branch whose pull request was closed without merging, before deleting the branch, so nothing is lost. A tag of that name at another commit stops the delete.
+_Avoid_: backup tag
+
+**Daily cleanup**:
+The scheduled run of `branches` in oneezy/tools (`.github/workflows/branches.yml`, 10:17 UTC) with the `PROJECT_PAT` secret over every repository its user owns, after a token check that names each repository the run will touch, skips one the token cannot write and refuses `layerdbiz/*` by name. A run by hand is a plan unless told otherwise.
+_Avoid_: branch sweep, nightly GC

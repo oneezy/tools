@@ -27,7 +27,7 @@ test("package.json, src/version.ts and the --help banner carry one version and n
   assert.equal(r.stdout.split("\n")[0], `skills-sync ${VERSION}`);
 });
 
-test("--help lists every command and every flag of build, check, update (refresh), versions and add beside the 0.2.0 ones; an unknown option exits 2 with the same help", () => {
+test("--help lists the machine commands, the library commands and every flag; an unknown option or command exits 2 with the same help; a retired command says what replaced it", () => {
   const help = cli("--help").stdout;
   // the commands as a library's CI reads them to know what this build can run: under Commands, up to the next heading,
   // the first word of each line indented by exactly two spaces
@@ -41,12 +41,13 @@ test("--help lists every command and every flag of build, check, update (refresh
   assert.deepEqual(commands, [
     "sync",
     "status",
+    "branches",
+    "hook",
     "unlink",
     "adopt-brain",
     "rollback-brain",
     "migrate-aliases",
     "rollback-aliases",
-    "projects",
     "update",
     "refresh",
     "versions",
@@ -65,34 +66,22 @@ test("--help lists every command and every flag of build, check, update (refresh
       "--skills <names|*>",
       "--as <old=new,...>",
       "--plugin <id>",
+      "--retry",
     ],
     [
+      "--plan",
+      "--quiet",
+      "--json",
+      "--library <owner/repo>",
       "--repo <path>",
       "--adoption-file <json>",
       "--alias-file <json>",
       "--receipt <path>",
-      "--library <src>",
-      "--agents <ids>",
-      "--global / --no-global",
-      "--projects <names|*>",
-      "--dev <dir>",
-      "--copy",
-      "--wsl <distros|*>",
+      "--expect-revision <sha>",
+      "--remote-ref <ref>",
+      "--no-entrypoints",
       "--symlinks",
       "--junctions",
-      "--no-pull / --pull",
-      "--no-restore",
-      "--retry",
-      "--sidecars",
-      "--no-layers",
-      "--no-entrypoints",
-      "--no-remember",
-      "--watch",
-      "--plan",
-      "--quiet",
-      "--json",
-      "-y, --yes",
-      "--ask",
       "-h, --help",
     ],
   ].flat();
@@ -106,15 +95,54 @@ test("--help lists every command and every flag of build, check, update (refresh
   assert.match(help, /INSTALL_INTERNAL_SKILLS=1/);
   assert.match(help, /locked upstream version/);
   assert.match(help, /exit 1 on any, 0 when clean/);
+  // what the branch rules promise: the names never deleted, the archive tag, that --plan writes nothing
+  assert.match(help, /main, dev and any \*-keep branch are never deleted/);
+  assert.match(help, /tagged archive\/<name> at its head,\s+then deleted/);
+  assert.match(help, /--plan lists every tag and delete without making\s+them/);
+  // what the session hook promises: silent when nothing changed, a dirty checkout left alone
+  assert.match(help, /Prints nothing when nothing changed; exit 0 unless the sync hit a conflict/);
+  assert.match(help, /a dirty one or one on another branch is named and\s+left alone/);
   // what a library's CI has to know about its checkout: neither a check nor a build needs history, and versions only go up
   assert.match(help, /Needs no history: clean in a shallow clone/);
   assert.match(help, /Builds never bump a version or append a commit hash/);
+  // what the machine commands promise: nothing of their own on the machine, settings from the release, old flags named
+  assert.match(help, /no library clone, no\nanswers file, nothing remembered between runs/);
+  assert.match(help, /named in one line on stderr/);
+  assert.match(
+    help,
+    /\n  --plan\s+show what would change, touch nothing: sync, unlink, branches and the library commands/,
+  );
+  assert.match(help, /status only reads, hook refuses it/);
+  // the old flags are not documented as options any more
+  for (const gone of ["--agents <ids>", "--global / --no-global", "--no-pull", "--watch", "-y, --yes", "--ask"])
+    assert.ok(!help.split("\n").some((l) => l.startsWith(`  ${gone}`)), `${gone} still listed`);
 
   const bad = cli("--nope");
   assert.equal(bad.status, 2);
   // node may put a warning of its own on stderr first; the option's line is followed by the whole help
   assert.ok(bad.stderr.includes(`unknown option --nope\n${help}`));
   assert.equal(bad.stdout, "");
+  const unknown = cli("frobnicate");
+  assert.equal(unknown.status, 2);
+  assert.ok(unknown.stderr.includes(`unknown command frobnicate\n${help}`));
+  assert.equal(unknown.stdout, "");
+  // a word a machine command does not expect is refused in one line, exit 2 (branches takes repos)
+  for (const args of [
+    ["sync", "extra"],
+    ["status", "x", "y"],
+    ["unlink", "now"],
+    ["hook", "x"],
+  ]) {
+    const r = cli(...args);
+    assert.equal(r.status, 2, args.join(" "));
+    assert.equal(r.stderr, `${args[0]}: takes no argument (got ${args.slice(1).join(" ")})\n`);
+    assert.equal(r.stdout, "");
+  }
+  const retired = cli("projects");
+  assert.equal(retired.status, 2);
+  assert.equal(retired.stdout, "");
+  assert.equal(retired.stderr.trimEnd().split("\n").length, 1, retired.stderr);
+  assert.match(retired.stderr, /^projects: retired; .*run sync\n$/);
 });
 
 test("the package ships the built CLI, the four schemas (the flow schema among them) and the README, and its bin is the built CLI", () => {

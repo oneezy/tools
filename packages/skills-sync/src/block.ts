@@ -1,0 +1,266 @@
+// The one managed block skills-sync writes into each harness's global instructions file (ADR-0011): ~/.claude/CLAUDE.md
+// and ~/.codex/AGENTS.md, never a repository's AGENTS.md, CLAUDE.md or settings. It says how to call a skill in each
+// harness and that an agent never fetches a SKILL.md to run one. The text is the same on every machine and needs no
+// release and no library, so it is written even when GitHub cannot be read. Only the bytes between the markers change;
+// everything around them stays as the user wrote it, line endings included. Blocks an older skills-sync left in
+// repositories are found and reported here, never edited.
+import fs from "node:fs";
+import path from "node:path";
+import { hasLinkedParent, lexists, samePath, toHash } from "./fs.js";
+import type { Harness } from "./harnesses.js";
+import type { Action } from "./plan.js";
+import { DEFAULT_REPO } from "./release.js";
+
+/** The block's id in its markers: <!-- skills-sync:skills:start --> ... <!-- skills-sync:skills:end -->. */
+export const BLOCK_ID = "skills";
+
+/**
+ * The one block, without its markers. Short on purpose: an agent reads it at the start of every session. The Brain
+ * section is the text the old `brain` block carried (the library's brain-routing.md), kept word for word so agent
+ * behaviour on every machine stays as it was; it lives here now, release-independent.
+ */
+export const BLOCK_BODY = `## Skills
+
+This block is written by skills-sync; edits here are overwritten. Skills come from the library ${DEFAULT_REPO}, installed into each harness in one form. Call one the way the harness you are in resolves it:
+
+| Harness | How to call a skill |
+| --- | --- |
+| Claude Code | \`/<plugin>:<skill>\`, e.g. \`/oneezy:oneezy-status\` |
+| Codex | \`$<skill>\` in the prompt (a plugin's skill: \`$<plugin>:<skill>\`), the \`/skills\` picker, or \`@<skill>\` on ChatGPT web |
+| Hermes | \`/<skill>\` for a loose skill; a plugin's skill: \`/agent-plugin-<id>-<hash>:<skill>\` |
+
+Never fetch a \`SKILL.md\` from GitHub, or run one from any folder this harness does not read: that bypasses the harness's own resolution and \`disable-model-invocation\`. When a typed skill does not resolve, show this table instead of improvising.
+
+## Brain
+
+For Brain capture, lookup, agenda, triage, task status or durable context, load \`/oneezy-brain\` and follow its current registry. The skill resolves the canonical Google Drive Brain and owns locations, schema, account selection and verification.
+
+This delegation supersedes earlier Brain destinations in these instructions and their imports. Retain pinned sources, GitHub and Spaces as historical evidence. If the installed skill or its supported Drive route is unavailable, report that exact blocker and stop dependent Brain operations.`;
+
+/** A marker is a whole line (trailing blanks allowed), so a mention in prose or a fenced example is not one. */
+const MARKER = /^<!-- skills-sync:([\w-]+):(start|end) -->(?=[ \t]*\r?$)/gm;
+
+export interface ManagedBlock {
+  id: string;
+  /** offset of the start marker */
+  start: number;
+  /** offset just past the end marker */
+  end: number;
+}
+
+/** Every managed block in `text`, in order; null when markers are unpaired, nested or out of order. */
+export function findBlocks(text: string): ManagedBlock[] | null {
+  const blocks: ManagedBlock[] = [];
+  let open: { id: string; start: number } | null = null;
+  for (const m of text.matchAll(MARKER)) {
+    const [whole, id, kind] = m;
+    if (kind === "start") {
+      if (open) return null;
+      open = { id, start: m.index };
+    } else {
+      if (!open || open.id !== id) return null;
+      blocks.push({ id, start: open.start, end: m.index + whole.length });
+      open = null;
+    }
+  }
+  return open ? null : blocks;
+}
+
+/** The ids the markers in `text` name, each once, whether or not they pair up. */
+export function blockIds(text: string): string[] {
+  return [...new Set([...text.matchAll(MARKER)].map((m) => m[1]))];
+}
+
+/**
+ * `text` with the one block in place: an existing managed block (whatever its id, so the old tool's `brain` block is
+ * replaced where it stands) becomes this one; otherwise the block is appended. Throws when the markers are broken or
+ * the file holds several blocks: that is a human's to sort out.
+ */
+export function withBlock(text: string, body = BLOCK_BODY): string {
+  const blocks = findBlocks(text);
+  if (!blocks) throw new Error("duplicate or incomplete managed block; left alone");
+  if (blocks.length > 1)
+    throw new Error(
+      `${blocks.length} managed blocks (${blocks.map((b) => b.id).join(", ")}); one is the rule; left alone`,
+    );
+  const newline = text.includes("\r\n") ? "\r\n" : "\n";
+  const block = `<!-- skills-sync:${BLOCK_ID}:start -->\n${body}\n<!-- skills-sync:${BLOCK_ID}:end -->`.replace(
+    /\n/g,
+    newline,
+  );
+  if (blocks.length) return text.slice(0, blocks[0].start) + block + text.slice(blocks[0].end);
+  const gap = !text || text.endsWith(newline + newline) ? "" : text.endsWith(newline) ? newline : newline + newline;
+  return text + gap + block + newline;
+}
+
+export type BlockStatus = "current" | "missing" | "outdated" | "conflict";
+
+export interface BlockState {
+  /** the harness's global instructions file */
+  file: string;
+  status: BlockStatus;
+  /** the ids of the managed blocks the file holds today (the old tool wrote `brain`) */
+  ids: string[];
+  /** why the block cannot be written, when it cannot */
+  reason?: string;
+}
+
+/** The harness's global instructions file; null for a harness whose table row names none (Hermes today). */
+export function globalFile(h: Harness): string | null {
+  return h.userInstructions?.[0] ? path.join(h.configDir, h.userInstructions[0]) : null;
+}
+
+interface Inspected {
+  state: BlockState;
+  /** the file as it is; null when absent */
+  bytes: Buffer | null;
+  /** the file as it should be; null on a conflict */
+  next: string | null;
+}
+
+function inspect(file: string): Inspected {
+  const conflict = (reason: string, ids: string[] = []): Inspected => ({
+    state: { file, status: "conflict", ids, reason },
+    bytes: null,
+    next: null,
+  });
+  if (hasLinkedParent(file)) return conflict("linked instruction file or parent; left alone");
+  let bytes: Buffer | null = null;
+  if (lexists(file)) {
+    try {
+      if (!fs.statSync(file).isFile()) return conflict("not a file; left alone");
+      bytes = fs.readFileSync(file);
+    } catch (error) {
+      return conflict(`unreadable (${error instanceof Error ? error.message : String(error)}); left alone`);
+    }
+  }
+  const text = bytes?.toString("utf8") ?? "";
+  if (bytes && (!Buffer.from(text).equals(bytes) || text.includes("\0"))) return conflict("not UTF-8 text; left alone");
+  const ids = blockIds(text);
+  let next: string;
+  try {
+    next = withBlock(text);
+  } catch (error) {
+    return conflict(error instanceof Error ? error.message : String(error), ids);
+  }
+  const status: BlockStatus = next === text ? "current" : ids.length ? "outdated" : "missing";
+  return { state: { file, status, ids }, bytes, next };
+}
+
+/** The block's state in `file`, nothing written: what the probe records and status shows. */
+export function readBlock(file: string): BlockState {
+  return inspect(file).state;
+}
+
+/**
+ * The action that makes `file` carry the block: a write (checked against the file's hash at apply time, as plan.ts
+ * does for every instruction write), a skip when it is current, a conflict when it cannot be written.
+ */
+export function blockAction(file: string): Action {
+  const { state, bytes, next } = inspect(file);
+  if (state.status === "conflict") return { kind: "conflict", path: file, note: state.reason };
+  if (state.status === "current") return { kind: "skip", path: file, note: "skills block current" };
+  return {
+    kind: "write",
+    path: file,
+    payload: next!,
+    expectedHash: bytes ? toHash(bytes) : null,
+    note:
+      state.status !== "outdated"
+        ? "skills block"
+        : state.ids.join(", ") === BLOCK_ID
+          ? "skills block updated"
+          : `skills block replaces ${state.ids.join(", ")}`,
+  };
+}
+
+export interface RepoBlock {
+  file: string;
+  ids: string[];
+}
+
+/**
+ * Managed blocks outside the global file, where the old tool wrote them: `names` directly under each of `roots` (a
+ * harness's project instruction file names under each project, or its secondary global files such as
+ * AGENTS.override.md under its config folder). `except` are the global files themselves. Found, never edited: each is
+ * a cleanup line in the report.
+ */
+export function repoBlocks(roots: string[], names: string[], except: string[] = []): RepoBlock[] {
+  const out: RepoBlock[] = [];
+  for (const root of roots) {
+    for (const name of names) {
+      const file = path.join(root, name);
+      if (except.some((e) => samePath(e, file))) continue;
+      let text: string;
+      try {
+        if (!fs.statSync(file).isFile()) continue;
+        text = fs.readFileSync(file, "utf8");
+      } catch {
+        continue;
+      }
+      const ids = blockIds(text);
+      if (ids.length) out.push({ file, ids });
+    }
+  }
+  return out;
+}
+
+/**
+ * `text` without its managed blocks: every well-formed block, whatever its id, and the line ending that closed its end
+ * marker; everything else byte for byte but one blank line: a block that ended the file takes the blank line before it
+ * (the gap blockAction appended it after, which cannot be told from a blank line a human left there). Throws when the
+ * markers are broken (a human's to sort out). unlink's half.
+ */
+export function withoutBlock(text: string): string {
+  const blocks = findBlocks(text);
+  if (!blocks) throw new Error("duplicate or incomplete managed block; left alone");
+  let out = "";
+  let at = 0;
+  for (const b of blocks) {
+    out += text.slice(at, b.start);
+    at = b.end;
+    if (text.startsWith("\r\n", at)) at += 2;
+    else if (text.startsWith("\n", at)) at += 1;
+  }
+  const rest = text.slice(at);
+  // a block that ended the file was appended after one blank line (blockAction's gap): that line goes with it, so the
+  // file is as it was before the block came
+  if (!rest) for (const nl of ["\r\n", "\n"]) if (out.endsWith(nl + nl)) return out.slice(0, -nl.length);
+  return out + rest;
+}
+
+/**
+ * The action that takes the managed block out of `file`: a write of the text around it (checked against the file's
+ * hash at apply time), a delete when the file held nothing else, a conflict when it cannot be read or its markers are
+ * broken; null when there is no file or no block, so a second unlink has nothing to do.
+ */
+export function blockRemoval(file: string): Action | null {
+  const conflict = (note: string): Action => ({ kind: "conflict", path: file, note });
+  if (!lexists(file)) return null;
+  if (hasLinkedParent(file)) return conflict("linked instruction file or parent; left alone");
+  let bytes: Buffer;
+  try {
+    if (!fs.statSync(file).isFile()) return conflict("not a file; left alone");
+    bytes = fs.readFileSync(file);
+  } catch (error) {
+    return conflict(`unreadable (${error instanceof Error ? error.message : String(error)}); left alone`);
+  }
+  const text = bytes.toString("utf8");
+  if (!Buffer.from(text).equals(bytes) || text.includes("\0")) return conflict("not UTF-8 text; left alone");
+  const ids = blockIds(text);
+  if (!ids.length) return null;
+  let next: string;
+  try {
+    next = withoutBlock(text);
+  } catch (error) {
+    return conflict(error instanceof Error ? error.message : String(error));
+  }
+  if (next === "") return { kind: "delete", path: file, note: `held only the skills-sync block (${ids.join(", ")})` };
+  return {
+    kind: "write",
+    path: file,
+    payload: next,
+    expectedHash: toHash(bytes),
+    note: `skills-sync block (${ids.join(", ")}) removed`,
+  };
+}

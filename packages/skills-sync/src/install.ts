@@ -1,32 +1,17 @@
-// The plugin form on the harnesses that have one: the library's built plugins (plugins/<id>/, listed in its two catalogs)
-// installed on Claude Code and Codex through each harness's own plugin commands. The tool never edits a settings file; the
-// harness writes its own while it installs. A plugin's skills lose their loose links on a harness only once that harness lists
-// the plugin enabled and resolves one of its skills (verified without a session: no tokens spent). Goose and Hermes have
-// no native plugin driver in this tool and keep their links. What the tool installed is recorded per harness in the local file, so a rollback
-// (sync --links) or unlink removes only its own.
+// The harnesses' plugin CLIs (claude, codex): one driver per harness with the read-only listings the probe asks for
+// (plugins, marketplaces, Codex's loaded skills) and the plugin commands the forms and unlink run (install, uninstall,
+// marketplace add, remove and upgrade), each through the harness's own command, never a settings edit by this tool.
+// pluginDependency serves migrate-aliases, which still verifies a plugin's copy of a skill from a checkout before it
+// retires an alias.
 import { spawnSync } from "node:child_process";
-import { createHash } from "node:crypto";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { isDir, isLink, linkTarget, samePath, under, real, hasLinkedParent } from "./fs.js";
 import { withInternal } from "./build.js";
-import { plainVersion, compareVersions } from "./versions.js";
 import type { Harness } from "./harnesses.js";
 import type { Library } from "./library.js";
-import type { Action, Report } from "./plan.js";
-
-/** How a harness gets the library's skills: its plugins, or one loose link per skill in its user folder. */
-export type Form = "plugin" | "links";
-
-/** What the tool installed on one harness (keyed by the harness's config folder in the local file): plugin ids, its marketplace. */
-export interface Owned {
-  harness: string;
-  marketplace?: string;
-  plugins: string[];
-  /** Built bytes last verified on this harness; cache identity is separate from the displayed semantic version. */
-  revisions?: Record<string, string>;
-}
+import type { Action } from "./plan.js";
 
 /** One built plugin as a harness's catalog lists it. */
 export interface Built {
@@ -47,6 +32,17 @@ export interface Installed {
   readInPlace?: boolean;
   /** Claude Code: "user" for a CLI install, "synced" for an account plugin claude.ai delivered */
   scope?: string;
+}
+
+/** One marketplace a harness has registered: where it reads it from, and the source it was added from. */
+export interface Marketplace {
+  name: string;
+  /** the folder the harness reads the catalog from (a Git snapshot under its config folder, or the local folder itself) */
+  root: string | null;
+  /** Codex: "git" for owner/repo or a Git URL, "local" for a folder; Claude Code: its source kind; null when unsaid */
+  sourceType: string | null;
+  /** the Git URL or local folder it was added from; null when unsaid */
+  source: string | null;
 }
 
 export interface Run {
@@ -75,12 +71,14 @@ interface Driver {
   catalog: string;
   /** the file a plugin install writes, named when the harness cannot install through a command */
   settings: (h: Harness) => string;
-  marketplaces: (run: Run) => Array<{ name: string; path: string }> | null;
+  marketplaces: (run: Run) => Marketplace[] | null;
   installed: (run: Run) => Installed[] | null;
-  addMarketplace: (run: Run, root: string) => boolean;
+  /** register a marketplace from a local folder (or, Codex, owner/repo on GitHub); null when the command failed */
+  addMarketplace: (run: Run, source: string) => MarketplaceAdded | null;
   removeMarketplace: (run: Run, name: string) => boolean;
+  /** Codex: refresh a Git marketplace's snapshot and reinstall its plugins; the errors it reported, null when it failed */
+  upgradeMarketplace?: (run: Run, name: string) => { errors: string[] } | null;
   install: (run: Run, id: string) => boolean;
-  update: (run: Run, id: string) => boolean;
   uninstall: (run: Run, id: string) => boolean;
   /** the names of the given plugins that resolve at least one of their skills */
   resolving: (run: Run, plugins: Built[], marketplace: string) => Set<string>;
@@ -135,7 +133,15 @@ const claude: Driver = {
     const v = r.ok ? json(r.out) : null;
     if (!Array.isArray(v)) return null;
     return v
-      .map((m) => ({ name: str(m?.name) ?? "", path: str(m?.path) ?? str(m?.installLocation) ?? "" }))
+      .map((m) => {
+        const root = str(m?.path) ?? str(m?.installLocation);
+        return {
+          name: str(m?.name) ?? "",
+          root,
+          sourceType: str(m?.source) ?? str(m?.source?.source),
+          source: str(m?.source?.repo) ?? str(m?.source?.url) ?? str(m?.source?.path) ?? root,
+        };
+      })
       .filter((m) => m.name);
   },
   installed(run) {
@@ -154,10 +160,10 @@ const claude: Driver = {
         ...(str(p.scope) ? { scope: p.scope as string } : {}),
       }));
   },
-  addMarketplace: (run, root) => claudeWrite(run, ["plugin", "marketplace", "add"], [root]),
+  addMarketplace: (run, root) =>
+    claudeWrite(run, ["plugin", "marketplace", "add"], [root]) ? { name: null, alreadyAdded: false } : null,
   removeMarketplace: (run, name) => claudeWrite(run, ["plugin", "marketplace", "remove"], [name]),
   install: (run, id) => claudeWrite(run, ["plugin", "install"], [id, "--scope", "user"]),
-  update: (run, id) => claudeWrite(run, ["plugin", "update"], [id, "--scope", "user"]),
   uninstall: (run, id) => claudeWrite(run, ["plugin", "uninstall"], [id, "--scope", "user"]),
   resolving(run, plugins, marketplace) {
     const out = new Set<string>();
@@ -186,7 +192,12 @@ const codex: Driver = {
     const v = (r.ok ? json(r.out) : null) as { marketplaces?: unknown } | null;
     if (!v || !Array.isArray(v.marketplaces)) return null;
     return v.marketplaces
-      .map((m) => ({ name: str(m?.name) ?? "", path: str(m?.root) ?? str(m?.marketplaceSource?.source) ?? "" }))
+      .map((m) => ({
+        name: str(m?.name) ?? "",
+        root: str(m?.root),
+        sourceType: str(m?.marketplaceSource?.sourceType),
+        source: str(m?.marketplaceSource?.source),
+      }))
       .filter((m) => m.name);
   },
   installed(run) {
@@ -204,10 +215,10 @@ const codex: Driver = {
         folder: null,
       }));
   },
-  addMarketplace: (run, root) => run(["plugin", "marketplace", "add", root, "--json"]).ok,
+  addMarketplace: codexMarketplaceAdd,
   removeMarketplace: (run, name) => run(["plugin", "marketplace", "remove", name, "--json"]).ok,
+  upgradeMarketplace: codexMarketplaceUpgrade,
   install: (run, id) => run(["plugin", "add", id, "--json"]).ok,
-  update: (run, id) => run(["plugin", "add", id, "--json"]).ok,
   uninstall: (run, id) => run(["plugin", "remove", id, "--json"]).ok,
   resolving(run, plugins) {
     const out = new Set<string>();
@@ -236,43 +247,83 @@ const codex: Driver = {
 
 const DRIVERS: Record<string, Driver> = { "claude-code": claude, codex };
 
-function revision(dir: string): string {
-  const hash = createHash("sha256");
-  const walk = (rel: string): void => {
-    for (const entry of fs
-      .readdirSync(path.join(dir, rel), { withFileTypes: true })
-      .sort((a, b) => a.name.localeCompare(b.name))) {
-      const name = rel ? `${rel}/${entry.name}` : entry.name;
-      if (entry.isDirectory()) walk(name);
-      else if (entry.isFile())
-        hash
-          .update(name)
-          .update("\0")
-          .update(fs.readFileSync(path.join(dir, name)))
-          .update("\0");
-    }
-  };
-  walk("");
-  return hash.digest("hex");
+/** A user plugin as `hermes plugins list --json --no-bundled` prints it. */
+export interface HermesListed {
+  name: string;
+  /** enabled, disabled, or not enabled */
+  status: string;
+  version: string | null;
+  /** `git pinned@<sha8>` for a --ref install, the catalog annotation, else user or git */
+  source: string | null;
 }
 
-/** The harnesses this step can give plugins to. */
-export function pluginHarness(h: Harness): boolean {
-  return h.id in DRIVERS;
-}
+/**
+ * Hermes's plugin commands (`hermes plugins ...`), through the same runner. Hermes has no marketplace: a plugin is
+ * installed straight from a GitHub repository path (`owner/repo/sub/dir`), pinned to a commit with --ref (a full sha),
+ * switched on with `enable` (plugins.enabled in config.yaml), moved with `install --force --ref` (`hermes plugins update`
+ * refuses a pinned install, so there is no update here) and dropped with `remove` (for `unlink`, tools#154).
+ * `list --json --no-bundled` is the harness's own view of its user plugins. Nothing here is a Driver: the old
+ * library-based plugin step never serves Hermes.
+ */
+export const hermes = {
+  bin: "hermes",
+  /** does this hermes have plugin commands? asked through --help only */
+  supports(run: Run): boolean {
+    const r = run(["plugins", "--help"]);
+    return r.ok && /install/.test(r.out + r.err);
+  },
+  list(run: Run): HermesListed[] | null {
+    const r = run(["plugins", "list", "--json", "--no-bundled"]);
+    const v = r.ok ? json(r.out) : null;
+    if (!Array.isArray(v)) return null;
+    return v
+      .filter((p) => str(p?.name))
+      .map((p) => ({
+        name: p.name as string,
+        status: str(p.status) ?? "not enabled",
+        // the CLI prints manifest.get("version", "") (older builds str(None)) for a manifest without a version
+        version: str(p.version) && p.version !== "None" ? (p.version as string) : null,
+        source: str(p.source),
+      }));
+  },
+  /** --no-enable: the enable is a step of its own, so a failed one is told apart; --force replaces this tool's own install */
+  install(run: Run, identifier: string, options: { ref?: string; force?: boolean } = {}): boolean {
+    return run([
+      "plugins",
+      "install",
+      identifier,
+      "--no-enable",
+      ...(options.ref ? ["--ref", options.ref] : []),
+      ...(options.force ? ["--force"] : []),
+    ]).ok;
+  },
+  enable: (run: Run, name: string) => run(["plugins", "enable", name]).ok,
+  remove: (run: Run, name: string) => run(["plugins", "remove", name]).ok,
+};
 
 /** The plugin CLI of a harness that has one: its name, and where PATH has it (null when it is not installed). */
 export function harnessCli(
   h: Harness,
   env: NodeJS.ProcessEnv = process.env,
 ): { bin: string; file: string | null } | null {
-  const d = DRIVERS[h.id];
-  return d ? { bin: d.bin, file: which(d.bin, env) } : null;
+  const bin = DRIVERS[h.id]?.bin ?? (h.id === "hermes" ? hermes.bin : null);
+  return bin ? { bin, file: which(bin, env) } : null;
 }
 
 /** What the harness lists as installed, account plugins included; null when it cannot list. */
 export function listInstalled(h: Harness, run: Run): Installed[] | null {
   return DRIVERS[h.id]?.installed(run) ?? null;
+}
+
+/**
+ * The plugin command behind `a` was refused: the action becomes the failure, with the CLI's own words attached
+ * (`run.failure`, the last command's stderr and exit code), so one line says what happened to that plugin.
+ */
+export function refused(a: Action, run: Run, note: string): void {
+  a.kind = "conflict";
+  a.failed = true;
+  a.note = note;
+  a.diagnostic = run.failure;
 }
 
 /**
@@ -300,11 +351,70 @@ export function codexPluginSkills(run: Run): Map<string, string[]> | null {
   return out;
 }
 
-export function nativePluginRoute(lib: Library, h: Harness, skill: string): boolean {
-  const d = DRIVERS[h.id],
-    catalog = readCatalog(lib, h);
-  const file = d && which(d.bin);
-  return !!file && !!catalog?.plugins.some((item) => item.skills.includes(skill)) && supportsPlugins(runner(file));
+/**
+ * What a marketplace add answered: the name the harness gave the marketplace (Codex says it; Claude Code does not) and
+ * whether it was registered from that source already (Codex: `alreadyAdded`, exit 0, nothing changed).
+ */
+export interface MarketplaceAdded {
+  name: string | null;
+  alreadyAdded: boolean;
+}
+
+/** `codex plugin marketplace add <source> --json`: its answer when it worked, null when it failed (run.failure says why). */
+function codexMarketplaceAdd(run: Run, source: string): MarketplaceAdded | null {
+  const r = run(["plugin", "marketplace", "add", source, "--json"]);
+  if (!r.ok) return null;
+  const v = json(r.out) as { marketplaceName?: unknown; alreadyAdded?: unknown } | null;
+  return { name: str(v?.marketplaceName), alreadyAdded: v?.alreadyAdded === true };
+}
+
+/**
+ * `codex plugin marketplace upgrade <name> --json`: refreshes a Git marketplace's snapshot when the remote moved and
+ * force-reinstalls every plugin installed from it (the first upgrade after an add reinstalls even when nothing moved).
+ * The errors it reported, as strings; null when the command failed (run.failure says why).
+ */
+function codexMarketplaceUpgrade(run: Run, name: string): { errors: string[] } | null {
+  const r = run(["plugin", "marketplace", "upgrade", name, "--json"]);
+  if (!r.ok) return null;
+  const v = json(r.out) as { errors?: unknown } | null;
+  const errors = Array.isArray(v?.errors) ? v.errors.map((e) => (typeof e === "string" ? e : JSON.stringify(e))) : [];
+  return { errors };
+}
+
+/** The marketplaces the harness's CLI lists; null when it cannot list them. */
+export function listMarketplaces(h: Harness, run: Run): Marketplace[] | null {
+  return DRIVERS[h.id]?.marketplaces(run) ?? null;
+}
+
+/**
+ * Register a marketplace from `source`: a local folder, or for Codex `owner/repo` on GitHub (and a Git URL). Null when the
+ * command failed (run.failure holds the diagnostic) or the harness has no driver.
+ */
+export function addMarketplace(h: Harness, run: Run, source: string): MarketplaceAdded | null {
+  return DRIVERS[h.id]?.addMarketplace(run, source) ?? null;
+}
+
+/** Unregister a marketplace by name. Codex keeps the plugins installed from it; Claude Code uninstalls them with it. */
+export function removeMarketplace(h: Harness, run: Run, name: string): boolean {
+  return DRIVERS[h.id]?.removeMarketplace(run, name) ?? false;
+}
+
+/**
+ * Upgrade a marketplace (Codex: refresh its Git snapshot and reinstall its plugins). The errors the command reported;
+ * null when it failed, or for a harness without the command.
+ */
+export function upgradeMarketplace(h: Harness, run: Run, name: string): { errors: string[] } | null {
+  return DRIVERS[h.id]?.upgradeMarketplace?.(run, name) ?? null;
+}
+
+/** Install `<id>@<marketplace>` through the harness's CLI (Codex's add is idempotent). False when the command failed. */
+export function installPlugin(h: Harness, run: Run, id: string): boolean {
+  return DRIVERS[h.id]?.install(run, id) ?? false;
+}
+
+/** Uninstall one plugin (<id>@<marketplace>) through the harness's own command; false when it refused (run.failure says why). */
+export function uninstallPlugin(h: Harness, run: Run, id: string): boolean {
+  return DRIVERS[h.id]?.uninstall(run, id) ?? false;
 }
 
 /** Resolve the exact installed skill, not merely any skill supplied by a matching plugin version. */
@@ -344,7 +454,7 @@ export function pluginDependency(
     if (hasLinkedParent(built) || !matchesFiles(built)) return null;
     const run = runner(file, onFailure);
     const market = d.marketplaces(run)?.find((item) => item.name === catalog.marketplace);
-    if (market && !samePath(market.path, lib.root)) return null;
+    if (market && !(market.root && samePath(market.root, lib.root))) return null;
     const id = `${b.name}@${catalog.marketplace}`;
     const installed = d.installed(run);
     if (!installed || installed.some((item) => item.name === b.name && item.id !== id)) return null;
@@ -444,13 +554,17 @@ export function which(bin: string, env: NodeJS.ProcessEnv = process.env): string
   return null;
 }
 
-/** Run a harness CLI with no TTY: a .cmd shim (npm's, on Windows) through the shell, anything else directly. */
+/**
+ * Run a harness CLI with no TTY: a .cmd shim (npm's, on Windows) through the shell, anything else directly. The shell
+ * gets one command line, quoted here for cmd.exe, never an args array: Node warns on stderr (DEP0190) for that pair, and
+ * a sync must print nothing it did not mean to.
+ */
 export function runner(file: string, onFailure?: (diagnostic: NonNullable<Action["diagnostic"]>) => void): Run {
   const shell = process.platform === "win32" && /\.(cmd|bat)$/i.test(file);
   const quote = (s: string) => (/[\s&|<>^()%!"]/.test(s) ? `"${s.replace(/"/g, "")}"` : s);
   const run: Run = (args) => {
     const r = shell
-      ? spawnSync(quote(file), args.map(quote), {
+      ? spawnSync([file, ...args].map(quote).join(" "), {
           shell: true,
           encoding: "utf8",
           cwd: os.homedir(),
@@ -487,302 +601,8 @@ export function supportsPlugins(run: Run): boolean {
   return r.ok && /marketplace/.test(r.out + r.err);
 }
 
-export interface PluginResult {
-  /** per harness id: the skill names whose loose links give way to a verified plugin, and that plugin's id */
-  covered: Map<string, Map<string, string>>;
-  /** the ownership record, per harness config folder, after this run */
-  owned: Record<string, Owned>;
-}
-
-/**
- * The plugin step for the selected harnesses. form plugin: install what the catalogs list, verify, and report which skills
- * the plugins now carry. form links: uninstall the plugins this tool installed (the marketplace stays registered). On
- * plan nothing runs but the harnesses' read-only listings.
- */
-export function plugins(
-  lib: Library,
-  harnesses: Harness[],
-  form: Form,
-  owned: Record<string, Owned>,
-  report: Report,
-  plan: boolean,
-): PluginResult {
-  const result: PluginResult = { covered: new Map(), owned: { ...owned } };
-  for (const h of harnesses) {
-    const d = DRIVERS[h.id];
-    if (!d) continue;
-    const prior = owned[h.configDir] ?? { harness: h.id, plugins: [] };
-    if (form === "links") {
-      const next = rollback(h, d, prior, false, report, plan);
-      setOwned(result.owned, h.configDir, next);
-      continue;
-    }
-    const catalog = readCatalog(lib, h);
-    if (!catalog) continue; // no built plugins: the links are the only form, exactly as before
-    const file = which(d.bin);
-    if (!file) {
-      report.add({ kind: "note", path: h.userSkills, note: `${h.name}: no ${d.bin} on PATH; loose links kept` });
-      continue;
-    }
-    const run = runner(file);
-    if (!supportsPlugins(run)) {
-      report.add({
-        kind: "conflict",
-        path: d.settings(h),
-        note: `${h.name} blocked: this ${d.bin} has no plugin commands, so installing the plugins would need an edit to ${d.settings(h)}, which skills-sync never makes; loose links kept`,
-      });
-      continue;
-    }
-    const covered = install(lib, h, d, run, catalog, prior, report, plan);
-    result.covered.set(h.id, covered.skills);
-    setOwned(result.owned, h.configDir, covered.owned);
-  }
-  return result;
-}
-
-function setOwned(all: Record<string, Owned>, key: string, o: Owned): void {
-  if (!o.plugins.length && !o.marketplace) delete all[key];
-  else all[key] = o;
-}
-
-function install(
-  lib: Library,
-  h: Harness,
-  d: Driver,
-  run: Run,
-  catalog: { marketplace: string; plugins: Built[] },
-  prior: Owned,
-  report: Report,
-  plan: boolean,
-): { skills: Map<string, string>; owned: Owned } {
-  const owned: Owned = {
-    ...prior,
-    harness: h.id,
-    plugins: [...prior.plugins],
-    ...(h.id === "codex" ? { revisions: { ...prior.revisions } } : {}),
-  };
-  const skills = new Map<string, string>();
-  const mkt = catalog.marketplace;
-  const where = (what: string) => `${h.name}: ${what}`;
-  const fail = (what: string, why: string, diagnostic: Action["diagnostic"] | null = run.failure ?? null) =>
-    report.add({ kind: "conflict", path: where(what), note: why, ...(diagnostic ? { diagnostic } : {}) });
-
-  const markets = d.marketplaces(run);
-  if (!markets) {
-    fail(`marketplace ${mkt}`, `${d.bin} could not list its marketplaces; loose links kept`);
-    return { skills, owned };
-  }
-  const existing = markets.find((m) => m.name === mkt);
-  if (existing && !(existing.path && samePath(existing.path, lib.root))) {
-    fail(
-      `marketplace ${mkt}`,
-      `already registered from ${existing.path || "another source"}, not this library; left alone, loose links kept`,
-    );
-    return { skills, owned };
-  }
-  if (!existing) {
-    report.add({ kind: "install", path: where(`marketplace ${mkt}`), target: lib.root });
-    if (!plan) {
-      if (!d.addMarketplace(run, lib.root)) {
-        fail(`marketplace ${mkt}`, `${d.bin} plugin marketplace add failed; loose links kept`);
-        return { skills, owned };
-      }
-      owned.marketplace = mkt;
-    }
-  }
-
-  const before = d.installed(run) ?? (plan && !existing ? [] : null);
-  if (!before) {
-    fail(`plugins from ${mkt}`, `${d.bin} could not list its plugins; loose links kept`);
-    return { skills, owned };
-  }
-  const listed = new Set(catalog.plugins.map((b) => `${b.name}@${mkt}`));
-  // a plugin this tool installed that the catalog no longer lists is this tool's to remove
-  for (const id of prior.plugins.filter((x) => !listed.has(x) && splitId(x).marketplace === mkt)) {
-    if (before.some((i) => i.id === id)) {
-      report.add({ kind: "uninstall", path: where(`plugin ${id}`), note: "no longer in the library's catalog" });
-      if (!plan && !d.uninstall(run, id)) {
-        fail(`plugin ${id}`, `${d.bin} could not uninstall it`);
-        continue;
-      }
-    }
-    owned.plugins = owned.plugins.filter((x) => x !== id);
-  }
-  const candidates: Built[] = [];
-  const fresh = new Set<string>();
-  for (const b of catalog.plugins) {
-    const id = `${b.name}@${mkt}`;
-    const mine = before.find((i) => i.id === id);
-    const other = before.find((i) => i.name === b.name && i.marketplace !== mkt);
-    if (other) {
-      fail(`plugin ${b.name}`, `already installed as ${other.id}; left alone, loose links kept for its skills`);
-      continue;
-    }
-    if (!mine) {
-      report.add({ kind: "install", path: where(`plugin ${id}`), note: d.built(lib, b) ?? undefined });
-      if (!plan) {
-        if (!d.install(run, id)) {
-          fail(`plugin ${id}`, `${d.bin} could not install it; loose links kept`);
-          continue;
-        }
-        if (!owned.plugins.includes(id)) owned.plugins.push(id);
-        fresh.add(id);
-      }
-    } else if (!mine.enabled) {
-      fail(`plugin ${id}`, "installed but disabled; left alone, loose links kept");
-      continue;
-    } else if (
-      !d.matches(mine, b, lib) ||
-      (h.id === "codex" && owned.plugins.includes(id) && owned.revisions?.[id] !== revision(b.dir))
-    ) {
-      const installedVersion = mine.version ? plainVersion(mine.version) : null;
-      const builtVersion = d.built(lib, b);
-      const legacyMigration =
-        owned.plugins.includes(id) &&
-        /^0\.\d+\.0\+[0-9a-f]{12,40}$/.test(mine.version ?? "") &&
-        !builtVersion?.includes("+");
-      if (
-        !legacyMigration &&
-        installedVersion &&
-        builtVersion &&
-        plainVersion(builtVersion) &&
-        compareVersions(installedVersion, builtVersion) > 0
-      ) {
-        fail(
-          `plugin ${id}`,
-          `newer installed version ${mine.version} > ${builtVersion}; preserved, update the reviewed library first`,
-        );
-        continue;
-      }
-      report.add({
-        kind: "install",
-        path: where(`plugin ${id}`),
-        note: `${mine.version ?? "no version"} -> ${d.built(lib, b) ?? "built"}`,
-      });
-      if (!plan && !d.update(run, id)) {
-        fail(`plugin ${id}`, `${d.bin} could not update it at the built version; loose links kept`);
-        continue;
-      }
-      fresh.add(id);
-    } else report.add({ kind: "skip", path: where(`plugin ${id}`), note: "installed" });
-    candidates.push(b);
-  }
-  if (plan) {
-    for (const b of candidates) for (const s of b.skills) skills.set(s, `${b.name}@${mkt}`);
-    return { skills, owned };
-  }
-
-  // verify before any link goes: listed enabled at the built version/source, and one skill resolving. A plugin already in place whose skills hold
-  // no loose link of this tool's has nothing left to unlink, so it is not asked again on every run
-  const after = d.installed(run) ?? [];
-  const inventoryFailure = run.failure;
-  const enabled = candidates.filter((b) => after.some((i) => i.id === `${b.name}@${mkt}` && i.enabled));
-  const matching = enabled.filter((b) =>
-    after.some((i) => i.id === `${b.name}@${mkt}` && i.enabled && d.matches(i, b, lib)),
-  );
-  const toAsk = matching.filter(
-    (b) => fresh.has(`${b.name}@${mkt}`) || b.skills.some((s) => ownLink(lib, path.join(h.userSkills, s))),
-  );
-  const resolving = d.resolving(run, toAsk, mkt);
-  for (const b of candidates) {
-    const id = `${b.name}@${mkt}`;
-    const ok = matching.includes(b) && (!toAsk.includes(b) || resolving.has(b.name));
-    if (!ok) {
-      const reason = !enabled.includes(b)
-        ? `${d.bin} does not list it enabled`
-        : !matching.includes(b)
-          ? `installed ${after.find((i) => i.id === id)?.version ?? "no version"} does not match built ${d.built(lib, b) ?? "source"}`
-          : `none of its skills resolves in ${d.bin}`;
-      fail(
-        `plugin ${id}`,
-        `installed but not verified (${reason}); loose links kept`,
-        (matching.includes(b) ? run.resolutionFailures?.get(b.name) : inventoryFailure) ?? null,
-      );
-      continue;
-    }
-    for (const s of b.skills) skills.set(s, id);
-    if (h.id === "codex" && owned.plugins.includes(id)) owned.revisions![id] = revision(b.dir);
-  }
-  return { skills, owned };
-}
-
 function ownLink(lib: Library, p: string): boolean {
   if (!isLink(p)) return false;
   const t = linkTarget(p);
   return !!t && under(t, lib.root);
-}
-
-/**
- * Uninstall the plugins this tool installed on one harness; with `marketplace`, the marketplace it registered too (unlink).
- * A plugin no longer installed just leaves the record. Returns the record after.
- */
-function rollback(h: Harness, d: Driver, prior: Owned, marketplace: boolean, report: Report, plan: boolean): Owned {
-  const owned: Owned = { ...prior, plugins: [...prior.plugins] };
-  if (!owned.plugins.length && !(marketplace && owned.marketplace)) return owned;
-  const where = (what: string) => `${h.name}: ${what}`;
-  const file = which(d.bin);
-  if (!file) {
-    report.add({
-      kind: "conflict",
-      path: where(owned.plugins.join(", ") || `marketplace ${owned.marketplace}`),
-      note: `installed by skills-sync, but no ${d.bin} on PATH to remove it`,
-    });
-    return owned;
-  }
-  const run = runner(file);
-  const installed = d.installed(run);
-  if (!installed) {
-    report.add({ kind: "conflict", path: where("plugins"), note: `${d.bin} could not list its plugins; left alone` });
-    return owned;
-  }
-  for (const id of prior.plugins) {
-    if (installed.some((i) => i.id === id)) {
-      report.add({ kind: "uninstall", path: where(`plugin ${id}`), note: "installed by skills-sync" });
-      if (plan) continue;
-      if (!d.uninstall(run, id)) {
-        report.add({
-          kind: "conflict",
-          path: where(`plugin ${id}`),
-          note: `${d.bin} could not uninstall it`,
-          diagnostic: run.failure,
-        });
-        continue;
-      }
-    }
-    if (!plan) owned.plugins = owned.plugins.filter((x) => x !== id);
-  }
-  if (marketplace && owned.marketplace) {
-    const m = owned.marketplace;
-    if (d.marketplaces(run)?.some((x) => x.name === m)) {
-      report.add({ kind: "uninstall", path: where(`marketplace ${m}`), note: "registered by skills-sync" });
-      if (!plan) {
-        if (d.removeMarketplace(run, m)) delete owned.marketplace;
-        else
-          report.add({
-            kind: "conflict",
-            path: where(`marketplace ${m}`),
-            note: `${d.bin} could not remove it`,
-            diagnostic: run.failure,
-          });
-      }
-    } else if (!plan) delete owned.marketplace;
-  }
-  return owned;
-}
-
-/** unlink's half: every plugin and marketplace this tool installed on the given harnesses, removed. */
-export function removeOwned(
-  harnesses: Harness[],
-  owned: Record<string, Owned>,
-  report: Report,
-  plan: boolean,
-): Record<string, Owned> {
-  const next = { ...owned };
-  for (const h of harnesses) {
-    const d = DRIVERS[h.id];
-    const prior = owned[h.configDir];
-    if (!d || !prior) continue;
-    setOwned(next, h.configDir, rollback(h, d, prior, true, report, plan));
-  }
-  return next;
 }

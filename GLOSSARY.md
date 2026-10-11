@@ -17,7 +17,7 @@ The one-screen terminal interface every Tool opens: sections of rows, the same k
 _Avoid_: menu, TUI
 
 **Harness**:
-An AI agent runtime with its own config folder and its own expected skill layout. In scope: Claude Code and Codex; out of scope for now: Hermes, Goose.
+An AI agent runtime with its own config folder and its own expected skill layout. In scope: Claude Code, Codex and Hermes (plugins from GitHub); out of scope: Goose.
 _Avoid_: agent, client
 
 **Surface**:

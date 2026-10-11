@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "title": "skills-sync.json",
-  "description": "The committed config of a skills library: the library itself, the third-party repositories it takes skills from (what is taken from each, renames, per-skill pins, attribution), and the plugins the library builds. Hand-edited and written by add; read by skills-sync refresh, sync and build.",
+  "description": "The committed config of a skills library: the library itself, the third-party repositories it takes skills from (what is taken from each, renames, per-skill pins, attribution), the plugins the library builds, and what every machine takes from it at a release. Hand-edited and written by add; read by skills-sync refresh and build in a checkout, and by sync, status and unlink from the release's commit on GitHub.",
   "type": "object",
   "required": ["version"],
   "additionalProperties": false,
@@ -45,6 +45,18 @@
         }
       }
     },
+    "renderings": {
+      "description": "Renderings of the packages for harnesses that cannot load plugins/<id>/ as built, each behind the folder it is written to (relative to the library root, / separators). Absent: none is written and build's output is the packages and catalogs alone. hermes: the Hermes rendering of every package at <folder>/<id>/ (the package without the Claude Code and Codex manifests, each skill's metadata cut to string entries), and a paragraph in every NOTICE.md naming it. Read by build; the machine sync installs from the folder the release's skills-sync.json names here (dist/hermes when it names none).",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "hermes": {
+          "description": "Where the Hermes rendering of every package is written, relative to the library root with / separators, such as dist/hermes. The machine sync installs from the folder the release's skills-sync.json names here, and from dist/hermes when it names none.",
+          "type": "string",
+          "pattern": "^[a-z0-9_-][a-z0-9._-]*(/[a-z0-9_-][a-z0-9._-]*)*$"
+        }
+      }
+    },
     "sources": {
       "description": "One entry per source id; the id names the snapshot folder upstream/<id> and the plugin built from it.",
       "type": "object",
@@ -62,6 +74,37 @@
       "patternProperties": {
         "^[a-z0-9][a-z0-9-]*$": {
           "$ref": "#/$defs/plugin"
+        }
+      }
+    },
+    "machines": {
+      "description": "What every machine takes from this file at a release's commit (read from GitHub by the machine commands sync, status and unlink; never from a checkout): which harnesses are served and which plugins each gets. Absent, every detected harness gets every plugin the release ships.",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "harnesses": {
+          "description": "Harness ids the machine commands serve (claude-code, codex, hermes); every detected one when absent.",
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
+          "uniqueItems": true
+        },
+        "plugins": {
+          "description": "Per harness id, or \"*\" for every harness not named, the plugin ids a machine installs from the release; a harness named nowhere gets every one.",
+          "type": "object",
+          "additionalProperties": false,
+          "patternProperties": {
+            "^(\\*|[a-z0-9][a-z0-9-]*)$": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1
+              },
+              "uniqueItems": true
+            }
+          }
         }
       }
     },

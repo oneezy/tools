@@ -1,7 +1,7 @@
 {
   "name": "@oneezy/skills-sync",
-  "version": "0.8.0",
-  "description": "One skills library, every agent harness, every project on the machine. Declares third-party sources in skills-sync.json, locks each at an upstream version in skills-sync.lock.json and moves them only on update, links every skill into Claude Code, Codex, Goose and Hermes, and into the projects you pick.",
+  "version": "0.9.0",
+  "description": "One skills library on every agent harness of the machine: Claude Code from the claude.ai account plugins, Codex and Hermes as plugins from GitHub, one global instructions block and one session hook per harness, nothing kept on the machine. Also the library commands that declare, lock, update and build its third-party sources.",
   "license": "MIT",
   "repository": {
     "type": "git",
@@ -28,7 +28,6 @@
     "prepublishOnly": "npm run build && vp test run"
   },
   "dependencies": {
-    "@clack/prompts": "^1.8.1",
     "yaml": "^2.8.0"
   },
   "devDependencies": {

@@ -5,7 +5,6 @@ import {
   copyDir,
   isLink,
   lexists,
-  linkTarget,
   makeLink,
   removeLink,
   samePath,
@@ -172,7 +171,10 @@ export function apply(report: Report, plan: boolean, exclude?: (repo: string, en
             }
           }
           fs.mkdirSync(path.dirname(a.path), { recursive: true });
-          fs.writeFileSync(a.path, a.payload as string | Buffer, a.expectedHash === null ? { flag: "wx" } : undefined);
+          // planned as a new file: never over one that appeared since
+          if (a.expectedHash === null && lexists(a.path))
+            throw new Error(`${a.path}: exists since planning; left alone`);
+          writeWhole(a.path, a.payload as string | Buffer);
           if (a.expectedHash !== undefined && !fs.readFileSync(a.path).equals(Buffer.from(a.payload as string)))
             throw new Error(`${a.path}: instruction readback differs from the planned write`);
           break;
@@ -194,24 +196,17 @@ export function apply(report: Report, plan: boolean, exclude?: (repo: string, en
   }
 }
 
-/** Make `link` point at `target`. Never destroys a real folder; only manages links into `managedRoot`. */
-export function ensureLink(report: Report, link: string, target: string, managedRoot: string, what: string): void {
-  if (!lexists(link)) {
-    report.add({ kind: "link", path: link, target });
-    return;
+/**
+ * Write `file` through a sibling temp file renamed into place (a rename replaces on Windows too), so a crash mid-write
+ * never leaves a user's instructions file empty or half written.
+ */
+function writeWhole(file: string, body: string | Buffer): void {
+  const tmp = `${file}.skills-sync.tmp`;
+  fs.writeFileSync(tmp, body);
+  try {
+    fs.renameSync(tmp, file);
+  } catch (error) {
+    fs.rmSync(tmp, { force: true });
+    throw error;
   }
-  if (isLink(link)) {
-    const current = linkTarget(link);
-    if (current && samePath(current, target)) report.add({ kind: "skip", path: link, note: "ok" });
-    else if (current && under(current, managedRoot))
-      report.add({ kind: "relink", path: link, target, note: `was ${current}` });
-    else
-      report.add({
-        kind: "conflict",
-        path: link,
-        note: `${what}: link points outside the skills library (${current}); left alone`,
-      });
-    return;
-  }
-  report.add({ kind: "conflict", path: link, note: `${what}: a real folder is in the way; left alone` });
 }

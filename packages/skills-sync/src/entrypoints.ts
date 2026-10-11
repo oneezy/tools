@@ -5,7 +5,7 @@ import type { Harness } from "./harnesses.js";
 import type { Library } from "./library.js";
 import { Report, type Action } from "./plan.js";
 import { shippedSchema, validate } from "./schema.js";
-import { pluginDependency, nativePluginRoute } from "./install.js";
+import { BLOCK_ID } from "./block.js";
 
 export const ENTRYPOINTS_NAME = "skills-sync.entrypoints.json";
 
@@ -122,6 +122,9 @@ function to_block(id: string, body: string, newline: string): string {
 function replace_block(text: string, id: string, body: string): string {
   const start = `<!-- skills-sync:${id}:start -->`;
   const end = `<!-- skills-sync:${id}:end -->`;
+  // a file the machine sync already manages gets no second block from the library-based run (ADR-0011)
+  if (id !== BLOCK_ID && text.includes(`<!-- skills-sync:${BLOCK_ID}:start -->`))
+    throw new Error("superseded by the global skills block; left alone");
   const starts = text.split(start).length - 1;
   const ends = text.split(end).length - 1;
   if (starts !== ends || starts > 1 || (starts === 1 && text.indexOf(end) < text.indexOf(start)))
@@ -142,7 +145,6 @@ export function entrypoints(
   verifySkills = false,
   planned?: Report,
   projectCopies = false,
-  nativePlugins = false,
   onlySkill?: string,
 ): EntryStatus[] {
   const statuses: EntryStatus[] = [];
@@ -199,11 +201,7 @@ export function entrypoints(
         const dependencies: NonNullable<Action["dependencies"]> = [];
         if (verifySkills) {
           const own = lib.scanOwn().skills.find((item) => item.name === entry.skill)!;
-          const pluginRequested = !route.nested && nativePlugins && nativePluginRoute(lib, harness, entry.skill);
-          const pluginRoot = pluginRequested
-            ? pluginDependency(lib, harness, entry.skill, entry.requiredFiles ?? [], !!planned)
-            : null;
-          const installed = pluginRoot ?? path.join(route.skills, entry.skill);
+          const installed = path.join(route.skills, entry.skill);
           const action = planned?.actions.find(
             (item) =>
               samePath(item.path, installed) &&
@@ -216,22 +214,20 @@ export function entrypoints(
           let available = false;
           try {
             const owned =
-              !!pluginRoot ||
               (isLink(installed) && samePath(real(installed), real(own.dir))) ||
               (route.nested && projectCopies && !isLink(installed));
-            available = pluginRequested
-              ? !!pluginRoot
-              : !!projected ||
-                (owned &&
-                  ["SKILL.md", ...(entry.requiredFiles ?? [])].every((name) => {
-                    const file = path.join(installed, name);
-                    return (
-                      lexists(file) &&
-                      !isLink(file) &&
-                      ((projectCopies && route.nested) || samePath(real(file), real(path.join(own.dir, name)))) &&
-                      fs.readFileSync(file).equals(fs.readFileSync(path.join(own.dir, name)))
-                    );
-                  }));
+            available =
+              !!projected ||
+              (owned &&
+                ["SKILL.md", ...(entry.requiredFiles ?? [])].every((name) => {
+                  const file = path.join(installed, name);
+                  return (
+                    lexists(file) &&
+                    !isLink(file) &&
+                    ((projectCopies && route.nested) || samePath(real(file), real(path.join(own.dir, name)))) &&
+                    fs.readFileSync(file).equals(fs.readFileSync(path.join(own.dir, name)))
+                  );
+                }));
           } catch {
             /* Independent destinations can continue when this installed dependency is unreadable. */
           }
@@ -243,13 +239,13 @@ export function entrypoints(
           }
           dependencies.push({
             path: installed,
-            target: pluginRoot || (route.nested && projectCopies) ? null : real(own.dir),
+            target: route.nested && projectCopies ? null : real(own.dir),
             files: ["SKILL.md", ...(entry.requiredFiles ?? [])].map((name) => ({
               name,
-              hash: toHash(fs.readFileSync(path.join(pluginRoot ?? own.dir, name))),
+              hash: toHash(fs.readFileSync(path.join(own.dir, name))),
             })),
           });
-          if (pluginRoot || (route.nested && projectCopies))
+          if (route.nested && projectCopies)
             dependencies.push({
               path: own.dir,
               target: null,

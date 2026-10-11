@@ -19,14 +19,18 @@ export interface Harness {
   universal: boolean;
   userInstructions?: string[];
   projectInstructions?: string[];
+  /** the harness's user-level hooks file, where the session hook lives (ADR-0010); unset for a harness without hooks */
+  userHooks?: string;
   note?: string;
 }
 
-export function harnessTable(home = os.homedir(), env = process.env): Harness[] {
+export function harnessTable(home = os.homedir(), env = process.env, platform = process.platform): Harness[] {
   const codexHome = env.CODEX_HOME?.trim() || path.join(home, ".codex");
   const claudeHome = env.CLAUDE_CONFIG_DIR?.trim() || path.join(home, ".claude");
   const configHome = env.XDG_CONFIG_HOME?.trim() || path.join(home, ".config");
-  const hermesHome = env.HERMES_HOME?.trim() || path.join(home, ".hermes");
+  const hermesHome = hermesHomeDir(home, env, platform);
+  // what the tool up to 0.7.x took for Hermes's home: HERMES_HOME, else ~/.hermes on every platform
+  const oldHermesHome = env.HERMES_HOME?.trim() || path.join(home, ".hermes");
   return [
     {
       id: "claude-code",
@@ -37,6 +41,7 @@ export function harnessTable(home = os.homedir(), env = process.env): Harness[] 
       universal: false,
       userInstructions: ["CLAUDE.md"],
       projectInstructions: ["CLAUDE.md", "CLAUDE.local.md", ".claude/CLAUDE.md"],
+      userHooks: path.join(claudeHome, "settings.json"),
     },
     {
       id: "codex",
@@ -49,6 +54,7 @@ export function harnessTable(home = os.homedir(), env = process.env): Harness[] 
       universal: true,
       userInstructions: ["AGENTS.md", "AGENTS.override.md"],
       projectInstructions: ["AGENTS.md", "AGENTS.override.md"],
+      userHooks: path.join(codexHome, "hooks.json"),
     },
     {
       id: "goose",
@@ -59,14 +65,40 @@ export function harnessTable(home = os.homedir(), env = process.env): Harness[] 
       universal: false,
     },
     {
+      // Hermes reads skills/ and plugins/ under its home; it has no global instructions file this tool knows of, so no
+      // userInstructions and no block (docs/research/hermes-plugin-format.md in oneezy/skills). Up to 0.7.x the tool
+      // took ~/.hermes for its home on every platform; on Windows that is not where Hermes looks, but the links the old
+      // tool left there are still this tool's to take out
       id: "hermes",
       name: "Hermes",
       configDir: hermesHome,
       userSkills: path.join(hermesHome, "skills"),
+      ...(oldHermesHome === hermesHome ? {} : { legacyUserSkills: [path.join(oldHermesHome, "skills")] }),
       projectSkills: path.join(".hermes", "skills"),
       universal: false,
     },
   ];
+}
+
+/**
+ * Hermes's home, as Hermes itself resolves it (hermes_constants.py): HERMES_HOME when set, else the platform default:
+ * %LOCALAPPDATA%\hermes on Windows (~/AppData/Local/hermes when LOCALAPPDATA is unset), ~/.hermes elsewhere, with
+ * HERMES_DATA_DIR_SUFFIX appended to the default's folder name. A named profile (hermes -p <id>) is <home>/profiles/<id>,
+ * a complete home of its own; this tool serves the default profile, which is the home itself.
+ */
+export function hermesHomeDir(
+  home = os.homedir(),
+  env: NodeJS.ProcessEnv = process.env,
+  platform: NodeJS.Platform = process.platform,
+): string {
+  const set = env.HERMES_HOME?.trim();
+  if (set) return set;
+  const suffix = env.HERMES_DATA_DIR_SUFFIX ?? "";
+  if (platform === "win32") {
+    const local = env.LOCALAPPDATA?.trim();
+    return path.join(local || path.join(home, "AppData", "Local"), `hermes${suffix}`);
+  }
+  return path.join(home, `.hermes${suffix}`);
 }
 
 export function detected(table: Harness[]): Harness[] {
