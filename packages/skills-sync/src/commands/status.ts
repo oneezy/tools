@@ -2,11 +2,12 @@
 // --json object /oneezy-status reads with the same facts: its form, each library plugin against the latest release,
 // every skill name listed twice, the session hook entry in its user hooks file, the managed block in its global
 // instructions file, and any block an older skills-sync left in a repository. Then, once per machine, the checkouts of
-// oneezy/skills and oneezy/tools in reach (the repository the current folder is in, its main worktree from a linked
-// one, and the folders beside it, as the hook finds them): on dev and clean, or not. Last the manual steps only a person
-// can take, step by step. A red line (`!`) is something the machine has wrong; the exit code is 1 when there is one. A
-// manual step is the person's, not the machine's: it never hides a red line (red lines print first) and alone leaves
-// the exit code 0. Nothing is written, no library is looked for, every git call is read-only; what an older version
+// oneezy/skills and oneezy/tools among the repositories the hook tends (the repository the current folder is in, its
+// main worktree from a linked one, and the folders beside it; outside any repository, the ones inside the current
+// folder): on dev and clean, or not; the hook tends every repository, status judges only these. Last the manual steps
+// only a person can take, step by step. A red line (`!`) is something the machine has wrong; the exit code is 1 when
+// there is one. A manual step is the person's, not the machine's: it never hides a red line (red lines print first)
+// and alone leaves the exit code 0. Nothing is written, no library is looked for, every git call is read-only; what an older version
 // left on the machine (the clone at ~/.skills-sync, its answers file) is one note each. The release's skills-sync.json
 // names the catalog the library's plugins come from and which harnesses are served (ADR-0012). In a cloud session the
 // account plugins arrive on their own and no hook or checkout exists, so status shows the block lines and the manual
@@ -444,7 +445,8 @@ function blockFacts(b: BlockState): StatusBlock {
 /**
  * The checkouts in reach, read-only: the branch and the porcelain status of each (story 53). The same discovery and the
  * same git call as the hook's (the repository `cwd` is in, its main worktree from a linked one, and the folders beside
- * it, by origin URL; no prompt, 30 s per call); nothing is fetched or moved, so a checkout is judged as it is. git
+ * it, or the ones inside `cwd` outside any repository; of those, the clones of oneezy/skills and oneezy/tools, by origin
+ * URL; no prompt, 30 s per call); nothing is fetched or moved, so a checkout is judged as it is. git
  * status runs with --no-optional-locks: it would otherwise refresh and rewrite .git/index under index.lock, which can
  * make a commit or the hook's fast-forward running at that moment fail. A git call that fails or times out is a red
  * line saying so, never a clean checkout.

@@ -1,6 +1,6 @@
 {
   "name": "@oneezy/skills-sync",
-  "version": "0.10.0",
+  "version": "0.11.0",
   "description": "One skills library on every agent harness of the machine: Claude Code from the claude.ai account plugins, Codex and Hermes as plugins from GitHub, one global instructions block and one session hook per harness, nothing kept on the machine. Also the library commands that declare, lock, update and build its third-party sources.",
   "license": "MIT",
   "repository": {
@@ -36,6 +36,6 @@
     "vite-plus": "1.0.0"
   },
   "engines": {
-    "node": ">=20"
+    "node": ">=20.11"
   }
 }

@@ -62,7 +62,7 @@ The one `SessionStart` entry `sync` keeps in a Harness's user hooks file (`~/.cl
 _Avoid_: startup hook, the old `sync-dev.sh`
 
 **Checkout**:
-A local clone of `oneezy/skills` or `oneezy/tools` the `hook` command tends: fetched, fast-forwarded on a clean `dev`, named and left alone when dirty or on another branch. Found on every run among the repository the session started in (its main worktree, when the session started in a linked one such as `<repo>/.claude/worktrees/<name>`) and the folders beside it, by its `origin` URL; a linked worktree is never a Checkout. `status` shows each one green on `dev` and clean, red otherwise, and red when git cannot read it.
+A local git repository the `hook` command tends, whoever owns it and wherever its `origin` points: on a clean `dev`, fetched and fast-forwarded only; named and left alone when dirty or on another branch; not mentioned at all when it has no `dev` branch or no `origin`. Found on every run: the repository the session started in (its main worktree, when the session started in a linked one such as `<repo>/.claude/worktrees/<name>`) and the git repositories directly beside it, or, outside any repository, the ones directly inside the session's folder; a linked worktree is never a Checkout. `status` judges only the Checkouts of `oneezy/skills` and `oneezy/tools`, known by their `origin` URL: green on `dev` and clean, red otherwise, and red when git cannot read it.
 _Avoid_: worktree (a Remote sessions word), working copy
 
 **Red line**:

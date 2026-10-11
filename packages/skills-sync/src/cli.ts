@@ -57,10 +57,11 @@ Commands
                    distro (through npx there; a distro without Node is one note, not a failure)
   status           is this machine done: against the latest release of ${DEFAULT_REPO} on GitHub (no library needed),
                    per harness its form, each plugin's version against the release, every skill name listed twice, the
-                   session hook entry and the global block; then the checkouts of oneezy/skills and oneezy/tools in
-                   reach (on dev and clean, or not); then the manual steps only you can take, step by step (a plugin to
-                   switch on at claude.ai, the Codex hook trust, the cloud setup line). --json for scripts; exit 1 on
-                   any red line, never for a manual step alone. Reads only: nothing cloned, linked or written
+                   session hook entry and the global block; then the checkouts of oneezy/skills and oneezy/tools among
+                   the repositories the hook tends (on dev and clean, or not); then the manual steps only you can take,
+                   step by step (a plugin to switch on at claude.ai, the Codex hook trust, the cloud setup line). --json
+                   for scripts; exit 1 on any red line, never for a manual step alone. Reads only: nothing cloned,
+                   linked or written
   branches [owner/repo ...]
                    the branch rules on GitHub (no library needed), for each repository named or, with none, every
                    repository the token owns: main, dev and any *-keep, research/* or prototype/* branch are never
@@ -71,10 +72,14 @@ Commands
                    without making them; --json carries the same lists; a repository the token cannot read or write is
                    reported and skipped. Exit 1 when anything was reported, 2 without a token to list your repositories
   hook             what the session-start hook runs: the sync above, quietly (only what changed or went wrong is
-                   printed), then the checkouts of ${DEFAULT_REPO} and oneezy/tools in and beside the current repository:
-                   a clean one on dev is fast-forwarded to origin/dev, a dirty one or one on another branch is named and
-                   left alone, and one line per repository says which branches (counted from the fetch) and open pull
-                   requests (one GitHub request) are not in dev yet.
+                   printed), then every git repository in reach, whoever owns it: the current repository (its main
+                   checkout, from a linked worktree) and the git repositories beside it, or outside any repository the
+                   ones directly inside the current folder. One with a dev branch and an origin, on dev with a clean
+                   tree, is fetched (15 s at most) and fast-forwarded to origin/dev; a dirty one or one on another
+                   branch is named and left alone; one with no dev or no origin is not mentioned. Never a rebase, a
+                   reset or a branch switch; six at a time, no fetch begins 90 s after the hook started. For the
+                   session's own repository only, one line says which branches (counted from the fetch) and, for a
+                   GitHub origin, which open pull requests (one GitHub request) are not in dev yet.
                    Takes no flags but --library (any other flag is refused, exit 2: the entry runs it bare).
                    Prints nothing when nothing changed; exit 0 unless the sync hit a conflict
   unlink           take away what this tool put on this machine, and only that: the plugins it installed from the
