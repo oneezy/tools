@@ -14,6 +14,8 @@ import { LOCAL_NAME, migrateAnswers, readLocal, writeLocal, type LinkMode, type 
 import { gitExclude, isDir, isLink, lexists, linkMode, linkTarget, real, samePath, setLinkMode } from "./fs.js";
 import { runBranches } from "./commands/branches.js";
 import { runStatus } from "./commands/status.js";
+import { runSync, syncFacts, type SyncResult } from "./commands/sync.js";
+import { isCloud } from "./machine.js";
 import { detected, harnessTable, type Harness } from "./harnesses.js";
 import { plugins, removeOwned, pluginDependency, type Form, type Owned } from "./install.js";
 import {
@@ -41,15 +43,20 @@ import { runInWsl, wslDistros } from "./wsl.js";
 const HELP = `skills-sync ${VERSION}
 One skills library, every harness, every project on this machine. Run it anywhere; it works out the rest.
 
-  no library on this machine   clone one into ~/.skills-sync (default: ${DEFAULT_LIBRARY}, or --library owner/repo)
-  library present              pull it, install the third-party skills its lock records, rebuild its layers, install its
-                               built plugins on Claude Code and Codex, link the user folders
+  every run                    the skills block in each harness's global instructions file (~/.claude/CLAUDE.md,
+                               ~/.codex/AGENTS.md): how to call a skill per harness, never fetch a SKILL.md to run one.
+                               Never a repository file; a block an older version left in one is reported
+  cloud session                that block and nothing else (CLAUDE_CODE_REMOTE=true): no clone, no links, no plugins
+  library present              also, until the plugin forms land: pull it, install the third-party skills its lock
+                               records, rebuild its layers, install its built plugins on Claude Code and Codex, link
+                               the user folders. sync clones nothing; --repo <path> runs that part alone
 
 Usage: skills-sync [command] [options]
 
 Commands
-  sync (default)   everything above; nothing moves upstream: with skills-sync.json every third-party skill is installed
-                   at the commit the lock records (frozen, the lock never written); without one, skills-lock.json is restored
+  sync (default)   everything above against the latest release of ${DEFAULT_REPO} on GitHub; nothing moves upstream:
+                   with skills-sync.json every third-party skill is installed at the commit the lock records (frozen,
+                   the lock never written); without one, skills-lock.json is restored
   status           this machine against the latest release of ${DEFAULT_REPO} on GitHub (no library needed): per harness
                    its form, each plugin's version against the release, every skill name listed twice; --json for
                    scripts; exit 1 on any red line. Reads only: nothing cloned, linked or written
@@ -127,8 +134,7 @@ Options
   --adoption-file <json> version 1 manifest of exact historical Brain paths and expectedTarget values
   --alias-file <json>    version 1 manifest of exact historical Skills/Status alias paths and expectedTarget values
   --receipt <path>       durable adoption/rollback receipt (required for scoped Brain commands)
-  --library <src>        status: the release repo to read (owner/repo; default ${DEFAULT_REPO}); sync: what to clone
-                         when there is no library yet (owner/repo or URL; default ${DEFAULT_LIBRARY})
+  --library <src>        sync, status: the release repo to read (owner/repo; default ${DEFAULT_REPO})
   --expect-revision <sha> verify library HEAD and origin's --remote-ref before any instruction rollout
   --remote-ref <ref>     exact remote branch/tag for that verification (default refs/heads/main)
   --agents <ids>         harnesses: claude-code,codex,goose,hermes (default: detected)
@@ -345,14 +351,15 @@ async function main(): Promise<void> {
   const log = (m: string) => (args.json ? undefined : process.stderr.write(m + "\n"));
   const setup = new Report();
 
-  // Machine commands act on this machine against the latest release on GitHub and never look for a library. status is
-  // the first; sync and unlink keep the library-based run below until their own tickets move them here.
+  // Machine commands act on this machine against GitHub and never look for a library: status and sync (the block, and
+  // the form work as its tickets land) against the latest release, branches against the repositories' branch rules.
+  // unlink keeps the library-based run below until #154.
+  const repo = args.library ?? DEFAULT_REPO;
+  if ((args.command === "status" || args.command === "sync") && !isRepoName(repo)) {
+    process.stderr.write(`${args.command}: --library names the release repo as owner/repo, not ${repo}\n`);
+    process.exit(2);
+  }
   if (args.command === "status") {
-    const repo = args.library ?? DEFAULT_REPO;
-    if (!isRepoName(repo)) {
-      process.stderr.write(`status: --library names the release repo as owner/repo, not ${repo}\n`);
-      process.exit(2);
-    }
     process.exitCode = await runStatus({ repo, json: args.json, quiet: args.quiet });
     return;
   }
@@ -364,6 +371,19 @@ async function main(): Promise<void> {
       quiet: args.quiet,
     });
     return;
+  }
+  // sync with --repo <path> is still the library-based run of that checkout alone (the publish guard plans against one),
+  // until #154 retires the flag; a cloud session never is: there the block is the whole sync (ADR-0007).
+  const cloud = isCloud();
+  let machineSync: SyncResult | null = null;
+  if (args.command === "sync" && (cloud || !args.repo)) {
+    machineSync = await runSync({ repo, plan: args.plan, agents: args.agents, cwd });
+    if (machineSync.report.conflicts().length) process.exitCode = 1;
+    // until #149, #150, #153 and #154: the old library-based sync keeps PCs working. It runs only where a library already
+    // is (~/.skills-sync, $SKILLS_REPO, a checkout above here): none is cloned any more (ADR-0007), and in the cloud
+    // nothing but the block is written. Its instruction blocks stay off: the block above is the only one (ADR-0011).
+    if (cloud || !findLibrary(cwd)) return printReport(machineSync.report, args, syncFacts(machineSync));
+    args.entrypoints = false;
   }
 
   const scopedBrain = args.command === "adopt-brain" || args.command === "rollback-brain";
@@ -495,6 +515,8 @@ async function main(): Promise<void> {
   // 2. this machine's answers: the local file, after a 0.2.0 answers file is moved there once
   if (!args.plan && args.command !== "check") migrateAnswers(lib.root, setup);
   apply(setup, args.plan);
+  // the machine sync's actions (already applied) lead the one report the old run prints at its end
+  if (machineSync) setup.actions.unshift(...machineSync.report.actions);
   const local = readLocal(lib.root);
   setLinkMode(args.links ?? local.links ?? "auto");
 
@@ -977,9 +999,8 @@ async function decide(
     wsl,
     unavailable: args.retry ? [] : (local.unavailable ?? []),
     links: args.links ?? local.links ?? "auto",
-    // a cloud session keeps loose links unless told: claude.ai syncs its own plugins into the container, and the
-    // repos' instructions read a skill from ~/.claude/skills/<name>
-    form: args.form ?? local.form ?? (process.env.CLAUDE_CODE_REMOTE === "true" ? "links" : "plugin"),
+    // a cloud session never gets here: its sync is the global block alone
+    form: args.form ?? local.form ?? "plugin",
     formChosen: !!(args.form ?? local.form),
   };
 }

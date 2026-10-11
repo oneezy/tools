@@ -5,10 +5,11 @@
 // skill folders, an old ~/.skills-sync link, a hook entry, a global block. Tests assert only what a user sees: files
 // and links, the fake CLIs' calls, the fake GitHub's requests, printed output, --json, exit codes.
 import { spawn } from "node:child_process";
+import { createHash } from "node:crypto";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { isLink, linkTarget, makeLink } from "../src/fs.js";
+import { isLink, lexists, linkTarget, makeLink } from "../src/fs.js";
 import { fixtureRelease, type FakeGithub } from "./fixtures/fake-github/fake-github.mjs";
 
 const CLI = path.resolve(import.meta.dirname, "..", "dist", "src", "cli.js");
@@ -167,7 +168,10 @@ export function spawnCli(
   });
 }
 
-/** Every entry under `dir`, relative, links marked, so a test can say "nothing changed". */
+/**
+ * Every entry under `dir`, relative: links as `name -> target`, folders as `name/`, files as `name <size> <sha256>`,
+ * so a test can say "nothing changed", content included. `names()` strips a snapshot back to its paths.
+ */
 export function snapshot(dir: string): string[] {
   const out: string[] = [];
   const walk = (d: string) => {
@@ -179,11 +183,19 @@ export function snapshot(dir: string): string[] {
       else if (e.isDirectory()) {
         out.push(`${rel}/`);
         walk(full);
-      } else out.push(rel);
+      } else {
+        const bytes = fs.readFileSync(full);
+        out.push(`${rel} ${bytes.length} ${createHash("sha256").update(bytes).digest("hex").slice(0, 16)}`);
+      }
     }
   };
   walk(dir);
   return out;
+}
+
+/** The paths of a snapshot's entries, without link targets, sizes or hashes. */
+export function names(entries: string[]): string[] {
+  return entries.map((e) => e.replace(/ -> .*$/, "").replace(/ \d+ [0-9a-f]{16}$/, ""));
 }
 
 function userSkills(m: PretendMachine, harness: HarnessId): string {
@@ -321,11 +333,23 @@ export function skillFolder(m: PretendMachine, harness: HarnessId, name: string,
   return folder;
 }
 
-/** The old ~/.skills-sync link to a library clone (default: a pretend clone under the machine). Returns the link. */
+/**
+ * The old ~/.skills-sync link to a library clone (default: a pretend clone under the machine, with the `brain`
+ * instruction entrypoint the real library had, so the old run would write that block). Returns the link.
+ */
 export function oldLibraryLink(m: PretendMachine, target?: string): string {
   const to = target ?? path.join(m.base, "old-library");
   if (!fs.existsSync(to)) {
     write(path.join(to, "skills", "oneezy", "oneezy-status", "SKILL.md"), skillMd("oneezy-status"));
+    write(path.join(to, "skills", "oneezy", "oneezy-brain", "SKILL.md"), skillMd("oneezy-brain"));
+    write(path.join(to, "brain-routing.md"), "## Brain\nLoad /oneezy-brain.\n");
+    write(
+      path.join(to, "skills-sync.entrypoints.json"),
+      JSON.stringify({
+        version: 1,
+        blocks: { brain: { source: "brain-routing.md", skill: "oneezy-brain", agents: ["claude-code", "codex"] } },
+      }) + "\n",
+    );
     write(path.join(to, "skills-lock.json"), JSON.stringify({ version: 1, skills: {} }) + "\n");
   }
   const link = path.join(m.home, ".skills-sync");
@@ -347,16 +371,40 @@ export function hookEntry(m: PretendMachine, harness: "claude-code" | "codex", c
   return file;
 }
 
+/** The harness's global instructions file: ~/.claude/CLAUDE.md, ~/.codex/AGENTS.md. */
+export function globalFile(m: PretendMachine, harness: "claude-code" | "codex"): string {
+  return path.join(configDir(m, harness), harness === "claude-code" ? "CLAUDE.md" : "AGENTS.md");
+}
+
 /**
- * A managed block in the harness's user instruction file (~/.claude/CLAUDE.md, ~/.codex/AGENTS.md), between the
- * markers skills-sync writes; text already in the file stays above it. Returns the file.
+ * A managed block appended to `file` between the markers skills-sync writes (`<!-- skills-sync:<id>:start -->` ...
+ * `<!-- skills-sync:<id>:end -->`; the old tool's id was `brain`); text already in the file stays above it. Returns the file.
  */
-export function globalBlock(m: PretendMachine, harness: "claude-code" | "codex", id: string, body: string): string {
-  const file = path.join(configDir(m, harness), harness === "claude-code" ? "CLAUDE.md" : "AGENTS.md");
+export function blockIn(file: string, id: string, body: string): string {
   const existing = fs.existsSync(file) ? fs.readFileSync(file, "utf8") : "";
   write(
     file,
     `${existing}${existing && !existing.endsWith("\n") ? "\n" : ""}<!-- skills-sync:${id}:start -->\n${body}\n<!-- skills-sync:${id}:end -->\n`,
+  );
+  return file;
+}
+
+/** A managed block in the harness's global instructions file. Returns the file. */
+export function globalBlock(m: PretendMachine, harness: "claude-code" | "codex", id: string, body: string): string {
+  return blockIn(globalFile(m, harness), id, body);
+}
+
+/**
+ * The old tool's per-machine answers, ~/.skills-sync/skills-sync.local.json (the link made by `oldLibraryLink` when it
+ * is not there yet): `dev` and `projects` are where it wrote repository instruction blocks. Returns the file.
+ */
+export function oldLocalFile(m: PretendMachine, local: Record<string, unknown>): string {
+  const link = path.join(m.home, ".skills-sync");
+  if (!lexists(link)) oldLibraryLink(m);
+  const file = path.join(linkTarget(link) ?? link, "skills-sync.local.json");
+  write(
+    file,
+    JSON.stringify({ agents: ["claude-code", "codex"], global: true, mode: "link", wsl: [], ...local }, null, 2) + "\n",
   );
   return file;
 }

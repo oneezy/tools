@@ -78,8 +78,12 @@ A Plugin claude.ai syncs into Claude Code for the account, listed by `claude plu
 _Avoid_: synced plugin (the harness's word), cloud plugin
 
 **Machine command**:
-A run that acts on this Host against the latest Release on GitHub and needs no Library on disk: `status` first, then `sync`, `hook`, `branches` and `unlink` as they move over. The opposite is a library command (`update`, `versions`, `add`, `build`, `check`), which runs inside a checkout.
+A run that acts on this Host against the latest Release on GitHub and needs no Library on disk: `status` and `sync` today, then `hook`, `branches` and `unlink` as they move over. The opposite is a library command (`update`, `versions`, `add`, `build`, `check`), which runs inside a checkout; `sync --repo <path>` is still one until the old run is retired.
 _Avoid_: remote command, online command
+
+**Global block**:
+The one managed block `sync` writes into a Harness's global instructions file (`~/.claude/CLAUDE.md`, `~/.codex/AGENTS.md`), between `skills-sync` markers: how to call a skill in each Harness, and the rule that an agent never fetches a `SKILL.md` to run one (ADR-0011 in oneezy/skills). Never written into a repository; a block an older version left there is reported, not edited. In a cloud session it is the whole sync.
+_Avoid_: entrypoint (the older per-library manifest), instructions block, brain block (its old id)
 
 **Catalog**:
 A marketplace file listing the Library's Plugins, one per Harness format.
