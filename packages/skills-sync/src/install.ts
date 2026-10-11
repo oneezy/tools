@@ -9,7 +9,6 @@ import os from "node:os";
 import path from "node:path";
 import { isDir, isLink, linkTarget, samePath, under, real, hasLinkedParent } from "./fs.js";
 import { withInternal } from "./build.js";
-import { plainVersion, compareVersions } from "./versions.js";
 import type { Harness } from "./harnesses.js";
 import type { Library } from "./library.js";
 import type { Action } from "./plan.js";
@@ -249,6 +248,17 @@ export function uninstallPlugin(h: Harness, run: Run, id: string): boolean {
 /** Remove a registered marketplace through the harness's own command; false when it refused (run.failure says why). */
 export function removeMarketplace(h: Harness, run: Run, name: string): boolean {
   return DRIVERS[h.id]?.removeMarketplace(run, name) ?? false;
+}
+
+/**
+ * The plugin command behind `a` was refused: the action becomes the failure, with the CLI's own words attached
+ * (`run.failure`, the last command's stderr and exit code), so one line says what happened to that plugin.
+ */
+export function refused(a: Action, run: Run, note: string): void {
+  a.kind = "conflict";
+  a.failed = true;
+  a.note = note;
+  a.diagnostic = run.failure;
 }
 
 /**

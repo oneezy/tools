@@ -135,11 +135,19 @@ test("sync on a machine with no library writes the skills block into both global
     r.stdout,
   );
   assert.equal(lines.at(-1), "2 changed, 0 already right, 0 left alone");
-  // the forms are named, not acted on, until their tickets land
+  // Claude Code's form is the account plugins: claude lists none here, which is one line about the sign-in, not one
+  // manual step per plugin of the release
   assert.ok(
-    lines.some((l) => l.startsWith(". note") && l.includes("Claude Code") && l.includes("form: account plugins")),
+    lines.some(
+      (l) =>
+        l.startsWith(". note") &&
+        l.includes("Claude Code") &&
+        l.includes("claude lists no account plugins; check it is logged in with the claude.ai account"),
+    ),
     r.stdout,
   );
+  assert.ok(!r.stdout.includes("not delivered"), r.stdout);
+  // the other forms are named, not acted on, until their tickets land
   assert.ok(
     lines.some((l) => l.startsWith(". note") && l.includes("Codex") && l.includes("form: plugins from GitHub")),
     r.stdout,
@@ -176,6 +184,7 @@ test("a second sync changes nothing and says so; --quiet then prints nothing; --
     number: 17,
     commit: "1717171717171717171717171717171717171717",
     tool: null,
+    config: { catalog: "oneezy-skills", harnesses: null, plugins: {} },
   });
   assert.deepEqual(
     s.actions.filter((a) => a.kind !== "note").map((a) => [a.kind, path.basename(a.path), a.note]),
@@ -288,8 +297,8 @@ test("blocks the old tool wrote into repository files are reported, never edited
   // the old library and its local file were left as they are; the home gained only the two global files
   assert.deepEqual(snapshot(path.join(m.base, "old-library")), libraryBefore);
   assert.deepEqual(added(homeBefore, snapshot(m.home)), [".claude/CLAUDE.md", ".codex/AGENTS.md"]);
-  // run inside the project, its blocks are the ones reported
-  const inside = await cli(m, PLAIN_LINE, CLOUD, app);
+  // run inside the project, its blocks are the ones reported (not under --quiet: a note is not a change)
+  const inside = await cli(m, [], CLOUD, app);
   assert.equal(inside.status, 0, inside.stderr);
   for (const file of projectFiles) assert.ok(inside.stdout.includes(file), `${file} in ${inside.stdout}`);
 });
@@ -392,10 +401,12 @@ test("in the cloud, --repo <checkout> does not bring a library-based run back: t
   assert.equal(r.stderr, ignored("--repo"));
   const s = r.json as unknown as SyncJson;
   assert.equal(s.cloud, true);
+  // the leftover link is named, then the two blocks; nothing of a library run
   assert.deepEqual(
     s.actions.map((a) => a.kind),
-    ["write", "write"],
+    ["note", "write", "write"],
   );
+  assert.ok(s.actions[0].note?.startsWith("the old library link;"), s.actions[0].note);
   assert.deepEqual(snapshot(library), before);
   assert.deepEqual(added(homeBefore, snapshot(m.home)), [".claude/CLAUDE.md", ".codex/AGENTS.md"]);
 });

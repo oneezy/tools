@@ -60,6 +60,11 @@ export function serves(release: Release | null, harnessId: string): boolean {
   return !list || list.includes(harnessId);
 }
 
+/** Why a harness is not served: the harnesses the release's skills-sync.json names, for the one note that says so. */
+export function notServed(release: Release | null): string {
+  return `the release's skills-sync.json names harnesses ${(release?.config?.harnesses ?? []).join(", ")}`;
+}
+
 /**
  * The release plugins a harness gets, sorted by id: every one the release ships, narrowed to the ids the release's
  * config names for the harness (machines.plugins.<harness>, else machines.plugins["*"]) when it names any. An id the
@@ -96,7 +101,7 @@ export function desired(
       report.add({
         kind: "note",
         path: state.harness.name,
-        note: `not served: the release's skills-sync.json names harnesses ${release!.config!.harnesses!.join(", ")}; nothing changed here`,
+        note: `not served: ${notServed(release)}; nothing changed here`,
       });
       continue;
     }

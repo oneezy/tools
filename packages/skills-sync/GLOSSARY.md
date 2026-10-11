@@ -74,8 +74,12 @@ How a Harness on a Host gets the Library's skills, one per Harness (ADR-0007): `
 _Avoid_: mode (that is a project's link or copy), install mode
 
 **Account plugin**:
-A Plugin claude.ai syncs into Claude Code for the account, listed by `claude plugin list` as `<id>@synced` and kept under `~/.claude/plugins/synced/`. The tool never installs or removes one; `status` compares it with the Release.
+A Plugin claude.ai syncs into Claude Code for the account, listed by `claude plugin list` as `<id>@synced` and kept under `~/.claude/plugins/synced/`. The tool never installs or removes one; `status` compares it with the Release, and `sync` removes what hides or duplicates one once `claude` lists it present and switched on.
 _Avoid_: synced plugin (the harness's word), cloud plugin
+
+**Library copy**:
+A checkout or clone of the Library on a Host (a `skills-sync.json` naming the Library's owner and name at its root), or `~/.skills-sync`. A loose link into one, or whose target is gone (a dangling link counts as the tool's leftover, whatever it once pointed at), is the tool's own leftover and goes once a Plugin on that Harness carries the skill (ADR-0007). A link to anywhere else and a real skill folder are the user's and are only ever named.
+_Avoid_: leftover, stale link
 
 **Machine command**:
 A run that acts on this Host against the latest Release on GitHub and keeps nothing of its own on the Host (ADR-0012): no Library clone, no answers file, nothing remembered between runs; settings come from the Release's `skills-sync.json`, Host facts (the Harnesses, their plugins and links, the WSL distros) are detected on every run. `sync`, `status`, `branches` and `unlink`, then `hook`. It takes `--plan`, `--json`, `--quiet` and `--library`; an older flag is accepted, does nothing and is named once on stderr. The opposite is a library command (`update`, `refresh`, `versions`, `add`, `build`, `check`, the brain and alias migrations), which runs inside a checkout named by `--repo` or found above the current folder and keeps every flag it had.

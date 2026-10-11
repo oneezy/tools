@@ -5,7 +5,7 @@
 // clone at ~/.skills-sync, its answers file) is one note each. The release's skills-sync.json names the catalog the
 // library's plugins come from and which harnesses are served (ADR-0012). Later tickets add the hook, the global block
 // and the checkouts to the same report.
-import { catalogOf, FORM_LABEL, formOf, serves, type MachineForm } from "../desired.js";
+import { catalogOf, FORM_LABEL, formOf, notServed, serves, type MachineForm } from "../desired.js";
 import { github } from "../github.js";
 import { harnessTable } from "../harnesses.js";
 import {
@@ -128,11 +128,7 @@ export function statusReport(
     const form = formOf(state.harness.id);
     if (!form) continue;
     if (!serves(release, state.harness.id)) {
-      lines.push(
-        note(
-          `${state.harness.name}: not served; the release's skills-sync.json names harnesses ${release!.config!.harnesses!.join(", ")}`,
-        ),
-      );
+      lines.push(note(`${state.harness.name}: not served; ${notServed(release)}`));
       continue;
     }
     harnesses[state.harness.id] = harnessReport(state, form, release);

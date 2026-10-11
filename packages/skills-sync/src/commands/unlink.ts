@@ -13,7 +13,7 @@ import { blockRemoval } from "../block.js";
 import { formOf } from "../desired.js";
 import { lexists } from "../fs.js";
 import { harnessTable } from "../harnesses.js";
-import { listMarketplaces, removeMarketplace, runner, supportsPlugins, uninstallPlugin, type Run } from "../install.js";
+import { listMarketplaces, refused, removeMarketplace, runner, supportsPlugins, uninstallPlugin } from "../install.js";
 import { libraryCopy, LIBRARY_MARKETPLACE, oldStateNotes, probe, type HarnessState, type Machine } from "../machine.js";
 import { apply, Report, type Action } from "../plan.js";
 
@@ -93,12 +93,4 @@ function plugins(state: HarnessState, plan: boolean): Action[] {
   out.push(a);
   if (!plan && !removeMarketplace(state.harness, run, catalog)) refused(a, run, `${bin} could not remove it`);
   return out;
-}
-
-/** The plugin command behind `a` was refused: the action becomes the failure, with the CLI's own words attached. */
-function refused(a: Action, run: Run, note: string): void {
-  a.kind = "conflict";
-  a.failed = true;
-  a.note = note;
-  a.diagnostic = run.failure;
 }
