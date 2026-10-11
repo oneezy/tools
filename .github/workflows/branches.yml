@@ -5,14 +5,19 @@
 # a request; a branch that is the head or the base of an open pull request stays; every other branch is left alone and
 # listed with why. The command holds the rules; nothing here lists a branch by hand.
 #
-#   schedule           every day at 10:17 UTC (oneezy/skills' run.yml takes 08:23): a real run over every repository
-#                      the token's user owns (GET /user/repos?affiliation=owner, archived ones left out). GitHub runs a
-#                      schedule from the default branch, so it starts once this file is promoted to main.
-#   workflow_dispatch  plan (default true): list every tag and delete without a single write; untick it for a real run.
-#                      repos (optional): owner/repo names separated by spaces; empty means the default list above.
+#   schedule           every day at 10:17 UTC (oneezy/skills' run.yml takes 08:23) over every repository the token's
+#                      user owns (GET /user/repos?affiliation=owner, archived ones left out). A plan, listing without a
+#                      write, until the repository variable BRANCHES_APPLY is `true` (Settings > Secrets and variables >
+#                      Actions > Variables): Justin sets it once he has read the first plan, and from then on the
+#                      schedule deletes and tags. Unset it to go back to plans.
+#   workflow_dispatch  plan (default true): list every tag and delete without a single write; untick it for a real run,
+#                      which applies at once whatever BRANCHES_APPLY says. repos (optional): owner/repo names separated
+#                      by spaces; empty means the default list above.
 #                      From a PC:       gh workflow run branches.yml -f plan=true -f repos='oneezy/skills oneezy/tools'
-#                      From a session:  gh api repos/oneezy/tools/actions/workflows/branches.yml/dispatches -f ref=dev \
-#                                         -f 'inputs[plan]=true'
+#                      From a session:  gh api repos/oneezy/tools/actions/workflows/branches.yml/dispatches \
+#                                         -f ref=main -f 'inputs[plan]=true'
+#   Both events exist only once this file is on the default branch (main): nothing can be dispatched, and nothing is
+#   scheduled, before the promotion; after it, the schedule runs as a plan until the variable is set.
 #
 # Steps: install the tool from npm (.github/actions/skills-sync-cli: @latest, ADR-0008) and refuse a version whose
 # --help has no `branches` (a word the tool does not know falls through to its default, `sync`; nothing runs), then the
@@ -20,9 +25,10 @@
 # under the token, "skipped: cannot write <repo>" for one it cannot write (never attempted), layerdbiz/* refused by name
 # (outside the token's reach, ADR-0013), and nothing run when nothing passes; then `branches --json` over the ones that
 # passed, with --plan when asked, and .github/scripts/branches-report.mjs turns the report into the run log and the step
-# summary (a table per repository and every line under it). The run fails on the command's exit 1 (a repository out of
-# reach, a tag in the way) and when the token check skipped a repository, with everything it could do still done, and on
-# exit 2 (bad usage). A layerdbiz refusal is by design and not red.
+# summary (a table per repository and every line under it); the JSON report is kept 90 days as the artifact
+# branches-report, the record of a real run. The run fails on the command's exit 1 (a repository out of reach, a tag in
+# the way) and when the token check skipped a repository, with everything it could do still done, and on exit 2 (bad
+# usage). A layerdbiz or archived refusal is by design and not red.
 #
 # Secret: PROJECT_PAT (the classic PAT task-manager.yml and automerge.yml already use), given to gh and the tool as
 # GITHUB_TOKEN through the environment, never as an argument. github.token reaches only this repository and cannot list
@@ -62,8 +68,14 @@ jobs:
       run:
         shell: bash
     env:
-      # a scheduled run is real; a dispatched one is a plan unless plan was unticked
-      PLAN: ${{ (github.event_name == 'workflow_dispatch' && inputs.plan) && 'true' || 'false' }}
+      # the schedule applies only once the repository variable BRANCHES_APPLY is true; a dispatch applies when plan is
+      # unticked; everything else is a plan (inputs.plan is a boolean in the inputs context; on a schedule it is null)
+      PLAN: >-
+        ${{ (github.event_name == 'schedule' && vars.BRANCHES_APPLY == 'true') && 'false'
+            || (github.event_name == 'workflow_dispatch' && !inputs.plan) && 'false'
+            || 'true' }}
+      EVENT: ${{ github.event_name }}
+      APPLY_VAR: ${{ vars.BRANCHES_APPLY }}
     steps:
       - name: Check out the scripts
         uses: actions/checkout@v5
@@ -81,7 +93,7 @@ jobs:
           REPOS: ${{ inputs.repos }}
         run: bash .github/scripts/branches-targets.sh
 
-      - name: ${{ (github.event_name == 'workflow_dispatch' && inputs.plan) && 'branches --plan' || 'branches' }}
+      - name: branches
         env:
           GITHUB_TOKEN: ${{ secrets.PROJECT_PAT }}
           CLI: ${{ steps.tool.outputs.cli }}
@@ -90,6 +102,13 @@ jobs:
           REPOS: ${{ steps.targets.outputs.repos }}
           SKIPPED: ${{ steps.targets.outputs.skipped }}
         run: |
+          case "$EVENT/$PLAN" in
+            schedule/true)
+              echo "schedule: plan until the repository variable BRANCHES_APPLY is true (now: ${APPLY_VAR:-unset})" ;;
+            schedule/false) echo "schedule: real run (BRANCHES_APPLY is true)" ;;
+            */true) echo "dispatch: plan (the plan input is on)" ;;
+            *) echo "dispatch: real run (the plan input is off)" ;;
+          esac
           # the published version must know the command: an unknown word would run the default, sync, on this runner
           if ! node "$CLI" --help | grep -E '^  branches( |$)' > /dev/null; then
             echo "::error title=branches::@oneezy/skills-sync@$TOOL_VERSION has no branches command; nothing run" >&2
@@ -104,7 +123,9 @@ jobs:
           node "$CLI" "${args[@]}" "${targets[@]}" > "$report"
           code=$?
           set -e
-          node .github/scripts/branches-report.mjs "$report"
+          # the report is the record of what was deleted and tagged: shown raw if the renderer fails, kept as an
+          # artifact below
+          node .github/scripts/branches-report.mjs "$report" || cat "$report"
           # a repository the token cannot write was skipped and named by the token check; the run is red so it is seen
           if [[ $code == 0 && ${SKIPPED:-0} != 0 ]]; then
             echo "::error title=branches::$SKIPPED skipped: cannot write (see the token check); the rest was done" >&2
@@ -112,3 +133,12 @@ jobs:
           fi
           echo "exit $code"
           exit "$code"
+
+      - name: Keep the JSON report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: branches-report
+          path: ${{ runner.temp }}/branches.json
+          if-no-files-found: ignore
+          retention-days: 90

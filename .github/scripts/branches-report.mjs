@@ -83,9 +83,10 @@ summary(
   ...report.repos.flatMap((r) => [
     `<details><summary><code>${r.repo}</code>: ${tally(r)}</summary>`,
     "",
-    "```text",
+    // four backticks: a branch name may hold three
+    "````text",
     ...r.lines.map((l) => `${l.mark} ${l.text}`),
-    "```",
+    "````",
     "",
     "</details>",
     "",

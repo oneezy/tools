@@ -13,7 +13,8 @@
 #   - a name that is not owner/repo fails the run (::error) before anything runs: the command would exit 2 with nothing
 #     done, and this way the step summary says which name
 #   - owner layerdbiz (any case) is refused by name and listed: those repositories wait for a token that covers them
-#     (ADR-0013 in oneezy/skills); a refusal is not a failure
+#     (ADR-0013 in oneezy/skills); a refusal is not a failure. An archived repository (read-only) is refused the same
+#     way
 #   - GET /repos/{owner}/{repo} with permissions.push true passes; false, or 401, 403 or 404 (the token's reach), is
 #     listed as "skipped: cannot write <repo>" with a ::warning, the command never names that repository, and the
 #     workflow ends red once the others are done (output skipped, the count), so a repository out of reach is seen.
@@ -65,10 +66,11 @@ bad=0
 skipped=0
 declare -A seen=()
 for repo in ${requested[@]+"${requested[@]}"}; do
-  if [[ -n ${seen[$repo]:-} ]]; then continue; fi
-  seen[$repo]=1
-  # the command's own test of a name (isRepoName): owner/repo, each of word characters, dots and dashes
-  if [[ ! $repo =~ ^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$ ]]; then
+  # GitHub names are case-insensitive: oneezy/Tools and oneezy/tools are one repository
+  if [[ -n ${seen[${repo,,}]:-} ]]; then continue; fi
+  seen[${repo,,}]=1
+  # the command's own test of a name (isRepoName): owner/repo of word characters, dots and dashes; no . or .. segment
+  if [[ ! $repo =~ ^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$ || $repo =~ ^\.\.?/|/\.\.?$ ]]; then
     echo "::error title=branches::not an owner/repo name: $repo" >&2
     rows+=("| \`$repo\` | refused: not owner/repo |")
     bad=1
@@ -80,10 +82,15 @@ for repo in ${requested[@]+"${requested[@]}"}; do
     rows+=("| \`$repo\` | refused: layerdbiz, outside the token's reach |")
     continue
   fi
-  if answer=$(gh api "repos/$repo" --jq '.permissions.push // false' 2>&1) && [[ $answer == true ]]; then
+  # an archived repository is read-only for everyone (the default list leaves them out already): refused, not red
+  if answer=$(gh api "repos/$repo" --jq 'if .archived then "archived" else (.permissions.push // false) end' 2>&1) \
+    && [[ $answer == true ]]; then
     echo "will run: $repo"
     rows+=("| \`$repo\` | will run |")
     run+=("$repo")
+  elif [[ $answer == archived ]]; then
+    echo "::notice title=branches::$repo refused: archived, read-only"
+    rows+=("| \`$repo\` | refused: archived, read-only |")
   else
     if [[ $answer == false ]]; then reason="no push permission"; else reason=$(why "$answer"); fi
     echo "::warning title=branches::skipped: cannot write $repo ($reason)"
