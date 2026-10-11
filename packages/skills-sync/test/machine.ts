@@ -11,7 +11,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { isLink, lexists, linkTarget, makeLink, samePath } from "../src/fs.js";
-import { fixtureRelease, type FakeGithub } from "./fixtures/fake-github/fake-github.mjs";
+import { fixtureRelease, type FakeGithub, type FixtureRelease } from "./fixtures/fake-github/fake-github.mjs";
 
 const CLI = path.resolve(import.meta.dirname, "..", "dist", "src", "cli.js");
 const FAKE_HARNESS = path.resolve(import.meta.dirname, "fixtures", "fake-harness", "fake-harness.mjs");
@@ -595,4 +595,111 @@ export function oldLocalFile(m: PretendMachine, local: Record<string, unknown>):
     JSON.stringify({ agents: ["claude-code", "codex"], global: true, mode: "link", wsl: [], ...local }, null, 2) + "\n",
   );
   return file;
+}
+
+/**
+ * The pretend GitHub the fake codex clones a marketplace from: <base>/github/<owner>/<repo> is a checkout of the
+ * library at `release`, with the Codex catalog (named `marketplace`), every plugin's files, the config that names it
+ * as the library (so a link into it is a library copy) and `.git-revision` = the release's commit, so a newer release
+ * laid down here is a moved remote for `codex plugin marketplace upgrade`. Returns the checkout.
+ */
+export function githubClone(
+  m: PretendMachine,
+  release: FixtureRelease,
+  repo = "oneezy/skills",
+  marketplace = "oneezy-skills",
+): string {
+  const [owner, name] = repo.split("/");
+  const github = path.join(m.base, "github");
+  const dir = path.join(github, owner, name);
+  fs.rmSync(dir, { recursive: true, force: true });
+  const plugins = Object.keys(release.plugins)
+    .sort()
+    .map((id) => ({
+      name: id,
+      source: `./plugins/${id}`,
+      policy: { installation: "AVAILABLE", authentication: "ON_USE" },
+    }));
+  write(
+    path.join(dir, ".agents", "plugins", "marketplace.json"),
+    JSON.stringify({ name: marketplace, interface: { displayName: repo }, plugins }, null, 2) + "\n",
+  );
+  for (const [id, p] of Object.entries(release.plugins))
+    for (const [rel, bytes] of p.files) write(path.join(dir, "plugins", id, ...rel.split("/")), bytes);
+  write(path.join(dir, "skills-sync.json"), JSON.stringify({ version: 1, library: { owner, name } }, null, 2) + "\n");
+  write(path.join(dir, ".git-revision"), `${release.commit}\n`);
+  m.env.FAKE_HARNESS_GITHUB = github;
+  return dir;
+}
+
+/**
+ * A checkout of the library somewhere on the machine (default: <base>/checkout), as far as the tool tells one: the
+ * config naming `repo` as the library. A link into it is a library copy. Returns the folder.
+ */
+export function libraryCheckout(
+  m: PretendMachine,
+  dir = path.join(m.base, "checkout"),
+  repo = "oneezy/skills",
+): string {
+  const [owner, name] = repo.split("/");
+  write(path.join(dir, "skills-sync.json"), JSON.stringify({ version: 1, library: { owner, name } }, null, 2) + "\n");
+  return dir;
+}
+
+/**
+ * A real folder in the harness's user skills folder (or `dir`) holding exactly the release's own files of the skill:
+ * the copy an older sync or Codex's skill installer left. Returns the folder.
+ */
+export function releaseCopy(
+  m: PretendMachine,
+  harness: HarnessId,
+  name: string,
+  release: FixtureRelease,
+  dir = userSkills(m, harness),
+): string {
+  const prefix = `skills/${name}/`;
+  const plugin = Object.values(release.plugins).find((p) => p.files.has(`${prefix}SKILL.md`));
+  if (!plugin) throw new Error(`${name}: no plugin of ${release.tag} carries it`);
+  const folder = path.join(dir, name);
+  for (const [rel, bytes] of plugin.files)
+    if (rel.startsWith(prefix)) write(path.join(folder, ...rel.slice(prefix.length).split("/")), bytes);
+  return folder;
+}
+
+/** One of Codex's own bundled skills, ~/.codex/skills/.system/<name>: Codex's, never the tool's. Returns the folder. */
+export function systemSkill(m: PretendMachine, name: string): string {
+  const folder = path.join(codexLegacySkills(m), ".system", name);
+  write(path.join(folder, "SKILL.md"), skillMd(name));
+  return folder;
+}
+
+/**
+ * A fake CLI run directly on the pretend machine, as a user would at a prompt (`codex plugin list --json` after a
+ * sync): its exit code, output and the JSON it printed. Not logged as one of the tool's calls.
+ */
+export function fakeCli(
+  m: PretendMachine,
+  host: CliName,
+  args: string[],
+): { status: number | null; stdout: string; stderr: string; json: Record<string, unknown> | null } {
+  const r = spawnSync(process.execPath, [FAKE_HARNESS, host, ...args], {
+    encoding: "utf8",
+    env: { ...process.env, ...m.env, FAKE_HARNESS_LOG: "" },
+  });
+  let json: Record<string, unknown> | null = null;
+  try {
+    json = JSON.parse(r.stdout);
+  } catch {
+    /* text, or a failure the caller reads from status */
+  }
+  return { status: r.status, stdout: r.stdout, stderr: r.stderr, json };
+}
+
+/** Switch a plugin the fake codex has installed on or off, as the user would through Codex. */
+export function codexPluginEnabled(m: PretendMachine, id: string, enabled: boolean): void {
+  const file = path.join(m.codexHome, "fake-harness.json");
+  const state = JSON.parse(fs.readFileSync(file, "utf8"));
+  if (!state.plugins[id]) throw new Error(`${id}: not installed on the fake codex`);
+  state.plugins[id].enabled = enabled;
+  write(file, JSON.stringify(state, null, 2));
 }

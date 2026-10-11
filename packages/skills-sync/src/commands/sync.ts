@@ -19,6 +19,13 @@ import { latestRelease, type Release } from "../release.js";
 /** The form modules by harness id; a harness without one (Goose) gets the block and nothing more. */
 export const FORMS: Record<string, FormFn> = { "claude-code": claudeCode, codex, hermes };
 
+/**
+ * The harnesses whose form is built (not a placeholder note): the old library-based run in cli.ts leaves them to the
+ * machine sync, or it would link their skills and register the library folder again. #153 adds Hermes; #154 removes
+ * this with the old run.
+ */
+export const BUILT_FORMS: ReadonlySet<string> = new Set(["claude-code", "codex"]);
+
 export interface SyncOptions {
   /** the release repo, owner/repo */
   repo: string;
