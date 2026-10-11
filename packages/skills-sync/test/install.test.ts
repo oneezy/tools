@@ -167,6 +167,13 @@ async function statusJson(extra: Record<string, string> = {}): Promise<{ status:
   return { status: r.status, json: JSON.parse(r.stdout) as StatusJson };
 }
 
+/**
+ * A harness's status lines without the session hook and global block ones: this library-based run writes neither, and
+ * status (tools#155) lists them red; these tests are about the plugin lines.
+ */
+const pluginLines = (lines: Array<{ ok: boolean; text: string }>) =>
+  lines.filter((l) => !/^(session hook|no session hook|old sync-dev\.sh hook|global block)/.test(l.text));
+
 function cli(args: string[], extra: Record<string, string> = {}, entrypoints = false): Run {
   const env = envFor(extra);
   if (fs.existsSync(log)) fs.rmSync(log);
@@ -473,7 +480,7 @@ test("status --json tells the tool's plugins from the rest and compares each wit
     );
   // Claude Code's form is the account plugin: what the tool installed through claude is red whatever its version
   assert.ok(
-    s.json.harnesses["claude-code"].lines
+    pluginLines(s.json.harnesses["claude-code"].lines)
       .filter((l) => !l.ok)
       .every((l) => l.text.endsWith(" installed by the tool; the form is account plugins")),
     JSON.stringify(s.json.harnesses["claude-code"].lines),
@@ -487,7 +494,9 @@ test("status --json tells the tool's plugins from the rest and compares each wit
     ],
   );
   assert.deepEqual(
-    s.json.harnesses.codex.lines.filter((l) => !l.ok).map((l) => l.text),
+    pluginLines(s.json.harnesses.codex.lines)
+      .filter((l) => !l.ok)
+      .map((l) => l.text),
     ["oneezy@oneezy-skills 0.1.0+aaaaaaaaaaaa (latest 0.2.0+bbbbbbbbbbbb)"],
   );
 
@@ -499,7 +508,7 @@ test("status --json tells the tool's plugins from the rest and compares each wit
   const after = await statusJson();
   assert.ok(after.json.harnesses.codex.plugins.installed.every((p) => p.current));
   assert.deepEqual(
-    after.json.harnesses.codex.lines.filter((l) => !l.ok),
+    pluginLines(after.json.harnesses.codex.lines).filter((l) => !l.ok),
     [],
   );
 });

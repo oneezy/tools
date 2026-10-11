@@ -1,8 +1,15 @@
-// status: this machine against the latest release of the library, per harness. Lines a user reads, and a --json object
-// /oneezy-status reads with the same facts. Red lines: a plugin behind the release (version or skill set), a plugin
-// this tool installed where the form is account plugins, nothing installed at all, a skill name listed twice. Exit 1
-// when any line is red. Nothing is written, no library is looked for. Later tickets add the hook, the global block and
-// the checkouts to the same report.
+// status: the one answer to "is this machine done" (spec stories 50 to 56). Per harness, lines a user reads and a
+// --json object /oneezy-status reads with the same facts: its form, each library plugin against the latest release,
+// every skill name listed twice, the session hook entry in its user hooks file, the managed block in its global
+// instructions file, and any block an older skills-sync left in a repository. Then, once per machine, the checkouts of
+// oneezy/skills and oneezy/tools in reach (the repository the current folder is in and the folders beside it, as the
+// hook finds them): on dev and clean, or not. Last the manual steps only a person can take, step by step. A red line
+// (`!`) is something the machine has wrong; the exit code is 1 when there is one. A manual step is the person's, not the
+// machine's: it never hides a red line (red lines print first) and alone leaves the exit code 0. Nothing is written, no
+// library is looked for, every git call is read-only. In a cloud session the account plugins arrive on their own and
+// no hook or checkout exists, so status shows the block lines and the manual steps only, and reads no release: a
+// session there must not go red over a GitHub it cannot reach.
+import { spawnSync } from "node:child_process";
 import { FORM_LABEL, formOf, type MachineForm } from "../desired.js";
 import { github } from "../github.js";
 import { harnessTable } from "../harnesses.js";
@@ -15,6 +22,10 @@ import {
   type SkillFolder,
 } from "../machine.js";
 import { latestRelease, type Release, type ReleasePlugin } from "../release.js";
+import { findCheckouts } from "./hook.js";
+import { manualSteps, type ManualStep } from "./status-steps.js";
+
+export type { ManualStep } from "./status-steps.js";
 
 export interface StatusLine {
   ok: boolean;
@@ -50,6 +61,29 @@ export interface StatusOther {
   skills: string[] | null;
 }
 
+/** The session hook entry in the harness's user hooks file (ADR-0010). */
+export interface StatusHook {
+  file: string;
+  /** the tool's own entry is in the file */
+  present: boolean;
+  /** present, the old sync-dev.sh entry gone, the file readable */
+  current: boolean;
+  /** Codex: trusted in its TUI; null on Claude Code, and on Codex when the file cannot be read */
+  trusted: boolean | null;
+}
+
+/** The managed block in the harness's global instructions file (ADR-0011). */
+export interface StatusBlock {
+  file: string;
+  /** a managed block of any id is in the file */
+  present: boolean;
+  /** the block is byte for byte what sync would write */
+  current: boolean;
+  status: "current" | "missing" | "outdated" | "conflict";
+  /** the ids of the managed blocks the file holds (the old tool wrote `brain`) */
+  ids: string[];
+}
+
 export interface StatusHarness {
   name: string;
   form: MachineForm;
@@ -59,7 +93,26 @@ export interface StatusHarness {
   loose: LooseLink[];
   folders: SkillFolder[];
   duplicates: Array<{ skill: string; in: string[] }>;
+  /** null for a harness whose table row names no hooks file (Hermes) */
+  hook: StatusHook | null;
+  /** null for a harness whose table row names no global instructions file (Hermes) */
+  block: StatusBlock | null;
+  /** blocks an older skills-sync left outside the global file: each a red line until removed by hand */
+  repoBlocks: Array<{ file: string; ids: string[] }>;
   lines: StatusLine[];
+}
+
+/** A checkout of oneezy/skills or oneezy/tools in reach of the current folder (story 53). */
+export interface StatusCheckout {
+  path: string;
+  /** owner/name, as the origin URL says */
+  repo: string;
+  branch: string;
+  /** `git status --porcelain` lines, untracked files included */
+  dirty: number;
+  clean: boolean;
+  /** on dev and clean */
+  ok: boolean;
 }
 
 export interface StatusReport {
@@ -71,6 +124,11 @@ export interface StatusReport {
   harnesses: Record<string, StatusHarness>;
   /** lines about the machine as a whole: the release line */
   lines: StatusLine[];
+  /** empty in the cloud, and when no checkout is in reach */
+  checkouts: StatusCheckout[];
+  manualSteps: ManualStep[];
+  /** how many red lines, checkouts included */
+  red: number;
   ok: boolean;
 }
 
@@ -80,21 +138,28 @@ export interface StatusOptions {
   json: boolean;
   quiet: boolean;
   env?: NodeJS.ProcessEnv;
+  /** where the run happens: its repository and the folders beside it are looked at for checkouts */
+  cwd?: string;
   write?: (text: string) => void;
 }
 
 /** Read the release, probe the machine, print the report. Returns the exit code: 0 all green, 1 something red. */
 export async function runStatus(options: StatusOptions): Promise<number> {
   const env = options.env ?? process.env;
+  const cwd = options.cwd ?? process.cwd();
   const write = options.write ?? ((text: string) => void process.stdout.write(text));
+  const machine = probe(harnessTable(undefined, env), env, cwd);
   let release: Release | null = null;
   let error: string | null = null;
-  try {
-    release = await latestRelease(github(env), options.repo);
-  } catch (e) {
-    error = e instanceof Error ? e.message : String(e);
-  }
-  const report = statusReport(options.repo, release, error, probe(harnessTable(undefined, env), env));
+  // in the cloud nothing is judged against the release (no plugin line, no step about one): it is not read
+  if (!machine.cloud)
+    try {
+      release = await latestRelease(github(env), options.repo);
+    } catch (e) {
+      error = e instanceof Error ? e.message : String(e);
+    }
+  const checkouts = machine.cloud ? [] : readCheckouts(cwd, env);
+  const report = statusReport(options.repo, release, error, machine, checkouts);
   write(options.json ? JSON.stringify(report, null, 2) + "\n" : statusText(report, options.quiet));
   return report.ok ? 0 : 1;
 }
@@ -103,24 +168,29 @@ const green = (text: string): StatusLine => ({ ok: true, mark: "=", text });
 const red = (text: string): StatusLine => ({ ok: false, mark: "!", text });
 const note = (text: string): StatusLine => ({ ok: true, mark: ".", text });
 
-/** The report from a release (or why there is none) and the probe. Pure: what the tests compare, what --json prints. */
+/** The report from a release (or why there is none), the probe and the checkouts. Pure: what the tests compare, what --json prints. */
 export function statusReport(
   repo: string,
   release: Release | null,
   error: string | null,
   machine: Machine,
+  checkouts: StatusCheckout[] = [],
 ): StatusReport {
-  const lines: StatusLine[] = [
-    release
-      ? green(`latest: ${release.repo} ${release.tag} (${release.commit.slice(0, 7)})`)
-      : red(`latest release of ${repo}: ${error ?? "not read"}`),
-  ];
+  const lines: StatusLine[] = [];
+  // the cloud reads no release: the line would be red over a GitHub a session start cannot reach
+  if (!machine.cloud)
+    lines.push(
+      release
+        ? green(`latest: ${release.repo} ${release.tag} (${release.commit.slice(0, 7)})`)
+        : red(`latest release of ${repo}: ${error ?? "not read"}`),
+    );
   const harnesses: Record<string, StatusHarness> = {};
   for (const state of machine.harnesses) {
     const form = formOf(state.harness.id);
-    if (form) harnesses[state.harness.id] = harnessReport(state, form, release);
+    if (form) harnesses[state.harness.id] = harnessReport(state, form, release, machine.cloud);
   }
   const all = [...lines, ...Object.values(harnesses).flatMap((h) => h.lines)];
+  const redCount = all.filter((l) => !l.ok).length + checkouts.filter((c) => !c.ok).length;
   return {
     release: release
       ? { repo: release.repo, tag: release.tag, number: release.number, commit: release.commit, tool: release.tool }
@@ -129,7 +199,10 @@ export function statusReport(
     cloud: machine.cloud,
     harnesses,
     lines,
-    ok: all.every((l) => l.ok),
+    checkouts,
+    manualSteps: manualSteps(machine, release),
+    red: redCount,
+    ok: redCount === 0,
   };
 }
 
@@ -173,7 +246,7 @@ function against(p: StatusPlugin, latest: ReleasePlugin | undefined, release: Re
   return `(${parts.join("; ")})`;
 }
 
-function harnessReport(state: HarnessState, form: MachineForm, release: Release | null): StatusHarness {
+function harnessReport(state: HarnessState, form: MachineForm, release: Release | null, cloud: boolean): StatusHarness {
   const lines: StatusLine[] = [];
   const synced: StatusPlugin[] = [];
   const installed: StatusInstalled[] = [];
@@ -182,10 +255,14 @@ function harnessReport(state: HarnessState, form: MachineForm, release: Release 
   const places = new Map<string, string[]>();
   const place = (skill: string, where: string) => places.set(skill, [...(places.get(skill) ?? []), where]);
   const v = (x: string | null) => x ?? "no version";
+  /** the plugin, duplicate and folder lines: everything but the block, which the cloud also shows */
+  const machineLine = (l: StatusLine) => {
+    if (!cloud) lines.push(l);
+  };
 
   const byId = <T extends { id: string }>(list: T[]): T[] => [...list].sort((a, b) => a.id.localeCompare(b.id));
 
-  if (state.note) lines.push(note(state.note));
+  if (state.note) machineLine(note(state.note));
   for (const p of byId(state.synced)) {
     // a plugin switched off loads nothing: its skills are no place for a duplicate
     if (p.enabled) for (const s of p.skills) place(s, `${p.id}@synced`);
@@ -199,11 +276,11 @@ function harnessReport(state: HarnessState, form: MachineForm, release: Release 
     synced.push(c);
     const name = `${p.id}@synced ${v(p.version)}`;
     if (!p.enabled) {
-      lines.push(note(`${name} disabled ${against(c, latest, release)}`));
+      machineLine(note(`${name} disabled ${against(c, latest, release)}`));
       continue;
     }
     const text = `${name} ${against(c, latest, release)}`;
-    lines.push(!release ? note(text) : c.current ? green(text) : red(text));
+    machineLine(!release ? note(text) : c.current ? green(text) : red(text));
   }
   for (const p of byId(state.installed)) {
     if (p.enabled) for (const s of p.skills ?? []) place(s, `${p.id}@${p.marketplace}`);
@@ -216,29 +293,41 @@ function harnessReport(state: HarnessState, form: MachineForm, release: Release 
     installed.push(c);
     const name = `${p.id}@${p.marketplace} ${v(p.version)}`;
     // Claude Code's form is the account plugin; a CLI install of the same name hides it (ADR-0007)
-    if (form === "account-plugins") lines.push(red(`${name} installed by the tool; the form is account plugins`));
-    else if (!p.enabled) lines.push(red(`${name} installed but disabled`));
+    if (form === "account-plugins") machineLine(red(`${name} installed by the tool; the form is account plugins`));
+    else if (!p.enabled) machineLine(red(`${name} installed but disabled`));
     else {
       const text = `${name} ${against(c, latest, release)}`;
-      lines.push(!release ? note(text) : c.current ? green(text) : red(text));
+      machineLine(!release ? note(text) : c.current ? green(text) : red(text));
     }
   }
   for (const l of state.loose) place(l.name, `loose link -> ${l.target}`);
   for (const f of state.folders) place(f.name, `folder ${f.path}`);
 
-  // after the plugin lines: what is missing, then the duplicates, then the notes on what else is there
+  // after the plugin lines: what is missing, then the duplicates, then the hook and the block, then the notes on what
+  // else is there
   const tag = release ? release.tag : "unknown";
   const nothing = form === "loose" ? !state.loose.length && !state.folders.length : !synced.length && !installed.length;
-  if (nothing) lines.push(red(form === "loose" ? `no skills (latest ${tag})` : `no plugins installed (latest ${tag})`));
+  if (nothing)
+    machineLine(red(form === "loose" ? `no skills (latest ${tag})` : `no plugins installed (latest ${tag})`));
   const duplicates = [...places]
     .filter(([, where]) => where.length > 1)
     .map(([skill, where]) => ({ skill, in: where }));
   for (const d of duplicates)
-    lines.push(red(`${d.skill} listed ${d.in.length === 2 ? "twice" : `${d.in.length} times`}: ${d.in.join(", ")}`));
-  if (state.loose.length || state.folders.length)
-    lines.push(note(`${count(state.loose.length, "loose link")}, ${count(state.folders.length, "skill folder")}`));
-  if (other.length)
+    machineLine(red(`${d.skill} listed ${d.in.length === 2 ? "twice" : `${d.in.length} times`}: ${d.in.join(", ")}`));
+
+  const hook = hookReport(state, cloud ? null : lines);
+  const block = blockReport(state, lines);
+  for (const old of state.repoBlocks)
     lines.push(
+      red(
+        `skills-sync block (${old.ids.join(", ")}) in ${old.file}; remove it by hand, the block lives only in ${state.harness.name}'s global file now`,
+      ),
+    );
+
+  if (state.loose.length || state.folders.length)
+    machineLine(note(`${count(state.loose.length, "loose link")}, ${count(state.folders.length, "skill folder")}`));
+  if (other.length)
+    machineLine(
       note(
         `${count(other.length, "other plugin")} left alone: ${other
           .map(
@@ -258,15 +347,93 @@ function harnessReport(state: HarnessState, form: MachineForm, release: Release 
     loose: state.loose,
     folders: state.folders,
     duplicates,
+    hook,
+    block,
+    repoBlocks: state.repoBlocks.map((b) => ({ file: b.file, ids: b.ids })),
     lines,
   };
+}
+
+/**
+ * The session hook's facts and, outside the cloud (`lines` null there: a cloud session never reads user hooks), its
+ * line: red when the entry is missing, when the old sync-dev.sh entry is still there, or when the file cannot be worked
+ * on; green when present. A present Codex entry the person has not trusted yet is green here and a manual step below:
+ * the machine is right, the trust is the person's. Harnesses are told apart by their id, never by `trusted`.
+ */
+function hookReport(state: HarnessState, lines: StatusLine[] | null): StatusHook | null {
+  const h = state.hook;
+  if (!h) return null;
+  // readHook's note is a file problem when the entry is not there, and the Codex trust step when it is
+  const problem = !h.present && h.note ? h.note : null;
+  const current = h.present && !h.old;
+  if (lines) {
+    if (problem) lines.push(red(`session hook in ${h.file}: ${problem}`));
+    else if (!h.present) lines.push(red(`no session hook entry in ${h.file}; run sync`));
+    else if (h.old) lines.push(red(`old sync-dev.sh hook still in ${h.file}; run sync`));
+    else if (state.harness.id === "codex" && h.trusted === false)
+      lines.push(green(`session hook in ${h.file}, not trusted in Codex yet (manual step below)`));
+    else lines.push(green(`session hook in ${h.file}`));
+  }
+  return { file: h.file, present: h.present, current, trusted: h.trusted };
+}
+
+/** The global block's facts and its line: green when current, red when missing, stale (an older block's text) or a conflict. */
+function blockReport(state: HarnessState, lines: StatusLine[]): StatusBlock | null {
+  const b = state.block;
+  if (!b) return null;
+  if (b.status === "current") lines.push(green(`global block in ${b.file} current`));
+  else if (b.status === "missing") lines.push(red(`global block in ${b.file} is missing; run sync`));
+  else if (b.status === "outdated")
+    lines.push(red(`global block in ${b.file} is stale (${b.ids.join(", ")}); run sync`));
+  else lines.push(red(`global block in ${b.file}: ${b.reason ?? "cannot be written"}`));
+  return {
+    file: b.file,
+    present: b.status === "current" || b.ids.length > 0,
+    current: b.status === "current",
+    status: b.status,
+    ids: b.ids,
+  };
+}
+
+/**
+ * The checkouts in reach, read-only: the branch and the porcelain status of each (story 53). The same discovery as the
+ * hook's (the repository `cwd` is in and the folders beside it, by origin URL); nothing is fetched or moved, so a
+ * checkout is judged as it is. Git runs without prompting and with 30 s per call.
+ */
+export function readCheckouts(cwd: string, env: NodeJS.ProcessEnv = process.env): StatusCheckout[] {
+  const git = (dir: string, args: string[]): string => {
+    const r = spawnSync("git", args, {
+      cwd: dir,
+      encoding: "utf8",
+      input: "",
+      timeout: 30_000,
+      windowsHide: true,
+      env: { ...env, GIT_TERMINAL_PROMPT: "0" },
+    });
+    return r.status === 0 ? (r.stdout ?? "") : "";
+  };
+  return findCheckouts(cwd, env).map((c) => {
+    const branch = git(c.path, ["rev-parse", "--abbrev-ref", "HEAD"]).trim() || "HEAD";
+    const dirty = git(c.path, ["status", "--porcelain"]).split(/\r?\n/).filter(Boolean).length;
+    return { path: c.path, repo: c.repo, branch, dirty, clean: dirty === 0, ok: branch === "dev" && dirty === 0 };
+  });
 }
 
 function count(n: number, what: string): string {
   return `${n} ${what}${n === 1 ? "" : "s"}`;
 }
 
-/** The text a user reads. Quiet: only the red lines, under their harness, and the summary when there is anything red. */
+/** A checkout as one line: `<path> on dev, clean`, or red with the branch and the dirty file count. */
+function checkoutLine(c: StatusCheckout): StatusLine {
+  const text = `${c.path} on ${c.branch}${c.clean ? ", clean" : `, dirty (${count(c.dirty, "file")})`}`;
+  return c.ok ? green(text) : red(text);
+}
+
+/**
+ * The text a user reads: the release, each harness, the checkouts, the manual steps, the summary. Quiet: only the red
+ * lines under their header, the manual steps (they are the person's open work) and the summary; nothing at all when
+ * there is neither.
+ */
 export function statusText(report: StatusReport, quiet: boolean): string {
   const out: string[] = [];
   const show = (l: StatusLine) => !quiet || !l.ok;
@@ -278,10 +445,26 @@ export function statusText(report: StatusReport, quiet: boolean): string {
     out.push(`${h.name}  form: ${FORM_LABEL[h.form]}`);
     for (const l of lines) out.push(`${l.mark} ${l.text}`);
   }
-  const reds = [...report.lines, ...Object.values(report.harnesses).flatMap((h) => h.lines)].filter(
-    (l) => !l.ok,
-  ).length;
-  if (reds) out.push(`status: ${count(reds, "red line")}`);
+  if (!report.cloud) {
+    const lines = report.checkouts.map(checkoutLine).filter(show);
+    if (lines.length) {
+      out.push("Checkouts");
+      for (const l of lines) out.push(`${l.mark} ${l.text}`);
+    } else if (!report.checkouts.length && !quiet)
+      out.push(
+        ". no checkout of oneezy/skills or oneezy/tools in reach (the repository here and the folders beside it)",
+      );
+  }
+  if (report.manualSteps.length) {
+    out.push("Manual steps");
+    report.manualSteps.forEach((s, i) => {
+      out.push(`${i + 1}. ${s.title}`);
+      s.steps.forEach((step, j) => out.push(`   ${j + 1}. ${step}`));
+    });
+  }
+  const steps = report.manualSteps.length;
+  if (report.red || steps)
+    out.push(`status: ${count(report.red, "red line")}${steps ? `, ${count(steps, "manual step")}` : ""}`);
   else if (!quiet) out.push("status: all green");
   return out.length ? out.join("\n") + "\n" : "";
 }

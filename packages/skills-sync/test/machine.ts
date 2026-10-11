@@ -10,7 +10,9 @@ import { createHash } from "node:crypto";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { withBlock } from "../src/block.js";
 import { isLink, lexists, linkTarget, makeLink, samePath } from "../src/fs.js";
+import { HOOK_COMMAND } from "../src/hooks.js";
 import { fixtureRelease, type FakeGithub, type FixtureRelease } from "./fixtures/fake-github/fake-github.mjs";
 
 const CLI = path.resolve(import.meta.dirname, "..", "dist", "src", "cli.js");
@@ -702,4 +704,36 @@ export function codexPluginEnabled(m: PretendMachine, id: string, enabled: boole
   if (!state.plugins[id]) throw new Error(`${id}: not installed on the fake codex`);
   state.plugins[id].enabled = enabled;
   write(file, JSON.stringify(state, null, 2));
+}
+
+/**
+ * The skills block as sync writes it, in the harness's global instructions file (appended to what is there): the state
+ * status calls current. Returns the file.
+ */
+export function currentBlock(m: PretendMachine, harness: "claude-code" | "codex"): string {
+  const file = globalFile(m, harness);
+  write(file, withBlock(fs.existsSync(file) ? fs.readFileSync(file, "utf8") : ""));
+  return file;
+}
+
+/**
+ * The tool's own session hook entry in the harness's user hooks file, as sync writes it (appended). Returns the index
+ * of its SessionStart group, which is what Codex's trust record names.
+ */
+export function ownHook(m: PretendMachine, harness: "claude-code" | "codex"): number {
+  const file = hookEntry(m, harness, HOOK_COMMAND);
+  const groups = JSON.parse(fs.readFileSync(file, "utf8")).hooks.SessionStart as Array<{
+    hooks: Array<{ command: string }>;
+  }>;
+  return groups.findIndex((g) => g.hooks.some((h) => h.command === HOOK_COMMAND));
+}
+
+/**
+ * A harness whose machine-side setup is done: the current block, the own hook entry and, on Codex, the trust record for
+ * it. What status paints green when the plugins are right too.
+ */
+export function doneHarness(m: PretendMachine, harness: "claude-code" | "codex"): void {
+  currentBlock(m, harness);
+  const group = ownHook(m, harness);
+  if (harness === "codex") codexTrust(m, group);
 }

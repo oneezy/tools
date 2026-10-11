@@ -248,7 +248,7 @@ Codex runs a user hook only after you trust it once, in its TUI, per machine or 
 
 ## Status
 
-`status` needs no library on the machine. It reads the latest release of `oneezy/skills` from GitHub (`--library owner/repo` for another release repo; `GITHUB_TOKEN` or `GH_TOKEN` is sent when set, the base URL comes from `SKILLS_SYNC_GITHUB_API` so tests point it at a fake) and probes this machine, writing nothing: the account plugins claude.ai synced into Claude Code (`<id>@synced`), the plugins installed through each harness's CLI (from the library's catalog `oneezy-skills`, or from anywhere else), the loose links in each user folder (`~/.claude/skills`, `~/.agents/skills`, Codex's old `~/.codex/skills`) and the real skill folders there. Per detected harness it prints its form (Claude Code: account plugins; Codex: plugins from GitHub; Hermes: loose skills), one line per library plugin against the release, and one line per skill name listed in more than one place:
+`status` is the one answer to "is this machine done". It needs no library on the machine. It reads the latest release of `oneezy/skills` from GitHub (`--library owner/repo` for another release repo; `GITHUB_TOKEN` or `GH_TOKEN` is sent when set, the base URL comes from `SKILLS_SYNC_GITHUB_API` so tests point it at a fake) and probes this machine, writing nothing: the account plugins claude.ai synced into Claude Code (`<id>@synced`), the plugins installed through each harness's CLI (from the library's catalog `oneezy-skills`, or from anywhere else), the loose links in each user folder (`~/.claude/skills`, `~/.agents/skills`, Codex's old `~/.codex/skills`) and the real skill folders there, the session hook entry in each user hooks file, the managed block in each global instructions file, and the checkouts of `oneezy/skills` and `oneezy/tools` in reach (the repository the current folder is in and the git repositories beside it, found as [the hook](#the-session-hook) finds them). Per detected harness it prints its form (Claude Code: account plugins; Codex: plugins from GitHub; Hermes: loose skills), one line per library plugin against the release, one line per skill name listed in more than one place, the hook line and the block line; then the checkouts, then the manual steps:
 
 ```
 latest: oneezy/skills release-17 (ae92a54)
@@ -256,14 +256,34 @@ Claude Code  form: account plugins
 ! matt-pocock@synced 1.3.0 (latest 1.3.1)
 = oneezy@synced 0.43.1 (latest 0.43.1)
 ! oneezy-status listed twice: oneezy@synced, loose link -> /root/.skills-sync/skills/oneezy/oneezy-status
+= session hook in /home/justin/.claude/settings.json
+! global block in /home/justin/.claude/CLAUDE.md is stale (brain); run sync
 . 1 loose link, 0 skill folders
 . 5 other plugins left alone: data@synced (anthropic-plugin-directory), ...
 Codex  form: plugins from GitHub
 ! no plugins installed (latest release-17)
-status: 3 red lines
+! no session hook entry in /home/justin/.codex/hooks.json; run sync
+= global block in /home/justin/.codex/AGENTS.md current
+Checkouts
+= /home/justin/dev/skills on dev, clean
+! /home/justin/dev/tools on feat/x, dirty (2 files)
+Manual steps
+1. Switch on the account plugins claude.ai does not deliver to Claude Code yet: play
+   1. Open https://claude.ai/customize/plugins (Customize > Plugins) in a browser, signed in to the claude.ai account Claude Code uses.
+   2. Find play and switch it on.
+   3. Start a new Claude Code session so claude.ai syncs it in, then run npx --yes @oneezy/skills-sync@latest status: each should show as <id>@synced.
+status: 5 red lines, 1 manual step
 ```
 
-`=` is green, `!` red, `.` a note. Under each harness: the plugin lines sorted by id, then the duplicate lines, then the notes (what else is in the user folders, which other plugins are left alone). A plugin switched off, at claude.ai or through the CLI, loads nothing: it is listed, never judged, and its skills count for no duplicate. When Codex cannot render its prompt input, an installed plugin's skills are not read (`skills not read`) and its version alone is judged. Red: a plugin behind the release (its version, or its skill set), a plugin the tool installed on Claude Code (the account plugin of the same name is the form there, and a CLI install hides it), nothing of the library installed on a plugin harness, a duplicate skill name, or the release not readable. Any red line exits 1; `--quiet` prints only the red lines. `--json` carries the same facts under stable keys: `release` (`repo`, `tag`, `number`, `commit`, `tool`), `cloud`, `lines`, `ok`, and per harness `name`, `form`, `cli`, `plugins.synced` / `plugins.installed` (each with `version`, `latest`, `current`, `skills`) / `plugins.other`, `loose`, `folders`, `duplicates`, `lines`.
+`=` is green, `!` red, `.` a note. Under each harness: the plugin lines sorted by id, then the duplicate lines, then the hook line, the block line and one red line per block an older version left in a repository file (`skills-sync block (brain) in <file>; remove it by hand, …`), then the notes (what else is in the user folders, which other plugins are left alone). A plugin switched off, at claude.ai or through the CLI, loads nothing: it is listed, never judged, and its skills count for no duplicate. When Codex cannot render its prompt input, an installed plugin's skills are not read (`skills not read`) and its version alone is judged.
+
+Red, and exit 1: a plugin behind the release (its version, or its skill set); a plugin the tool installed on Claude Code (the account plugin of the same name is the form there, and a CLI install hides it); nothing of the library installed on a plugin harness; a duplicate skill name; the release not readable; no session hook entry, or the old `sync-dev.sh` entry still beside it, or a hooks file that cannot be edited; the global block missing, stale (an older block's text, `brain`) or unwritable; a block in a repository file; a checkout that is dirty or not on `dev`. A Codex hook entry that is present but not yet trusted is a green line and a manual step, not a red line: the machine is right, the trust is yours. No checkout in reach is one note.
+
+A **manual step** is something only you can do, so it never makes the exit code non-zero on its own and never hides a red line: the red lines print first, the steps after, each a numbered block with numbered steps you can follow on a phone, and the summary counts both (`status: 2 red lines, 1 manual step`; `status: all green` only when there is neither). The steps, each with a stable `id` in `--json`: `claude-plugins` (a release plugin the claude.ai account does not deliver, or one switched off there: the Plugins page and what to toggle), `claude-account` (`claude` lists no account plugin at all: the sign-in and `syncClaudeAiPlugins`), `codex-trust` (the hook trust in Codex's TUI, once per machine or WSL distro), `codex-other-plugins` (a plugin of a library plugin's name from another marketplace, a ChatGPT one: uninstall it by hand), `adopt-or-delete` (what sync leaves in Codex's skills folders because it is not the library's: a folder that is not exactly the release's files for the skill, a link to somewhere that is not a library copy, a library copy or dangling link no plugin carries; the library's own copies are not listed, sync removes them), and in the cloud `cloud-setup` (this session still ran the old setup script line: `~/.skills-sync` exists or `~/.claude/skills` holds loose links; replace the environment's line with `npx --yes @oneezy/skills-sync@latest --quiet`). `--quiet` prints only the red lines, the manual steps and the summary, and nothing at all on a done machine.
+
+In a cloud session (`CLAUDE_CODE_REMOTE=true`) the account plugins arrive on their own and no hook or checkout exists, so `status` shows the block lines and the manual steps only, reads no release (`release` is `null`, there is no release line, and GitHub is not asked), and the exit code follows the block lines.
+
+`--json` carries the same facts under stable keys (added, never renamed): `release` (`repo`, `tag`, `number`, `commit`, `tool`), `cloud`, `lines`, `checkouts` (`path`, `repo`, `branch`, `dirty`, `clean`, `ok`), `manualSteps` (`id`, `title`, `steps`), `red`, `ok`, and per harness `name`, `form`, `cli`, `plugins.synced` / `plugins.installed` (each with `version`, `latest`, `current`, `skills`) / `plugins.other`, `loose`, `folders`, `duplicates`, `hook` (`file`, `present`, `current`, `trusted`; `null` for a harness without a hooks file), `block` (`file`, `present`, `current`, `status`, `ids`; `null` for a harness without a global file), `repoBlocks`, `lines`. `/oneezy-status` reads it.
 
 ## Branches
 

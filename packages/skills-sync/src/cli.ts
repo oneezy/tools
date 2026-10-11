@@ -61,9 +61,12 @@ Commands
   sync (default)   everything above against the latest release of ${DEFAULT_REPO} on GitHub; nothing moves upstream:
                    with skills-sync.json every third-party skill is installed at the commit the lock records (frozen,
                    the lock never written); without one, skills-lock.json is restored
-  status           this machine against the latest release of ${DEFAULT_REPO} on GitHub (no library needed): per harness
-                   its form, each plugin's version against the release, every skill name listed twice; --json for
-                   scripts; exit 1 on any red line. Reads only: nothing cloned, linked or written
+  status           is this machine done: against the latest release of ${DEFAULT_REPO} on GitHub (no library needed),
+                   per harness its form, each plugin's version against the release, every skill name listed twice, the
+                   session hook entry and the global block; then the checkouts of oneezy/skills and oneezy/tools in
+                   reach (on dev and clean, or not); then the manual steps only you can take, step by step (a plugin to
+                   switch on at claude.ai, the Codex hook trust, the cloud setup line). --json for scripts; exit 1 on
+                   any red line, never for a manual step alone. Reads only: nothing cloned, linked or written
   branches [owner/repo ...]
                    the branch rules on GitHub (no library needed), for each repository named or, with none, every
                    repository the token owns: main, dev and any *-keep branch are never deleted (nor the repository's

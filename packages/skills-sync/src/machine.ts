@@ -9,7 +9,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { globalFile, readBlock, repoBlocks, type BlockState, type RepoBlock } from "./block.js";
-import { isDir, isLink, isSkillDir, linkTarget, samePath } from "./fs.js";
+import { isDir, isLink, isSkillDir, lexists, linkTarget, samePath } from "./fs.js";
 import { detected, RESERVED, type Harness } from "./harnesses.js";
 import { readHook, type HookState } from "./hooks.js";
 import {
@@ -83,10 +83,20 @@ export interface HarnessState {
   hook: HookState | null;
 }
 
+/** The old tool's ~/.skills-sync: a link to its library clone, or the clone itself. Detected; never read, never removed. */
+export interface OldLibrary {
+  path: string;
+  kind: "link" | "folder";
+  /** where the link points, for a link */
+  target?: string;
+}
+
 export interface Machine {
   /** a claude.ai cloud session (CLAUDE_CODE_REMOTE=true) */
   cloud: boolean;
   harnesses: HarnessState[];
+  /** ~/.skills-sync when it exists: the old library clone or the link to it; in the cloud, proof the old setup line ran */
+  oldLibrary: OldLibrary | null;
 }
 
 /**
@@ -97,7 +107,17 @@ export function probe(table: Harness[], env: NodeJS.ProcessEnv = process.env, cw
   const found = detected(table);
   const roots = [...oldProjects(), path.resolve(cwd)].filter((r, i, all) => all.findIndex((x) => samePath(x, r)) === i);
   const globals = found.map(globalFile).filter((f): f is string => !!f);
-  return { cloud: isCloud(env), harnesses: found.map((h) => probeHarness(h, env, roots, globals)) };
+  return {
+    cloud: isCloud(env),
+    harnesses: found.map((h) => probeHarness(h, env, roots, globals)),
+    oldLibrary: oldLibrary(homeLibrary(os.homedir())),
+  };
+}
+
+function oldLibrary(hl: string): OldLibrary | null {
+  if (!lexists(hl)) return null;
+  if (isLink(hl)) return { path: hl, kind: "link", target: linkTarget(hl) ?? "?" };
+  return isDir(hl) ? { path: hl, kind: "folder" } : null;
 }
 
 /** A claude.ai cloud session: the container sets CLAUDE_CODE_REMOTE=true. */

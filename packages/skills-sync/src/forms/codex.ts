@@ -340,7 +340,7 @@ function sameRepo(source: string, repo: string): boolean {
  * Does the folder hold exactly the release's files for the skill (the plugin's `skills/<name>/...` entries), each with
  * the release's sha256: nothing missing, nothing added, nothing edited. Anything else is the user's.
  */
-function sameFiles(folder: string, p: ReleasePlugin, prefix: string): boolean {
+export function sameFiles(folder: string, p: ReleasePlugin, prefix: string): boolean {
   const want = new Map(
     Object.entries(p.files)
       .filter(([rel]) => rel.startsWith(prefix))
@@ -375,7 +375,7 @@ function filesIn(dir: string): string[] | null {
  * points), inside a checkout of the release repo (a skills-sync.json naming it as the library at some ancestor), or
  * gone ("dangling": the tool's leftover). Null for anything else, which is never removed.
  */
-function libraryCopy(target: string, repo: string): "library" | "dangling" | null {
+export function libraryCopy(target: string, repo: string): "library" | "dangling" | null {
   if (!target) return null;
   if (!lexists(target)) return "dangling";
   const home = homeLibrary(os.homedir());

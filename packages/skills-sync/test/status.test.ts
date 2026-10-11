@@ -1,7 +1,9 @@
 // status: the first machine command. On a machine with no library it reads the latest oneezy/skills release from
 // GitHub (the fake one, through SKILLS_SYNC_GITHUB_API) and shows, per detected harness, its form, each plugin against
 // the latest release, and every skill name listed twice. The CLI runs as a process on the pretend machine
-// (test/machine.ts); the tests assert only output, --json and exit codes, and that nothing was cloned or linked.
+// (test/machine.ts); the tests assert only output, --json and exit codes, and that nothing was cloned or linked. The
+// hook, block, checkout and manual-step lines (tools#155) have their own file, test/status-done.test.ts; here each
+// harness starts with its hook entry and block in place (doneHarness) so only the plugin lines are under test.
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
@@ -13,6 +15,9 @@ import {
   cli,
   codexLegacySkills,
   destroy,
+  doneHarness,
+  globalFile,
+  hooksFile,
   installedPlugin,
   looseLink,
   pretendMachine,
@@ -77,13 +82,22 @@ afterEach(() => {
   for (const m of machines.splice(0)) destroy(m);
 });
 
+/** A machine whose harnesses have their hook entry and block in place already: the plugin lines alone are under test. */
 function machine(options: Parameters<typeof pretendMachine>[0] = {}): PretendMachine {
   const m = pretendMachine({ github: gh, ...options });
   machines.push(m);
+  for (const h of options.harnesses ?? ["claude-code", "codex"]) if (h !== "hermes") doneHarness(m, h);
   return m;
 }
 
 const red = (lines: Line[]) => lines.filter((l) => !l.ok).map((l) => l.text);
+/** The two green lines every done harness shows after its plugin and duplicate lines. */
+const done = (m: PretendMachine, h: "claude-code" | "codex") => [
+  `= session hook in ${hooksFile(m, h)}`,
+  `= global block in ${globalFile(m, h)} current`,
+];
+const NO_CHECKOUT =
+  ". no checkout of oneezy/skills or oneezy/tools in reach (the repository here and the folders beside it)";
 
 test("status on a machine with no library reads the latest release and says what each harness lacks, cloning and linking nothing", async () => {
   const m = machine();
@@ -118,6 +132,7 @@ test("account plugins are compared with the release: current ones green, one beh
   const r17 = gh.fixture.releases.find((r) => r.number === 17)!;
   syncedPlugin(m, "oneezy", { files: r17.plugins.oneezy.files });
   syncedPlugin(m, "matt-pocock", { version: "1.3.0", skills: ["grilling", "tdd"] });
+  syncedPlugin(m, "play", { files: r17.plugins.play.files });
   const r = await cli(m, ["status"]);
   assert.equal(r.status, 1, r.stderr);
   assert.equal(
@@ -127,6 +142,9 @@ test("account plugins are compared with the release: current ones green, one beh
       "Claude Code  form: account plugins",
       "! matt-pocock@synced 1.3.0 (latest 1.3.1)",
       "= oneezy@synced 0.43.1 (latest 0.43.1)",
+      "= play@synced 0.43.0 (latest 0.43.0)",
+      ...done(m, "claude-code"),
+      NO_CHECKOUT,
       "status: 1 red line",
       "",
     ].join("\n"),
@@ -137,6 +155,7 @@ test("account plugins are compared with the release: current ones green, one beh
     [
       ["matt-pocock", "1.3.0", "1.3.1", false, ["grilling", "tdd"]],
       ["oneezy", "0.43.1", "0.43.1", true, ["oneezy-merge", "oneezy-status"]],
+      ["play", "0.43.0", "0.43.0", true, ["play-unslop"]],
     ],
   );
   assert.deepEqual(red(j.harnesses["claude-code"].lines), ["matt-pocock@synced 1.3.0 (latest 1.3.1)"]);
@@ -144,9 +163,19 @@ test("account plugins are compared with the release: current ones green, one beh
   syncedPlugin(m, "matt-pocock", { files: r17.plugins["matt-pocock"].files });
   const ok = await cli(m, ["status"]);
   assert.equal(ok.status, 0, ok.stdout + ok.stderr);
-  assert.match(
+  assert.equal(
     ok.stdout,
-    /= matt-pocock@synced 1\.3\.1 \(latest 1\.3\.1\)\n= oneezy@synced 0\.43\.1 \(latest 0\.43\.1\)\nstatus: all green\n$/,
+    [
+      "latest: oneezy/skills release-17 (1717171)",
+      "Claude Code  form: account plugins",
+      "= matt-pocock@synced 1.3.1 (latest 1.3.1)",
+      "= oneezy@synced 0.43.1 (latest 0.43.1)",
+      "= play@synced 0.43.0 (latest 0.43.0)",
+      ...done(m, "claude-code"),
+      NO_CHECKOUT,
+      "status: all green",
+      "",
+    ].join("\n"),
   );
   // a plugin at the right version but missing a skill the release carries is behind too
   fs.rmSync(path.join(m.claudeHome, "plugins", "synced", "org-1111_bucket-2222", "oneezy", "skills", "oneezy-merge"), {
@@ -199,7 +228,9 @@ test("a skill listed twice on a harness is a red line naming each place: a plugi
     text.stdout.includes(`\n! oneezy-status listed twice: oneezy@synced, loose link -> ${target}\n`),
     text.stdout,
   );
-  assert.ok(text.stdout.endsWith("status: 2 red lines\n"), text.stdout);
+  // beside the red lines, two manual steps: the account plugins not delivered, and Codex's link and folder (not the
+  // library's) to adopt or delete
+  assert.ok(text.stdout.endsWith("status: 2 red lines, 2 manual steps\n"), text.stdout);
   // a third place counts: the account plugin, a plugin the tool installed and a real folder, all named
   installedPlugin(m, "claude-code", "oneezy", { version: "c69993a67bba", skills: ["oneezy-merge"] });
   const folder3 = skillFolder(m, "claude-code", "oneezy-merge");
@@ -282,6 +313,7 @@ test("Hermes keeps the loose form: nothing in its skills folder is red, links an
       "latest: oneezy/skills release-17 (1717171)",
       "Hermes  form: loose skills",
       "! no skills (latest release-17)",
+      NO_CHECKOUT,
       "status: 1 red line",
       "",
     ].join("\n"),
@@ -325,6 +357,7 @@ test("when Codex cannot render its prompt input, a plugin's skills are not read:
     [
       [true, "codex cannot list its plugin skills"],
       [true, "oneezy@oneezy-skills 0.43.1 (latest 0.43.1; skills not read)"],
+      ...done(m, "codex").map((t) => [true, t.slice(2)]),
       [true, "1 loose link, 0 skill folders"],
     ],
   );
@@ -372,6 +405,7 @@ test("a plugin switched off loads nothing: its skills are no place for a duplica
     [
       [true, "matt-pocock@synced 1.3.0 disabled (latest 1.3.1)"],
       [true, "oneezy@synced 0.43.1 (latest 0.43.1)"],
+      ...done(m, "claude-code").map((t) => [true, t.slice(2)]),
       [true, "1 loose link, 0 skill folders"],
       [true, "1 other plugin left alone: foo@elsewhere"],
     ],
@@ -391,7 +425,7 @@ test("a plugin switched off loads nothing: its skills are no place for a duplica
 test("--quiet prints only the red lines under their harness and the summary; a green machine prints nothing", async () => {
   const m = machine({ harnesses: ["claude-code"] });
   const r17 = gh.fixture.releases.find((r) => r.number === 17)!;
-  syncedPlugin(m, "oneezy", { files: r17.plugins.oneezy.files });
+  for (const id of ["oneezy", "matt-pocock", "play"]) syncedPlugin(m, id, { files: r17.plugins[id].files });
   const green = await cli(m, ["status", "--quiet"]);
   assert.equal(green.status, 0, green.stderr);
   assert.equal(green.stdout, "");
@@ -441,9 +475,17 @@ test("when GitHub cannot be reached, or the latest release has no release.json, 
   );
   assert.deepEqual(red(s.harnesses["claude-code"].lines), []);
   const text = await cli(m, ["status"]);
-  assert.match(
-    text.stdout,
-    /^! latest release of oneezy\/skills: .*\nClaude Code  form: account plugins\n\. oneezy@synced 0\.43\.1 \(latest unknown\)\nstatus: 1 red line\n$/,
+  assert.equal(
+    text.stdout.replace(/^! latest release of oneezy\/skills: .*\n/, "! latest release\n"),
+    [
+      "! latest release",
+      "Claude Code  form: account plugins",
+      ". oneezy@synced 0.43.1 (latest unknown)",
+      ...done(m, "claude-code"),
+      NO_CHECKOUT,
+      "status: 1 red line",
+      "",
+    ].join("\n"),
   );
 
   const bare = await startFakeGithub({
