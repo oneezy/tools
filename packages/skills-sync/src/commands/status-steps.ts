@@ -7,7 +7,7 @@
 // adopt or delete, and, in the cloud, the old setup line that still cloned the old library and linked every skill a
 // second time. The rules for "a library copy" and "the release's own files" are the forms' own (machine.ts's libraryCopy,
 // the Codex form's sameFiles), so status and sync agree on what sync removes and what it leaves for a person.
-import { catalogOf, formOf, pluginsFor, serves } from "../desired.js";
+import { catalogOf, formOf, pluginsFor, sameCatalog, serves } from "../desired.js";
 import { sameFiles } from "../forms/codex.js";
 import { lexists } from "../fs.js";
 import { libraryCopy, type HarnessState, type Machine } from "../machine.js";
@@ -78,7 +78,7 @@ const count = (n: number, one: string, many = `${one}s`): string => `${n} ${n ==
  * account plugin at all, the account sync itself is off, not a plugin: one step about the sign-in, not one per plugin.
  */
 function claudePlugins(state: HarnessState, release: Release | null): ManualStep | null {
-  if (!release || state.note || !state.cli) return null;
+  if (!release || !state.listed) return null;
   const name = state.harness.name;
   if (!state.synced.length)
     return {
@@ -134,7 +134,7 @@ function otherPlugins(state: HarnessState, release: Release | null): ManualStep 
   if (!release) return null;
   const others = state.installed
     // a plugin switched off loads nothing, so it doubles nothing
-    .filter((p) => p.enabled && p.marketplace !== catalogOf(release) && ids(release, state).includes(p.id))
+    .filter((p) => p.enabled && !sameCatalog(p.marketplace, catalogOf(release)) && ids(release, state).includes(p.id))
     .sort((a, b) => a.id.localeCompare(b.id));
   if (!others.length) return null;
   const name = state.harness.name;

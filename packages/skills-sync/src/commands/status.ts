@@ -339,7 +339,10 @@ function harnessReport(state: HarnessState, form: MachineForm, release: Release 
   // else is there
   const tag = release ? release.tag : "unknown";
   const nothing = form === "loose" ? !state.loose.length && !state.folders.length : !synced.length && !installed.length;
-  if (nothing)
+  // codex missing, or failing to list: what it has installed is unknown, which is not nothing (still red: not done)
+  const unread = state.harness.id === "codex" && !state.listed;
+  if (unread) machineLine(red(`plugins not read (${state.note ?? `no ${state.harness.id} on PATH`}; latest ${tag})`));
+  else if (nothing)
     machineLine(red(form === "loose" ? `no skills (latest ${tag})` : `no plugins installed (latest ${tag})`));
   const duplicates = [...places]
     .filter(([, where]) => where.length > 1)

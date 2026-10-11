@@ -468,6 +468,20 @@ test("without the claude CLI the account plugins are read from their folders and
   assert.deepEqual(r.calls, []);
 });
 
+test("when Codex is missing, or cannot list its plugins, its plugins are not read: one red line says so, not that nothing is installed", async () => {
+  const absent = machine({ harnesses: ["codex"], clis: ["claude"] });
+  const r = await cli(absent, ["status", "--json"]);
+  assert.equal(r.status, 1, r.stderr);
+  const codex = (r.json as unknown as StatusJson).harnesses.codex;
+  assert.deepEqual(red(codex.lines), ["plugins not read (no codex on PATH; latest release-17)"]);
+  const failing = machine({ harnesses: ["codex"] });
+  const f = await cli(failing, ["status"], { FAKE_HARNESS_FAIL_LIST: "codex" });
+  assert.equal(f.status, 1, f.stderr);
+  const out = f.stdout.trimEnd().split("\n");
+  assert.ok(out.includes("! plugins not read (codex cannot list its plugins; latest release-17)"), f.stdout);
+  assert.ok(!out.some((l) => l.includes("no plugins installed")), f.stdout);
+});
+
 test("when GitHub cannot be reached, or the latest release has no release.json, the release line is red and the machine is still described", async () => {
   const m = machine({ github: null, harnesses: ["claude-code"] });
   syncedPlugin(m, "oneezy", { version: "0.43.1", skills: ["oneezy-merge", "oneezy-status"] });

@@ -549,6 +549,23 @@ test("a Codex plugin of a library plugin's name from another marketplace is red 
   );
 });
 
+test("a release config that writes the library's name in another case (Oneezy/Skills) names the same catalog: Codex's plugins from oneezy-skills are the library's, no step to uninstall them", async () => {
+  const m = machine();
+  const { skills } = await synced(m);
+  const contents = gh.fixture.contents![r17.commit];
+  const was = contents["skills-sync.json"];
+  contents["skills-sync.json"] = fixtureConfig("Oneezy/Skills", "0.43.1");
+  try {
+    const r = await cli(m, ["status", "--json"], {}, skills);
+    assert.equal(r.status, 0, r.stdout);
+    const j = json(r);
+    assert.deepEqual(j.manualSteps, []);
+    assert.deepEqual(j.harnesses.codex.duplicates, []);
+  } finally {
+    contents["skills-sync.json"] = was;
+  }
+});
+
 test("a Codex plugin from another marketplace that is switched off doubles nothing: no step to uninstall it", async () => {
   const m = machine();
   const { skills } = await synced(m);

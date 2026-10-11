@@ -184,14 +184,20 @@ function mainWorktree(cwd: string, env: NodeJS.ProcessEnv): string | null {
 
 /**
  * One checkout: on dev with a clean tree, fetch origin (every branch, gone ones pruned: dev for the fast-forward, the
- * rest for the drift line), fast-forward and say so when it moved; otherwise name the branch and the dirty files and
- * touch nothing, not even a fetch, which it would get no fast-forward from and which is up to 30 s of a session start
+ * rest for the drift line), fast-forward and say so when it moved; otherwise name the branch and the dirty files (or
+ * that git status could not be read, which is never taken for clean) and touch nothing, not even a fetch, which it would get no fast-forward from and which is up to 30 s of a session start
  * (stories 33, 34, 75). A fetch or a merge that fails is a line, not a stop. Returns whether the fetch worked, which
  * is what the drift line needs.
  */
 function tend(c: Checkout, env: NodeJS.ProcessEnv, write: (t: string) => void, warn: (t: string) => void): boolean {
   const branch = git(c.path, ["rev-parse", "--abbrev-ref", "HEAD"], env).out.trim() || "HEAD";
-  const dirty = git(c.path, ["status", "--porcelain"], env).out.split(/\r?\n/).filter(Boolean).length;
+  const status = git(c.path, ["status", "--porcelain"], env);
+  // a status git could not give is no clean tree: nothing is fetched or merged on a guess
+  if (!status.ok) {
+    warn(`${c.path}: git status not read ${reason(status)}; left alone\n`);
+    return false;
+  }
+  const dirty = status.out.split(/\r?\n/).filter(Boolean).length;
   if (branch !== "dev" || dirty) {
     warn(`${c.path}: on ${branch}${dirty ? `, dirty (${count(dirty, "file")})` : ""}; left alone\n`);
     return false;
