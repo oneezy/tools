@@ -11,9 +11,10 @@ export class GitHubError extends Error {
     /** the HTTP status, or 0 when no response came back */
     public status: number,
     public url: string,
-    message: string,
+    /** what went wrong, without the URL: "404 Not Found", "ECONNREFUSED", "not JSON" */
+    public detail: string,
   ) {
-    super(message);
+    super(`${url}: ${detail}`);
     this.name = "GitHubError";
   }
 }
@@ -71,7 +72,7 @@ export function github(env: NodeJS.ProcessEnv = process.env, fetchImpl: typeof f
     } catch (error) {
       const cause = (error as { cause?: { code?: string; message?: string } }).cause;
       const why = cause?.code ?? cause?.message ?? (error instanceof Error ? error.message : String(error));
-      throw new GitHubError(0, url, `${url}: ${why}`);
+      throw new GitHubError(0, url, why);
     }
     if (!res.ok) {
       let detail = `${res.status} ${res.statusText}`.trim();
@@ -81,28 +82,34 @@ export function github(env: NodeJS.ProcessEnv = process.env, fetchImpl: typeof f
       } catch {
         /* no JSON body: the status line is the message */
       }
-      throw new GitHubError(res.status, url, `${url}: ${detail}`);
+      throw new GitHubError(res.status, url, detail);
     }
     return res;
+  };
+  /** The body of a successful answer as JSON; anything else (an HTML page from a proxy, say) is an error, not a crash. */
+  const json = async <T>(res: Response, path: string): Promise<T> => {
+    try {
+      return (await res.json()) as T;
+    } catch {
+      throw new GitHubError(res.status, baseUrl + path, "not JSON");
+    }
   };
   return {
     baseUrl,
     hasToken: token !== "",
     async getJson<T>(path: string): Promise<T> {
-      const res = await request(path, JSON_ACCEPT);
-      return (await res.json()) as T;
+      return json<T>(await request(path, JSON_ACCEPT), path);
     },
     async getList<T>(path: string): Promise<T[]> {
       const items: T[] = [];
       let next: string | null = path;
       while (next) {
         const res = await request(next, JSON_ACCEPT);
-        items.push(...((await res.json()) as T[]));
+        items.push(...(await json<T[]>(res, next)));
         const link = nextPage(res.headers.get("link"));
         if (!link) break;
         // GitHub's next-page links stay on the API host; one elsewhere would carry the token to a stranger
-        if (!link.startsWith(baseUrl + "/"))
-          throw new GitHubError(0, link, `${link}: next page is not under ${baseUrl}`);
+        if (!link.startsWith(baseUrl + "/")) throw new GitHubError(0, link, `next page is not under ${baseUrl}`);
         next = link.slice(baseUrl.length);
       }
       return items;
@@ -112,8 +119,7 @@ export function github(env: NodeJS.ProcessEnv = process.env, fetchImpl: typeof f
       return Buffer.from(await res.arrayBuffer());
     },
     async post<T>(path: string, body: unknown): Promise<T> {
-      const res = await request(path, JSON_ACCEPT, "POST", JSON.stringify(body));
-      return (await res.json()) as T;
+      return json<T>(await request(path, JSON_ACCEPT, "POST", JSON.stringify(body)), path);
     },
     async del(path: string): Promise<void> {
       await request(path, JSON_ACCEPT, "DELETE");

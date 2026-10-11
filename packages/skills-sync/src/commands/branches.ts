@@ -7,11 +7,6 @@
 import { github, GitHubError, type GitHub } from "../github.js";
 import { isRepoName } from "../release.js";
 
-/** The branch names the rules never delete: the two core branches and the one keep marker (ADR-0013). */
-export function isKeptName(name: string): boolean {
-  return name === "main" || name === "dev" || name.endsWith("-keep");
-}
-
 export interface BranchLine {
   /** "-" a delete (with its tag, when one is made), "!" a problem, "." a branch left alone or a note, "=" the kept names */
   mark: "-" | "!" | "." | "=";
@@ -78,6 +73,19 @@ interface UserRepo {
   archived?: boolean;
 }
 
+/** One repository being cleaned: what every rule needs to know, and the report it writes into. */
+interface Job {
+  gh: GitHub;
+  repo: string;
+  /** the repository's owner, the `owner:` half of a pull request's head */
+  owner: string;
+  plan: boolean;
+  r: RepoReport;
+}
+
+/** The branch names the rules never delete: the two core branches and the one keep marker (ADR-0013). */
+const isKeptName = (name: string): boolean => name === "main" || name === "dev" || name.endsWith("-keep");
+
 /** A ref name in a URL path: each segment encoded, the slashes kept, as GitHub's ref routes expect. */
 const refPath = (name: string): string => name.split("/").map(encodeURIComponent).join("/");
 
@@ -85,12 +93,9 @@ const short = (sha: string): string => sha.slice(0, 7);
 
 const count = (n: number, what: string): string => `${n} ${what}${n === 1 ? "" : "s"}`;
 
-/** Why a GitHub call failed, without the URL its message starts with. */
-function detail(e: unknown): string {
-  if (e instanceof GitHubError)
-    return e.message.startsWith(e.url + ": ") ? e.message.slice(e.url.length + 2) : e.message;
-  return e instanceof Error ? e.message : String(e);
-}
+/** Why a call failed: GitHub's status and message, or the error's text. */
+const detail = (e: unknown): string =>
+  e instanceof GitHubError ? e.detail : e instanceof Error ? e.message : String(e);
 
 /** Apply the rules (or plan them), print the report. Exit code: 0 all done or planned, 1 something reported, 2 bad usage. */
 export async function runBranches(options: BranchesOptions): Promise<number> {
@@ -136,7 +141,7 @@ async function ownRepos(gh: GitHub): Promise<string[]> {
  * One repository: list its branches, decide each by the rules, make (or plan) the tags and deletes. Any GitHub error
  * stops this repository where it is, reported, and the next repository still runs.
  */
-export async function cleanRepo(gh: GitHub, repo: string, plan: boolean): Promise<RepoReport> {
+async function cleanRepo(gh: GitHub, repo: string, plan: boolean): Promise<RepoReport> {
   const r: RepoReport = { repo, kept: [], deleted: [], archived: [], left: [], skipped: null, problems: [], lines: [] };
   const skip = (reason: string) => {
     r.skipped = reason;
@@ -156,17 +161,17 @@ export async function cleanRepo(gh: GitHub, repo: string, plan: boolean): Promis
     r.lines.push({ mark: ".", text: "skipped: no dev branch" });
     return r;
   }
-  const owner = repo.split("/")[0];
   const sorted = [...branches].sort((a, z) => a.name.localeCompare(z.name));
   // the kept names are known from the listing alone: nothing is ever asked about them
   r.kept = sorted.filter((b) => isKeptName(b.name)).map((b) => b.name);
   const keptLine = () => {
     if (r.kept.length) r.lines.push({ mark: "=", text: `kept: ${r.kept.join(", ")}` });
   };
+  const job: Job = { gh, repo, owner: repo.split("/")[0], plan, r };
   for (const b of sorted) {
     if (isKeptName(b.name)) continue;
     try {
-      await decide(gh, repo, owner, b, plan, r);
+      await decide(job, b);
     } catch (e) {
       const status = e instanceof GitHubError ? e.status : 0;
       keptLine();
@@ -179,15 +184,16 @@ export async function cleanRepo(gh: GitHub, repo: string, plan: boolean): Promis
 }
 
 /** The rules for one branch that is not main, dev or *-keep. Writes go through here only when `plan` is false. */
-async function decide(gh: GitHub, repo: string, owner: string, b: Branch, plan: boolean, r: RepoReport): Promise<void> {
+async function decide({ gh, repo, owner, plan, r }: Job, b: Branch): Promise<void> {
   const left = (why: string) => {
     r.left.push({ branch: b.name, why });
     r.lines.push({ mark: ".", text: `${b.name}  left: ${why}` });
   };
-  const remove = async (reason: string, tag = "") => {
+  /** Delete the branch (unless planning); `prefix` names the tag made first, when one was. */
+  const remove = async (reason: string, prefix = "") => {
     if (!plan) await gh.del(`/repos/${repo}/git/refs/heads/${refPath(b.name)}`);
     r.deleted.push({ branch: b.name, reason });
-    r.lines.push({ mark: "-", text: `${b.name}  ${tag}${plan ? "delete" : "deleted"}: ${reason}` });
+    r.lines.push({ mark: "-", text: `${b.name}  ${prefix}${plan ? "delete" : "deleted"}: ${reason}` });
   };
   if (b.protected) return left("protected on GitHub");
   const pulls = await gh.getList<Pull>(

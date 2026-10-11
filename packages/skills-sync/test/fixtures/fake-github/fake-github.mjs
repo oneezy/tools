@@ -257,12 +257,13 @@ export async function startFakeGithub(fixture = fixtureLibrary()) {
       const pullJson = (p) => {
         const headSha = p.sha ?? repo.branches[p.head]?.sha ?? sha("0");
         const merged = !!p.merged;
+        const state = p.state ?? (merged ? "closed" : "open");
         return {
           number: p.number,
-          state: p.state ?? (merged ? "closed" : "open"),
+          state,
           title: p.title ?? `${p.head} into ${p.base ?? "dev"}`,
           merged_at: merged ? "2026-10-10T00:00:00Z" : null,
-          closed_at: (p.state ?? (merged ? "closed" : "open")) === "closed" ? "2026-10-10T00:00:00Z" : null,
+          closed_at: state === "closed" ? "2026-10-10T00:00:00Z" : null,
           merge_commit_sha: merged ? sha(String(p.number)) : null,
           base: { ref: p.base ?? "dev", sha: repo.branches[p.base ?? "dev"]?.sha ?? sha("0") },
           head: { ref: p.head, sha: headSha, repo: { full_name: full } },

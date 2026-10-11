@@ -22,6 +22,8 @@ export interface AccountPlugin {
   path: string;
   /** the claude.ai marketplace label the bucket's manifest records (Justin's library is "skills"); null when unknown */
   marketplace: string | null;
+  /** switched off at claude.ai: listed, never judged; true when read from the folders without the CLI */
+  enabled: boolean;
 }
 
 /** A plugin installed through the harness's CLI: <id>@<marketplace>. */
@@ -29,7 +31,8 @@ export interface CliPlugin {
   id: string;
   marketplace: string;
   version: string | null;
-  skills: string[];
+  /** the skills it carries; null when they could not be read (Codex without its prompt input) */
+  skills: string[] | null;
   enabled: boolean;
   /** where the harness reads it from, when it says */
   path: string | null;
@@ -50,7 +53,7 @@ export interface HarnessState {
   harness: Harness;
   /** the harness's plugin CLI on PATH; null when the harness has none or it is not installed */
   cli: string | null;
-  /** why plugins could not be listed through the CLI, when they could not */
+  /** why plugins, or their skills, could not be listed through the CLI, when they could not */
   note?: string;
   synced: AccountPlugin[];
   installed: CliPlugin[];
@@ -80,10 +83,14 @@ function probeHarness(h: Harness, env: NodeJS.ProcessEnv): HarnessState {
       if (!listed) state.note = `${cli.bin} cannot list its plugins`;
       else {
         // Codex names no folder for a plugin; its loaded skills come from the prompt input it renders locally
-        const codexSkills = h.id === "codex" && listed.length ? codexPluginSkills(run) : null;
+        let codexSkills: Map<string, string[]> | null = null;
+        if (h.id === "codex" && listed.length) {
+          codexSkills = codexPluginSkills(run);
+          if (!codexSkills) state.note = `${cli.bin} cannot list its plugin skills`;
+        }
         for (const p of listed) {
           if (p.scope === "synced" || p.marketplace === "synced") {
-            if (p.folder) state.synced.push(accountPlugin(p.name, p.folder, p.version));
+            if (p.folder) state.synced.push(accountPlugin(p.name, p.folder, p.version, p.enabled));
           } else
             state.installed.push({
               id: p.name,
@@ -91,7 +98,8 @@ function probeHarness(h: Harness, env: NodeJS.ProcessEnv): HarnessState {
               version: p.version,
               enabled: p.enabled,
               path: p.folder,
-              skills: p.folder ? skillsIn(p.folder) : (codexSkills?.get(p.name) ?? []),
+              // no folder and no prompt input: the skills are unknown, not none
+              skills: p.folder ? skillsIn(p.folder) : codexSkills ? (codexSkills.get(p.name) ?? []) : null,
             });
         }
       }
@@ -102,9 +110,11 @@ function probeHarness(h: Harness, env: NodeJS.ProcessEnv): HarnessState {
   for (const dir of [h.userSkills, ...(h.legacyUserSkills ?? [])]) {
     if (!isDir(dir)) continue;
     for (const name of fs.readdirSync(dir).sort()) {
+      // the harness's own entries (.system, synced) and dot names are never a skill, link or folder
+      if (RESERVED.has(name) || name.startsWith(".")) continue;
       const p = path.join(dir, name);
       if (isLink(p)) state.loose.push({ name, path: p, target: linkTarget(p) ?? "" });
-      else if (!RESERVED.has(name) && !name.startsWith(".") && isSkillDir(p)) state.folders.push({ name, path: p });
+      else if (isSkillDir(p)) state.folders.push({ name, path: p });
     }
   }
   return state;
@@ -129,10 +139,13 @@ function readJson(file: string): Record<string, unknown> | null {
   }
 }
 
-/** The plugin's version as the library wrote it: the root plugin.json, else the Claude manifest. */
-function pluginVersion(dir: string): string | null {
+/**
+ * A field of the plugin's manifest: the root plugin.json as the library writes it, else the Claude manifest (claude.ai's
+ * own plugins, such as design, live in a UUID folder with only that one).
+ */
+function manifestField(dir: string, field: "name" | "version"): string | null {
   for (const file of ["plugin.json", path.join(".claude-plugin", "plugin.json")]) {
-    const v = readJson(path.join(dir, file))?.version;
+    const v = readJson(path.join(dir, file))?.[field];
     if (typeof v === "string" && v) return v;
   }
   return null;
@@ -150,9 +163,10 @@ function accountMarketplace(dir: string): string | null {
   return typeof entry?.marketplaceName === "string" ? entry.marketplaceName : null;
 }
 
-function accountPlugin(id: string, dir: string, listedVersion: string | null): AccountPlugin {
-  const version = pluginVersion(dir) ?? (listedVersion && listedVersion !== "unknown" ? listedVersion : null);
-  return { id, version, skills: skillsIn(dir), path: dir, marketplace: accountMarketplace(dir) };
+function accountPlugin(id: string, dir: string, listedVersion: string | null, enabled: boolean): AccountPlugin {
+  const version =
+    manifestField(dir, "version") ?? (listedVersion && listedVersion !== "unknown" ? listedVersion : null);
+  return { id, version, skills: skillsIn(dir), path: dir, marketplace: accountMarketplace(dir), enabled };
 }
 
 /** Without the CLI: every plugin folder under plugins/synced/<bucket>/, the bucket's manifest and meta files skipped. */
@@ -166,8 +180,7 @@ function scanSynced(configDir: string): AccountPlugin[] {
     for (const name of fs.readdirSync(dir).sort()) {
       const p = path.join(dir, name);
       if (name.startsWith(".") || !isDir(p)) continue;
-      const manifestName = readJson(path.join(p, "plugin.json"))?.name;
-      out.push(accountPlugin(typeof manifestName === "string" && manifestName ? manifestName : name, p, null));
+      out.push(accountPlugin(manifestField(p, "name") ?? name, p, null, true));
     }
   }
   return out;

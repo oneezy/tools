@@ -28,15 +28,17 @@ export interface StatusPlugin {
   version: string | null;
   /** the release's version of this plugin; null when the release has no such plugin or was not read */
   latest: string | null;
-  /** version and skill set both match the release */
+  /** version and skill set both match the release; with the skills not read, the version alone */
   current: boolean;
-  skills: string[];
+  /** null when the harness could not say which skills the plugin loads */
+  skills: string[] | null;
   path: string | null;
+  /** switched off: listed, never judged, its skills no place for a duplicate */
+  enabled: boolean;
 }
 
 export interface StatusInstalled extends StatusPlugin {
   marketplace: string;
-  enabled: boolean;
 }
 
 /** A plugin that is not the library's: an account plugin from another marketplace, or a CLI install from elsewhere. */
@@ -45,7 +47,7 @@ export interface StatusOther {
   marketplace: string | null;
   scope: "synced" | "installed";
   version: string | null;
-  skills: string[];
+  skills: string[] | null;
 }
 
 export interface StatusHarness {
@@ -132,20 +134,25 @@ export function statusReport(
 }
 
 function sameSet(a: string[], b: string[]): boolean {
-  return a.length === b.length && [...a].sort().every((x, i) => x === [...b].sort()[i]);
+  if (a.length !== b.length) return false;
+  const sa = [...a].sort();
+  const sb = [...b].sort();
+  return sa.every((x, i) => x === sb[i]);
 }
 
 function compare(
-  p: { id: string; version: string | null; skills: string[]; path: string | null },
+  p: { id: string; version: string | null; skills: string[] | null; path: string | null; enabled: boolean },
   latest: ReleasePlugin | undefined,
 ): StatusPlugin {
   return {
     id: p.id,
     version: p.version,
     latest: latest?.version ?? null,
-    current: !!latest && p.version === latest.version && sameSet(p.skills, latest.skills),
+    // skills not read: the version alone decides
+    current: !!latest && p.version === latest.version && (p.skills === null || sameSet(p.skills, latest.skills)),
     skills: p.skills,
     path: p.path,
+    enabled: p.enabled,
   };
 }
 
@@ -154,9 +161,11 @@ function against(p: StatusPlugin, latest: ReleasePlugin | undefined, release: Re
   if (!release) return "(latest unknown)";
   if (!latest) return "(not in the release)";
   const parts = [`latest ${latest.version ?? "no version"}`];
-  if (!sameSet(p.skills, latest.skills)) {
-    const missing = latest.skills.filter((s) => !p.skills.includes(s));
-    const extra = p.skills.filter((s) => !latest.skills.includes(s));
+  const skills = p.skills;
+  if (skills === null) parts.push("skills not read");
+  else if (!sameSet(skills, latest.skills)) {
+    const missing = latest.skills.filter((s) => !skills.includes(s));
+    const extra = skills.filter((s) => !latest.skills.includes(s));
     parts.push(
       `skills differ: ${[missing.length ? `missing ${missing.join(", ")}` : "", extra.length ? `extra ${extra.join(", ")}` : ""].filter(Boolean).join("; ")}`,
     );
@@ -178,7 +187,8 @@ function harnessReport(state: HarnessState, form: MachineForm, release: Release 
 
   if (state.note) lines.push(note(state.note));
   for (const p of byId(state.synced)) {
-    for (const s of p.skills) place(s, `${p.id}@synced`);
+    // a plugin switched off loads nothing: its skills are no place for a duplicate
+    if (p.enabled) for (const s of p.skills) place(s, `${p.id}@synced`);
     const latest = release?.plugins[p.id];
     // without the release, every account plugin may be the library's: all are listed, none judged
     if (release && !latest) {
@@ -187,17 +197,22 @@ function harnessReport(state: HarnessState, form: MachineForm, release: Release 
     }
     const c = compare(p, latest);
     synced.push(c);
-    const text = `${p.id}@synced ${v(p.version)} ${against(c, latest, release)}`;
+    const name = `${p.id}@synced ${v(p.version)}`;
+    if (!p.enabled) {
+      lines.push(note(`${name} disabled ${against(c, latest, release)}`));
+      continue;
+    }
+    const text = `${name} ${against(c, latest, release)}`;
     lines.push(!release ? note(text) : c.current ? green(text) : red(text));
   }
   for (const p of byId(state.installed)) {
-    for (const s of p.skills) place(s, `${p.id}@${p.marketplace}`);
+    if (p.enabled) for (const s of p.skills ?? []) place(s, `${p.id}@${p.marketplace}`);
     if (p.marketplace !== LIBRARY_MARKETPLACE) {
       other.push({ id: p.id, marketplace: p.marketplace, scope: "installed", version: p.version, skills: p.skills });
       continue;
     }
     const latest = release?.plugins[p.id];
-    const c = { ...compare(p, latest), marketplace: p.marketplace, enabled: p.enabled };
+    const c = { ...compare(p, latest), marketplace: p.marketplace };
     installed.push(c);
     const name = `${p.id}@${p.marketplace} ${v(p.version)}`;
     // Claude Code's form is the account plugin; a CLI install of the same name hides it (ADR-0007)
@@ -211,15 +226,17 @@ function harnessReport(state: HarnessState, form: MachineForm, release: Release 
   for (const l of state.loose) place(l.name, `loose link -> ${l.target}`);
   for (const f of state.folders) place(f.name, `folder ${f.path}`);
 
+  // after the plugin lines: what is missing, then the duplicates, then the notes on what else is there
   const tag = release ? release.tag : "unknown";
-  if (form === "loose") {
-    if (!state.loose.length && !state.folders.length) lines.push(red(`no skills (latest ${tag})`));
-    else lines.push(note(`${count(state.loose.length, "loose link")}, ${count(state.folders.length, "skill folder")}`));
-  } else {
-    if (!synced.length && !installed.length) lines.push(red(`no plugins installed (latest ${tag})`));
-    if (state.loose.length || state.folders.length)
-      lines.push(note(`${count(state.loose.length, "loose link")}, ${count(state.folders.length, "skill folder")}`));
-  }
+  const nothing = form === "loose" ? !state.loose.length && !state.folders.length : !synced.length && !installed.length;
+  if (nothing) lines.push(red(form === "loose" ? `no skills (latest ${tag})` : `no plugins installed (latest ${tag})`));
+  const duplicates = [...places]
+    .filter(([, where]) => where.length > 1)
+    .map(([skill, where]) => ({ skill, in: where }));
+  for (const d of duplicates)
+    lines.push(red(`${d.skill} listed ${d.in.length === 2 ? "twice" : `${d.in.length} times`}: ${d.in.join(", ")}`));
+  if (state.loose.length || state.folders.length)
+    lines.push(note(`${count(state.loose.length, "loose link")}, ${count(state.folders.length, "skill folder")}`));
   if (other.length)
     lines.push(
       note(
@@ -231,11 +248,6 @@ function harnessReport(state: HarnessState, form: MachineForm, release: Release 
           .join(", ")}`,
       ),
     );
-  const duplicates = [...places]
-    .filter(([, where]) => where.length > 1)
-    .map(([skill, where]) => ({ skill, in: where }));
-  for (const d of duplicates)
-    lines.push(red(`${d.skill} listed ${d.in.length === 2 ? "twice" : `${d.in.length} times`}: ${d.in.join(", ")}`));
 
   return {
     name: state.harness.name,
