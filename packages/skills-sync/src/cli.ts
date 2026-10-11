@@ -579,6 +579,12 @@ async function main(): Promise<void> {
   const choices = await decide(args, local, lib, table, cwd, interactive);
   if (!choices) return p.cancel("nothing changed");
   if (!args.plan) saveLocal(lib.root, choices);
+  // until #154: Claude Code's form is the account plugins (ADR-0007), which the machine sync above served; the old run
+  // would put the tool's plugins and links back there, so it serves the other harnesses only
+  if (machineSync) {
+    choices.agents = choices.agents.filter((h) => h.id !== "claude-code");
+    if (!choices.agents.length) return printReport(setup, args, { entrypoints: [] });
+  }
 
   // 5. run
   await runOnce(lib, choices, args, cwd, setup);
@@ -1147,6 +1153,10 @@ async function runOnce(lib: Library, c: Choices, args: Args, cwd: string, report
         d,
         lib.root,
         [
+          // the distro runs the published old flow, which knows no machine sync: name the harnesses this run serves,
+          // so it never touches Claude Code there either (until #154 deletes the fan-out)
+          "--agents",
+          c.agents.map((h) => h.id).join(","),
           ...(!args.entrypoints ? ["--no-entrypoints"] : []),
           ...(!args.remember ? ["--no-remember"] : []),
           ...(args.form ? [args.form === "plugin" ? "--plugins" : "--links"] : []),

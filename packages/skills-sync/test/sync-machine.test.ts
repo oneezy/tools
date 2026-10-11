@@ -132,11 +132,19 @@ test("sync on a machine with no library writes the skills block into both global
     r.stdout,
   );
   assert.equal(lines.at(-1), "2 changed, 0 already right, 0 left alone");
-  // the forms are named, not acted on, until their tickets land
+  // Claude Code's form is the account plugins: claude lists none here, which is one line about the sign-in, not one
+  // manual step per plugin of the release
   assert.ok(
-    lines.some((l) => l.startsWith(". note") && l.includes("Claude Code") && l.includes("form: account plugins")),
+    lines.some(
+      (l) =>
+        l.startsWith(". note") &&
+        l.includes("Claude Code") &&
+        l.includes("claude lists no account plugins; check it is logged in with the claude.ai account"),
+    ),
     r.stdout,
   );
+  assert.ok(!r.stdout.includes("not delivered"), r.stdout);
+  // the other forms are named, not acted on, until their tickets land
   assert.ok(
     lines.some((l) => l.startsWith(". note") && l.includes("Codex") && l.includes("form: plugins from GitHub")),
     r.stdout,
@@ -474,10 +482,10 @@ test("a PC with a library keeps the old library-based sync after the block, with
   globalBlock(m, "claude-code", "brain", "## Brain\nold");
   const r = await cli(m, ["--no-wsl"]);
   assert.equal(r.status, 0, r.stderr);
-  // the block first, then what the old run did: the user-folder links of the library's skills, as before
+  // the block first, then what the old run did: the user-folder links of the library's skills, as before, on every
+  // harness but Claude Code, whose form is the account plugins now (tools#149): no link, no plugin of the tool's there
   for (const h of ["claude-code", "codex"] as const) assertBlock(read(globalFile(m, h)));
-  const link = path.join(m.claudeHome, "skills", "oneezy-status");
-  assert.ok(isLink(link), link);
+  assert.equal(lexists(path.join(m.claudeHome, "skills")), false);
   assert.ok(isLink(path.join(m.home, ".agents", "skills", "oneezy-status")));
   const lines = r.stdout.trimEnd().split("\n");
   const write = lines.findIndex((l) => l.startsWith("+ write") && l.includes("CLAUDE.md"));
