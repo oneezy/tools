@@ -116,7 +116,7 @@ test("every other entry and key stays byte for byte: a foreign SessionStart grou
       PreToolUse: [{ matcher: "Bash", hooks: [{ type: "command", command: "echo pre" }] }],
       SessionStart: [{ matcher: "startup", hooks: [{ type: "command", command: "echo mine", timeout: 5 }] }],
     },
-    model: "opus",
+    theme: "dark",
   };
   // four spaces, CRLF, no trailing newline
   write(claude, JSON.stringify(claudeDoc, null, 4).replace(/\n/g, "\r\n"));
@@ -223,6 +223,31 @@ test("Codex: an untrusted entry is a note with the manual step; trust recorded i
   assert.deepEqual(actions(trusted.json, codex), [["skip", "session hook current"]]);
   assert.equal(read(config), toml);
   assert.ok(!trusted.stdout.includes("needs trust"), trusted.stdout);
+  // the other shapes Codex could write the same record in are read too; a record for another position is not
+  const key = (group: number) => `${codex.replace(/\\/g, "\\\\")}:session_start:${group}:0`;
+  const hash = `"sha256:${"cd".repeat(32)}"`;
+  const forms = (g: number) => [
+    `[hooks.state]\n"${key(g)}".trusted_hash = ${hash}\n`,
+    `[hooks.state]\n"${key(g)}" = { trusted_hash = ${hash} }\n`,
+    `[hooks]\nstate."${key(g)}".trusted_hash = ${hash}\n`,
+    `[hooks]\nstate."${key(g)}" = { trusted_hash = ${hash} }\n`,
+    `hooks.state."${key(g)}".trusted_hash = ${hash}\n`,
+  ];
+  for (const [g, want] of [
+    [1, [["skip", "session hook current"]]],
+    [
+      0,
+      [
+        ["skip", "session hook current"],
+        ["note", CODEX_TRUST_STEP],
+      ],
+    ],
+  ] as const)
+    for (const form of forms(g)) {
+      write(config, form);
+      const again = await cli(m, ["--json"]);
+      assert.deepEqual(actions(again.json, codex), want, form);
+    }
 });
 
 test("--plan lists both hook writes and writes nothing; a cloud session writes no hook at all", async () => {

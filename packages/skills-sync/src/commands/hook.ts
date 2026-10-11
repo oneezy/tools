@@ -1,13 +1,14 @@
 // hook: what the session-start entry runs (ADR-0010). First the machine sync, quietly: nothing printed unless something
 // changed or went wrong. Then the checkout duties on the clones of oneezy/skills and oneezy/tools this session can see
 // (the repository the current folder is in and the folders beside it, found on every run, nothing remembered,
-// ADR-0012): fetch origin; a clean checkout on dev is fast-forwarded, a dirty one or one on another branch is named
-// and left alone. Last, one line per repository: the branches ahead of dev, counted from the refs the fetch just
-// brought (no request spent: the hook often runs without a token, and anonymous GitHub allows 60 requests an hour),
-// and the open pull requests into dev, one GitHub request. The harness feeds stdout to the model as session context,
-// so stdout carries only what a user should read, and problems go to stderr. The exit code is 0 unless the sync hit a
-// conflict a person must fix: GitHub out of reach, a fetch that fails or a checkout that cannot fast-forward are
-// reported, not failures of the session start.
+// ADR-0012): a clean checkout on dev is fetched and fast-forwarded, a dirty one or one on another branch is named and
+// left alone, not even fetched. Last, one line per repository: the branches ahead of dev, counted from the refs the
+// fetch just brought (no request spent: the hook often runs without a token, and anonymous GitHub allows 60 requests
+// an hour), and the open pull requests into dev, one GitHub request; eight names at most of each, the rest a count,
+// since the harness feeds stdout to the model as session context. Stdout carries only what a user should read, and
+// problems go to stderr. The exit code is 0 unless the sync hit a conflict a person must fix: GitHub out of reach, a
+// fetch that fails or a checkout that cannot fast-forward are reported, not failures of the session start. Every git
+// call has 30 s, so a black-holed network cannot run the hook past the 120 s its entry allows.
 import { spawnSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
@@ -43,6 +44,12 @@ interface Pull {
 
 const count = (n: number, one: string, many = `${one}s`): string => `${n} ${n === 1 ? one : many}`;
 
+/** How many names a drift line spells out; the rest is a count, so a repository with forty old branches is one line. */
+const NAMED = 8;
+
+const some = (names: string[]): string =>
+  names.length > NAMED ? `${names.slice(0, NAMED).join(", ")} … and ${names.length - NAMED} more` : names.join(", ");
+
 /** Why a call failed: GitHub's status and message, or the error's text. */
 const detail = (e: unknown): string =>
   e instanceof GitHubError ? e.detail : e instanceof Error ? e.message : String(e);
@@ -69,7 +76,7 @@ export async function runHook(options: HookOptions = {}): Promise<number> {
   const releaseConflict = (a: (typeof conflicts)[number]) => sync.error !== null && a.path === repo && !a.failed;
   const code = conflicts.some((a) => !releaseConflict(a)) ? 1 : 0;
 
-  // 2. the checkouts in reach; the first of a repository whose fetch worked answers for the repository below
+  // 2. the checkouts in reach; the first of a repository that was fetched answers for the repository below
   const fetched = new Map<string, Checkout>();
   for (const c of findCheckouts(cwd, env))
     if (tend(c, env, write, warn) && !fetched.has(c.repo)) fetched.set(c.repo, c);
@@ -96,13 +103,16 @@ interface GitResult {
   why: string;
 }
 
-/** git in `cwd`, never prompting: a remote that wants credentials fails instead of hanging the session start. */
+/**
+ * git in `cwd`, never prompting: a remote that wants credentials fails instead of hanging the session start, and a
+ * call gets 30 s (the release read has 30 s too, and the hook's entry allows 120 s in all).
+ */
 function git(cwd: string, args: string[], env: NodeJS.ProcessEnv): GitResult {
   const r = spawnSync("git", args, {
     cwd,
     encoding: "utf8",
     input: "",
-    timeout: 60_000,
+    timeout: 30_000,
     windowsHide: true,
     env: { ...env, GIT_TERMINAL_PROMPT: "0" },
   });
@@ -119,9 +129,9 @@ function reason(r: GitResult): string {
   return `(${r.why})${said ? `: ${said}` : ", nothing on stderr"}`;
 }
 
-/** owner/name from a GitHub remote URL (https, ssh or git@), null for anything else. */
+/** owner/name from a GitHub remote URL (https, ssh with or without a port, or git@), null for anything else. */
 export function repoOf(url: string): string | null {
-  const m = /github\.com[/:]([^/\s]+)\/([^/\s]+?)(?:\.git)?\/?$/i.exec(url.trim());
+  const m = /(?:^|[/@])github\.com(?::\d+)?[/:]([^/\s]+)\/([^/\s]+?)(?:\.git)?\/?$/i.exec(url.trim());
   return m ? `${m[1]}/${m[2]}` : null;
 }
 
@@ -158,22 +168,23 @@ export function findCheckouts(cwd: string, env: NodeJS.ProcessEnv = process.env)
 }
 
 /**
- * One checkout: fetch origin (every branch, gone ones pruned: dev for the fast-forward, the rest for the drift line);
- * on dev with a clean tree, fast-forward and say so when it moved; otherwise name the branch and the dirty files and
- * touch nothing (stories 33, 34, 75). A fetch or a merge that fails is a line, not a stop. Returns whether the fetch
- * worked, which is what the drift line needs.
+ * One checkout: on dev with a clean tree, fetch origin (every branch, gone ones pruned: dev for the fast-forward, the
+ * rest for the drift line), fast-forward and say so when it moved; otherwise name the branch and the dirty files and
+ * touch nothing, not even a fetch, which it would get no fast-forward from and which is up to 30 s of a session start
+ * (stories 33, 34, 75). A fetch or a merge that fails is a line, not a stop. Returns whether the fetch worked, which
+ * is what the drift line needs.
  */
 function tend(c: Checkout, env: NodeJS.ProcessEnv, write: (t: string) => void, warn: (t: string) => void): boolean {
-  const fetched = git(c.path, ["fetch", "--quiet", "--prune", "origin"], env);
-  if (!fetched.ok) {
-    warn(`${c.path}: fetch of origin failed ${reason(fetched)}\n`);
-    return false;
-  }
   const branch = git(c.path, ["rev-parse", "--abbrev-ref", "HEAD"], env).out.trim() || "HEAD";
   const dirty = git(c.path, ["status", "--porcelain"], env).out.split(/\r?\n/).filter(Boolean).length;
   if (branch !== "dev" || dirty) {
     warn(`${c.path}: on ${branch}${dirty ? `, dirty (${count(dirty, "file")})` : ""}; left alone\n`);
-    return true;
+    return false;
+  }
+  const fetched = git(c.path, ["fetch", "--quiet", "--prune", "origin"], env);
+  if (!fetched.ok) {
+    warn(`${c.path}: fetch of origin failed ${reason(fetched)}\n`);
+    return false;
   }
   const before = git(c.path, ["rev-parse", "HEAD"], env).out.trim();
   const merged = git(c.path, ["merge", "--ff-only", "--quiet", "origin/dev"], env);
@@ -213,8 +224,8 @@ export async function drift(
   }
   if (!ahead.length && !numbers.length) return null;
   const parts: string[] = [];
-  if (ahead.length) parts.push(`${count(ahead.length, "branch", "branches")} ahead of dev (${ahead.join(", ")})`);
+  if (ahead.length) parts.push(`${count(ahead.length, "branch", "branches")} ahead of dev (${some(ahead)})`);
   if (numbers.length)
-    parts.push(`${count(numbers.length, "open pull request")} (${numbers.map((n) => `#${n}`).join(", ")})`);
+    parts.push(`${count(numbers.length, "open pull request")} (${some(numbers.map((n) => `#${n}`))})`);
   return `${c.repo}: ${parts.join(", ")}`;
 }

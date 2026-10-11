@@ -78,6 +78,7 @@ Commands
                    a clean one on dev is fast-forwarded to origin/dev, a dirty one or one on another branch is named and
                    left alone, and one line per repository says which branches (counted from the fetch) and open pull
                    requests (one GitHub request) are not in dev yet.
+                   Takes no flags but --library (--plan, --json, --quiet and --agents are refused, exit 2).
                    Prints nothing when nothing changed; exit 0 unless the sync hit a conflict
   unlink           remove every link this tool made in the user folders, and every plugin and marketplace it installed
   adopt-brain      explicitly adopt only this host's two historical Brain links; propagate verified instructions only
@@ -383,6 +384,11 @@ async function main(): Promise<void> {
     return;
   }
   if (args.command === "hook") {
+    // the entry runs it bare; a flag here is a mistake, and --plan on a run that must write would be a silent one
+    if (args.plan || args.json || args.quiet || args.agents) {
+      process.stderr.write("hook takes no flags but --library\n");
+      process.exit(2);
+    }
     process.exitCode = await runHook({ repo, cwd });
     return;
   }

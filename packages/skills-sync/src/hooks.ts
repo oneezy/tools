@@ -208,9 +208,10 @@ export function hookActions(h: Harness, hook: HookState): Action[] {
 
 /**
  * Codex records a trusted user hook in config.toml as `[hooks.state."<hooks.json>:session_start:<group>:<handler>"]`
- * with a `trusted_hash` (oneezy/skills#66). The table is read leniently (a header table, a dotted key or an inline
- * table under [hooks.state]) and never written: the hash is Codex's own, and trusting on its behalf would defeat the
- * review. The key's path half is compared as a path, so a case or separator difference on Windows does not matter.
+ * with a `trusted_hash` (oneezy/skills#66). The table is read leniently (a header table; a dotted key at the top,
+ * under [hooks] or under [hooks.state]; an inline table under either) and never written: the hash is Codex's own, and
+ * trusting on its behalf would defeat the review. The key's path half is compared as a path, so a case or separator
+ * difference on Windows does not matter.
  */
 function codexTrusted(configDir: string, hooksFile: string, own: { group: number; handler: number }): boolean {
   let toml: string;
@@ -232,28 +233,34 @@ function trustedKeys(toml: string): string[] {
   const out: string[] = [];
   const quoted = String.raw`(?:"((?:[^"\\]|\\.)*)"|'([^']*)')`;
   const header = new RegExp(String.raw`^\s*\[\s*hooks\s*\.\s*state\s*\.\s*${quoted}\s*\]`);
-  const dotted = new RegExp(String.raw`^\s*hooks\s*\.\s*state\s*\.\s*${quoted}\s*\.\s*trusted_hash\s*=`);
-  const inline = new RegExp(String.raw`^\s*${quoted}\s*=\s*\{[^}]*\btrusted_hash\s*=`);
+  // the key's dotted and inline forms, each with the prefix its table leaves out: hooks.state at the top, state under
+  // [hooks], nothing under [hooks.state]
+  const dotted = (prefix: string) => new RegExp(String.raw`^\s*${prefix}${quoted}\s*\.\s*trusted_hash\s*=`);
+  const inline = (prefix: string) => new RegExp(String.raw`^\s*${prefix}${quoted}\s*=\s*\{[^}]*\btrusted_hash\s*=`);
+  const forms: Record<string, RegExp[]> = {
+    "": [dotted(String.raw`hooks\s*\.\s*state\s*\.\s*`), inline(String.raw`hooks\s*\.\s*state\s*\.\s*`)],
+    hooks: [dotted(String.raw`state\s*\.\s*`), inline(String.raw`state\s*\.\s*`)],
+    "hooks.state": [dotted(""), inline("")],
+  };
   const unescape = (m: RegExpExecArray) => (m[1] !== undefined ? m[1].replace(/\\(["\\])/g, "$1") : m[2]);
-  let table: string | null = null;
+  let table = "";
   let pending: string | null = null;
   for (const line of toml.split(/\r?\n/)) {
     if (/^\s*#/.test(line)) continue;
     let m = header.exec(line);
     if (m) {
       pending = unescape(m);
-      table = null;
+      table = "";
       continue;
     }
     const any = /^\s*\[\s*([^\]]+?)\s*\]/.exec(line);
     if (any) {
-      table = any[1];
+      table = any[1].replace(/\s/g, "");
       pending = null;
       continue;
     }
     if (pending !== null && /^\s*trusted_hash\s*=/.test(line)) out.push(pending);
-    if ((m = dotted.exec(line))) out.push(unescape(m));
-    if (table === "hooks.state" && (m = inline.exec(line))) out.push(unescape(m));
+    for (const form of forms[table] ?? []) if ((m = form.exec(line))) out.push(unescape(m));
   }
   return out;
 }

@@ -8,6 +8,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
 import { afterAll, afterEach, beforeAll, test } from "vite-plus/test";
+import { repoOf } from "../src/commands/hook.js";
 import { sha, startFakeGithub, type FakeGithub } from "./fixtures/fake-github/fake-github.mjs";
 import {
   advanceOrigin,
@@ -18,6 +19,7 @@ import {
   hooksFile,
   originBranch,
   pretendMachine,
+  snapshot,
   write,
   type PretendMachine,
 } from "./machine.js";
@@ -112,7 +114,7 @@ test("the first run writes the blocks and the hook entries and says so; a clean 
   ]);
 });
 
-test("a dirty checkout and one on another branch are named on stderr and left alone, even when origin moved; a checkout found beside the current one counts too", async () => {
+test("a dirty checkout and one on another branch are named on stderr and left alone, not even fetched, when origin moved; a checkout found beside the current one counts too", async () => {
   const m = machine();
   const { skills, tools } = checkouts(m);
   await cli(m, []);
@@ -135,12 +137,60 @@ test("a dirty checkout and one on another branch are named on stderr and left al
   ]);
   assert.equal(head(m, skills), skillsHead);
   assert.equal(head(m, tools), toolsHead);
+  // no fetch either: origin/dev in each is still where the clone left it
+  assert.equal(git(m, skills, ["rev-parse", "origin/dev"]), skillsHead);
+  assert.equal(git(m, tools, ["rev-parse", "origin/dev"]), git(m, tools, ["rev-parse", "dev"]));
   assert.ok(fs.readFileSync(path.join(skills, "README.md"), "utf8").endsWith("local edit\n"));
   assert.ok(fs.existsSync(path.join(tools, "notes.txt")));
   // clean but on another branch: named without a file count
   fs.rmSync(path.join(tools, "notes.txt"));
   const again = await cli(m, ["hook"], {}, tools);
   assert.ok(lines(again.stderr).includes(`${tools}: on feat/x; left alone`), again.stderr);
+});
+
+test("a drift line names eight branches and eight pull requests at most, the rest is a count", async () => {
+  const m = machine();
+  const { skills } = checkouts(m);
+  for (let i = 1; i <= 9; i++) originBranch(m, "oneezy/skills", `feat/b${i}`, 1);
+  gh.fixture.repos = {
+    ...gh.fixture.repos,
+    "oneezy/skills": {
+      branches: { ...quiet },
+      pulls: Array.from({ length: 10 }, (_, i) => ({ number: i + 1, head: `feat/b${(i % 9) + 1}` })),
+    },
+  };
+  await cli(m, []);
+  const r = await cli(m, ["hook"], {}, skills);
+  assert.equal(r.status, 0, r.stderr);
+  assert.deepEqual(lines(r.stdout), [
+    "oneezy/skills: 9 branches ahead of dev (feat/b1, feat/b2, feat/b3, feat/b4, feat/b5, feat/b6, feat/b7, feat/b8 … and 1 more), " +
+      "10 open pull requests (#1, #2, #3, #4, #5, #6, #7, #8 … and 2 more)",
+  ]);
+});
+
+test("hook takes no flags: --plan is refused with exit 2 and nothing is written", async () => {
+  const m = machine();
+  const before = snapshot(m.home);
+  for (const flags of [["--plan"], ["--json"], ["--quiet"], ["--agents", "codex"]]) {
+    const r = await cli(m, ["hook", ...flags]);
+    assert.equal(r.status, 2, flags.join(" "));
+    assert.equal(r.stdout, "", flags.join(" "));
+    assert.equal(r.stderr, "hook takes no flags but --library\n", flags.join(" "));
+  }
+  assert.deepEqual(snapshot(m.home), before);
+});
+
+test("a checkout is known by its origin URL in every form GitHub gives out, and by nothing else", () => {
+  assert.equal(repoOf("https://github.com/oneezy/skills.git"), "oneezy/skills");
+  assert.equal(repoOf("https://github.com/oneezy/skills"), "oneezy/skills");
+  assert.equal(repoOf("git@github.com:oneezy/tools.git"), "oneezy/tools");
+  assert.equal(repoOf("ssh://git@github.com/oneezy/tools.git"), "oneezy/tools");
+  assert.equal(repoOf("ssh://git@github.com:22/oneezy/tools.git"), "oneezy/tools");
+  assert.equal(repoOf("https://Oneezy@GitHub.com/Oneezy/Tools/"), "Oneezy/Tools");
+  assert.equal(repoOf("https://gitlab.com/oneezy/skills.git"), null);
+  assert.equal(repoOf("https://notgithub.com/oneezy/skills.git"), null);
+  assert.equal(repoOf("https://github.community/oneezy/skills"), null);
+  assert.equal(repoOf("/srv/git/oneezy/skills.git"), null);
 });
 
 test("nothing changed, nothing ahead, nothing open: hook prints nothing and exits 0; outside any repository there are no checkout duties and GitHub is not asked about branches", async () => {
