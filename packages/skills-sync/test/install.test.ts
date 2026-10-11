@@ -497,7 +497,7 @@ test("status --json tells the tool's plugins from the rest and compares each wit
     pluginLines(s.json.harnesses.codex.lines)
       .filter((l) => !l.ok)
       .map((l) => l.text),
-    ["oneezy@oneezy-skills 0.1.0+aaaaaaaaaaaa (latest 0.2.0+bbbbbbbbbbbb)"],
+    ["oneezy@oneezy-skills 0.1.0+aaaaaaaaaaaa (latest 0.2.0+bbbbbbbbbbbb); run sync"],
   );
 
   // a rebuild that took the next version: Codex runs its cached copy until the plugin is added again

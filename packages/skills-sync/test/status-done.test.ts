@@ -12,9 +12,10 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
 import { afterAll, afterEach, beforeAll, test } from "vite-plus/test";
-import { linkTarget } from "../src/fs.js";
+import { linkTarget, real } from "../src/fs.js";
 import { startFakeGithub, type FakeGithub, type FixtureRelease } from "./fixtures/fake-github/fake-github.mjs";
 import {
+  advanceOrigin,
   blockIn,
   checkoutOf,
   cli,
@@ -59,7 +60,15 @@ interface StatusJson {
     }
   >;
   lines: Line[];
-  checkouts: Array<{ path: string; repo: string; branch: string; dirty: number; clean: boolean; ok: boolean }>;
+  checkouts: Array<{
+    path: string;
+    repo: string;
+    branch: string;
+    dirty: number | null;
+    clean: boolean;
+    ok: boolean;
+    error?: string;
+  }>;
   manualSteps: Array<{ id: string; title: string; steps: string[] }>;
   red: number;
   ok: boolean;
@@ -179,9 +188,26 @@ test("a plugin behind the latest release is one red line and exit 1", async () =
   syncedPlugin(m, "matt-pocock", { version: "1.3.0", skills: ["grilling", "tdd"] });
   const r = await cli(m, ["status"], {}, skills);
   assert.equal(r.status, 1);
-  assert.ok(lines(r.stdout).includes("! matt-pocock@synced 1.3.0 (latest 1.3.1)"), r.stdout);
+  assert.ok(
+    lines(r.stdout).includes("! matt-pocock@synced 1.3.0 (latest 1.3.1); start a new Claude Code session"),
+    r.stdout,
+  );
   assert.equal(lines(r.stdout).at(-1), "status: 1 red line");
   assert.equal(json(await cli(m, ["status", "--json"], {}, skills)).red, 1);
+});
+
+test("a plugin ahead of the release (main's snapshot before the release job finished, or claude.ai ahead) is a note, not red", async () => {
+  const m = machine();
+  const { skills } = await synced(m);
+  const ahead = { version: "0.43.2", skills: ["oneezy-merge", "oneezy-status"] };
+  syncedPlugin(m, "oneezy", ahead);
+  installedPlugin(m, "codex", "oneezy", ahead);
+  const r = await cli(m, ["status"], {}, skills);
+  assert.equal(r.status, 0, r.stdout);
+  const out = lines(r.stdout);
+  assert.ok(out.includes(". oneezy@synced 0.43.2 (latest 0.43.1; ahead of the release)"), r.stdout);
+  assert.ok(out.includes(". oneezy@oneezy-skills 0.43.2 (latest 0.43.1; ahead of the release)"), r.stdout);
+  assert.equal(out.at(-1), "status: all green");
 });
 
 test("a skill name listed twice is one red line and exit 1", async () => {
@@ -270,12 +296,19 @@ test("a block an older version left in a repository file is a red cleanup line u
 test("a dirty checkout is one red line and exit 1; so is one on another branch; --json says which", async () => {
   const m = machine();
   const { skills, tools } = await synced(m);
+  // origin moves on: a status that fetched would move origin/dev in the checkouts
+  const was = {
+    skills: git(m, skills, ["rev-parse", "origin/dev"]),
+    tools: git(m, tools, ["rev-parse", "origin/dev"]),
+  };
+  advanceOrigin(m, "oneezy/skills");
+  advanceOrigin(m, "oneezy/tools");
   fs.appendFileSync(path.join(skills, "README.md"), "local edit\n");
   const dirty = await cli(m, ["status"], {}, skills);
   assert.equal(dirty.status, 1);
   assert.deepEqual(
     lines(dirty.stdout).filter((l) => l.startsWith("! ")),
-    [`! ${skills} on dev, dirty (1 file)`],
+    [`! ${skills} on dev, dirty (1 file); commit or stash them`],
   );
   assert.equal(lines(dirty.stdout).at(-1), "status: 1 red line");
   const j = json(await cli(m, ["status", "--json"], {}, skills));
@@ -291,11 +324,71 @@ test("a dirty checkout is one red line and exit 1; so is one on another branch; 
   assert.equal(off.status, 1);
   assert.deepEqual(
     lines(off.stdout).filter((l) => l.startsWith("! ")),
-    [`! ${tools} on feat/x, clean`],
+    [`! ${tools} on feat/x, clean; switch it to dev`],
   );
   assert.equal(lines(off.stdout).at(-1), "status: 1 red line");
-  // status never fetched or moved anything: origin/dev in each is where the clone left it
-  assert.equal(git(m, skills, ["rev-parse", "origin/dev"]), git(m, skills, ["rev-parse", "dev"]));
+  // status never fetched or moved anything: origin/dev in each is where the clone left it, though origin moved on
+  assert.equal(git(m, skills, ["rev-parse", "origin/dev"]), was.skills);
+  assert.equal(git(m, tools, ["rev-parse", "origin/dev"]), was.tools);
+  // dirty and off dev at once: both remedies
+  fs.appendFileSync(path.join(tools, "README.md"), "local edit\n");
+  assert.deepEqual(
+    lines((await cli(m, ["status"], {}, skills)).stdout).filter((l) => l.startsWith("! ")),
+    [`! ${tools} on feat/x, dirty (1 file); commit or stash them, then switch it to dev`],
+  );
+});
+
+test("from a task worktree under a checkout (<repo>/.claude/worktrees/<name>), status checks the main checkouts, not the worktrees", async () => {
+  const m = machine();
+  const { skills, tools } = await synced(m);
+  // the real repositories ignore .claude/worktrees/; so does this one
+  fs.appendFileSync(path.join(skills, ".git", "info", "exclude"), ".claude/worktrees/\n");
+  const task = path.join(skills, ".claude", "worktrees", "skills-issue-1-x");
+  git(m, skills, ["worktree", "add", "--quiet", "-b", "feat/x", task]);
+  // a linked worktree beside the checkouts (its .git is a file) is no checkout of its own either
+  git(m, tools, ["worktree", "add", "--quiet", "-b", "feat/y", path.join(path.dirname(tools), "tools-issue-2-y")]);
+  const r = await cli(m, ["status"], {}, task);
+  assert.equal(r.status, 0, r.stdout + r.stderr);
+  assert.ok(!lines(r.stdout).some((l) => l.startsWith("! ")), r.stdout);
+  assert.equal(lines(r.stdout).at(-1), "status: all green");
+  // git names the main worktree in its own spelling of the path (on Windows a short 8.3 temp folder may come back long)
+  assert.deepEqual(
+    json(await cli(m, ["status", "--json"], {}, task)).checkouts.map((c) => [real(c.path), c.branch, c.ok]),
+    [
+      [real(skills), "dev", true],
+      [real(tools), "dev", true],
+    ],
+  );
+});
+
+test("status reads git without taking its index lock: a tracked file's new timestamp does not make it rewrite the index", async () => {
+  const m = machine();
+  const { skills } = await synced(m);
+  const index = path.join(skills, ".git", "index");
+  const before = fs.readFileSync(index);
+  // the same bytes with another timestamp: a plain git status would refresh the index's stat data and write it
+  const later = new Date(Date.now() + 120_000);
+  fs.utimesSync(path.join(skills, "README.md"), later, later);
+  const r = await cli(m, ["status"], {}, skills);
+  assert.equal(r.status, 0, r.stdout + r.stderr);
+  assert.ok(fs.readFileSync(index).equals(before), "status rewrote .git/index");
+});
+
+test("a checkout whose git status cannot be read is a red line saying so, never a clean one", async () => {
+  const m = machine();
+  const { skills, tools } = await synced(m);
+  write(path.join(skills, ".git", "index"), "not an index");
+  const r = await cli(m, ["status"], {}, skills);
+  assert.equal(r.status, 1, r.stdout);
+  const reds = lines(r.stdout).filter((l) => l.startsWith("! "));
+  assert.equal(reds.length, 1, r.stdout);
+  assert.ok(reds[0].startsWith(`! ${skills}: git status not read (exit 128)`), r.stdout);
+  assert.ok(lines(r.stdout).includes(`= ${tools} on dev, clean`), r.stdout);
+  const j = json(await cli(m, ["status", "--json"], {}, skills));
+  assert.equal(j.red, 1);
+  const c = j.checkouts.find((x) => x.path === skills)!;
+  assert.deepEqual([c.dirty, c.clean, c.ok], [null, false, false]);
+  assert.match(c.error ?? "", /^git status not read \(exit 128\)/);
 });
 
 test("outside any checkout the checkouts are one note, not red", async () => {
@@ -354,6 +447,22 @@ test("an untrusted Codex hook is a manual step with the trust steps, not a red l
   assert.equal(lines(quiet.stdout).at(-1), "status: 0 red lines, 1 manual step");
 });
 
+test("a Codex hooks file without the tool's entry is a red line and no trust step, whatever trust record is left", async () => {
+  const m = machine();
+  const { skills } = await synced(m);
+  const file = hooksFile(m, "codex");
+  write(file, "{}\n");
+  const r = await cli(m, ["status"], {}, skills);
+  assert.equal(r.status, 1, r.stdout);
+  assert.deepEqual(
+    lines(r.stdout).filter((l) => l.startsWith("! ")),
+    [`! no session hook entry in ${file}; run sync`],
+  );
+  assert.ok(!lines(r.stdout).includes("Manual steps"), r.stdout);
+  assert.equal(lines(r.stdout).at(-1), "status: 1 red line");
+  assert.deepEqual(json(await cli(m, ["status", "--json"], {}, skills)).manualSteps, []);
+});
+
 test("manual steps print after the red lines and never hide one; the summary counts both; the exit code follows the red lines alone", async () => {
   const m = machine();
   const { skills } = await synced(m);
@@ -362,7 +471,7 @@ test("manual steps print after the red lines and never hide one; the summary cou
   const r = await cli(m, ["status"], {}, skills);
   assert.equal(r.status, 1);
   const out = lines(r.stdout);
-  const redAt = out.indexOf(`! ${skills} on dev, dirty (1 file)`);
+  const redAt = out.indexOf(`! ${skills} on dev, dirty (1 file); commit or stash them`);
   const stepsAt = out.indexOf("Manual steps");
   assert.ok(redAt > 0 && stepsAt > redAt, r.stdout);
   assert.equal(out.at(-1), "status: 1 red line, 1 manual step");
@@ -435,6 +544,21 @@ test("a Codex plugin of a library plugin's name from another marketplace is red 
   );
 });
 
+test("a Codex plugin from another marketplace that is switched off doubles nothing: no step to uninstall it", async () => {
+  const m = machine();
+  const { skills } = await synced(m);
+  installedPlugin(m, "codex", "oneezy", {
+    files: r17.plugins.oneezy.files,
+    version: "0.43.1",
+    marketplace: "openai-curated-remote",
+    enabled: false,
+  });
+  const r = await cli(m, ["status", "--json"], {}, skills);
+  assert.equal(r.status, 0, r.stdout);
+  assert.deepEqual(json(r).harnesses.codex.duplicates, []);
+  assert.deepEqual(json(r).manualSteps, []);
+});
+
 test("what sync leaves in Codex's skills folders because it is not the library's is a manual step: adopt it or delete it; the library's own copies are not listed", async () => {
   const m = machine();
   const { skills } = await synced(m);
@@ -474,10 +598,11 @@ test("in the cloud status shows the block lines and the manual steps only, reads
     "Claude Code  form: account plugins",
     `! global block in ${globalFile(m, "claude-code")} is missing; run sync`,
     "Manual steps",
-    `1. Replace this cloud environment's setup script line; this session still ran the old one (${old} is the old library link -> ${linkTarget(old)!}; 2 loose links in ${path.join(m.claudeHome, "skills")} (grilling, oneezy-status))`,
+    `1. The old @oneezy/skills-sync line ran in this session (${old} is the old library link -> ${linkTarget(old)!}; 2 loose links in ${path.join(m.claudeHome, "skills")} (grilling, oneezy-status)): make the cloud run the new one`,
     "   1. At claude.ai open this project's settings, then the Cloud environment menu, then the gear beside the selected environment, and find Setup script (an environment the organization owns is read-only there: an admin changes it in the admin settings).",
-    "   2. Replace the line that runs @oneezy/skills-sync (the old one ended -y --agents claude-code --global --no-projects --no-wsl --quiet) with: npx --yes @oneezy/skills-sync@latest --quiet",
-    "   3. Start a new cloud thread and run npx --yes @oneezy/skills-sync@latest status there: no loose link, and this step gone.",
+    "   2. If the line that runs @oneezy/skills-sync is the old one (it ends -y --agents claude-code --global --no-projects --no-wsl --quiet), replace it with: npx --yes @oneezy/skills-sync@latest --quiet",
+    "   3. If the setup script already runs the new line, the old one came from elsewhere in this session, such as a repository's AGENTS.md telling the agent to run it first: change that line to npx --yes @oneezy/skills-sync@latest --quiet the same way.",
+    "   4. Start a new cloud thread and run npx --yes @oneezy/skills-sync@latest status there: no loose link, and this step gone.",
     "status: 1 red line, 1 manual step",
   ]);
   // GitHub was not asked anything

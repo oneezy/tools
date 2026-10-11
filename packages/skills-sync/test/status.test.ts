@@ -141,7 +141,7 @@ test("account plugins are compared with the release: current ones green, one beh
     [
       "latest: oneezy/skills release-17 (1717171)",
       "Claude Code  form: account plugins",
-      "! matt-pocock@synced 1.3.0 (latest 1.3.1)",
+      "! matt-pocock@synced 1.3.0 (latest 1.3.1); start a new Claude Code session",
       "= oneezy@synced 0.43.1 (latest 0.43.1)",
       "= play@synced 0.43.0 (latest 0.43.0)",
       ...done(m, "claude-code"),
@@ -159,7 +159,9 @@ test("account plugins are compared with the release: current ones green, one beh
       ["play", "0.43.0", "0.43.0", true, ["play-unslop"]],
     ],
   );
-  assert.deepEqual(red(j.harnesses["claude-code"].lines), ["matt-pocock@synced 1.3.0 (latest 1.3.1)"]);
+  assert.deepEqual(red(j.harnesses["claude-code"].lines), [
+    "matt-pocock@synced 1.3.0 (latest 1.3.1); start a new Claude Code session",
+  ]);
   // the same claude.ai sync brings matt-pocock up: everything green, exit 0
   syncedPlugin(m, "matt-pocock", { files: r17.plugins["matt-pocock"].files });
   const ok = await cli(m, ["status"]);
@@ -185,7 +187,7 @@ test("account plugins are compared with the release: current ones green, one beh
   const partial = await cli(m, ["status", "--json"]);
   assert.equal(partial.status, 1);
   assert.deepEqual(red((partial.json as unknown as StatusJson).harnesses["claude-code"].lines), [
-    "oneezy@synced 0.43.1 (latest 0.43.1; skills differ: missing oneezy-merge)",
+    "oneezy@synced 0.43.1 (latest 0.43.1; skills differ: missing oneezy-merge); start a new Claude Code session",
   ]);
 });
 
@@ -288,7 +290,7 @@ test("account plugins from other marketplaces, tool-installed plugins and plugin
   );
   // a disabled plugin loads nothing, whatever its version
   assert.deepEqual(red(codex.lines), [
-    "oneezy@oneezy-skills 0.43.0 (latest 0.43.1)",
+    "oneezy@oneezy-skills 0.43.0 (latest 0.43.1); run sync",
     "play@oneezy-skills 0.43.0 installed but disabled",
   ]);
   const text = await cli(m, ["status"]);
@@ -298,7 +300,7 @@ test("account plugins from other marketplaces, tool-installed plugins and plugin
   );
   assert.ok(
     text.stdout.includes(
-      "\nCodex  form: plugins from GitHub\n= matt-pocock@oneezy-skills 1.3.1 (latest 1.3.1)\n! oneezy@oneezy-skills 0.43.0 (latest 0.43.1)\n! play@oneezy-skills 0.43.0 installed but disabled\n",
+      "\nCodex  form: plugins from GitHub\n= matt-pocock@oneezy-skills 1.3.1 (latest 1.3.1)\n! oneezy@oneezy-skills 0.43.0 (latest 0.43.1); run sync\n! play@oneezy-skills 0.43.0 installed but disabled\n",
     ),
     text.stdout,
   );
@@ -372,7 +374,7 @@ test("when Codex cannot render its prompt input, a plugin's skills are not read:
   const behind = await cli(m, ["status"], { FAKE_HARNESS_FAIL_PROMPT: "codex" });
   assert.equal(behind.status, 1);
   assert.ok(
-    behind.stdout.includes("\n! matt-pocock@oneezy-skills 1.3.0 (latest 1.3.1; skills not read)\n"),
+    behind.stdout.includes("\n! matt-pocock@oneezy-skills 1.3.0 (latest 1.3.1; skills not read); run sync\n"),
     behind.stdout,
   );
 });
@@ -423,7 +425,7 @@ test("a plugin switched off loads nothing: its skills are no place for a duplica
   const on = await cli(m, ["status", "--json"]);
   assert.equal(on.status, 1);
   assert.deepEqual(red((on.json as unknown as StatusJson).harnesses["claude-code"].lines), [
-    "matt-pocock@synced 1.3.0 (latest 1.3.1)",
+    "matt-pocock@synced 1.3.0 (latest 1.3.1); start a new Claude Code session",
     `grilling listed twice: matt-pocock@synced, loose link -> ${linkTarget(link)!}`,
   ]);
 });

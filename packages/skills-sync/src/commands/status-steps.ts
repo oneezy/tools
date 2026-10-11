@@ -4,10 +4,9 @@
 // with a stable id /oneezy-status can read: the account plugins claude.ai does not deliver to Claude Code yet (a toggle
 // at claude.ai), a Claude Code that lists no account plugin at all (a sign-in), the Codex hook trust (its TUI, once per
 // machine), the duplicate Codex plugins from other marketplaces (ChatGPT's), what is left in Codex's skills folders to
-// adopt or delete, and, in the cloud, the environment's setup script line that still clones the old library and links
-// every skill a second time. The rules for "a library copy" and "the release's own files" are the forms' own
-// (library-copy.ts, the Codex form's sameFiles), so status and sync agree on what sync removes and what it leaves for a
-// person.
+// adopt or delete, and, in the cloud, the old setup line that still cloned the old library and linked every skill a
+// second time. The rules for "a library copy" and "the release's own files" are the forms' own (library-copy.ts, the
+// Codex form's sameFiles), so status and sync agree on what sync removes and what it leaves for a person.
 import { formOf } from "../desired.js";
 import { sameFiles } from "../forms/codex.js";
 import { dangling, isLibraryCopy } from "../forms/library-copy.js";
@@ -29,7 +28,10 @@ const OLD_CLOUD_FLAGS = "-y --agents claude-code --global --no-projects --no-wsl
 /** How many items a step spells out before "and N more": a step is read on a phone. */
 const NAMED = 10;
 
-/** The open manual steps for this machine, in the order they print. Pure. */
+/**
+ * The open manual steps for this machine, in the order they print. Reads only (the links and folders the probe found,
+ * hashing a folder's files against the release's), writes nothing.
+ */
 export function manualSteps(machine: Machine, release: Release | null): ManualStep[] {
   const out: ManualStep[] = [];
   if (machine.cloud) {
@@ -125,7 +127,8 @@ function codexTrust(state: HarnessState): ManualStep | null {
 function otherPlugins(state: HarnessState, release: Release | null): ManualStep | null {
   if (!release) return null;
   const others = state.installed
-    .filter((p) => p.marketplace !== LIBRARY_MARKETPLACE && release.plugins[p.id])
+    // a plugin switched off loads nothing, so it doubles nothing
+    .filter((p) => p.enabled && p.marketplace !== LIBRARY_MARKETPLACE && release.plugins[p.id])
     .sort((a, b) => a.id.localeCompare(b.id));
   if (!others.length) return null;
   const name = state.harness.name;
@@ -184,9 +187,11 @@ function adoptOrDelete(state: HarnessState, release: Release | null): ManualStep
 }
 
 /**
- * In the cloud the account plugins arrive on their own and the block is the whole sync (ADR-0007); the environment's
- * setup script used to clone the library to ~/.skills-sync and link every skill into ~/.claude/skills, so each was
- * listed twice. Either leftover in this session means the environment still runs that line; only a person can change it.
+ * In the cloud the account plugins arrive on their own and the block is the whole sync (ADR-0007); the old setup line
+ * cloned the library to ~/.skills-sync and linked every skill into ~/.claude/skills, so each was listed twice. Either
+ * leftover in this session means the old line ran here: from the environment's setup script, or from an agent that
+ * followed a repository's "run this first" line. The evidence cannot tell which, so the step names both; only a person
+ * can change either.
  */
 function cloudSetup(machine: Machine, claude: HarnessState | undefined): ManualStep | null {
   const evidence: string[] = [];
@@ -201,10 +206,11 @@ function cloudSetup(machine: Machine, claude: HarnessState | undefined): ManualS
   if (!evidence.length) return null;
   return {
     id: "cloud-setup",
-    title: `Replace this cloud environment's setup script line; this session still ran the old one (${evidence.join("; ")})`,
+    title: `The old @oneezy/skills-sync line ran in this session (${evidence.join("; ")}): make the cloud run the new one`,
     steps: [
       "At claude.ai open this project's settings, then the Cloud environment menu, then the gear beside the selected environment, and find Setup script (an environment the organization owns is read-only there: an admin changes it in the admin settings).",
-      `Replace the line that runs @oneezy/skills-sync (the old one ended ${OLD_CLOUD_FLAGS}) with: ${CLOUD_SETUP_LINE}`,
+      `If the line that runs @oneezy/skills-sync is the old one (it ends ${OLD_CLOUD_FLAGS}), replace it with: ${CLOUD_SETUP_LINE}`,
+      `If the setup script already runs the new line, the old one came from elsewhere in this session, such as a repository's AGENTS.md telling the agent to run it first: change that line to ${CLOUD_SETUP_LINE} the same way.`,
       "Start a new cloud thread and run npx --yes @oneezy/skills-sync@latest status there: no loose link, and this step gone.",
     ],
   };

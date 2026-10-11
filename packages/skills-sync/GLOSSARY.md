@@ -58,15 +58,15 @@ The one `SessionStart` entry `sync` keeps in a Harness's user hooks file (`~/.cl
 _Avoid_: startup hook, the old `sync-dev.sh`
 
 **Checkout**:
-A local clone of `oneezy/skills` or `oneezy/tools` the `hook` command tends: fetched, fast-forwarded on a clean `dev`, named and left alone when dirty or on another branch. Found on every run among the repository the session started in and the folders beside it, by its `origin` URL. `status` shows each one green on `dev` and clean, red otherwise.
+A local clone of `oneezy/skills` or `oneezy/tools` the `hook` command tends: fetched, fast-forwarded on a clean `dev`, named and left alone when dirty or on another branch. Found on every run among the repository the session started in (its main worktree, when the session started in a linked one such as `<repo>/.claude/worktrees/<name>`) and the folders beside it, by its `origin` URL; a linked worktree is never a Checkout. `status` shows each one green on `dev` and clean, red otherwise, and red when git cannot read it.
 _Avoid_: worktree (a Remote sessions word), working copy
 
 **Red line**:
-A `status` line marked `!`: something the machine has wrong that `sync` or a cleanup fixes (a plugin behind the Release, a skill listed twice, a missing Session hook entry, a stale Global block, a block in a repository file, a dirty or off-`dev` Checkout). Any red line makes `status` exit 1; `/oneezy-status` is done when there is none.
+A `status` line marked `!`: something the machine has wrong that `sync` or a cleanup fixes (a plugin behind the Release, a skill listed twice, a missing Session hook entry, a stale Global block, a block in a repository file, a dirty or off-`dev` Checkout, or one git cannot read). A plugin ahead of the Release is a note, not a red line. Any red line makes `status` exit 1; `/oneezy-status` is done when there is none.
 _Avoid_: error, failure (a failed action is a conflict)
 
 **Manual step**:
-Something only Justin can do, which `status` lists after the red lines as a numbered block of steps and counts in its summary: switch an Account plugin on at claude.ai, trust the Session hook in Codex, uninstall a ChatGPT plugin that doubles a Library one, adopt or delete what is left in Codex's skills folders, replace the cloud environment's setup script line. Never a red line and never the exit code, and never hiding one.
+Something only Justin can do, which `status` lists after the red lines as a numbered block of steps and counts in its summary: switch an Account plugin on at claude.ai, trust the Session hook in Codex, uninstall a ChatGPT plugin that doubles a Library one, adopt or delete what is left in Codex's skills folders, make the cloud run the new setup line when the old one ran in the session. Never a red line and never the exit code, and never hiding one.
 _Avoid_: todo, action item, warning
 
 **Working set**:

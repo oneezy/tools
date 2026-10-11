@@ -9,9 +9,9 @@
 // library is looked for, every git call is read-only. In a cloud session the account plugins arrive on their own and
 // no hook or checkout exists, so status shows the block lines and the manual steps only, and reads no release: a
 // session there must not go red over a GitHub it cannot reach.
-import { spawnSync } from "node:child_process";
 import type { BlockState } from "../block.js";
 import { FORM_LABEL, formOf, type MachineForm } from "../desired.js";
+import { versionGap } from "../forms/codex.js";
 import { github } from "../github.js";
 import { harnessTable } from "../harnesses.js";
 import type { HookState } from "../hooks.js";
@@ -24,7 +24,7 @@ import {
   type SkillFolder,
 } from "../machine.js";
 import { latestRelease, type Release, type ReleasePlugin } from "../release.js";
-import { findCheckouts } from "./hook.js";
+import { findCheckouts, git, reason } from "./hook.js";
 import { manualSteps, type ManualStep } from "./status-steps.js";
 
 export interface StatusLine {
@@ -108,11 +108,13 @@ export interface StatusCheckout {
   /** owner/name, as the origin URL says */
   repo: string;
   branch: string;
-  /** `git status --porcelain` lines, untracked files included */
-  dirty: number;
+  /** `git status --porcelain` lines, untracked files included; null when git could not say */
+  dirty: number | null;
   clean: boolean;
   /** on dev and clean */
   ok: boolean;
+  /** why git could not be read (`git status not read (exit 128): …`), only then */
+  error?: string;
 }
 
 export interface StatusReport {
@@ -217,16 +219,27 @@ function compare(
   p: { id: string; version: string | null; skills: string[] | null; path: string | null; enabled: boolean },
   latest: ReleasePlugin | undefined,
 ): StatusPlugin {
+  // sync's comparison (versionGap): an unversioned release plugin is judged by its skill set alone
+  const gap = latest ? versionGap(p, latest) : null;
   return {
     id: p.id,
     version: p.version,
     latest: latest?.version ?? null,
     // skills not read: the version alone decides
-    current: !!latest && p.version === latest.version && (p.skills === null || sameSet(p.skills, latest.skills)),
+    current:
+      !!latest && (gap === "same" || gap === "unversioned") && (p.skills === null || sameSet(p.skills, latest.skills)),
     skills: p.skills,
     path: p.path,
     enabled: p.enabled,
   };
+}
+
+/**
+ * A plugin newer than the release: the marketplace snapshot is main, which runs ahead of the release until the release
+ * job finishes, and claude.ai may deliver ahead of it too. Sync leaves it as it is, so status notes it, never red.
+ */
+function ahead(p: StatusPlugin, latest: ReleasePlugin | undefined): boolean {
+  return !!latest && versionGap(p, latest) === "ahead";
 }
 
 /** "(latest 1.3.1)" with, when the skill sets differ, which skills are missing from or extra in the installed copy. */
@@ -234,6 +247,7 @@ function against(p: StatusPlugin, latest: ReleasePlugin | undefined, release: Re
   if (!release) return "(latest unknown)";
   if (!latest) return "(not in the release)";
   const parts = [`latest ${latest.version ?? "no version"}`];
+  if (ahead(p, latest)) parts.push("ahead of the release");
   const skills = p.skills;
   if (skills === null) parts.push("skills not read");
   else if (!sameSet(skills, latest.skills)) {
@@ -280,7 +294,8 @@ function harnessReport(state: HarnessState, form: MachineForm, release: Release 
       continue;
     }
     const text = `${name} ${against(c, latest, release)}`;
-    machineLine(!release ? note(text) : c.current ? green(text) : red(text));
+    // claude.ai delivers an account plugin's update at a session start
+    machineLine(plugin(text, c, latest, release, `start a new ${state.harness.name} session`));
   }
   for (const p of byId(state.installed)) {
     if (p.enabled) for (const s of p.skills ?? []) place(s, `${p.id}@${p.marketplace}`);
@@ -297,7 +312,7 @@ function harnessReport(state: HarnessState, form: MachineForm, release: Release 
     else if (!p.enabled) machineLine(red(`${name} installed but disabled`));
     else {
       const text = `${name} ${against(c, latest, release)}`;
-      machineLine(!release ? note(text) : c.current ? green(text) : red(text));
+      machineLine(plugin(text, c, latest, release, "run sync"));
     }
   }
   for (const l of state.loose) place(l.name, `loose link -> ${l.target}`);
@@ -354,6 +369,18 @@ function harnessReport(state: HarnessState, form: MachineForm, release: Release 
   };
 }
 
+/** A library plugin's line: a note without the release or ahead of it, green when current, else red with the remedy. */
+function plugin(
+  text: string,
+  c: StatusPlugin,
+  latest: ReleasePlugin | undefined,
+  release: Release | null,
+  remedy: string,
+): StatusLine {
+  if (!release || ahead(c, latest)) return note(text);
+  return c.current ? green(text) : red(`${text}; ${remedy}`);
+}
+
 /**
  * The session hook's line: red when the entry is missing, when the old sync-dev.sh entry is still there, or when the
  * file cannot be worked on; green when present. A present Codex entry the person has not trusted yet is green here and
@@ -395,25 +422,29 @@ function blockFacts(b: BlockState): StatusBlock {
 }
 
 /**
- * The checkouts in reach, read-only: the branch and the porcelain status of each (story 53). The same discovery as the
- * hook's (the repository `cwd` is in and the folders beside it, by origin URL); nothing is fetched or moved, so a
- * checkout is judged as it is. Git runs without prompting and with 30 s per call.
+ * The checkouts in reach, read-only: the branch and the porcelain status of each (story 53). The same discovery and the
+ * same git call as the hook's (the repository `cwd` is in, its main worktree from a linked one, and the folders beside
+ * it, by origin URL; no prompt, 30 s per call); nothing is fetched or moved, so a checkout is judged as it is. git
+ * status runs with --no-optional-locks: it would otherwise refresh and rewrite .git/index under index.lock, which can
+ * make a commit or the hook's fast-forward running at that moment fail. A git call that fails or times out is a red
+ * line saying so, never a clean checkout.
  */
 function readCheckouts(cwd: string, env: NodeJS.ProcessEnv = process.env): StatusCheckout[] {
-  const git = (dir: string, args: string[]): string => {
-    const r = spawnSync("git", args, {
-      cwd: dir,
-      encoding: "utf8",
-      input: "",
-      timeout: 30_000,
-      windowsHide: true,
-      env: { ...env, GIT_TERMINAL_PROMPT: "0" },
-    });
-    return r.status === 0 ? (r.stdout ?? "") : "";
-  };
   return findCheckouts(cwd, env).map((c) => {
-    const branch = git(c.path, ["rev-parse", "--abbrev-ref", "HEAD"]).trim() || "HEAD";
-    const dirty = git(c.path, ["status", "--porcelain"]).split(/\r?\n/).filter(Boolean).length;
+    const head = git(c.path, ["rev-parse", "--abbrev-ref", "HEAD"], env);
+    const status = head.ok ? git(c.path, ["--no-optional-locks", "status", "--porcelain"], env) : head;
+    const branch = (head.ok && head.out.trim()) || "HEAD";
+    if (!status.ok)
+      return {
+        path: c.path,
+        repo: c.repo,
+        branch,
+        dirty: null,
+        clean: false,
+        ok: false,
+        error: `git status not read ${reason(status)}`,
+      };
+    const dirty = status.out.split(/\r?\n/).filter(Boolean).length;
     return { path: c.path, repo: c.repo, branch, dirty, clean: dirty === 0, ok: branch === "dev" && dirty === 0 };
   });
 }
@@ -422,10 +453,21 @@ function count(n: number, what: string): string {
   return `${n} ${what}${n === 1 ? "" : "s"}`;
 }
 
-/** A checkout as one line: `<path> on dev, clean`, or red with the branch and the dirty file count. */
+/**
+ * A checkout as one line: `<path> on dev, clean`, or red with the branch, the dirty file count and what to do; or red
+ * with why git could not be read.
+ */
 function checkoutLine(c: StatusCheckout): StatusLine {
+  if (c.error || c.dirty === null) return red(`${c.path}: ${c.error ?? "git status not read"}`);
   const text = `${c.path} on ${c.branch}${c.clean ? ", clean" : `, dirty (${count(c.dirty, "file")})`}`;
-  return c.ok ? green(text) : red(text);
+  if (c.ok) return green(text);
+  const offDev = c.branch !== "dev";
+  const remedy = c.clean
+    ? "switch it to dev"
+    : offDev
+      ? "commit or stash them, then switch it to dev"
+      : "commit or stash them";
+  return red(`${text}; ${remedy}`);
 }
 
 /**
