@@ -2,14 +2,15 @@
 // asks for, the fake claude and codex CLIs on PATH (fixtures/fake-harness), the fake GitHub named through
 // SKILLS_SYNC_GITHUB_API, and nothing of the session's own (no CLAUDE_CODE_REMOTE, no real harness folders). The
 // helpers lay down what a machine may have before a run: account plugins, tool-installed plugins, loose links, real
-// skill folders, an old ~/.skills-sync link, a hook entry, a global block. Tests assert only what a user sees: files
-// and links, the fake CLIs' calls, the fake GitHub's requests, printed output, --json, exit codes.
+// skill folders, an old ~/.skills-sync link, a hook entry, a Codex trust record, a global block, and git checkouts of
+// the tended repositories with a bare origin each. Tests assert only what a user sees: files and links, the fake CLIs'
+// calls, the fake GitHub's requests, printed output, --json, exit codes, the checkouts' heads.
 import { spawn, spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { isLink, lexists, linkTarget, makeLink } from "../src/fs.js";
+import { isLink, lexists, linkTarget, makeLink, samePath } from "../src/fs.js";
 import { fixtureRelease, type FakeGithub, type FixtureRelease } from "./fixtures/fake-github/fake-github.mjs";
 
 const CLI = path.resolve(import.meta.dirname, "..", "dist", "src", "cli.js");
@@ -31,6 +32,8 @@ export interface PretendMachine {
   github: FakeGithub | null;
   /** the environment every run gets; a test may add to it */
   env: Record<string, string>;
+  /** folders on PATH after the fake CLIs: the real git's (and what it needs beside it), when the machine was asked for it */
+  extraPath: string[];
 }
 
 export interface MachineOptions {
@@ -41,6 +44,8 @@ export interface MachineOptions {
   /** the fake GitHub the run talks to; null for a machine with no GitHub reachable */
   github?: FakeGithub | null;
   env?: Record<string, string>;
+  /** the real git on PATH too (its folder after the fake CLIs), for a command that runs git on checkouts */
+  git?: boolean;
 }
 
 export interface Run {
@@ -98,7 +103,45 @@ export function pretendMachine(options: MachineOptions = {}): PretendMachine {
     SKILLS_SYNC_GITHUB_API: github?.url ?? "http://127.0.0.1:9",
     ...options.env,
   };
-  return { base, home, claudeHome, codexHome, hermesHome, bin, log: env.FAKE_HARNESS_LOG, github, env };
+  return {
+    base,
+    home,
+    claudeHome,
+    codexHome,
+    hermesHome,
+    bin,
+    log: env.FAKE_HARNESS_LOG,
+    github,
+    env,
+    extraPath: options.git ? gitFolders() : [],
+  };
+}
+
+/**
+ * The folders the session's git needs on an otherwise bare PATH. On Linux, the one git is in. On Windows, Git for
+ * Windows is three folders under one root, and the session's PATH may put any of them first (Git Bash puts mingw64\bin
+ * and usr\bin ahead of cmd): cmd, the launcher; mingw64\bin, git itself; usr\bin, the sh that git runs to serve a
+ * fetch from a local path. All three go on the run's PATH, cmd first, with System32 after them as on every Windows
+ * PATH.
+ */
+function gitFolders(): string[] {
+  const names = process.platform === "win32" ? ["git.exe", "git.cmd"] : ["git"];
+  const found = (process.env.PATH ?? "")
+    .split(path.delimiter)
+    .find((dir) => dir && names.some((n) => fs.existsSync(path.join(dir, n))));
+  if (!found) throw new Error("git is not on PATH");
+  if (process.platform !== "win32") return [found];
+  const folders: string[] = [];
+  for (const root of [path.dirname(found), path.dirname(path.dirname(found))])
+    if (!folders.length && fs.existsSync(path.join(root, "cmd", "git.exe")))
+      for (const sub of [["cmd"], ["mingw64", "bin"], ["usr", "bin"]]) {
+        const dir = path.join(root, ...sub);
+        if (fs.existsSync(dir)) folders.push(dir);
+      }
+  if (!folders.some((f) => samePath(f, found))) folders.push(found);
+  const systemRoot = process.env.SystemRoot ?? process.env.SYSTEMROOT ?? process.env.windir;
+  if (systemRoot) folders.push(path.join(systemRoot, "System32"), systemRoot);
+  return folders;
 }
 
 export function destroy(m: PretendMachine): void {
@@ -119,8 +162,8 @@ export async function cli(
   const pathKey = Object.keys(env).find((k) => k.toUpperCase() === "PATH") ?? "PATH";
   for (const k of ["CLAUDE_CODE_REMOTE", "SKILLS_REPO", "GITHUB_TOKEN", "GH_TOKEN", "NODE_USE_ENV_PROXY"])
     delete env[k];
-  // only the fake CLIs; on Windows the .cmd shims still run, because the shell comes from ComSpec, not PATH
-  env[pathKey] = m.bin;
+  // only the fake CLIs (and git when asked); on Windows the .cmd shims still run, because the shell comes from ComSpec
+  env[pathKey] = [m.bin, ...m.extraPath].join(path.delimiter);
   Object.assign(env, m.env, extra);
   if (fs.existsSync(m.log)) fs.rmSync(m.log);
   const before = m.github?.requests.length ?? 0;
@@ -373,18 +416,147 @@ export function oldLibraryLink(m: PretendMachine, target?: string): string {
   return link;
 }
 
+/** The harness's user hooks file: Claude Code's ~/.claude/settings.json, Codex's ~/.codex/hooks.json. */
+export function hooksFile(m: PretendMachine, harness: "claude-code" | "codex"): string {
+  return path.join(configDir(m, harness), harness === "claude-code" ? "settings.json" : "hooks.json");
+}
+
 /**
- * A session hook entry as a user wrote it: Claude Code's ~/.claude/settings.json (hooks.SessionStart), Codex's
- * ~/.codex/hooks.json. Other entries in the file are kept. Returns the file.
+ * A session hook entry as a user (or an older setup) wrote it, in the shape both harnesses read: one SessionStart
+ * group `{ matcher, hooks: [{ type: "command", command, timeout }] }` appended to Claude Code's settings.json or Codex's
+ * hooks.json, the file written as the harnesses write theirs (two spaces, a trailing newline). `group` replaces the
+ * default group when a test needs another shape. Other entries in the file are kept. Returns the file.
  */
-export function hookEntry(m: PretendMachine, harness: "claude-code" | "codex", command: string): string {
-  const file = path.join(configDir(m, harness), harness === "claude-code" ? "settings.json" : "hooks.json");
+export function hookEntry(
+  m: PretendMachine,
+  harness: "claude-code" | "codex",
+  command: string,
+  group?: Record<string, unknown>,
+): string {
+  const file = hooksFile(m, harness);
   const settings = fs.existsSync(file) ? JSON.parse(fs.readFileSync(file, "utf8")) : {};
   settings.hooks ??= {};
   settings.hooks.SessionStart ??= [];
-  settings.hooks.SessionStart.push({ matcher: "", hooks: [{ type: "command", command }] });
+  settings.hooks.SessionStart.push(
+    group ?? { matcher: "startup|resume", hooks: [{ type: "command", command, timeout: 30 }] },
+  );
   write(file, JSON.stringify(settings, null, 2) + "\n");
   return file;
+}
+
+/**
+ * Codex's record of a trusted user hook, as its TUI writes it into ~/.codex/config.toml:
+ * `[hooks.state."<hooks.json>:session_start:<group>:<handler>"]` with a `trusted_hash`. The path is a TOML basic
+ * string, so a Windows path has its backslashes doubled. Appended to the file. Returns the file.
+ */
+export function codexTrust(m: PretendMachine, group: number, handler = 0): string {
+  const file = path.join(m.codexHome, "config.toml");
+  const key = `${hooksFile(m, "codex").replace(/\\/g, "\\\\")}:session_start:${group}:${handler}`;
+  const existing = fs.existsSync(file) ? fs.readFileSync(file, "utf8") : "";
+  write(
+    file,
+    `${existing}${existing && !existing.endsWith("\n") ? "\n" : ""}[hooks.state."${key}"]\ntrusted_hash = "sha256:${"ab".repeat(32)}"\n`,
+  );
+  return file;
+}
+
+/** git for the pretend machine's repositories, isolated from the session's own config; throws on failure. */
+export function git(m: PretendMachine, cwd: string, args: string[]): string {
+  const config = path.join(m.base, "gitconfig");
+  if (!fs.existsSync(config)) fs.writeFileSync(config, "");
+  const r = spawnSync("git", args, {
+    cwd,
+    encoding: "utf8",
+    input: "",
+    windowsHide: true,
+    env: {
+      ...process.env,
+      GIT_CONFIG_NOSYSTEM: "1",
+      GIT_CONFIG_GLOBAL: config,
+      GIT_AUTHOR_NAME: "test",
+      GIT_AUTHOR_EMAIL: "test@example.com",
+      GIT_COMMITTER_NAME: "test",
+      GIT_COMMITTER_EMAIL: "test@example.com",
+      GIT_TERMINAL_PROMPT: "0",
+    },
+  });
+  if (r.status !== 0) throw new Error(`git ${args.join(" ")} in ${cwd}: ${r.stderr || r.error?.message}`);
+  return r.stdout.trim();
+}
+
+/** Where the pretend GitHub keeps its bare repositories: <base>/github/<owner>/<name>.git. */
+function githubRoot(m: PretendMachine): string {
+  return path.join(m.base, "github");
+}
+
+/**
+ * A pretend GitHub repository on disk: a bare origin for owner/name under <base>/github/, HEAD on dev, one commit on
+ * dev and main. Made once per machine. Returns the bare repository.
+ */
+export function bareOrigin(m: PretendMachine, repo: string): string {
+  const dir = path.join(githubRoot(m), ...repo.split("/")) + ".git";
+  if (fs.existsSync(dir)) return dir;
+  fs.mkdirSync(dir, { recursive: true });
+  git(m, dir, ["init", "--quiet", "--bare"]);
+  git(m, dir, ["symbolic-ref", "HEAD", "refs/heads/dev"]);
+  const work = fs.mkdtempSync(path.join(scratch(m), "init-"));
+  git(m, work, ["init", "--quiet"]);
+  git(m, work, ["symbolic-ref", "HEAD", "refs/heads/dev"]);
+  write(path.join(work, "README.md"), `# ${repo}\n`);
+  git(m, work, ["add", "."]);
+  git(m, work, ["commit", "--quiet", "-m", "first"]);
+  git(m, work, ["remote", "add", "origin", dir]);
+  git(m, work, ["push", "--quiet", "origin", "dev", "dev:main"]);
+  return dir;
+}
+
+function scratch(m: PretendMachine): string {
+  const dir = path.join(m.base, "scratch");
+  fs.mkdirSync(dir, { recursive: true });
+  return dir;
+}
+
+/**
+ * A checkout of that repository at <base>/dev/<name> (or `dir`), on dev at origin's head. Its origin URL is the real
+ * GitHub one; a url.insteadOf rewrite in its own config sends every fetch to the bare repository instead. Returns the
+ * checkout.
+ */
+export function checkoutOf(m: PretendMachine, repo: string, dir?: string): string {
+  const origin = bareOrigin(m, repo);
+  const to = dir ?? path.join(m.base, "dev", repo.split("/")[1]);
+  fs.mkdirSync(path.dirname(to), { recursive: true });
+  git(m, m.base, ["clone", "--quiet", origin, to]);
+  git(m, to, ["remote", "set-url", "origin", `https://github.com/${repo}.git`]);
+  git(m, to, ["config", `url.${githubRoot(m).replace(/\\/g, "/")}/.insteadOf`, "https://github.com/"]);
+  return to;
+}
+
+/** One more commit on origin's dev, through a scratch clone, so a checkout behind it can fast-forward. Returns its sha. */
+export function advanceOrigin(m: PretendMachine, repo: string, file = "CHANGES.md"): string {
+  const work = fs.mkdtempSync(path.join(scratch(m), "advance-"));
+  git(m, m.base, ["clone", "--quiet", "--branch", "dev", bareOrigin(m, repo), work]);
+  fs.appendFileSync(path.join(work, file), `${new Date().toISOString()} ${Math.random()}\n`);
+  git(m, work, ["add", "."]);
+  git(m, work, ["commit", "--quiet", "-m", `change ${file}`]);
+  git(m, work, ["push", "--quiet", "origin", "dev"]);
+  return git(m, work, ["rev-parse", "HEAD"]);
+}
+
+/**
+ * A branch on origin named `name`, from dev's head with `commits` commits of its own (0: dev's head itself), made
+ * through a scratch clone. Returns the branch's sha.
+ */
+export function originBranch(m: PretendMachine, repo: string, name: string, commits = 1): string {
+  const work = fs.mkdtempSync(path.join(scratch(m), "branch-"));
+  git(m, m.base, ["clone", "--quiet", "--branch", "dev", bareOrigin(m, repo), work]);
+  git(m, work, ["checkout", "--quiet", "-b", name]);
+  for (let i = 0; i < commits; i++) {
+    fs.appendFileSync(path.join(work, `${name.replace(/\//g, "-")}.md`), `${i} ${Math.random()}\n`);
+    git(m, work, ["add", "."]);
+    git(m, work, ["commit", "--quiet", "-m", `${name} ${i + 1}`]);
+  }
+  git(m, work, ["push", "--quiet", "origin", name]);
+  return git(m, work, ["rev-parse", "HEAD"]);
 }
 
 /** The harness's global instructions file: ~/.claude/CLAUDE.md, ~/.codex/AGENTS.md. */
