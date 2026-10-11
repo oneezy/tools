@@ -35,7 +35,8 @@ export interface Built {
   skills: string[];
 }
 
-interface Installed {
+/** One plugin a harness lists as installed, whatever installed it. */
+export interface Installed {
   id: string;
   name: string;
   marketplace: string;
@@ -44,9 +45,11 @@ interface Installed {
   /** where the harness reads the plugin from when it reads it in place (Claude Code's directory marketplaces) */
   folder: string | null;
   readInPlace?: boolean;
+  /** Claude Code: "user" for a CLI install, "synced" for an account plugin claude.ai delivered */
+  scope?: string;
 }
 
-interface Run {
+export interface Run {
   (args: string[]): { ok: boolean; out: string; err: string; exitCode: number | null };
   failure?: Action["diagnostic"];
   resolutionFailures?: Map<string, Action["diagnostic"]>;
@@ -148,6 +151,7 @@ const claude: Driver = {
         enabled: p.enabled === true,
         folder: str(p.readFromFolder) ?? str(p.installPath),
         readInPlace: !!str(p.readFromFolder),
+        ...(str(p.scope) ? { scope: p.scope as string } : {}),
       }));
   },
   addMarketplace: (run, root) => claudeWrite(run, ["plugin", "marketplace", "add"], [root]),
@@ -255,6 +259,45 @@ function revision(dir: string): string {
 /** The harnesses this step can give plugins to. */
 export function pluginHarness(h: Harness): boolean {
   return h.id in DRIVERS;
+}
+
+/** The plugin CLI of a harness that has one: its name, and where PATH has it (null when it is not installed). */
+export function harnessCli(
+  h: Harness,
+  env: NodeJS.ProcessEnv = process.env,
+): { bin: string; file: string | null } | null {
+  const d = DRIVERS[h.id];
+  return d ? { bin: d.bin, file: which(d.bin, env) } : null;
+}
+
+/** What the harness lists as installed, account plugins included; null when it cannot list. */
+export function listInstalled(h: Harness, run: Run): Installed[] | null {
+  return DRIVERS[h.id]?.installed(run) ?? null;
+}
+
+/**
+ * Codex: the skills each enabled plugin loads, from the model-visible prompt input rendered locally (one line per
+ * plugin skill, `- <plugin>:<skill>: ...`); null when Codex cannot render it. No session starts, no tokens are spent.
+ */
+export function codexPluginSkills(run: Run): Map<string, string[]> | null {
+  const r = run(["debug", "prompt-input"]);
+  if (!r.ok) return null;
+  const texts: string[] = [];
+  const visit = (value: unknown): void => {
+    if (typeof value === "string") texts.push(value);
+    else if (Array.isArray(value)) value.forEach(visit);
+    else if (value && typeof value === "object") Object.values(value).forEach(visit);
+  };
+  visit(json(r.out) ?? r.out);
+  const out = new Map<string, string[]>();
+  for (const line of texts.flatMap((t) => t.split(/\r?\n/))) {
+    const m = /^\s*- ([^\s:`]+):([^\s:`]+):/.exec(line);
+    if (!m) continue;
+    const list = out.get(m[1]) ?? [];
+    if (!list.includes(m[2])) list.push(m[2]);
+    out.set(m[1], list.sort());
+  }
+  return out;
 }
 
 export function nativePluginRoute(lib: Library, h: Harness, skill: string): boolean {
@@ -402,7 +445,7 @@ export function which(bin: string, env: NodeJS.ProcessEnv = process.env): string
 }
 
 /** Run a harness CLI with no TTY: a .cmd shim (npm's, on Windows) through the shell, anything else directly. */
-function runner(file: string, onFailure?: (diagnostic: NonNullable<Action["diagnostic"]>) => void): Run {
+export function runner(file: string, onFailure?: (diagnostic: NonNullable<Action["diagnostic"]>) => void): Run {
   const shell = process.platform === "win32" && /\.(cmd|bat)$/i.test(file);
   const quote = (s: string) => (/[\s&|<>^()%!"]/.test(s) ? `"${s.replace(/"/g, "")}"` : s);
   const run: Run = (args) => {
@@ -439,7 +482,7 @@ function runner(file: string, onFailure?: (diagnostic: NonNullable<Action["diagn
 }
 
 /** Does this harness's CLI have plugin commands? Asked through --help only, so an old CLI never starts a session. */
-function supportsPlugins(run: Run): boolean {
+export function supportsPlugins(run: Run): boolean {
   const r = run(["plugin", "--help"]);
   return r.ok && /marketplace/.test(r.out + r.err);
 }
@@ -742,67 +785,4 @@ export function removeOwned(
     setOwned(next, h.configDir, rollback(h, d, prior, true, report, plan));
   }
   return next;
-}
-
-export interface HarnessForm {
-  form: Form;
-  /** why the harness is on links when it could have plugins: no CLI, no plugin commands, nothing built */
-  note?: string;
-  plugins: Array<{
-    name: string;
-    id: string;
-    installed: string | null;
-    built: string | null;
-    enabled: boolean;
-    match: boolean;
-    owned: boolean;
-  }>;
-}
-
-/** status: per harness, which form is active and, per built plugin, the installed and built versions. Reads only. */
-export function pluginStatus(
-  lib: Library,
-  harnesses: Harness[],
-  owned: Record<string, Owned>,
-): Record<string, HarnessForm> {
-  const out: Record<string, HarnessForm> = {};
-  for (const h of harnesses) {
-    const d = DRIVERS[h.id];
-    if (!d) {
-      out[h.id] = { form: "links", note: "no plugin support", plugins: [] };
-      continue;
-    }
-    const catalog = readCatalog(lib, h);
-    if (!catalog) {
-      out[h.id] = { form: "links", note: "the library has no built plugins", plugins: [] };
-      continue;
-    }
-    const file = which(d.bin);
-    if (!file) {
-      out[h.id] = { form: "links", note: `no ${d.bin} on PATH`, plugins: [] };
-      continue;
-    }
-    const run = runner(file);
-    const installed = supportsPlugins(run) ? d.installed(run) : null;
-    if (!installed) {
-      out[h.id] = { form: "links", note: `${d.bin} cannot list plugins`, plugins: [] };
-      continue;
-    }
-    const mine = owned[h.configDir]?.plugins ?? [];
-    const plugins = catalog.plugins.map((b) => {
-      const id = `${b.name}@${catalog.marketplace}`;
-      const i = installed.find((x) => x.id === id);
-      return {
-        name: b.name,
-        id,
-        installed: i ? (i.version ?? "") : null,
-        built: d.built(lib, b),
-        enabled: !!i?.enabled,
-        match: !!i && d.matches(i, b, lib),
-        owned: mine.includes(id),
-      };
-    });
-    out[h.id] = { form: plugins.some((p) => p.enabled) ? "plugin" : "links", plugins };
-  }
-  return out;
 }

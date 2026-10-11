@@ -12,8 +12,9 @@ import { check } from "./check.js";
 import { entrypoints, instructionDependencies } from "./entrypoints.js";
 import { LOCAL_NAME, migrateAnswers, readLocal, writeLocal, type LinkMode, type Local } from "./config.js";
 import { gitExclude, isDir, isLink, lexists, linkMode, linkTarget, real, samePath, setLinkMode } from "./fs.js";
+import { runStatus } from "./commands/status.js";
 import { detected, harnessTable, type Harness } from "./harnesses.js";
-import { pluginStatus, plugins, readCatalog, removeOwned, pluginDependency, type Form, type Owned } from "./install.js";
+import { plugins, removeOwned, pluginDependency, type Form, type Owned } from "./install.js";
 import {
   cloneLibrary,
   DEFAULT_LIBRARY,
@@ -27,14 +28,15 @@ import {
 import { apply, line, Report } from "./plan.js";
 import { byDirection, type Moved, type Position } from "./changelog.js";
 import { refresh, type RefreshResult } from "./refresh.js";
+import { DEFAULT_REPO, isRepoName } from "./release.js";
 import { lockedSource, readLock } from "./lock.js";
 import { cloneUrl, cmp, configText, readConfig } from "./sources.js";
 import { discard } from "./stage.js";
-import { findProjects, home, isRepo, layers, projects, status, unlink, type Status } from "./steps.js";
+import { findProjects, home, isRepo, layers, projects, unlink } from "./steps.js";
+import { VERSION } from "./version.js";
 import { commitsPast, releasesOf, versionLabel } from "./versions.js";
 import { runInWsl, wslDistros } from "./wsl.js";
 
-const VERSION = "0.7.6";
 const HELP = `skills-sync ${VERSION}
 One skills library, every harness, every project on this machine. Run it anywhere; it works out the rest.
 
@@ -47,8 +49,9 @@ Usage: skills-sync [command] [options]
 Commands
   sync (default)   everything above; nothing moves upstream: with skills-sync.json every third-party skill is installed
                    at the commit the lock records (frozen, the lock never written); without one, skills-lock.json is restored
-  status           what is linked and what is missing, and per harness which form is active (plugin or links) and whether
-                   each installed plugin is the built one
+  status           this machine against the latest release of ${DEFAULT_REPO} on GitHub (no library needed): per harness
+                   its form, each plugin's version against the release, every skill name listed twice; --json for
+                   scripts; exit 1 on any red line. Reads only: nothing cloned, linked or written
   unlink           remove every link this tool made in the user folders, and every plugin and marketplace it installed
   adopt-brain      explicitly adopt only this host's two historical Brain links; propagate verified instructions only
   rollback-brain   restore the exact preserved links in --receipt; refuse later destination edits
@@ -114,7 +117,8 @@ Options
   --adoption-file <json> version 1 manifest of exact historical Brain paths and expectedTarget values
   --alias-file <json>    version 1 manifest of exact historical Skills/Status alias paths and expectedTarget values
   --receipt <path>       durable adoption/rollback receipt (required for scoped Brain commands)
-  --library <src>        what to clone when there is no library yet (owner/repo or URL; default ${DEFAULT_LIBRARY})
+  --library <src>        status: the release repo to read (owner/repo; default ${DEFAULT_REPO}); sync: what to clone
+                         when there is no library yet (owner/repo or URL; default ${DEFAULT_LIBRARY})
   --expect-revision <sha> verify library HEAD and origin's --remote-ref before any instruction rollout
   --remote-ref <ref>     exact remote branch/tag for that verification (default refs/heads/main)
   --agents <ids>         harnesses: claude-code,codex,goose,hermes (default: detected)
@@ -331,6 +335,18 @@ async function main(): Promise<void> {
   const log = (m: string) => (args.json ? undefined : process.stderr.write(m + "\n"));
   const setup = new Report();
 
+  // Machine commands act on this machine against the latest release on GitHub and never look for a library. status is
+  // the first; sync and unlink keep the library-based run below until their own tickets move them here.
+  if (args.command === "status") {
+    const repo = args.library ?? DEFAULT_REPO;
+    if (!isRepoName(repo)) {
+      process.stderr.write(`status: --library names the release repo as owner/repo, not ${repo}\n`);
+      process.exit(2);
+    }
+    process.exitCode = await runStatus({ repo, json: args.json, quiet: args.quiet });
+    return;
+  }
+
   const scopedBrain = args.command === "adopt-brain" || args.command === "rollback-brain";
   const scopedAliases = args.command === "migrate-aliases" || args.command === "rollback-aliases";
   if (scopedBrain || scopedAliases) {
@@ -457,8 +473,8 @@ async function main(): Promise<void> {
     return printReport(report, args, { entrypoints: verified, receipt: path.resolve(args.receipt) });
   }
 
-  // 2. this machine's answers: the local file, after a 0.2.0 answers file is moved there once; status only reads
-  if (!args.plan && args.command !== "status" && args.command !== "check") migrateAnswers(lib.root, setup);
+  // 2. this machine's answers: the local file, after a 0.2.0 answers file is moved there once
+  if (!args.plan && args.command !== "check") migrateAnswers(lib.root, setup);
   apply(setup, args.plan);
   const local = readLocal(lib.root);
   setLinkMode(args.links ?? local.links ?? "auto");
@@ -489,7 +505,7 @@ async function main(): Promise<void> {
 
   // 3. Only clean compatible checkouts fast-forward. Dirty locks are preserved;
   // the refresh that follows remains frozen at the committed source pins.
-  if (args.pull && args.command !== "status" && !args.plan) {
+  if (args.pull && !args.plan) {
     if (args.pull === "force") {
       try {
         fs.unlinkSync(path.join(lib.root, ".git", "skills-sync-pulled"));
@@ -509,10 +525,6 @@ async function main(): Promise<void> {
 
   const table = harnessTable();
 
-  if (args.command === "status") {
-    const ids = args.agents ?? local.agents;
-    return printStatus(lib, ids ? table.filter((h) => ids.includes(h.id)) : detected(table), args, local);
-  }
   if (args.command === "unlink") {
     const r = new Report();
     unlink(lib, table, r);
@@ -1140,85 +1152,6 @@ function linksLine(r: Report): string {
     return `links: ${junction} made as junctions${mode === "auto" ? " (directory symlinks were refused: Developer Mode or elevation allows them; --junctions makes this the rule)" : " (--junctions)"}`;
   if (junction) return `links: ${symlink} made as symlinks, ${junction} as junctions (symlinks were refused part way)`;
   return `links: ${symlink} made as symlinks${mode === "symlink" ? " (--symlinks)" : ""}`;
-}
-
-function printStatus(lib: Library, table: Harness[], args: Args, local: Local): void {
-  if (args.expectRevision || args.remoteRef) {
-    const reason = verifyLibraryRevision(lib.root, args.expectRevision, args.remoteRef);
-    if (reason) {
-      const report = new Report();
-      report.add({ kind: "conflict", path: lib.root, note: reason });
-      process.exitCode = 1;
-      printReport(report, args, { entrypoints: [] });
-      return;
-    }
-  }
-  const harnesses = pluginStatus(lib, table, local.plugins ?? {});
-  // a skill an enabled plugin carries is not missing from that harness's user folder
-  const carried = new Map<string, Set<string>>();
-  for (const h of table) {
-    const on = new Set(harnesses[h.id].plugins.filter((x) => x.enabled).map((x) => x.name));
-    const built = on.size ? (readCatalog(lib, h)?.plugins ?? []) : [];
-    carried.set(h.id, new Set(built.filter((b) => on.has(b.name)).flatMap((b) => b.skills)));
-  }
-  const s = status(lib, table, carried);
-  const dev = path.resolve(args.dev ?? local.dev ?? process.cwd());
-  const projectNames =
-    args.projects === false
-      ? []
-      : args.projects === "*"
-        ? findProjects(dev, lib).map((project) => path.basename(project))
-        : (args.projects ?? local.projects ?? []);
-  const instructionProjects = projectNames.map((name) => path.join(dev, name)).filter(isDir);
-  const instructions = args.entrypoints
-    ? entrypoints(
-        lib,
-        table,
-        args.global ?? local.global ?? true,
-        instructionProjects,
-        new Report(),
-        true,
-        undefined,
-        args.copy ?? local.mode === "copy",
-        (args.form ?? local.form ?? (process.env.CLAUDE_CODE_REMOTE === "true" ? "links" : "plugin")) === "plugin",
-      )
-    : [];
-  if (instructions.some((item) => item.state !== "current")) process.exitCode = 1;
-  if (args.json) {
-    process.stdout.write(JSON.stringify({ ...s, harnesses, entrypoints: instructions }, null, 2) + "\n");
-    return;
-  }
-  process.stdout.write(
-    `library ${s.library}: ${s.own.length} own${groupSummary(s)}, ${s.thirdParty.length} third-party, ${s.missingFromLock.length} in the lock but not installed\n`,
-  );
-  for (const [layer, v] of Object.entries(s.layers))
-    process.stdout.write(`${layer}: ${v.linked} linked, ${v.missing.length} missing\n`);
-  for (const [dir, v] of Object.entries(s.user))
-    process.stdout.write(
-      `${dir}: ${v.linked} linked, ${v.plugin ? `${v.plugin} in plugins, ` : ""}${v.missing.length} missing\n`,
-    );
-  for (const h of table) {
-    const x = harnesses[h.id];
-    if (x.form === "links") {
-      process.stdout.write(`${h.name}: links${x.note ? ` (${x.note})` : ""}\n`);
-      continue;
-    }
-    const on = x.plugins.filter((p) => p.enabled);
-    const stale = on.filter((p) => !p.match).map((p) => `${p.name} ${p.installed || "?"} != ${p.built ?? "?"}`);
-    process.stdout.write(
-      `${h.name}: plugin, ${on.length} of ${x.plugins.length} installed${stale.length ? `, not the built version: ${stale.join(", ")}` : ", each the built version"}\n`,
-    );
-  }
-  for (const item of instructions)
-    process.stdout.write(`${item.path}: ${item.block} ${item.state}${item.reason ? ` (${item.reason})` : ""}\n`);
-}
-
-/** " (oneezy: 2, flat: 1)" when any own skill sits in a group; nothing for a flat-only library. */
-function groupSummary(s: Status): string {
-  const counts = new Map<string, number>();
-  for (const o of s.ownSkills) counts.set(o.plugin ?? "flat", (counts.get(o.plugin ?? "flat") ?? 0) + 1);
-  if (![...counts.keys()].some((k) => k !== "flat")) return "";
-  return ` (${[...counts].map(([k, v]) => `${k}: ${v}`).join(", ")})`;
 }
 
 main().catch((e) => bail(String(e?.stack ?? e)));

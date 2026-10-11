@@ -9,7 +9,7 @@ import { isLink, lexists, linkTarget, real, samePath } from "../src/fs.js";
 import { harnessTable, type Harness } from "../src/harnesses.js";
 import { EMPTY_LOCK, findLibrary, Library, looksLikeLibrary } from "../src/library.js";
 import { apply, Report } from "../src/plan.js";
-import { home, layers } from "../src/steps.js";
+import { home, layers, status } from "../src/steps.js";
 
 let base: string;
 let lib: Library;
@@ -103,16 +103,15 @@ function cli(...args: string[]): { status: number | null; stdout: string; stderr
   });
 }
 
-test("status --json names each own skill's plugin id: oneezy, oneezy, none", () => {
-  const r = cli("status", "--json");
-  assert.equal(r.status, 0, r.stderr);
-  const s = JSON.parse(r.stdout);
+test("the library's status names each own skill's plugin id: oneezy, oneezy, none; the real home is untouched", () => {
+  const s = status(lib, [claude, codex]);
   assert.deepEqual(s.own, ["a", "b", "c"]);
   assert.deepEqual(s.ownSkills, [
     { name: "a", plugin: "oneezy", path: "skills/oneezy/a" },
     { name: "b", plugin: "oneezy", path: "skills/oneezy/b" },
     { name: "c", plugin: null, path: "skills/c" },
   ]);
+  assert.equal(cli("check").status, 0);
   assert.ok(
     !lexists(path.join(os.homedir(), ".skills-sync")) ||
       !samePath(real(path.join(os.homedir(), ".skills-sync")), lib.root),

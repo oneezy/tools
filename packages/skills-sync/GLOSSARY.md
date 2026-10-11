@@ -70,8 +70,16 @@ A Group or a Source's skills packaged for a Harness's plugin system, with its ow
 _Avoid_: package, bundle
 
 **Form**:
-How a Harness on a Host gets the Library's skills: `plugin` (the Library's Plugins installed through the Harness's own commands, Claude Code and Codex) or `links` (one link per skill in its User folder). A skill a verified Plugin carries has no link there.
+How a Harness on a Host gets the Library's skills, one per Harness (ADR-0007): `account plugins` (Claude Code: the Plugins enabled on the claude.ai account, delivered as `<id>@synced`), `plugins from GitHub` (Codex: the Library's marketplace added from GitHub) or `loose skills` (Hermes: one link per skill in its User folder). Never two on one Harness, so no skill name is listed twice. `sync` still moves between the older `plugin` and `links` pair until the account-plugin and Codex tickets land.
 _Avoid_: mode (that is a project's link or copy), install mode
+
+**Account plugin**:
+A Plugin claude.ai syncs into Claude Code for the account, listed by `claude plugin list` as `<id>@synced` and kept under `~/.claude/plugins/synced/`. The tool never installs or removes one; `status` compares it with the Release.
+_Avoid_: synced plugin (the harness's word), cloud plugin
+
+**Machine command**:
+A run that acts on this Host against the latest Release on GitHub and needs no Library on disk: `status` first, then `sync`, `hook`, `branches` and `unlink` as they move over. The opposite is a library command (`update`, `versions`, `add`, `build`, `check`), which runs inside a checkout.
+_Avoid_: remote command, online command
 
 **Catalog**:
 A marketplace file listing the Library's Plugins, one per Harness format.

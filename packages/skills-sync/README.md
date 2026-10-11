@@ -34,7 +34,7 @@ A skills library is a folder with `skills/` beside `skills-sync.json`, `skills-s
 
 A library with a config gets its third-party skills through `refresh` (see [Third-party sources](#third-party-sources)). A library with only `skills-lock.json` keeps working exactly as before: `sync` restores from that lock and `npx skills update` owns the copies.
 
-A folder directly under `skills/` that holds `SKILL.md` is a flat own skill. One without `SKILL.md` is a **group**: its children are own skills, and the group's name (`oneezy`, `trident`) is the plugin id they will be packaged under. A skill is known everywhere by its folder name alone, so `skills/oneezy/oneezy-status` links as `oneezy-status`, exactly as `skills/oneezy-status` would, and moving a skill into a group retargets its links without dropping any. Groups do not nest: a `SKILL.md` two levels below a group, or a second skill with a name already taken, is reported once on every run and never linked. `status --json` lists each own skill with its `plugin` (null when flat) and its `path` under the library.
+A folder directly under `skills/` that holds `SKILL.md` is a flat own skill. One without `SKILL.md` is a **group**: its children are own skills, and the group's name (`oneezy`, `trident`) is the plugin id they will be packaged under. A skill is known everywhere by its folder name alone, so `skills/oneezy/oneezy-status` links as `oneezy-status`, exactly as `skills/oneezy-status` would, and moving a skill into a group retargets its links without dropping any. Groups do not nest: a `SKILL.md` two levels below a group, or a second skill with a name already taken, is reported once on every run and never linked.
 
 The group named `play` is the playground: a place to try a skill (your own idea, or one copied from someone else's repo) before promoting it into another group. It is packaged, cataloged and linked exactly like any other group, and every skill in it is named `play-<name>` (`skills/play/play-unslop`, used as `/play-unslop`), so it never clashes with a skill from a source; `check` fails on one that is not. Other groups' skill names are not held to a prefix.
 
@@ -228,7 +228,26 @@ The harnesses write their own settings while they install (Claude Code's `extraK
 
 **Rollback.** `sync --links` uninstalls the plugins the tool installed (`claude plugin uninstall --scope user`, `codex plugin remove`), keeps the marketplace registered, and restores the loose links; a second `--links` changes nothing. `--plugins` goes back. Either flag is remembered as `form` in `skills-sync.local.json`; with neither, the form is `plugin`, or `links` in a cloud session (`CLAUDE_CODE_REMOTE=true`), where claude.ai already syncs plugins of the same names into the container and the repos' instructions read `~/.claude/skills/<name>/SKILL.md`. `unlink` removes both forms the tool owns: its links, its plugins, then its marketplace (Codex's marketplace remove does not take its plugins with it, so they go first).
 
-**status** adds, per harness, `form: plugin | links` (with why, for links) and per built plugin its installed and built versions and a `match` flag; `status --json` puts it under `harnesses`. Claude Code's plugin matches when it is read in place from the built package or its cached version is the library's current Git revision; Codex's when its version is the built one. A successful update response that leaves a stale or disabled plugin is reported as unverified and keeps owned loose links.
+**status** is a machine command (below): it compares what each harness has with the latest release of the library on GitHub, not with a checkout.
+
+## Status
+
+`status` needs no library on the machine. It reads the latest release of `oneezy/skills` from GitHub (`--library owner/repo` for another release repo; `GITHUB_TOKEN` or `GH_TOKEN` is sent when set, the base URL comes from `SKILLS_SYNC_GITHUB_API` so tests point it at a fake) and probes this machine, writing nothing: the account plugins claude.ai synced into Claude Code (`<id>@synced`), the plugins installed through each harness's CLI (from the library's catalog `oneezy-skills`, or from anywhere else), the loose links in each user folder (`~/.claude/skills`, `~/.agents/skills`, Codex's old `~/.codex/skills`) and the real skill folders there. Per detected harness it prints its form (Claude Code: account plugins; Codex: plugins from GitHub; Hermes: loose skills), one line per library plugin against the release, and one line per skill name listed in more than one place:
+
+```
+latest: oneezy/skills release-17 (ae92a54)
+Claude Code  form: account plugins
+! matt-pocock@synced 1.3.0 (latest 1.3.1)
+= oneezy@synced 0.43.1 (latest 0.43.1)
+! oneezy-status listed twice: oneezy@synced, loose link -> /root/.skills-sync/skills/oneezy/oneezy-status
+. 1 loose link, 0 skill folders
+. 5 other plugins left alone: data@synced (anthropic-plugin-directory), ...
+Codex  form: plugins from GitHub
+! no plugins installed (latest release-17)
+status: 3 red lines
+```
+
+`=` is green, `!` red, `.` a note. Under each harness: the plugin lines sorted by id, then the duplicate lines, then the notes (what else is in the user folders, which other plugins are left alone). A plugin switched off, at claude.ai or through the CLI, loads nothing: it is listed, never judged, and its skills count for no duplicate. When Codex cannot render its prompt input, an installed plugin's skills are not read (`skills not read`) and its version alone is judged. Red: a plugin behind the release (its version, or its skill set), a plugin the tool installed on Claude Code (the account plugin of the same name is the form there, and a CLI install hides it), nothing of the library installed on a plugin harness, a duplicate skill name, or the release not readable. Any red line exits 1; `--quiet` prints only the red lines. `--json` carries the same facts under stable keys: `release` (`repo`, `tag`, `number`, `commit`, `tool`), `cloud`, `lines`, `ok`, and per harness `name`, `form`, `cli`, `plugins.synced` / `plugins.installed` (each with `version`, `latest`, `current`, `skills`) / `plugins.other`, `loose`, `folders`, `duplicates`, `lines`.
 
 ## Artifacts
 
@@ -301,6 +320,7 @@ Every answer is also a flag, so scripts and agents never see a prompt:
 --symlinks | --junctions
 --plugins | --links
 --library owner/repo   --pull | --no-pull
+status: --json  --quiet  --library owner/repo
 --no-restore  --retry  --sidecars  --no-layers
 --watch  --plan  --quiet  --json  -y  --ask
 update | refresh: [<source>...]  --to <version>|previous|latest  --frozen  --retry  --json
@@ -310,7 +330,7 @@ build: --plugins  --catalogs  --artifacts  --check
 check: --json  --quiet
 ```
 
-Commands: `sync` (default), `status`, `unlink` (remove every link this tool made in the user folders, then every plugin and marketplace it installed), `projects` (only step 7), `update` (alias `refresh`), `versions <source>` and `add <source>` (see [Third-party sources](#third-party-sources)), `build` (see [Plugins and catalogs](#plugins-and-catalogs) and [Artifacts](#artifacts)), `check` (see [Check](#check)).
+Commands: `sync` (default), `status` (this machine against the latest release, see [Status](#status)), `unlink` (remove every link this tool made in the user folders, then every plugin and marketplace it installed), `projects` (only step 7), `update` (alias `refresh`), `versions <source>` and `add <source>` (see [Third-party sources](#third-party-sources)), `build` (see [Plugins and catalogs](#plugins-and-catalogs) and [Artifacts](#artifacts)), `check` (see [Check](#check)).
 
 `--watch` keeps running and redoes layers and user folders when `skills/`, the config or the lock changes, so a skill you add is linked the moment its folder appears.
 
@@ -322,7 +342,7 @@ pnpm test          # tsc, then vp test (Vitest) on temp folders and temp git rep
 node dist/src/cli.js --repo <library> --plan
 ```
 
-Publishing is not done by hand. Bump `version` here (and `VERSION` in `src/cli.ts`), merge to `dev`, promote to `main`: `.github/workflows/publish-skills-sync.yml` publishes any version npm does not have yet, through npm trusted publishing (no token, no `npm login`, no 2FA prompt), with provenance. To retry, run that workflow from the Actions tab.
+Publishing is not done by hand. Bump `version` here (and `VERSION` in `src/version.ts`), merge to `dev`, promote to `main`: `.github/workflows/publish-skills-sync.yml` publishes any version npm does not have yet, through npm trusted publishing (no token, no `npm login`, no 2FA prompt), with provenance. To retry, run that workflow from the Actions tab.
 
 The three JSON Schemas under `schemas/` ship with the package: `skills-sync.schema.json` for the config (sources, plugins, the `generate` switches, the `releases` upload record), which `refresh`, `add`, `build` and `check` validate before doing anything; `skills-sync.local.schema.json` for this machine's answers, validated on every read; and `flow.schema.json` for an own skill's `flow.yaml`, which `check` validates. The validator and the ZIP writer are in the tool; there is no dependency for either.
 
@@ -332,6 +352,6 @@ An optional `skills-sync.entrypoints.json` version-1 manifest declares named blo
 
 Codex targets the configured CODEX_HOME’s AGENTS.md and an existing AGENTS.override.md, plus selected projects’ existing nested AGENTS/override files. Claude targets the configured CLAUDE_CONFIG_DIR’s CLAUDE.md, plus selected projects’ existing CLAUDE.md, CLAUDE.local.md and .claude/CLAUDE.md. A new project CLAUDE.md imports existing AGENTS fallbacks to preserve their instructions. Symlinked files/parents, malformed markers, changed-after-plan targets and nontext instructions are conflicts left alone. Additional host-managed policies and instruction imports require actual host inspection; this is not proof of every future session’s loading.
 
-`--plan` writes nothing. Both plan and apply gate each instruction destination on its required installed skill and references before planning a write. Links must resolve to the canonical own skill (explicit project-copy mode verifies the copy); native plugins must match the registered library, enabled identity/version, exact resolved skill and packaged bytes. A stale plugin dependency also retains that skill's owned loose link. A blocked destination exits nonzero while independent valid destinations continue. Apply rechecks dependency, source-template and destination hashes immediately before writing, then reads back. `status` inspects without writing. `--no-entrypoints` opts out; `--no-remember` avoids changing per-machine answers during a development handoff. No hook, schedule or cloud upload is added.
+`--plan` writes nothing. Both plan and apply gate each instruction destination on its required installed skill and references before planning a write. Links must resolve to the canonical own skill (explicit project-copy mode verifies the copy); native plugins must match the registered library, enabled identity/version, exact resolved skill and packaged bytes. A stale plugin dependency also retains that skill's owned loose link. A blocked destination exits nonzero while independent valid destinations continue. Apply rechecks dependency, source-template and destination hashes immediately before writing, then reads back. `--no-entrypoints` opts out; `--no-remember` avoids changing per-machine answers during a development handoff. No hook, schedule or cloud upload is added.
 
 For a pinned rollout, pass `--expect-revision <full-commit-sha> --remote-ref refs/tags/<release-tag>` with `--no-pull`. The default remote ref is `refs/heads/main`. The selected HEAD, clean authored/generated library files, and origin's exact ref (peeled for annotated tags) must all agree before rollout. Missing access or a mismatch refuses the rollout; it never changes Git configuration or replaces dirty work. Development checkouts omit this flag until their source changes are committed and reviewed.
