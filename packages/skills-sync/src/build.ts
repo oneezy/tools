@@ -11,6 +11,7 @@ import { spawnSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import YAML from "yaml";
+import { adaptFiles, compileAdapt, forbiddenInFiles, type Compiled, type Hit } from "./adapt.js";
 import { archives, type Built } from "./artifacts.js";
 import { isDir, isLink, isSkillDir, lexists } from "./fs.js";
 import { hermesNamespace } from "./hermes.js";
@@ -55,6 +56,23 @@ export interface BuildResult {
   off: boolean;
   /** plugin ids of an own group holding no skill yet: neither built nor cataloged, one note (or removal) each */
   skipped: string[];
+  /** every forbidden term a source's adapt rules left in a package file (path relative to the library, / separators) */
+  forbidden: Forbidden[];
+  /** every adapt rule that matched nothing in any file of its source's skills, by its index in the rules */
+  unusedRules: UnusedRule[];
+}
+
+/** A forbidden term left in a package file after its source's adapt rules: the file, its line (from 1), the term. */
+export interface Forbidden extends Hit {
+  source: string;
+  path: string;
+}
+
+/** An adapt rule that matched nothing in its source's skills. */
+export interface UnusedRule {
+  source: string;
+  rule: number;
+  find: string;
 }
 
 /**
@@ -145,6 +163,8 @@ type Origin =
       date: string;
       version: string | null;
       perSkill: Record<string, string>;
+      /** how many adapt rules rewrote the text files, 0 when the source has none */
+      adapted: number;
     };
 
 /** One package, resolved: its skills with every transform applied, its license, its origin. */
@@ -156,13 +176,25 @@ interface Package {
   license: Buffer | null;
   spdx: string | null;
   origin: Origin;
+  /** forbidden terms left in the package's files, relative to the package */
+  forbidden: Array<Hit & { rel: string }>;
+  /** the source's adapt rules that matched nothing */
+  unused: UnusedRule[];
 }
 
 export function build(lib: Library, opts: BuildOptions): BuildResult {
   const config = readConfig(lib.configFile);
   const report = new Report();
   const head = libraryHead(lib.root);
-  const result: BuildResult = { report, versions: {}, drift: [], off: !config.generate.plugins, skipped: [] };
+  const result: BuildResult = {
+    report,
+    versions: {},
+    drift: [],
+    off: !config.generate.plugins,
+    skipped: [],
+    forbidden: [],
+    unusedRules: [],
+  };
   if (result.off) return result;
   const changes = new Report(); // what differs from disk, applied unless checking
   // a check never looks at artifacts/: the archives are upload material, generated and ignored by git
@@ -195,6 +227,12 @@ export function build(lib: Library, opts: BuildOptions): BuildResult {
       const dir = path.join(lib.plugins, id);
       const pkg = resolvePackage(lib, config, id, changes);
       if (!pkg) continue;
+      if (pkg.origin.kind === "source") {
+        const source = pkg.origin.id;
+        for (const { rel, ...h } of pkg.forbidden)
+          result.forbidden.push({ source, path: `plugins/${id}/${rel}`, ...h });
+        result.unusedRules.push(...pkg.unused);
+      }
       const disk = diskFiles(dir);
       if (disk.links.length) {
         // never followed, never written through: a link inside the package is a conflict and the package is left alone
@@ -293,7 +331,7 @@ function resolvePackage(lib: Library, config: Config, id: string, report: Report
   if (plugin.group) {
     const own = lib.scanOwn().skills.filter((s) => s.plugin === plugin.group);
     const skills = new Map<string, Map<string, Buffer>>();
-    for (const s of own) skills.set(s.name, skillCopy(s.dir, report));
+    for (const s of own) skills.set(s.name, skillCopy(s.dir, report, null).files);
     const licenseFile = ["LICENSE", "LICENSE.md", "LICENSE.txt"]
       .map((n) => path.join(lib.root, n))
       .find((f) => fs.existsSync(f));
@@ -307,6 +345,8 @@ function resolvePackage(lib: Library, config: Config, id: string, report: Report
       license,
       spdx: license ? spdx(license.toString("utf8")) : null,
       origin: { kind: "own", group: plugin.group },
+      forbidden: [],
+      unused: [],
     };
   }
   const src = config.sources[plugin.source!];
@@ -318,6 +358,15 @@ function resolvePackage(lib: Library, config: Config, id: string, report: Report
     });
     return null;
   }
+  // the source's adapt rules, compiled once; a pattern that is not a regular expression stops the package
+  const adapt = compileAdapt(src.adapt ?? {}, `sources.${plugin.source}.adapt`);
+  if (!adapt.ok) {
+    report.add({ kind: "conflict", path: where, note: `${adapt.errors.join("; ")}; package not built` });
+    return null;
+  }
+  const rules = adapt.compiled.rules.length ? adapt.compiled : null;
+  const counts = adapt.compiled.rules.map(() => 0);
+  const forbidden: Array<Hit & { rel: string }> = [];
   const snapDir = path.join(lib.upstream, plugin.source!);
   const meta = readSnapshot(snapDir);
   if (!meta) {
@@ -362,7 +411,11 @@ function resolvePackage(lib: Library, config: Config, id: string, report: Report
       });
       continue;
     }
-    skills.set(s.name, skillCopy(copy, report));
+    const c = skillCopy(copy, report, rules);
+    c.counts.forEach((n, i) => (counts[i] += n));
+    for (const h of forbiddenInFiles(c.files, adapt.compiled))
+      forbidden.push({ ...h, rel: `skills/${s.name}/${h.rel}` });
+    skills.set(s.name, c.files);
     const at = entry.commit ?? lock!.commit;
     if (at !== meta.commit) perSkill[s.name] = at;
   }
@@ -389,7 +442,20 @@ function resolvePackage(lib: Library, config: Config, id: string, report: Report
     skills,
     license,
     spdx: license ? spdx(license.toString("utf8")) : null,
-    origin: { kind: "source", id: plugin.source!, src, commit: meta.commit, date: meta.date, version, perSkill },
+    origin: {
+      kind: "source",
+      id: plugin.source!,
+      src,
+      commit: meta.commit,
+      date: meta.date,
+      version,
+      perSkill,
+      adapted: counts.length,
+    },
+    forbidden,
+    unused: (src.adapt?.rules ?? [])
+      .map((r, rule) => ({ source: plugin.source!, rule, find: r.find }))
+      .filter((r) => counts[r.rule] === 0),
   };
 }
 
@@ -568,6 +634,11 @@ function notice(pkg: Package, config: Config, head: Head): string {
     `- Commit: ${commitLine}`,
     `- License: ${license}`,
     `- Skills: ${skills.join(", ")}`,
+    ...(o.kind === "source" && o.adapted
+      ? [
+          `- Adapted: ${o.adapted} find/replace rule${o.adapted === 1 ? "" : "s"} from \`sources.${o.id}.adapt\` in skills-sync.json rewrote the Markdown and text files; scripts and every other file are as upstream wrote them`,
+        ]
+      : []),
     "",
     "Every `SKILL.md` under `skills/` carries `metadata.internal: true`: the library's own copies are the ones `npx skills` installs and updates, and these are skipped (`INSTALL_INTERNAL_SKILLS=1` re-exposes them).",
     "",
@@ -782,17 +853,23 @@ export function hermesSkillProblems(md: string, folder: string): string[] {
 }
 
 /**
- * The copy of a skill folder that goes into a package: every file in the package's line endings (see `lf`), its root
- * SKILL.md marked internal, everything else as it is; a link inside is not copied, with a note.
+ * The copy of a skill folder that goes into a package: every file in the package's line endings (see `lf`), the
+ * source's adapt rules applied to its text files when it has any (counted per rule), its root SKILL.md marked internal,
+ * everything else as it is; a link inside is not copied, with a note.
  */
-function skillCopy(dir: string, report: Report): Map<string, Buffer> {
+function skillCopy(
+  dir: string,
+  report: Report,
+  rules: Compiled | null,
+): { files: Map<string, Buffer>; counts: number[] } {
   const { files, links } = folderFiles(dir);
   for (const l of links)
     report.add({ kind: "note", path: path.join(dir, l), note: "a link; not copied into the package" });
-  const out = new Map([...files].map(([rel, bytes]) => [rel, lf(bytes)]));
+  const copied = new Map([...files].map(([rel, bytes]) => [rel, lf(bytes)]));
+  const { files: out, counts } = rules ? adaptFiles(copied, rules) : { files: copied, counts: [] };
   const md = out.get("SKILL.md");
   if (md) out.set("SKILL.md", Buffer.from(withInternal(md.toString("utf8")), "utf8"));
-  return out;
+  return { files: out, counts };
 }
 
 /** The SPDX id a LICENSE text declares, for the manifests; null when the text is not one of the common licenses. */

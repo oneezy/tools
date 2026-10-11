@@ -254,6 +254,59 @@
             "minLength": 1
           },
           "uniqueItems": true
+        },
+        "adapt": {
+          "description": "Plain find/replace rules for skills written for another harness. build applies the rules in order to every Markdown and text file (.md, .mdc, .markdown, .txt) of this source's skills as it copies them into plugins/<id>/ and every rendering made from it; scripts and other files, the snapshot under upstream/ and the working set stay as upstream wrote them. A forbid match left after the rules, on a line no allow pattern accepts, fails check and build --check with the file, line and term; a rule that matches nothing is reported; update warns when new upstream text holds a forbidden term.",
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "rules": {
+              "description": "Applied in order, each to the text the one before it left.",
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/rule"
+              }
+            },
+            "forbid": {
+              "description": "JavaScript regular expressions no adapted file may still match once the rules ran (case-sensitive; one per term).",
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1
+              },
+              "uniqueItems": true
+            },
+            "allow": {
+              "description": "JavaScript regular expressions for whole lines that may keep a forbidden term, such as a factual mention of the other harness.",
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1
+              },
+              "uniqueItems": true
+            }
+          }
+        }
+      }
+    },
+    "rule": {
+      "type": "object",
+      "required": ["find", "replace"],
+      "additionalProperties": false,
+      "properties": {
+        "find": {
+          "description": "A JavaScript regular expression; every match is replaced.",
+          "type": "string",
+          "minLength": 1
+        },
+        "replace": {
+          "description": "The replacement, with $1, $<name> and $& as in JavaScript's String.prototype.replace; $$ for a dollar sign.",
+          "type": "string"
+        },
+        "flags": {
+          "description": "Regular expression flags: g is always implied (writing it changes nothing); i (ignore case), m (^ and $ per line), s (. matches a newline), u (Unicode).",
+          "type": "string",
+          "pattern": "^[gimsu]*$"
         }
       }
     },
