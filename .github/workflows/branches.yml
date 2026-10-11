@@ -1,8 +1,8 @@
 # branches: the branch rules of ADR-0013 (oneezy/skills), run once a day across Justin's repositories by the latest
 # published @oneezy/skills-sync (its `branches` command, oneezy/tools#152), and by hand as a plan. A branch whose pull
 # request was merged into dev, or whose commits are all in dev, is deleted; one whose pull request was closed without
-# merging is tagged archive/<name>, then deleted; main, dev, the default branch and any *-keep branch are never named in
-# a request; a branch that is the head or the base of an open pull request stays; every other branch is left alone and
+# merging is tagged archive/<name>, then deleted; main, dev, the default branch and any *-keep, research/* or prototype/*
+# branch are never named in a request; a branch that is the head or the base of an open pull request stays; every other branch is left alone and
 # listed with why. The command holds the rules; nothing here lists a branch by hand.
 #
 #   schedule           every day at 10:17 UTC (oneezy/skills' run.yml takes 08:23) over every repository the token's

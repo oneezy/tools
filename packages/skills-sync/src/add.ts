@@ -11,7 +11,7 @@ import { defaultBranch, discard, stage, type Staged } from "./stage.js";
 export interface AddOptions {
   id?: string;
   root?: string;
-  /** folder names to take; every skill found when absent or "*" */
+  /** folder names to take; when absent, every skill found now as a list; "*" writes "skills": "*", every skill now and later */
   skills?: string[] | "*";
   /** upstream name -> working-set name */
   as: Record<string, string>;
@@ -93,13 +93,17 @@ export function addSource(lib: Library, spec: string, opts: AddOptions): AddResu
     );
   const notSelected = Object.keys(opts.as).filter((n) => !names.includes(n));
   if (notSelected.length) return fail(`--as names skills that are not selected: ${notSelected.join(", ")}`);
-  const skills = Object.keys(opts.as).length ? Object.fromEntries(names.map((n) => [n, opts.as[n] ?? n])) : names;
+  const renames = Object.keys(opts.as).length > 0;
+  // --skills "*" follows upstream: every folder under root now and later, renames beside it; otherwise what is found now
+  const skills: Source["skills"] =
+    opts.skills === "*" ? "*" : renames ? Object.fromEntries(names.map((n) => [n, opts.as[n] ?? n])) : names;
   const attribution = findAttribution(r.staged.dir, root);
   const entry: Source = {
     repo,
     ref,
     ...(root ? { root } : {}),
     skills,
+    ...(opts.skills === "*" && renames ? { rename: { ...opts.as } } : {}),
     ...(attribution.length ? { attribution } : {}),
   };
   config.sources = { ...sources, [id]: entry };
