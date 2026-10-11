@@ -60,9 +60,20 @@ export type FormFn = (
   options: FormOptions,
 ) => Action[] | Promise<Action[]>;
 
-/** The catalog name a library's build gives its marketplaces when its config names none: <owner>-<name> of the repo. */
+/**
+ * The catalog name a library's build gives its marketplaces when its config names none: <owner>-<name> of the repo,
+ * lowercased (GitHub's names are not case-sensitive, so `--library Oneezy/Skills` is oneezy/skills).
+ */
 export function catalogFor(repo: string): string {
-  return repo.replace("/", "-");
+  return repo.replace("/", "-").toLowerCase();
+}
+
+/**
+ * Is a marketplace name the catalog? Compared without case: the catalog comes from a repo name or the release config's
+ * owner and name, which GitHub does not tell apart by case, and Hermes's comes from the lowercased install URL.
+ */
+export function sameCatalog(name: string, catalog: string): boolean {
+  return name.toLowerCase() === catalog.toLowerCase();
 }
 
 /**

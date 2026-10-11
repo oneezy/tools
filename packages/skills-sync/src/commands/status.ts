@@ -12,7 +12,7 @@
 // account plugins arrive on their own and no hook or checkout exists, so status shows the block lines and the manual
 // steps only, and reads no release: a session there must not go red over a GitHub it cannot reach.
 import type { BlockState } from "../block.js";
-import { catalogOf, FORM_LABEL, formOf, notServed, serves, type MachineForm } from "../desired.js";
+import { catalogOf, FORM_LABEL, formOf, notServed, sameCatalog, serves, type MachineForm } from "../desired.js";
 import { versionGap } from "../forms/codex.js";
 import { github } from "../github.js";
 import { harnessTable } from "../harnesses.js";
@@ -316,7 +316,7 @@ function harnessReport(state: HarnessState, form: MachineForm, release: Release 
   }
   for (const p of byId(state.installed)) {
     if (p.enabled) for (const s of p.skills ?? []) place(s, `${p.id}@${p.marketplace}`);
-    if (p.marketplace !== catalogOf(release)) {
+    if (!sameCatalog(p.marketplace, catalogOf(release))) {
       other.push({ id: p.id, marketplace: p.marketplace, scope: "installed", version: p.version, skills: p.skills });
       continue;
     }
