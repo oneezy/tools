@@ -23,6 +23,7 @@ import {
   destroy,
   fakeCli,
   githubClone,
+  hooksFile,
   installedPlugin,
   libraryCheckout,
   releaseCopy,
@@ -164,7 +165,8 @@ test("on a machine with nothing installed, sync adds the marketplace from GitHub
     ),
     r.stdout,
   );
-  assert.equal(out.at(-1), "5 changed, 0 already right, 0 left alone");
+  // the block, the session hook, the marketplace, three plugins
+  assert.equal(out.at(-1), "6 changed, 0 already right, 0 left alone");
   // status agrees: current, nothing listed twice, exit 0
   const s = await cli(m, ["status", "--json"]);
   assert.equal(s.status, 0, s.stdout);
@@ -182,7 +184,7 @@ test("a second sync changes nothing: every plugin and the marketplace are skips,
   const before = snapshot(m.home);
   const r = await cli(m, []);
   assert.equal(r.status, 0, r.stderr);
-  assert.equal(lines(r).at(-1), "0 changed, 5 already right, 0 left alone");
+  assert.equal(lines(r).at(-1), "0 changed, 6 already right, 0 left alone");
   assert.deepEqual(r.calls.filter(mutating), []);
   assert.deepEqual(snapshot(m.home), before);
   const j = await cli(m, ["--json"]);
@@ -438,7 +440,10 @@ test(".system and dot-named folders are never listed or touched; a folder that i
   assert.deepEqual(snapshot(system), systemBefore);
   assert.deepEqual(snapshot(hidden), hiddenBefore);
   assert.ok(!JSON.stringify(r.json).includes(".system") && !JSON.stringify(r.json).includes(".hidden"), r.stdout);
-  const notes = actions(r).filter((a) => a.kind === "note" && !a.path.startsWith("Codex"));
+  // the notes about Codex's skill folders: not the form's own lines, not the session hook's trust step
+  const notes = actions(r).filter(
+    (a) => a.kind === "note" && !a.path.startsWith("Codex") && a.path !== hooksFile(m, "codex"),
+  );
   const byPath = (a: [string, string | undefined], b: [string, string | undefined]) => a[0].localeCompare(b[0]);
   assert.deepEqual(
     notes.map((a): [string, string | undefined] => [a.path, a.note]).sort(byPath),
@@ -562,7 +567,7 @@ test("when codex cannot list its marketplaces, the add is asked again and answer
   const a = actions(r).find((x) => x.path === `Codex: marketplace ${MKT}`);
   assert.deepEqual([a?.kind, a?.note], ["skip", "from GitHub oneezy/skills (already registered)"]);
   const text = await cli(m, [], env);
-  assert.equal(lines(text).at(-1), "0 changed, 5 already right, 0 left alone");
+  assert.equal(lines(text).at(-1), "0 changed, 6 already right, 0 left alone");
   assert.deepEqual(installed(m), ALL_17);
   // the fake answers as codex 0.162.1: the same source again is already added, exit 0
   const again = fakeCli(m, "codex", ["plugin", "marketplace", "add", "oneezy/skills", "--json"]);
@@ -582,6 +587,8 @@ test("--plan lists every action and changes nothing: no file, no link, no plugin
     actions(r).map((a) => [a.kind, a.path]),
     [
       ["write", path.join(m.codexHome, "AGENTS.md")],
+      ["write", hooksFile(m, "codex")],
+      ["note", hooksFile(m, "codex")],
       ["install", `Codex: marketplace ${MKT}`],
       ["install", "Codex: plugin matt-pocock@oneezy-skills"],
       ["install", "Codex: plugin oneezy@oneezy-skills"],
@@ -596,7 +603,7 @@ test("--plan lists every action and changes nothing: no file, no link, no plugin
   assert.deepEqual(installed(m), []);
   assert.deepEqual(marketplaces(m), []);
   const text = await cli(m, ["--plan"]);
-  assert.equal(lines(text).at(-1), "plan: 7 would change, 0 already right, 0 left alone");
+  assert.equal(lines(text).at(-1), "plan: 8 would change, 0 already right, 0 left alone");
   assert.deepEqual(snapshot(m.home), before);
 });
 
