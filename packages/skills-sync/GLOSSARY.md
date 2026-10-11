@@ -66,7 +66,7 @@ A local git repository the `hook` command tends, whoever owns it and wherever it
 _Avoid_: worktree (a Remote sessions word), working copy
 
 **Red line**:
-A `status` line marked `!`: something the machine has wrong that `sync` or a cleanup fixes (a plugin behind the Release, a skill listed twice, a missing Session hook entry, a stale Global block, a block in a repository file, a dirty or off-`dev` Checkout, or one git cannot read). A plugin ahead of the Release is a note, not a red line. Any red line makes `status` exit 1; `/oneezy-status` is done when there is none.
+A `status` line marked `!`: something the machine has wrong that `sync` or a cleanup fixes (a plugin behind the Release, a skill listed twice, a missing Session hook entry, a stale or hand-edited Global block, a block in a repository file, a dirty or off-`dev` Checkout, or one git cannot read). A plugin ahead of the Release is a note, not a red line. Any red line makes `status` exit 1; `/oneezy-status` is done when there is none.
 _Avoid_: error, failure (a failed action is a conflict)
 
 **Manual step**:
@@ -110,8 +110,20 @@ A run that acts on this Host against the latest Release on GitHub and keeps noth
 _Avoid_: remote command, online command
 
 **Global block**:
-The one managed block `sync` writes into a Harness's global instructions file (`~/.claude/CLAUDE.md`, `~/.codex/AGENTS.md`), between `skills-sync` markers: how to call a skill in each Harness, and the rule that an agent never fetches a `SKILL.md` to run one (ADR-0011 in oneezy/skills). Never written into a repository; a block an older version left there is reported, not edited. In a cloud session it is the whole sync.
+The one managed block `sync` writes into a Harness's global instructions file (`~/.claude/CLAUDE.md`, `~/.codex/AGENTS.md`), between `skills-sync` markers (ADR-0011 in oneezy/skills): the Shared text of the latest Release, verbatim, its start marker carrying a Stamp. Never written into a repository; a block an older version left there is reported, not edited. In a cloud session it is the whole sync. `status` calls it current, stale (another text than the latest Release's, or an older block) or hand-edited (its text no longer matches its Stamp).
 _Avoid_: entrypoint (the older per-library manifest), instructions block, brain block (its old id)
+
+**Shared text**:
+`SHARED.md` at the root of the Library, the one canonical text of Justin's global instructions, read at the commit of the latest Release (the commit its Plugins come from) and written as the Global block. A Release without one gets the tool's built-in text instead. When it cannot be read, every Global block stays as it is and one line says so.
+_Avoid_: brain routing (its Brain section replaced `brain-routing.md`), shared instructions file
+
+**Stamp**:
+What the Global block's start marker carries after its id: the Release its text was read at and the sha256 of that text (`<!-- skills-sync:skills:start release-26 sha256:<hex> -->`). The text decides: a Release with the same Shared text changes no block; a text that no longer hashes to its Stamp was edited by hand.
+_Avoid_: version marker, checksum
+
+**Backup**:
+The copy of a global instructions file `sync` or `unlink` makes beside it before a write changes it: `CLAUDE-backup-<UTC yyyymmdd-HHMMSS>.md`, `AGENTS-backup-<UTC yyyymmdd-HHMMSS>.md`. Never overwritten, never deleted by the tool; the write's line names it.
+_Avoid_: snapshot (a Source's upstream copy), before-image
 
 **Catalog**:
 A marketplace file listing the Library's Plugins, one per Harness format.

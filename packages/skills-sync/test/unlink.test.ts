@@ -163,14 +163,16 @@ test("unlink removes the tool's plugins, its marketplace registration, its links
   assert.equal(plan.requests.length, 0, "unlink reads no release");
   const planned = (plan.json as { actions: ActionJson[] }).actions;
   assert.deepEqual(
-    planned.filter((a) => a.kind !== "note").map((a) => [a.kind, a.path, a.note]),
+    planned
+      .filter((a) => a.kind !== "note")
+      .map((a) => [a.kind, a.path, a.note?.replace(/; backup .*-backup-\d{8}-\d{6}\.md$/, "; backup <file>")]),
     [
       ["uninstall", "Claude Code: plugin oneezy@oneezy-skills", "installed by this tool"],
       ["uninstall", "Claude Code: marketplace oneezy-skills", "registered by this tool"],
       ["remove", s.gone, "a dangling link"],
       ["remove", s.grilling, "a link to a library copy"],
       ["write", s.claudeSettings, "session hook removed"],
-      ["write", s.claudeMd, "skills-sync block (skills) removed"],
+      ["write", s.claudeMd, "skills-sync block (skills) removed; backup <file>"],
       ["uninstall", "Codex: plugin matt-pocock@oneezy-skills", "installed by this tool"],
       ["uninstall", "Codex: plugin play@oneezy-skills", "installed by this tool"],
       ["uninstall", "Codex: marketplace oneezy-skills", "registered by this tool"],
@@ -374,7 +376,8 @@ test("a block sync appended to a file goes with the blank line sync put before i
   write(agents, "mine\n");
   const synced = await cli(m, ["--quiet"]);
   assert.equal(synced.status, 0, synced.stderr + synced.stdout);
-  assert.ok(read(agents).startsWith(`mine\n\n${START}`), read(agents));
+  // sync stamps its start marker with the release and the text's sha256
+  assert.ok(read(agents).startsWith(`mine\n\n${START.replace(" -->", " release-17 sha256:")}`), read(agents));
   const r = await cli(m, ["unlink", "--quiet"]);
   assert.equal(r.status, 0, r.stderr + r.stdout);
   assert.equal(read(agents), "mine\n");

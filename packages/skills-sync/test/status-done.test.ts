@@ -12,7 +12,8 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
 import { afterAll, afterEach, beforeAll, test } from "vite-plus/test";
-import { linkTarget, real } from "../src/fs.js";
+import { BLOCK_BODY } from "../src/block.js";
+import { linkTarget, real, toHash } from "../src/fs.js";
 import {
   fixtureConfig,
   startFakeGithub,
@@ -44,6 +45,9 @@ import {
   write,
   type PretendMachine,
 } from "./machine.js";
+
+/** The sha256 of the tool's built-in block text, as the stamp carries it. */
+const BUILT_IN = toHash(Buffer.from(`${BLOCK_BODY}\n`));
 
 interface Line {
   ok: boolean;
@@ -175,6 +179,9 @@ test("a fully synced machine prints every line green and exits 0; --json carries
       current: true,
       status: "current",
       ids: ["skills"],
+      // the fixture library's release-17 has no SHARED.md: the built-in text, stamped with that release
+      stamp: { release: "release-17", sha256: BUILT_IN },
+      latest: { release: "release-17", sha256: BUILT_IN },
     });
   assert.deepEqual(j.harnesses.codex.repoBlocks, []);
   assert.deepEqual(j.checkouts, [
@@ -265,15 +272,17 @@ test("a stale global block (an older block's text) is one red line and exit 1; a
   assert.equal(stale.status, 1);
   assert.deepEqual(
     lines(stale.stdout).filter((l) => l.startsWith("! ")),
-    [`! global block in ${file} is stale (brain); run sync`],
+    [`! global block in ${file} is stale (an older block: brain); run sync`],
   );
   assert.equal(lines(stale.stdout).at(-1), "status: 1 red line");
   assert.deepEqual(json(await cli(m, ["status", "--json"], {}, skills)).harnesses.codex.block, {
     file,
     present: true,
     current: false,
-    status: "outdated",
+    status: "stale",
     ids: ["brain"],
+    stamp: null,
+    latest: { release: "release-17", sha256: BUILT_IN },
   });
   fs.rmSync(file);
   const missing = await cli(m, ["status", "--json"], {}, skills);
@@ -634,7 +643,7 @@ test("a harness the release's skills-sync.json does not serve owes no manual ste
   }
 });
 
-test("in the cloud status shows the block lines and the manual steps only, reads no release, and the exit code follows the block", async () => {
+test("in the cloud status shows the block lines and the manual steps only, reads the release for the block alone, and the exit code follows the block", async () => {
   const m = machine({ harnesses: ["claude-code"], clis: ["claude"], git: false });
   const cloud = { CLAUDE_CODE_REMOTE: "true" };
   // what a cloud thread has today: the account plugins, and what the old setup line made of the library
@@ -656,11 +665,11 @@ test("in the cloud status shows the block lines and the manual steps only, reads
     "   4. Start a new cloud thread and run npx --yes @oneezy/skills-sync@latest status there: no loose link, and this step gone.",
     "status: 1 red line, 1 manual step",
   ]);
-  // GitHub was not asked anything
-  assert.deepEqual(r.requests, []);
+  // GitHub was only read, for the release the block's text comes from
+  assert.ok(r.requests.length > 0 && r.requests.every((q) => q.method === "GET"), JSON.stringify(r.requests));
   const j = json(await cli(m, ["status", "--json"], cloud));
   assert.equal(j.cloud, true);
-  assert.equal(j.release, null);
+  assert.equal(j.release?.tag, "release-17");
   assert.ok(!("error" in j));
   assert.deepEqual(j.lines, []);
   assert.deepEqual(j.checkouts, []);

@@ -47,9 +47,13 @@ Usage: skills-sync [command] [options]
 Commands
   sync (default)   bring every detected harness to its one form (ADR-0007): Claude Code the account plugins claude.ai
                    delivers, Codex the library's plugins from GitHub, Hermes its plugins; and the skills block in each
-                   harness's global instructions file (~/.claude/CLAUDE.md, ~/.codex/AGENTS.md): how to call a skill
-                   per harness, never fetch a SKILL.md to run one. Never a repository file; a block an older version
-                   left in one is reported, as is the clone an older version kept at ~/.skills-sync. Outside the cloud
+                   harness's global instructions file (~/.claude/CLAUDE.md, ~/.codex/AGENTS.md): the library's
+                   SHARED.md at the release's commit, verbatim, its start marker stamped with the release and the
+                   text's sha256 (a release without SHARED.md: the tool's built-in text). Before a file's content
+                   changes it is copied beside itself (CLAUDE-backup-<UTC yyyymmdd-HHMMSS>.md, AGENTS-backup-...),
+                   never over an earlier backup. GitHub or SHARED.md out of reach keeps every block as it is: one
+                   line, not a conflict. Never a repository file; a block an older version left in one is reported,
+                   as is the clone an older version kept at ~/.skills-sync. Outside the cloud
                    also one session-start hook entry per harness (~/.claude/settings.json, ~/.codex/hooks.json) running
                    \`npx --yes @oneezy/skills-sync@latest hook\`; other entries are never touched, the old sync-dev.sh
                    entry goes once the new one is in, Codex asks you to trust it once. In a cloud session
@@ -57,11 +61,12 @@ Commands
                    distro (through npx there; a distro without Node is one note, not a failure)
   status           is this machine done: against the latest release of ${DEFAULT_REPO} on GitHub (no library needed),
                    per harness its form, each plugin's version against the release, every skill name listed twice, the
-                   session hook entry and the global block; then the checkouts of oneezy/skills and oneezy/tools among
-                   the repositories the hook tends (on dev and clean, or not); then the manual steps only you can take,
-                   step by step (a plugin to switch on at claude.ai, the Codex hook trust, the cloud setup line). --json
-                   for scripts; exit 1 on any red line, never for a manual step alone. Reads only: nothing cloned,
-                   linked or written
+                   session hook entry and the global block (current, stale: another text than the release's SHARED.md,
+                   or hand-edited: its text no longer matches its stamp); then the checkouts of oneezy/skills and
+                   oneezy/tools among the repositories the hook tends (on dev and clean, or not); then the manual
+                   steps only you can take, step by step (a plugin to switch on at claude.ai, the Codex hook trust,
+                   the cloud setup line). --json for scripts; exit 1 on any red line, never for a manual step alone.
+                   Reads only: nothing cloned, linked or written
   branches [owner/repo ...]
                    the branch rules on GitHub (no library needed), for each repository named or, with none, every
                    repository the token owns: main, dev and any *-keep, research/* or prototype/* branch are never
@@ -86,9 +91,10 @@ Commands
                    library's catalog (and the catalog's registration once none is left), its loose links in every
                    harness skills folder (to a library copy, or dangling), its session hook entry in each harness's user
                    hooks file, the skills block in each global instructions file (either file too when it held nothing
-                   else). Account plugins, other marketplaces, real folders, other links, other hook entries, Codex's
-                   trust record and repository files are never touched. Offline; exit 1 on a conflict. This machine
-                   only: on Windows run it inside each WSL distro too (the sync there put a block and a hook entry)
+                   else; a file that keeps your text is backed up beside itself first, as sync does). Account plugins,
+                   other marketplaces, real folders, other links, other hook entries, Codex's trust record and
+                   repository files are never touched. Offline; exit 1 on a conflict. This machine only: on Windows
+                   run it inside each WSL distro too (the sync there put a block and a hook entry)
   adopt-brain      explicitly adopt only this host's two historical Brain links; propagate verified instructions only
   rollback-brain   restore the exact preserved links in --receipt; refuse later destination edits
   migrate-aliases  back up only explicit historical Skills/Status aliases after verifying installed native replacements
@@ -862,7 +868,11 @@ function printReport(r: Report, args: Args, extra: Record<string, unknown> = {})
   }
   const changes = r.changes();
   const conflicts = r.conflicts();
-  if (args.quiet && !changes.length && !conflicts.length) return;
+  // quiet with nothing changed or red: only a loud note (the block that could not be updated), else nothing
+  if (args.quiet && !changes.length && !conflicts.length) {
+    for (const a of r.actions) if (a.kind === "note" && a.loud) process.stdout.write(line(a) + "\n");
+    return;
+  }
   for (const a of r.actions) if (a.kind !== "skip") process.stdout.write(line(a) + "\n");
   if (r.links.symlink + r.links.junction) process.stdout.write(linksLine(r) + "\n");
   const verb = args.plan ? "would change" : "changed";

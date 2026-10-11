@@ -13,7 +13,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import YAML from "yaml";
-import { withBlock } from "../src/block.js";
+import { blockSource, withBlock } from "../src/block.js";
 import { HERMES_PATH, renderHermes } from "../src/build.js";
 import { isLink, lexists, linkTarget, makeLink, samePath } from "../src/fs.js";
 import type { HermesActivation } from "../src/hermes.js";
@@ -739,11 +739,17 @@ export function codexPluginEnabled(m: PretendMachine, id: string, enabled: boole
 
 /**
  * The skills block as sync writes it, in the harness's global instructions file (appended to what is there): the state
- * status calls current. Returns the file.
+ * status calls current. The text is `shared` of `release`; by default the fixture library's latest release, which has
+ * no SHARED.md, so the tool's built-in text. Returns the file.
  */
-export function currentBlock(m: PretendMachine, harness: "claude-code" | "codex"): string {
+export function currentBlock(
+  m: PretendMachine,
+  harness: "claude-code" | "codex",
+  release = "release-17",
+  shared: string | null = null,
+): string {
   const file = globalFile(m, harness);
-  write(file, withBlock(fs.existsSync(file) ? fs.readFileSync(file, "utf8") : ""));
+  write(file, withBlock(fs.existsSync(file) ? fs.readFileSync(file, "utf8") : "", blockSource(release, shared)));
   return file;
 }
 

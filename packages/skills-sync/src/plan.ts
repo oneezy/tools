@@ -47,6 +47,13 @@ export interface Action {
   expectedHash?: string | null;
   dependencies?: Array<{ path: string; target: string | null; files: Array<{ name: string; hash: string }> }>;
   failed?: boolean;
+  /**
+   * for write: where the file as it was is copied first, beside it, never over an existing file (a name taken already
+   * gets -2, -3 ...: the path the copy really went to replaces this one, and the note with it)
+   */
+  backup?: string;
+  /** for note: printed under --quiet too, when nothing changed (the one line about a block that could not be updated) */
+  loud?: boolean;
   diagnostic?: { command: string[]; exitCode: number | null; stderr: string; stdout: string };
 }
 
@@ -174,6 +181,13 @@ export function apply(report: Report, plan: boolean, exclude?: (repo: string, en
           // planned as a new file: never over one that appeared since
           if (a.expectedHash === null && lexists(a.path))
             throw new Error(`${a.path}: exists since planning; left alone`);
+          if (a.backup && lexists(a.path)) {
+            const made = backupCopy(a.path, a.backup);
+            if (made !== a.backup) {
+              a.note = a.note?.replace(a.backup, made);
+              a.backup = made;
+            }
+          }
           writeWhole(a.path, a.payload as string | Buffer);
           if (a.expectedHash !== undefined && !fs.readFileSync(a.path).equals(Buffer.from(a.payload as string)))
             throw new Error(`${a.path}: instruction readback differs from the planned write`);
@@ -192,6 +206,25 @@ export function apply(report: Report, plan: boolean, exclude?: (repo: string, en
       const code = (error as NodeJS.ErrnoException).code;
       a.note = `${kind} failed${code ? ` (${code})` : ""}: ${error instanceof Error ? error.message : String(error)}; independent destinations continue`;
       failedPaths.push(a.path);
+    }
+  }
+}
+
+/**
+ * Copy `file` to `backup`, or, when that name is taken (an earlier backup made in the same second), to the first free
+ * `<name>-2<ext>`, `<name>-3<ext>` ...: a backup is never overwritten. Returns the path the copy went to. Throws when
+ * it cannot be made, so the write that needed it does not happen.
+ */
+function backupCopy(file: string, backup: string): string {
+  const ext = path.extname(backup);
+  const stem = backup.slice(0, backup.length - ext.length);
+  for (let n = 1; ; n++) {
+    const to = n === 1 ? backup : `${stem}-${n}${ext}`;
+    try {
+      fs.copyFileSync(file, to, fs.constants.COPYFILE_EXCL);
+      return to;
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
     }
   }
 }

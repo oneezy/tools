@@ -4,9 +4,11 @@
 // GitHub's requests, printed lines, --json and exit codes. There is no library-based run any more: a library on the
 // machine is never found or used, and an older flag is named once on stderr (test/no-local-state.test.ts).
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 import { afterAll, afterEach, beforeAll, test } from "vite-plus/test";
+import { BLOCK_BODY } from "../src/block.js";
 import { lexists, linkTarget, samePath } from "../src/fs.js";
 import { startFakeGithub, type FakeGithub } from "./fixtures/fake-github/fake-github.mjs";
 import {
@@ -38,7 +40,8 @@ interface SyncJson {
   cloud: boolean;
 }
 
-const START = "<!-- skills-sync:skills:start -->";
+/** The start marker sync writes here: the fixture library's latest release has no SHARED.md, so the built-in text. */
+const START = `<!-- skills-sync:skills:start release-17 sha256:${createHash("sha256").update(`${BLOCK_BODY}\n`).digest("hex")} -->`;
 const END = "<!-- skills-sync:skills:end -->";
 const CLOUD = { CLAUDE_CODE_REMOTE: "true" };
 /** The setup-script line cloud environments run today, and the plain one the spec reduces it to. */
@@ -90,7 +93,8 @@ function assertBlock(text: string): void {
   assert.equal(count(text, START), 1, text);
   assert.equal(count(text, END), 1, text);
   const block = text.slice(text.indexOf(START), text.indexOf(END) + END.length);
-  assert.match(block, /^<!-- skills-sync:skills:start -->\r?\n## Skills\r?\n/);
+  assert.ok(block.startsWith(START), block);
+  assert.match(block.slice(START.length), /^\r?\n## Skills\r?\n/);
   assert.ok(block.includes("| Claude Code | `/<plugin>:<skill>`, e.g. `/oneezy:oneezy-status` |"), block);
   assert.ok(
     block.includes(
@@ -137,11 +141,21 @@ test("sync on a machine with no library writes the skills block into both global
   }
   const lines = r.stdout.trimEnd().split("\n");
   assert.ok(
-    lines.some((l) => l.startsWith("+ write") && l.includes("CLAUDE.md") && l.includes("(skills block)")),
+    lines.some(
+      (l) =>
+        l.startsWith("+ write") &&
+        l.includes("CLAUDE.md") &&
+        l.includes("(skills block (built-in text; release-17 has no SHARED.md))"),
+    ),
     r.stdout,
   );
   assert.ok(
-    lines.some((l) => l.startsWith("+ write") && l.includes("AGENTS.md") && l.includes("(skills block)")),
+    lines.some(
+      (l) =>
+        l.startsWith("+ write") &&
+        l.includes("AGENTS.md") &&
+        l.includes("(skills block (built-in text; release-17 has no SHARED.md))"),
+    ),
     r.stdout,
   );
   assert.equal(lines.at(-1), "4 changed, 0 already right, 0 left alone");
@@ -223,7 +237,10 @@ test("text around the markers stays byte for byte: the old brain block is replac
   assert.ok(c.startsWith(`# Mine\n\nAbove the block.\n\n${START}\n`), c);
   assert.ok(c.endsWith(`\n${END}\n\nBelow the block.\n`), c);
   assertBlock(c);
-  assert.ok(r.stdout.includes("(skills block replaces brain)"), r.stdout);
+  assert.ok(
+    r.stdout.includes("(skills block replaces brain (built-in text; release-17 has no SHARED.md); backup "),
+    r.stdout,
+  );
   const x = read(codex);
   assert.ok(x.startsWith(`top\r\n${START}\r\n`), x);
   assert.ok(x.endsWith(`\r\n${END}\r\nbottom\r\n`), x);
@@ -381,27 +398,26 @@ for (const [name, line] of [
     assert.equal(again.stderr, warning);
   });
 
-test("in the cloud the release is not read: with no GitHub reachable the plain line still exits 0, prints no problem and writes both blocks", async () => {
+test("in the cloud with no GitHub reachable the plain line still exits 0 and prints nothing red: no block is written, one line says so", async () => {
   const m = machine({ github: null });
   const r = await cli(m, PLAIN_LINE, CLOUD);
   assert.equal(r.status, 0, r.stderr);
   assert.equal(r.stderr, "");
-  // --quiet prints the changes and nothing else: two writes, no red line, no word about a release
+  // --quiet with nothing changed prints the one line about the block's text and nothing else
   const lines = r.stdout.trimEnd().split("\n");
-  assert.equal(lines.filter((l) => l.startsWith("+ write")).length, 2, r.stdout);
-  assert.ok(!r.stdout.includes("!") && !r.stdout.includes("release"), r.stdout);
-  for (const h of ["claude-code", "codex"] as const) assertBlock(read(globalFile(m, h)));
-  // the session's next start says nothing at all
-  const next = await cli(m, PLAIN_LINE, CLOUD);
-  assert.equal(next.status, 0, next.stderr);
-  assert.equal(next.stdout + next.stderr, "");
-  // and --json says the release was not asked for
+  assert.equal(lines.length, 1, r.stdout);
+  assert.match(
+    lines[0],
+    /^\. note\s+SHARED\.md {2}\(not read: latest release not read: .*; every global block kept as it is\)$/,
+  );
+  for (const h of ["claude-code", "codex"] as const) assert.equal(fs.existsSync(globalFile(m, h)), false);
+  // --json names the error, and nothing is a conflict
   const j = await cli(m, ["--json"], CLOUD);
   assert.equal(j.status, 0, j.stderr);
   const s = j.json as unknown as SyncJson;
   assert.equal(s.cloud, true);
   assert.equal(s.release, null);
-  assert.equal(s.error, undefined);
+  assert.match(s.error ?? "", /releases\/latest/);
   assert.equal(s.actions.filter((a) => a.kind === "conflict").length, 0);
 });
 
@@ -440,39 +456,41 @@ test("--plan writes nothing and says what would change, in text and --json", asy
   const s = j.json as unknown as SyncJson;
   assert.equal(s.plan, true);
   assert.deepEqual(
-    s.actions.filter((a) => a.kind === "write").map((a) => [path.basename(a.path), a.note]),
+    s.actions
+      .filter((a) => a.kind === "write")
+      .map((a) => [path.basename(a.path), a.note?.replace(/; backup .*-backup-\d{8}-\d{6}\.md$/, "; backup <file>")]),
     [
-      ["CLAUDE.md", "skills block"],
+      ["CLAUDE.md", "skills block (built-in text; release-17 has no SHARED.md)"],
       ["settings.json", "session hook"],
-      ["AGENTS.md", "skills block replaces brain"],
+      ["AGENTS.md", "skills block replaces brain (built-in text; release-17 has no SHARED.md); backup <file>"],
       ["hooks.json", "session hook"],
     ],
   );
+  // the backup is planned, not made
   assert.deepEqual(snapshot(m.home), before);
 });
 
-test("GitHub unreachable: the block is still written, one red line names the release, exit 1", async () => {
+test("GitHub unreachable: no block is written or changed, one note says so beside the one red line naming the release, exit 1", async () => {
   const m = machine({ github: null });
   const r = await cli(m, []);
   assert.equal(r.status, 1, r.stderr);
-  for (const h of ["claude-code", "codex"] as const) assertBlock(read(globalFile(m, h)));
-  const reds = r.stdout
-    .trimEnd()
-    .split("\n")
-    .filter((l) => l.startsWith("!"));
+  for (const h of ["claude-code", "codex"] as const) assert.equal(fs.existsSync(globalFile(m, h)), false);
+  const out = r.stdout.trimEnd().split("\n");
+  const reds = out.filter((l) => l.startsWith("!"));
   assert.equal(reds.length, 1, r.stdout);
   assert.ok(reds[0].includes("oneezy/skills") && reds[0].includes("latest release not read"), reds[0]);
-  assert.equal(r.stdout.trimEnd().split("\n").at(-1), "4 changed, 0 already right, 1 left alone");
+  assert.equal(out.filter((l) => l.includes("SHARED.md")).length, 1, r.stdout);
+  // the two hook entries need no release
+  assert.equal(out.at(-1), "2 changed, 0 already right, 1 left alone");
   const j = await cli(m, ["--json"]);
   assert.equal(j.status, 1, j.stderr);
   const s = j.json as unknown as SyncJson;
   assert.equal(s.release, null);
   assert.match(s.error ?? "", /releases\/latest/);
   assert.equal(s.actions.filter((a) => a.kind === "conflict").length, 1);
-  // the block stayed current: the red line is the only thing wrong
   assert.deepEqual(
     s.actions.filter((a) => a.kind === "skip").map((a) => path.basename(a.path)),
-    ["CLAUDE.md", "settings.json", "AGENTS.md", "hooks.json"],
+    ["settings.json", "hooks.json"],
   );
 });
 
@@ -489,9 +507,9 @@ test("--library names the release repo as owner/repo: another repo is asked for,
     other.requests.some((q) => q.path === "/repos/other/library/releases/latest"),
     JSON.stringify(other.requests),
   );
-  // the fake has no such repo: red, but the block needs no release
+  // the fake has no such repo: red, and without its release there is no block text to write
   assert.equal(other.status, 1, other.stderr);
-  assertBlock(read(globalFile(m, "claude-code")));
+  assert.equal(fs.existsSync(globalFile(m, "claude-code")), false);
 });
 
 test("--agents picks nothing any more: every detected harness is served and the flag is named once; Hermes has no global instructions file in the table, so it gets a form line and no block", async () => {
