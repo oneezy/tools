@@ -662,9 +662,15 @@ test("Hermes's home resolves as Hermes does: HERMES_HOME first, else %LOCALAPPDA
     hermesHomeDir(home, { LOCALAPPDATA: local, HERMES_HOME: path.join("E:", "h") }, "win32"),
     path.join("E:", "h"),
   );
-  assert.equal(hermesHomeDir("/home/justin", { LOCALAPPDATA: local }, "linux"), "/home/justin/.hermes");
-  assert.equal(hermesHomeDir("/home/justin", { HERMES_DATA_DIR_SUFFIX: "2" }, "darwin"), "/home/justin/.hermes2");
-  assert.equal(hermesHomeDir("/home/justin", { HERMES_HOME: " /opt/hermes " }, "linux"), "/opt/hermes");
+  // path.join writes the host's separator, so the expectations are joined too (this runs on Windows CI as well)
+  const posixHome = path.join("/home", "justin");
+  assert.equal(hermesHomeDir(posixHome, { LOCALAPPDATA: local }, "linux"), path.join(posixHome, ".hermes"));
+  assert.equal(hermesHomeDir(posixHome, { HERMES_DATA_DIR_SUFFIX: "2" }, "darwin"), path.join(posixHome, ".hermes2"));
+  assert.equal(
+    hermesHomeDir(posixHome, { HERMES_HOME: " /opt/hermes " }, "linux"),
+    "/opt/hermes",
+    "HERMES_HOME is taken as set, trimmed",
+  );
   const row = harnessTable(home, { LOCALAPPDATA: local }, "win32").find((h) => h.id === "hermes")!;
   assert.equal(row.configDir, path.join(local, "hermes"));
   assert.equal(row.userSkills, path.join(local, "hermes", "skills"));
