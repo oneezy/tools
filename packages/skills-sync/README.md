@@ -237,16 +237,17 @@ The harnesses write their own settings while they install (Claude Code's `extraK
 ```
 latest: oneezy/skills release-17 (ae92a54)
 Claude Code  form: account plugins
-= oneezy@synced 0.43.1 (latest 0.43.1)
 ! matt-pocock@synced 1.3.0 (latest 1.3.1)
+= oneezy@synced 0.43.1 (latest 0.43.1)
 ! oneezy-status listed twice: oneezy@synced, loose link -> /root/.skills-sync/skills/oneezy/oneezy-status
+. 1 loose link, 0 skill folders
 . 5 other plugins left alone: data@synced (anthropic-plugin-directory), ...
 Codex  form: plugins from GitHub
 ! no plugins installed (latest release-17)
 status: 3 red lines
 ```
 
-`=` is green, `!` red, `.` a note. Red: a plugin behind the release (its version, or its skill set), a plugin the tool installed on Claude Code (the account plugin of the same name is the form there, and a CLI install hides it), nothing of the library installed on a plugin harness, a duplicate skill name, or the release not readable. Any red line exits 1; `--quiet` prints only the red lines. `--json` carries the same facts under stable keys: `release` (`repo`, `tag`, `number`, `commit`, `tool`), `cloud`, `lines`, `ok`, and per harness `name`, `form`, `cli`, `plugins.synced` / `plugins.installed` (each with `version`, `latest`, `current`, `skills`) / `plugins.other`, `loose`, `folders`, `duplicates`, `lines`.
+`=` is green, `!` red, `.` a note. Under each harness: the plugin lines sorted by id, then the duplicate lines, then the notes (what else is in the user folders, which other plugins are left alone). A plugin switched off, at claude.ai or through the CLI, loads nothing: it is listed, never judged, and its skills count for no duplicate. When Codex cannot render its prompt input, an installed plugin's skills are not read (`skills not read`) and its version alone is judged. Red: a plugin behind the release (its version, or its skill set), a plugin the tool installed on Claude Code (the account plugin of the same name is the form there, and a CLI install hides it), nothing of the library installed on a plugin harness, a duplicate skill name, or the release not readable. Any red line exits 1; `--quiet` prints only the red lines. `--json` carries the same facts under stable keys: `release` (`repo`, `tag`, `number`, `commit`, `tool`), `cloud`, `lines`, `ok`, and per harness `name`, `form`, `cli`, `plugins.synced` / `plugins.installed` (each with `version`, `latest`, `current`, `skills`) / `plugins.other`, `loose`, `folders`, `duplicates`, `lines`.
 
 ## Artifacts
 

@@ -69,7 +69,11 @@ export function github(env: NodeJS.ProcessEnv = process.env, fetchImpl: typeof f
     baseUrl,
     async getJson<T>(path: string): Promise<T> {
       const res = await request(path, "application/vnd.github+json");
-      return (await res.json()) as T;
+      try {
+        return (await res.json()) as T;
+      } catch {
+        throw new GitHubError(res.status, baseUrl + path, `${baseUrl + path}: not JSON`);
+      }
     },
     async download(path: string): Promise<Buffer> {
       const res = await request(path, "application/octet-stream");

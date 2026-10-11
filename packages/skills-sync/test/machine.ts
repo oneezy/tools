@@ -223,16 +223,25 @@ function writePlugin(dir: string, id: string, p: PluginFiles): void {
 /**
  * An account plugin as claude.ai delivers it: <claudeHome>/plugins/synced/<org>_<bucket>/<id>/ beside the bucket's
  * manifest.json and <id>.meta.json. `marketplace` is the claude.ai marketplace label (Justin's library is "skills";
- * Anthropic's directory is "anthropic-plugin-directory"). Returns the plugin folder.
+ * Anthropic's directory is "anthropic-plugin-directory"). `enabled: false` is a plugin switched off at claude.ai, which
+ * the fake claude then lists as disabled. Returns the plugin folder.
  */
 export function syncedPlugin(
   m: PretendMachine,
   id: string,
-  p: PluginFiles & { marketplace?: string; folder?: string } = {},
+  p: PluginFiles & { marketplace?: string; folder?: string; enabled?: boolean } = {},
 ): string {
   const bucket = path.join(m.claudeHome, "plugins", "synced", "org-1111_bucket-2222");
   const dir = path.join(bucket, p.folder ?? id);
   writePlugin(dir, id, p);
+  const stateFile = path.join(m.claudeHome, "fake-harness.json");
+  const state = fs.existsSync(stateFile)
+    ? JSON.parse(fs.readFileSync(stateFile, "utf8"))
+    : { marketplaces: {}, plugins: {} };
+  state.synced ??= {};
+  if (p.enabled === false) state.synced[`${p.folder ?? id}@synced`] = { enabled: false };
+  else delete state.synced[`${p.folder ?? id}@synced`];
+  write(stateFile, JSON.stringify(state, null, 2));
   fs.mkdirSync(path.join(dir, ".in_use"), { recursive: true });
   const marketplace = p.marketplace ?? "skills";
   write(

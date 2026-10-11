@@ -4,7 +4,8 @@
 // every call to FAKE_HARNESS_LOG. FAKE_HARNESS_OLD=<claude,codex> makes one a CLI without plugin commands;
 // FAKE_HARNESS_BROKEN=<claude,codex> one that installs but never resolves a plugin's skills. Claude also lists the
 // account plugins claude.ai synced into <CLAUDE_CONFIG_DIR>/plugins/synced/<bucket>/<name>/ as <name>@synced, exactly
-// as the real CLI does (version "unknown" unless the Claude manifest carries one), and answers details for them.
+// as the real CLI does (version "unknown" unless the Claude manifest carries one), and answers details for them; a test
+// switches one off through the state file's `synced` map ({ "<name>@synced": { enabled: false } }).
 import fs from "node:fs";
 import path from "node:path";
 import {spawnSync} from "node:child_process";
@@ -60,7 +61,8 @@ const synced = () => {
       } catch {
         /* no Claude manifest, or none with a version */
       }
-      out.push({ id: `${name}@synced`, version, scope: "synced", enabled: true, installPath });
+      const enabled = state.synced?.[`${name}@synced`]?.enabled ?? true;
+      out.push({ id: `${name}@synced`, version, scope: "synced", enabled, installPath });
     }
   }
   return out;

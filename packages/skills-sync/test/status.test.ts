@@ -29,14 +29,23 @@ interface Line {
 interface HarnessJson {
   name: string;
   form: string;
+  note?: string;
   plugins: {
-    synced: Array<{ id: string; version: string | null; latest: string | null; current: boolean; skills: string[] }>;
+    synced: Array<{
+      id: string;
+      version: string | null;
+      latest: string | null;
+      current: boolean;
+      skills: string[];
+      enabled: boolean;
+    }>;
     installed: Array<{
       id: string;
       marketplace: string;
       version: string | null;
       latest: string | null;
       current: boolean;
+      skills: string[] | null;
     }>;
     other: Array<{ id: string; marketplace: string | null }>;
   };
@@ -293,6 +302,89 @@ test("Hermes keeps the loose form: nothing in its skills folder is red, links an
     [[true, "1 loose link, 1 skill folder"]],
   );
   assert.deepEqual(r.calls, []);
+});
+
+test("when Codex cannot render its prompt input, a plugin's skills are not read: the version alone is judged and the harness says so", async () => {
+  const m = machine({ harnesses: ["codex"] });
+  const r17 = gh.fixture.releases.find((r) => r.number === 17)!;
+  installedPlugin(m, "codex", "oneezy", { files: r17.plugins.oneezy.files, version: "0.43.1" });
+  looseLink(m, "codex", "oneezy-status");
+  const r = await cli(m, ["status", "--json"], { FAKE_HARNESS_FAIL_PROMPT: "codex" });
+  assert.equal(r.status, 0, r.stdout + r.stderr);
+  const codex = (r.json as unknown as StatusJson).harnesses.codex;
+  assert.equal(codex.note, "codex cannot list its plugin skills");
+  assert.deepEqual(
+    codex.plugins.installed.map((p) => [p.id, p.version, p.latest, p.current, p.skills]),
+    [["oneezy", "0.43.1", "0.43.1", true, null]],
+  );
+  // skills nobody could read are no place for a duplicate
+  assert.deepEqual(codex.duplicates, []);
+  assert.deepEqual(
+    codex.lines.map((l) => [l.ok, l.text]),
+    [
+      [true, "codex cannot list its plugin skills"],
+      [true, "oneezy@oneezy-skills 0.43.1 (latest 0.43.1; skills not read)"],
+      [true, "1 loose link, 0 skill folders"],
+    ],
+  );
+  // a version behind the release is red all the same
+  installedPlugin(m, "codex", "matt-pocock", { version: "1.3.0", skills: ["grilling", "tdd"] });
+  const behind = await cli(m, ["status"], { FAKE_HARNESS_FAIL_PROMPT: "codex" });
+  assert.equal(behind.status, 1);
+  assert.ok(
+    behind.stdout.includes("\n! matt-pocock@oneezy-skills 1.3.0 (latest 1.3.1; skills not read)\n"),
+    behind.stdout,
+  );
+});
+
+test("a plugin switched off loads nothing: its skills are no place for a duplicate, and a disabled account plugin is listed, never judged", async () => {
+  const m = machine({ harnesses: ["claude-code"] });
+  const r17 = gh.fixture.releases.find((r) => r.number === 17)!;
+  syncedPlugin(m, "oneezy", { files: r17.plugins.oneezy.files });
+  // another marketplace's plugin, disabled, carrying a skill of the same name as the library's
+  installedPlugin(m, "claude-code", "foo", {
+    version: "1.0.0",
+    skills: ["oneezy-status"],
+    marketplace: "elsewhere",
+    enabled: false,
+  });
+  // an account plugin switched off at claude.ai, behind the release, carrying grilling, which a loose link also has
+  syncedPlugin(m, "matt-pocock", { version: "1.3.0", skills: ["grilling", "tdd"], enabled: false });
+  const link = looseLink(m, "claude-code", "grilling");
+  const r = await cli(m, ["status", "--json"]);
+  assert.equal(r.status, 0, r.stdout + r.stderr);
+  const claude = (r.json as unknown as StatusJson).harnesses["claude-code"];
+  assert.deepEqual(claude.duplicates, []);
+  assert.deepEqual(
+    claude.plugins.synced.map((p) => [p.id, p.enabled, p.current]),
+    [
+      ["matt-pocock", false, false],
+      ["oneezy", true, true],
+    ],
+  );
+  assert.deepEqual(
+    claude.plugins.other.map((p) => [p.id, p.marketplace]),
+    [["foo", "elsewhere"]],
+  );
+  assert.deepEqual(
+    claude.lines.map((l) => [l.ok, l.text]),
+    [
+      [true, "matt-pocock@synced 1.3.0 disabled (latest 1.3.1)"],
+      [true, "oneezy@synced 0.43.1 (latest 0.43.1)"],
+      [true, "1 loose link, 0 skill folders"],
+      [true, "1 other plugin left alone: foo@elsewhere"],
+    ],
+  );
+  const text = await cli(m, ["status"]);
+  assert.ok(text.stdout.includes("\n. matt-pocock@synced 1.3.0 disabled (latest 1.3.1)\n"), text.stdout);
+  // switched back on at claude.ai, the same plugin is judged and its skills count
+  syncedPlugin(m, "matt-pocock", { version: "1.3.0", skills: ["grilling", "tdd"], enabled: true });
+  const on = await cli(m, ["status", "--json"]);
+  assert.equal(on.status, 1);
+  assert.deepEqual(red((on.json as unknown as StatusJson).harnesses["claude-code"].lines), [
+    "matt-pocock@synced 1.3.0 (latest 1.3.1)",
+    `grilling listed twice: matt-pocock@synced, loose link -> ${linkTarget(link)!}`,
+  ]);
 });
 
 test("--quiet prints only the red lines under their harness and the summary; a green machine prints nothing", async () => {
