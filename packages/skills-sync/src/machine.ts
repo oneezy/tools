@@ -65,7 +65,7 @@ export interface HarnessState {
   folders: SkillFolder[];
   /** the managed block in the harness's global instructions file; null when its table row names no such file */
   block: BlockState | null;
-  /** blocks an older skills-sync wrote into repository instruction files: reported, never edited (ADR-0011) */
+  /** blocks an older skills-sync left outside the global file (repository files, AGENTS.override.md): reported, never edited */
   repoBlocks: RepoBlock[];
 }
 
@@ -111,7 +111,10 @@ function probeHarness(h: Harness, env: NodeJS.ProcessEnv, roots: string[], globa
     loose: [],
     folders: [],
     block: file ? readBlock(file) : null,
-    repoBlocks: repoBlocks(roots, h.projectInstructions ?? [], globals),
+    repoBlocks: [
+      ...repoBlocks(roots, h.projectInstructions ?? [], globals),
+      ...repoBlocks([h.configDir], (h.userInstructions ?? []).slice(1), globals),
+    ],
   };
   const cli = harnessCli(h, env);
   if (cli) {

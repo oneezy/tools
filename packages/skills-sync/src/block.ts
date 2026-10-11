@@ -29,7 +29,7 @@ This block is written by skills-sync; edits here are overwritten. Skills come fr
 | Codex | \`$<skill>\` in the prompt (a plugin's skill: \`$<plugin>:<skill>\`), the \`/skills\` picker, or \`@<skill>\` on ChatGPT web |
 | Hermes | \`/<skill>\` for a loose skill; a plugin's skill: \`/agent-plugin-<id>-<hash>:<skill>\` |
 
-Never fetch a \`SKILL.md\` from GitHub, or run one from any copy this harness did not load: that bypasses the harness's own resolution and \`disable-model-invocation\`. When a typed skill does not resolve, show this table instead of improvising.
+Never fetch a \`SKILL.md\` from GitHub, or run one from any folder this harness does not read: that bypasses the harness's own resolution and \`disable-model-invocation\`. When a typed skill does not resolve, show this table instead of improvising.
 
 ## Brain
 
@@ -37,7 +37,8 @@ For Brain capture, lookup, agenda, triage, task status or durable context, load 
 
 This delegation supersedes earlier Brain destinations in these instructions and their imports. Retain pinned sources, GitHub and Spaces as historical evidence. If the installed skill or its supported Drive route is unavailable, report that exact blocker and stop dependent Brain operations.`;
 
-const MARKER = /<!-- skills-sync:([\w-]+):(start|end) -->/g;
+/** A marker is a whole line (trailing blanks allowed), so a mention in prose or a fenced example is not one. */
+const MARKER = /^<!-- skills-sync:([\w-]+):(start|end) -->(?=[ \t]*\r?$)/gm;
 
 export interface ManagedBlock {
   id: string;
@@ -164,7 +165,12 @@ export function blockAction(file: string): Action {
     path: file,
     payload: next!,
     expectedHash: bytes ? toHash(bytes) : null,
-    note: state.status === "outdated" ? `skills block replaces ${state.ids.join(", ")}` : "skills block",
+    note:
+      state.status !== "outdated"
+        ? "skills block"
+        : state.ids.join(", ") === BLOCK_ID
+          ? "skills block updated"
+          : `skills block replaces ${state.ids.join(", ")}`,
   };
 }
 
@@ -174,9 +180,10 @@ export interface RepoBlock {
 }
 
 /**
- * Managed blocks in repository instruction files, where the old tool wrote them: `names` (a harness's project
- * instruction file names) directly under each of `roots`. `except` are the global files, never repository files
- * even when a root is a harness's config folder. Found, never edited: each is a cleanup line in the report.
+ * Managed blocks outside the global file, where the old tool wrote them: `names` directly under each of `roots` (a
+ * harness's project instruction file names under each project, or its secondary global files such as
+ * AGENTS.override.md under its config folder). `except` are the global files themselves. Found, never edited: each is
+ * a cleanup line in the report.
  */
 export function repoBlocks(roots: string[], names: string[], except: string[] = []): RepoBlock[] {
   const out: RepoBlock[] = [];
