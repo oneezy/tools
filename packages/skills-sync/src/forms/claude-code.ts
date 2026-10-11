@@ -9,15 +9,12 @@
 // other account plugins are never touched. The library's marketplace registration goes with the last plugin the tool
 // installed from it. Plugin commands run here through install.ts's drivers, outside --plan, and come back as uninstall
 // actions; the link removals come back as remove actions for apply().
-import fs from "node:fs";
 import os from "node:os";
-import path from "node:path";
-import type { FormFn } from "../desired.js";
-import { lexists, real, under } from "../fs.js";
-import { listMarketplaces, removeMarketplace, runner, uninstallPlugin, type Run } from "../install.js";
-import { homeLibrary } from "../library.js";
+import { catalogOf, pluginsFor, type FormFn } from "../desired.js";
+import { lexists } from "../fs.js";
+import { listMarketplaces, refused, removeMarketplace, runner, uninstallPlugin, type Run } from "../install.js";
 import {
-  LIBRARY_MARKETPLACE,
+  libraryCopy,
   type AccountPlugin,
   type CliPlugin,
   type HarnessState,
@@ -48,10 +45,13 @@ export const claudeCode: FormFn = (release, state, _machine, { plan }) => {
       },
     ];
 
-  const mine = state.installed.filter((p) => p.marketplace === LIBRARY_MARKETPLACE);
-  // the account plugins the release lists, switched on: where Claude Code loads the library's skills from
+  const catalog = catalogOf(release);
+  const mine = state.installed.filter((p) => p.marketplace === catalog);
+  // the release plugins this harness gets (the release's config may narrow them), switched on at the account: where
+  // Claude Code loads the library's skills from
+  const listed = pluginsFor(release, state.harness.id).map((p) => p.id);
   const delivered = new Map<string, AccountPlugin>();
-  for (const p of state.synced) if (release.plugins[p.id] && p.enabled) delivered.set(p.id, p);
+  for (const p of state.synced) if (listed.includes(p.id) && p.enabled) delivered.set(p.id, p);
   const work: Redundant[] = [...delivered.values()]
     .sort((a, b) => a.id.localeCompare(b.id))
     .map((account) => ({
@@ -126,7 +126,7 @@ export const claudeCode: FormFn = (release, state, _machine, { plan }) => {
   // the registration goes with the last plugin the tool installed from the marketplace: claude's remove takes the
   // marketplace's plugins with it, so never while one the account does not deliver yet stays
   if (mine.length && mine.every((p) => gone.has(`${p.id}@${p.marketplace}`)))
-    out.push(...marketplace(state, run, plan));
+    out.push(...marketplace(state, run, catalog, plan));
 
   // claude listed fine and not one account plugin: the sync itself is off, not a plugin (a token or API-key sign-in,
   // syncClaudeAiPlugins: false, a Claude Code older than 2.1.273), so one line, not one per plugin
@@ -138,7 +138,7 @@ export const claudeCode: FormFn = (release, state, _machine, { plan }) => {
     });
   // what the account does not deliver yet keeps whatever it has today; switching it on is a click at claude.ai
   else
-    for (const id of Object.keys(release.plugins).sort())
+    for (const id of listed)
       if (!delivered.has(id))
         out.push({
           kind: "note",
@@ -148,48 +148,13 @@ export const claudeCode: FormFn = (release, state, _machine, { plan }) => {
   return out;
 };
 
-function marketplace(state: HarnessState, run: Run, plan: boolean): Action[] {
-  const p = `${state.harness.name}: marketplace ${LIBRARY_MARKETPLACE}`;
+function marketplace(state: HarnessState, run: Run, catalog: string, plan: boolean): Action[] {
+  const p = `${state.harness.name}: marketplace ${catalog}`;
   const markets = listMarketplaces(state.harness, run);
   if (markets === null)
     return [{ kind: "note", path: p, note: "claude could not list its marketplaces; a registration stays" }];
-  if (!markets.some((m) => m.name === LIBRARY_MARKETPLACE)) return [];
+  if (!markets.some((m) => m.name === catalog)) return [];
   const a: Action = { kind: "uninstall", path: p, note: "no plugin from it remains" };
-  if (!plan && !removeMarketplace(state.harness, run, LIBRARY_MARKETPLACE))
-    refused(a, run, "claude could not remove it");
+  if (!plan && !removeMarketplace(state.harness, run, catalog)) refused(a, run, "claude could not remove it");
   return [a];
-}
-
-/** The plugin command behind `a` was refused: the action becomes the failure, with claude's own words attached. */
-function refused(a: Action, run: Run, note: string): void {
-  a.kind = "conflict";
-  a.failed = true;
-  a.note = note;
-  a.diagnostic = run.failure;
-}
-
-/**
- * Is `target`, where a loose link points, a copy the tool made? Inside a checkout or clone of the library (a
- * skills-sync.json naming the release repo's owner and name at some ancestor), inside ~/.skills-sync or what it points
- * at, or gone (a clone that moved or was deleted leaves its links dangling). Anything else is the user's.
- */
-function libraryCopy(target: string, repo: string, home: string): boolean {
-  if (!lexists(target)) return true;
-  const hl = homeLibrary(home);
-  if (under(target, hl) || under(target, real(hl))) return true;
-  const [owner, name] = repo.toLowerCase().split("/");
-  for (let dir = path.dirname(target); ; dir = path.dirname(dir)) {
-    const lib = readJson(path.join(dir, "skills-sync.json"))?.library as Record<string, unknown> | undefined;
-    if (lib && String(lib.owner).toLowerCase() === owner && String(lib.name).toLowerCase() === name) return true;
-    if (path.dirname(dir) === dir) return false;
-  }
-}
-
-function readJson(file: string): Record<string, unknown> | null {
-  try {
-    const v: unknown = JSON.parse(fs.readFileSync(file, "utf8"));
-    return v && typeof v === "object" ? (v as Record<string, unknown>) : null;
-  } catch {
-    return null;
-  }
 }

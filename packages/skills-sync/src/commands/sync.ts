@@ -1,11 +1,12 @@
 // sync, the default machine command: read the latest release, probe this machine, compute what each harness should
-// have (desired.ts) and apply it, or show it with --plan; nothing else is looked for, no library, no local file. Today
-// that is the managed block in each harness's global instructions file (ADR-0011) and a cleanup line per block an older
-// skills-sync left in a repository, then each harness's form from src/forms/ (tools#149, #150 and #153). Outside the
-// cloud, GitHub being unreachable is one red line, not a stop: the block needs no release and is written anyway. In the
-// cloud the release is not read at all: the block is the whole sync there, and a session start must not go red (or
-// print) over a GitHub it cannot reach. The caller prints the report (cli.ts's printer, so sync's output and the old
-// library-based run's read the same) and sets the exit code from it: 1 when an action failed or anything is red.
+// have (desired.ts) and apply it, or show it with --plan; nothing else is looked for, no library, no local file, nothing
+// of its own left on the machine (ADR-0012). Today that is the managed block in each harness's global instructions file
+// (ADR-0011), a cleanup line per block an older skills-sync left in a repository, a note per leftover of the old tool,
+// and whatever each harness's form in src/forms/ asks for. Outside the cloud, GitHub being unreachable is one red line,
+// not a stop: the block needs no release and is written anyway. In the cloud the release is not read at all: the block
+// is the whole sync there, and a session start must not go red (or print) over a GitHub it cannot reach. The caller
+// prints the report (cli.ts's printer, shared with every command) and sets the exit code from it: 1 when an action
+// failed or anything is red. On Windows the caller also runs this same sync inside every WSL distro (wsl.ts).
 import { desired, type FormFn } from "../desired.js";
 import { claudeCode } from "../forms/claude-code.js";
 import { codex } from "../forms/codex.js";
@@ -19,20 +20,11 @@ import { latestRelease, type Release } from "../release.js";
 /** The form modules by harness id; a harness without one (Goose) gets the block and nothing more. */
 export const FORMS: Record<string, FormFn> = { "claude-code": claudeCode, codex, hermes };
 
-/**
- * The harnesses whose form is built (not a placeholder note): the old library-based run in cli.ts leaves them to the
- * machine sync, or it would link their skills and register the library folder again. #154 removes this with the old
- * run.
- */
-export const BUILT_FORMS: ReadonlySet<string> = new Set(["claude-code", "codex", "hermes"]);
-
 export interface SyncOptions {
   /** the release repo, owner/repo */
   repo: string;
   /** show the plan, write nothing */
   plan: boolean;
-  /** only these harness ids (--agents); every detected one when unset */
-  agents?: string[];
   env?: NodeJS.ProcessEnv;
   /** where the run happens; a repository there is looked at for old blocks */
   cwd?: string;
@@ -60,9 +52,7 @@ export async function runSync(options: SyncOptions): Promise<SyncResult> {
     }
   const report = new Report();
   if (error) report.add({ kind: "conflict", path: options.repo, note: `latest release not read: ${error}` });
-  report.merge(
-    await desired(release, machine, FORMS, { agents: options.agents, plan: options.plan, github: release ? gh : null }),
-  );
+  report.merge(await desired(release, machine, FORMS, { plan: options.plan, github: release ? gh : null }));
   apply(report, options.plan);
   return { report, release, error, machine };
 }
@@ -77,9 +67,12 @@ export function syncFacts(r: SyncResult): Record<string, unknown> {
           number: r.release.number,
           commit: r.release.commit,
           tool: r.release.tool,
+          config: r.release.config,
         }
       : null,
     ...(r.error ? { error: r.error } : {}),
     cloud: r.machine.cloud,
+    oldLibrary: r.machine.oldLibrary,
+    oldLocalFile: r.machine.oldLocalFile,
   };
 }

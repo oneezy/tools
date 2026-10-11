@@ -43,7 +43,8 @@ export function check(lib: Library): CheckResult {
   const result: CheckResult = { problems: [], notes: [], skills: 0, flows: 0, generated: 0, fixes: [] };
   const problem = (file: string, reason: string) => result.problems.push({ path: rel(lib, file), reason });
   for (const reason of entrypointProblems(lib)) problem(path.join(lib.root, ENTRYPOINTS_NAME), reason);
-  for (const s of lib.scanOwn().skills) {
+  const scan = lib.scanOwn();
+  for (const s of scan.skills) {
     const md = path.join(s.dir, "SKILL.md");
     result.skills++;
     if (s.plugin === PLAY && !s.name.startsWith(`${PLAY}-`))
@@ -57,6 +58,9 @@ export function check(lib: Library): CheckResult {
     result.flows++;
     for (const reason of flowProblems(fs.readFileSync(flow, "utf8"), s.name)) problem(flow, reason);
   }
+  // what the scan passed over: a second skill of a name already taken, a SKILL.md too deep to be a skill. Nothing else
+  // reports them, and a plugin built from the group would carry the wrong one
+  for (const i of scan.ignored) problem(i.path, i.note);
   // generated files come from the config: a library without one (a lock alone) has none to check
   if (!lib.hasConfig() || !validConfig(lib, problem)) return result;
   pluginDrift(lib, result, problem);

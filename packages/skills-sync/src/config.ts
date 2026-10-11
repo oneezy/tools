@@ -1,35 +1,48 @@
-// This machine's answers (harnesses, projects, WSL distros, unavailable skills, link mode) live in
-// skills-sync.local.json, gitignored, so the committed config skills-sync.json is the same on every machine.
-// Before 0.3.0 the answers were kept in skills-sync.json itself; such a file is moved to the local file once.
+// skills-sync.local.json beside a library checkout's committed config skills-sync.json, gitignored. The library commands
+// (update, refresh, add) keep one list in it: the selected skills an earlier run found gone upstream. The machine
+// commands never read or write it (ADR-0012): the file an older version left beside the old clone is reported as a
+// leftover and nothing more. Every field an older version wrote stays in the type and the shipped schema, so an old
+// checkout's file still validates. Before 0.3.0 the answers were kept in skills-sync.json itself; such a file is read as
+// the local file when there is no other.
 import fs from "node:fs";
 import path from "node:path";
 import type { LinkMode } from "./fs.js";
-import type { Form, Owned } from "./install.js";
-import type { Report } from "./plan.js";
 import { shippedSchema, validate } from "./schema.js";
 
 export type { LinkMode } from "./fs.js";
 
+/** How a harness got the library's skills before ADR-0007: its plugins, or one loose link per skill. */
+export type Form = "plugin" | "links";
+
+/** What an older version installed on one harness (keyed by the harness's config folder): plugin ids, its marketplace. */
+export interface Owned {
+  harness: string;
+  marketplace?: string;
+  plugins: string[];
+  /** built bytes last verified on that harness; cache identity, apart from the displayed semantic version */
+  revisions?: Record<string, string>;
+}
+
 export interface Local {
-  /** harness ids to sync */
+  /** harness ids to sync (older versions) */
   agents?: string[];
-  /** link into the harnesses' user skills folders */
+  /** link into the harnesses' user skills folders (older versions) */
   global?: boolean;
-  /** folder whose git repos are offered as projects */
+  /** folder whose git repos were offered as projects (older versions) */
   dev?: string;
-  /** project folder names (relative to dev) to keep in sync */
+  /** project folder names (relative to dev) that got the skills (older versions) */
   projects?: string[];
-  /** how projects get their skills */
+  /** how projects got their skills (older versions) */
   mode?: "link" | "copy";
-  /** WSL distro names to fan out to (Windows only) */
+  /** WSL distro names fanned out to (older versions; the distros are detected on every run now) */
   wsl?: string[];
   /** selected skills the last refresh or restore could not find upstream; retried with --retry */
   unavailable?: string[];
   /** how links are made: a symlink with a junction fallback (auto), or one kind only */
   links?: LinkMode;
-  /** the user folders' form on harnesses with plugins, when --plugins or --links chose one (else the default) */
+  /** the user folders' form on harnesses with plugins, when --plugins or --links chose one (older versions) */
   form?: Form;
-  /** what this tool installed through each harness's plugin commands, keyed by the harness's config folder */
+  /** what an older version installed through each harness's plugin commands, keyed by the harness's config folder */
   plugins?: Record<string, Owned>;
 }
 
@@ -58,7 +71,7 @@ export function configKind(libraryRoot: string): "config" | "answers" | "none" {
   return keys.length && keys.every((k) => ANSWER_KEYS.has(k)) ? "answers" : "config";
 }
 
-/** The local file, validated; the legacy answers when it has not been moved yet (a --plan run); else nothing. */
+/** The local file, validated; the legacy answers when there is no local file; else nothing. */
 export function readLocal(libraryRoot: string): Local {
   const file = path.join(libraryRoot, LOCAL_NAME);
   if (fs.existsSync(file)) {
@@ -79,20 +92,4 @@ export function readLocal(libraryRoot: string): Local {
 
 export function writeLocal(libraryRoot: string, local: Local): void {
   fs.writeFileSync(path.join(libraryRoot, LOCAL_NAME), JSON.stringify(local, null, 2) + "\n");
-}
-
-/** A legacy answers file becomes the local file: one move, reported once; never when the local file already exists. */
-export function migrateAnswers(libraryRoot: string, report: Report): void {
-  if (configKind(libraryRoot) !== "answers") return;
-  const from = path.join(libraryRoot, CONFIG_NAME);
-  const to = path.join(libraryRoot, LOCAL_NAME);
-  if (fs.existsSync(to)) {
-    report.add({
-      kind: "conflict",
-      path: from,
-      note: `holds this machine's answers from an older version, but ${LOCAL_NAME} already exists; delete it, or make it the committed config`,
-    });
-    return;
-  }
-  report.add({ kind: "move", path: from, target: to, note: "per-machine answers now live in the local file" });
 }

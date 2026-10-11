@@ -142,53 +142,10 @@ export function skillsIn(dir: string): string[] {
     .sort();
 }
 
-/** Content hash of a folder: relative paths plus bytes, so two copies compare equal. */
-export function folderHash(folder: string): string {
-  const h = createHash("sha256");
-  const walk = (dir: string) => {
-    for (const e of fs.readdirSync(dir, { withFileTypes: true }).sort((a, b) => a.name.localeCompare(b.name))) {
-      const full = path.join(dir, e.name);
-      if (e.isDirectory()) walk(full);
-      else if (e.isFile()) {
-        h.update(path.relative(folder, full).replace(/\\/g, "/"));
-        h.update(fs.readFileSync(full));
-      }
-    }
-  };
-  walk(folder);
-  return h.digest("hex");
-}
-
 export function copyDir(src: string, dst: string): void {
   if (fs.existsSync(dst)) fs.rmSync(dst, { recursive: true, force: true });
   fs.mkdirSync(path.dirname(dst), { recursive: true });
   fs.cpSync(src, dst, { recursive: true, dereference: true });
-}
-
-/** Add lines to a repo's .git/info/exclude (honored by git, never committed). */
-export function gitExclude(repo: string, entries: string[]): boolean {
-  const gitDir = path.join(repo, ".git");
-  let infoDir: string;
-  try {
-    const st = fs.statSync(gitDir);
-    if (st.isDirectory()) infoDir = path.join(gitDir, "info");
-    else {
-      // worktree: ".git" is a file pointing at the real git dir
-      const m = /gitdir:\s*(.+)/.exec(fs.readFileSync(gitDir, "utf8"));
-      if (!m) return false;
-      infoDir = path.join(path.resolve(repo, m[1].trim()), "info");
-    }
-  } catch {
-    return false;
-  }
-  fs.mkdirSync(infoDir, { recursive: true });
-  const file = path.join(infoDir, "exclude");
-  const existing = fs.existsSync(file) ? fs.readFileSync(file, "utf8") : "";
-  const lines = new Set(existing.split(/\r?\n/));
-  const missing = entries.filter((e) => !lines.has(e));
-  if (!missing.length) return false;
-  fs.writeFileSync(file, existing.replace(/\n?$/, "\n") + "# skills-sync links\n" + missing.join("\n") + "\n");
-  return true;
 }
 
 export function toHash(bytes: Buffer): string {

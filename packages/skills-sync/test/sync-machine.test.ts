@@ -1,13 +1,13 @@
 // sync as a machine command: the managed block in each harness's global instructions file (ADR-0011), and in a cloud
 // session nothing else. The CLI runs as a process on the pretend machine (test/machine.ts) against the fake GitHub; the
 // tests assert what a user sees: the files (and that nothing else in the home changed), the fake CLIs' calls, the fake
-// GitHub's requests, printed lines, --json and exit codes. The old library-based run is still reachable on a PC that has
-// a library; one test proves it runs after the block, with its own instruction blocks off.
+// GitHub's requests, printed lines, --json and exit codes. There is no library-based run any more: a library on the
+// machine is never found or used, and an older flag is named once on stderr (test/no-local-state.test.ts).
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
 import { afterAll, afterEach, beforeAll, test } from "vite-plus/test";
-import { isLink, lexists, linkTarget, samePath } from "../src/fs.js";
+import { lexists, linkTarget, samePath } from "../src/fs.js";
 import { startFakeGithub, type FakeGithub } from "./fixtures/fake-github/fake-github.mjs";
 import {
   blockIn,
@@ -44,6 +44,9 @@ const CLOUD = { CLAUDE_CODE_REMOTE: "true" };
 /** The setup-script line cloud environments run today, and the plain one the spec reduces it to. */
 const SETUP_LINE = ["-y", "--agents", "claude-code", "--global", "--no-projects", "--no-wsl", "--quiet"];
 const PLAIN_LINE = ["--quiet"];
+/** The one line a machine command prints for the older flags: each as given, once, in order. */
+const ignored = (...flags: string[]) =>
+  `ignored: ${flags.join(", ")} (settings come from the release's skills-sync.json; machine facts are detected on every run)\n`;
 
 let gh: FakeGithub;
 const machines: PretendMachine[] = [];
@@ -193,6 +196,7 @@ test("a second sync changes nothing and says so; --quiet then prints nothing; --
     number: 17,
     commit: "1717171717171717171717171717171717171717",
     tool: null,
+    config: { catalog: "oneezy-skills", harnesses: null, plugins: {} },
   });
   assert.deepEqual(
     s.actions.filter((a) => a.kind !== "note").map((a) => [a.kind, path.basename(a.path), a.note]),
@@ -264,20 +268,23 @@ test("a file with two managed blocks is left alone and red; the other harness's 
   assert.equal(r.stdout.trimEnd().split("\n").at(-1), "3 changed, 0 already right, 1 left alone");
 });
 
-test("blocks the old tool wrote into repository files are reported, never edited: in the current directory and in the projects the old local file remembers", async () => {
+test("blocks the old tool wrote into repository files are reported, never edited: in the current directory; the projects the old local file remembers are not looked at, that file is never read", async () => {
   const m = machine();
   const dev = path.join(m.base, "dev");
   const app = path.join(dev, "app");
   const repoFiles = [
-    blockIn(path.join(app, "AGENTS.md"), "brain", "old"),
-    blockIn(path.join(app, "CLAUDE.md"), "brain", "old"),
-    blockIn(path.join(app, ".claude", "CLAUDE.md"), "brain", "old"),
     blockIn(path.join(m.base, "here", "AGENTS.md"), "brain", "old"),
     blockIn(path.join(m.base, "here", "CLAUDE.md"), "brain", "old"),
+    blockIn(path.join(m.base, "here", ".claude", "CLAUDE.md"), "brain", "old"),
+  ];
+  // what the old tool left in a project it remembered: found only by running there, where its harness would read it
+  const projectFiles = [
+    blockIn(path.join(app, "AGENTS.md"), "brain", "old"),
+    blockIn(path.join(app, "CLAUDE.md"), "brain", "old"),
   ];
   fs.mkdirSync(path.join(app, ".git"));
   oldLocalFile(m, { dev, projects: ["app", "gone"] });
-  const texts = repoFiles.map(read);
+  const texts = [...repoFiles, ...projectFiles].map(read);
   const libraryBefore = snapshot(path.join(m.base, "old-library"));
   const homeBefore = snapshot(m.home);
   // the cloud is where the current directory is a repository with such a block
@@ -299,10 +306,15 @@ test("blocks the old tool wrote into repository files are reported, never edited
     notes.every((l) => l.includes("remove it by hand")),
     r.stdout,
   );
-  assert.deepEqual(repoFiles.map(read), texts);
-  // the old library and its local file were read, not written; the home gained only the two global files
+  assert.ok(!r.stdout.includes(app), `the remembered project is not looked at: ${r.stdout}`);
+  assert.deepEqual([...repoFiles, ...projectFiles].map(read), texts);
+  // the old library and its local file were left as they are; the home gained only the two global files
   assert.deepEqual(snapshot(path.join(m.base, "old-library")), libraryBefore);
   assert.deepEqual(added(homeBefore, snapshot(m.home)), [".claude/CLAUDE.md", ".codex/AGENTS.md"]);
+  // run inside the project, its blocks are the ones reported (not under --quiet: a note is not a change)
+  const inside = await cli(m, [], CLOUD, app);
+  assert.equal(inside.status, 0, inside.stderr);
+  for (const file of projectFiles) assert.ok(inside.stdout.includes(file), `${file} in ${inside.stdout}`);
 });
 
 test("a repository block is also reported outside the cloud, and a global file is never mistaken for one", async () => {
@@ -333,7 +345,7 @@ for (const [name, line] of [
   ["today's setup-script line", SETUP_LINE],
   ["the plain line", PLAIN_LINE],
 ] as const)
-  test(`in the cloud, ${name} writes only the global block: no clone, no ~/.skills-sync, no links, no plugins, no local file, even with a library present`, async () => {
+  test(`in the cloud, ${name} writes only the global blocks: no clone, no ~/.skills-sync, no links, no plugins, no local file, even with a library present; the older flags are named once on stderr`, async () => {
     const m = machine();
     // a library is on the machine (as the old setup script left it): the cloud run must not touch or use it
     const library = linkTarget(oldLibraryLink(m))!;
@@ -341,7 +353,9 @@ for (const [name, line] of [
     const homeBefore = snapshot(m.home);
     const r = await cli(m, [...line], CLOUD);
     assert.equal(r.status, 0, r.stderr);
-    const files = line === SETUP_LINE ? [".claude/CLAUDE.md"] : [".claude/CLAUDE.md", ".codex/AGENTS.md"];
+    // --agents picks nothing any more: every detected harness gets its block
+    const files = [".claude/CLAUDE.md", ".codex/AGENTS.md"];
+    const warning = line === SETUP_LINE ? ignored("-y", "--agents", "--global", "--no-projects", "--no-wsl") : "";
     assert.deepEqual(added(homeBefore, snapshot(m.home)), files);
     for (const f of files) assertBlock(read(path.join(m.home, f)));
     assert.deepEqual(snapshot(library), libraryBefore);
@@ -358,12 +372,13 @@ for (const [name, line] of [
     assert.equal(lines.filter((l) => l.startsWith("+ write")).length, files.length, r.stdout);
     assert.equal(lines.at(-1), `${files.length} changed, 0 already right, 0 left alone`);
     assert.ok(!r.stdout.includes("form:"), r.stdout);
-    assert.equal(r.stderr, "");
-    // the next session start: nothing to do, nothing printed
+    // stderr: the one line naming the older flags, or nothing, so the setup script stays silent
+    assert.equal(r.stderr, warning);
+    // the next session start: nothing to do, nothing printed but that line
     const again = await cli(m, [...line], CLOUD);
     assert.equal(again.status, 0, again.stderr);
     assert.equal(again.stdout, "");
-    assert.equal(again.stderr, "");
+    assert.equal(again.stderr, warning);
   });
 
 test("in the cloud the release is not read: with no GitHub reachable the plain line still exits 0, prints no problem and writes both blocks", async () => {
@@ -390,19 +405,22 @@ test("in the cloud the release is not read: with no GitHub reachable the plain l
   assert.equal(s.actions.filter((a) => a.kind === "conflict").length, 0);
 });
 
-test("in the cloud, --repo <checkout> does not bring the library-based run back: the block is the whole sync", async () => {
+test("in the cloud, --repo <checkout> does not bring a library-based run back: the block is the whole sync, the flag is named once", async () => {
   const m = machine();
   const library = linkTarget(oldLibraryLink(m))!;
   const before = snapshot(library);
   const homeBefore = snapshot(m.home);
   const r = await cli(m, ["--repo", library, "--json"], CLOUD);
   assert.equal(r.status, 0, r.stderr);
+  assert.equal(r.stderr, ignored("--repo"));
   const s = r.json as unknown as SyncJson;
   assert.equal(s.cloud, true);
+  // the leftover link is named, then the two blocks; nothing of a library run
   assert.deepEqual(
     s.actions.map((a) => a.kind),
-    ["write", "write"],
+    ["note", "write", "write"],
   );
+  assert.ok(s.actions[0].note?.startsWith("the old library link;"), s.actions[0].note);
   assert.deepEqual(snapshot(library), before);
   assert.deepEqual(added(homeBefore, snapshot(m.home)), [".claude/CLAUDE.md", ".codex/AGENTS.md"]);
 });
@@ -476,13 +494,19 @@ test("--library names the release repo as owner/repo: another repo is asked for,
   assertBlock(read(globalFile(m, "claude-code")));
 });
 
-test("--agents picks the harnesses; Hermes has no global instructions file in the table, so it gets no block, and without hermes on PATH its plugin form is one note and nothing in its home", async () => {
+test("--agents picks nothing any more: every detected harness is served and the flag is named once; Hermes has no global instructions file in the table, so it gets a form line and no block", async () => {
   const m = machine({ harnesses: ["claude-code", "codex", "hermes"] });
   const before = snapshot(m.home);
   const r = await cli(m, ["--agents", "codex,hermes"]);
-  assert.equal(r.status, 0, r.stderr + r.stdout);
-  assert.deepEqual(added(before, snapshot(m.home)), [".codex/AGENTS.md", ".codex/hooks.json"]);
-  assert.ok(!r.stdout.includes("Claude Code"), r.stdout);
+  assert.equal(r.status, 0, r.stderr);
+  assert.equal(r.stderr, ignored("--agents"));
+  assert.deepEqual(added(before, snapshot(m.home)), [
+    ".claude/CLAUDE.md",
+    ".claude/settings.json",
+    ".codex/AGENTS.md",
+    ".codex/hooks.json",
+  ]);
+  assert.ok(r.stdout.includes("Claude Code"), r.stdout);
   assert.ok(
     r.stdout
       .split("\n")
@@ -490,69 +514,4 @@ test("--agents picks the harnesses; Hermes has no global instructions file in th
     r.stdout,
   );
   assert.deepEqual(fs.readdirSync(m.hermesHome), []);
-});
-
-test("a PC with a library keeps the old library-based sync after the block, with the old instruction blocks off: one report, no brain block", async () => {
-  // the old run's default harnesses are Claude Code and Codex, whose forms the machine sync built (tools#149, tools#150),
-  // and Hermes's is built too (tools#153): Goose, named, is the one harness that keeps the old run's links
-  const m = machine({ harnesses: ["claude-code", "codex", "hermes"], clis: ["claude"] });
-  const gooseHome = path.join(m.home, ".config", "goose");
-  fs.mkdirSync(gooseHome, { recursive: true });
-  const agents = ["--agents", "claude-code,codex,hermes,goose"];
-  const library = linkTarget(oldLibraryLink(m))!;
-  globalBlock(m, "claude-code", "brain", "## Brain\nold");
-  const r = await cli(m, ["--no-wsl", ...agents]);
-  assert.equal(r.status, 0, r.stderr);
-  // the block first, then what the old run did: the user-folder links of the library's skills, as before, on every
-  // harness but Claude Code, Codex and Hermes: no link, no plugin of the tool's there
-  for (const h of ["claude-code", "codex"] as const) assertBlock(read(globalFile(m, h)));
-  assert.equal(lexists(path.join(m.claudeHome, "skills")), false);
-  assert.equal(lexists(path.join(m.home, ".agents", "skills", "oneezy-status")), false);
-  assert.equal(lexists(path.join(m.hermesHome, "skills")), false);
-  assert.ok(isLink(path.join(gooseHome, "skills", "oneezy-status")), r.stdout);
-  const lines = r.stdout.trimEnd().split("\n");
-  const write = lines.findIndex((l) => l.startsWith("+ write") && l.includes("CLAUDE.md"));
-  const linked = lines.findIndex((l) => l.startsWith("+ link") && l.includes("oneezy-status"));
-  assert.ok(write >= 0 && linked > write, r.stdout);
-  assert.equal(lines.filter((l) => /\d+ changed, \d+ already right, \d+ left alone$/.test(l)).length, 1, r.stdout);
-  // the old run still remembers its answers in the library, as it did; nothing of it wrote a brain block anywhere
-  assert.ok(fs.existsSync(path.join(library, "skills-sync.local.json")));
-  for (const f of fs.readdirSync(m.home, { recursive: true, withFileTypes: true }))
-    if (f.isFile() && f.name.endsWith(".md")) {
-      const text = read(path.join(f.parentPath, f.name));
-      assert.ok(!text.includes("skills-sync:brain"), `${f.name}: ${text}`);
-    }
-  const again = await cli(m, ["--no-wsl", ...agents]);
-  assert.equal(again.status, 0, again.stderr);
-  assert.ok(again.stdout.trimEnd().split("\n").at(-1)?.startsWith("0 changed"), again.stdout);
-});
-
-test("sync --repo <lib> (the old run with its instruction blocks on) never puts a brain block beside the skills block: it is reported as superseded, and the plain sync after it stays green", async () => {
-  const m = machine();
-  const library = linkTarget(oldLibraryLink(m))!;
-  const first = await cli(m, ["--no-wsl"]);
-  assert.equal(first.status, 0, first.stderr);
-  const texts = (["claude-code", "codex"] as const).map((h) => read(globalFile(m, h)));
-  // the line the library's release notes print
-  const old = await cli(m, ["--repo", library, "--no-pull", "-y", "--global", "--no-projects", "--no-wsl"]);
-  assert.equal(old.status, 1, old.stderr);
-  const superseded = old.stdout
-    .split("\n")
-    .filter((l) => l.startsWith("!") && l.includes("superseded by the global skills block"));
-  assert.equal(superseded.length, 2, old.stdout);
-  assert.deepEqual(
-    (["claude-code", "codex"] as const).map((h) => read(globalFile(m, h))),
-    texts,
-  );
-  const plain = await cli(m, ["--no-wsl"]);
-  assert.equal(plain.status, 0, plain.stderr);
-  assert.ok(plain.stdout.trimEnd().split("\n").at(-1)?.startsWith("0 changed"), plain.stdout);
-  for (const h of ["claude-code", "codex"] as const) {
-    const text = read(globalFile(m, h));
-    assert.deepEqual(
-      [...text.matchAll(/<!-- skills-sync:([\w-]+):start -->/g)].map((x) => x[1]),
-      ["skills"],
-      text,
-    );
-  }
 });

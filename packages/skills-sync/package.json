@@ -28,7 +28,6 @@
     "prepublishOnly": "npm run build && vp test run"
   },
   "dependencies": {
-    "@clack/prompts": "^1.8.1",
     "yaml": "^2.8.0"
   },
   "devDependencies": {

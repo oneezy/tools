@@ -5,7 +5,6 @@ import {
   copyDir,
   isLink,
   lexists,
-  linkTarget,
   makeLink,
   removeLink,
   samePath,
@@ -210,26 +209,4 @@ function writeWhole(file: string, body: string | Buffer): void {
     fs.rmSync(tmp, { force: true });
     throw error;
   }
-}
-
-/** Make `link` point at `target`. Never destroys a real folder; only manages links into `managedRoot`. */
-export function ensureLink(report: Report, link: string, target: string, managedRoot: string, what: string): void {
-  if (!lexists(link)) {
-    report.add({ kind: "link", path: link, target });
-    return;
-  }
-  if (isLink(link)) {
-    const current = linkTarget(link);
-    if (current && samePath(current, target)) report.add({ kind: "skip", path: link, note: "ok" });
-    else if (current && under(current, managedRoot))
-      report.add({ kind: "relink", path: link, target, note: `was ${current}` });
-    else
-      report.add({
-        kind: "conflict",
-        path: link,
-        note: `${what}: link points outside the skills library (${current}); left alone`,
-      });
-    return;
-  }
-  report.add({ kind: "conflict", path: link, note: `${what}: a real folder is in the way; left alone` });
 }

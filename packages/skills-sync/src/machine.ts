@@ -2,14 +2,16 @@
 // down (ADR-0012). Per harness: the account plugins claude.ai delivered (<id>@synced), the plugins installed through the
 // harness's own CLI (from the library's catalog, or from anywhere else), the loose links in its user skills folder and
 // where they point, the real skill folders there, the state of the managed block in its global instructions file, the
-// session hook entry in its user hooks file, and the blocks an older skills-sync left in repository files. The plugin
-// CLIs are asked through install.ts's runner, read-only listings only; when a CLI is missing, the account plugins are
-// read from their folders instead.
+// session hook entry in its user hooks file, and the blocks an older skills-sync left in repository files. For the
+// machine: what an older version left behind, the clone or link at ~/.skills-sync and its answers file, detected and
+// reported, never read. The plugin CLIs are asked through install.ts's runner, read-only listings only; when a CLI is
+// missing, the account plugins are read from their folders instead.
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { globalFile, readBlock, repoBlocks, type BlockState, type RepoBlock } from "./block.js";
-import { isDir, isLink, isSkillDir, linkTarget, samePath, skillsIn } from "./fs.js";
+import { LOCAL_NAME } from "./config.js";
+import { isDir, isLink, isSkillDir, lexists, linkTarget, real, skillsIn, under } from "./fs.js";
 import { detected, RESERVED, type Harness } from "./harnesses.js";
 import { githubRepo, hermesPlugins, type HermesActivation, type HermesInstall } from "./hermes.js";
 import { readHook, type HookState } from "./hooks.js";
@@ -22,9 +24,10 @@ import {
   supportsPlugins,
   type Marketplace,
 } from "./install.js";
-import { homeLibrary } from "./library.js";
+import { homeLibrary, looksLikeLibrary } from "./library.js";
+import type { Action } from "./plan.js";
 
-/** The library's catalog name: the marketplace a plugin this tool installed comes from, on Claude Code and Codex. */
+/** The library's catalog name when the release's config names none: the marketplace a plugin this tool installed comes from. */
 export const LIBRARY_MARKETPLACE = "oneezy-skills";
 
 /** An account plugin: claude.ai syncs it into <claudeHome>/plugins/synced/<org>_<bucket>/<folder>/. */
@@ -92,21 +95,41 @@ export interface HarnessState {
   hook: HookState | null;
 }
 
+/** The old tool's ~/.skills-sync: a link to its library clone, or the clone itself. Detected; never read, never removed. */
+export interface OldLibrary {
+  path: string;
+  kind: "link" | "folder";
+  /** where the link points, for a link */
+  target?: string;
+}
+
 export interface Machine {
   /** a claude.ai cloud session (CLAUDE_CODE_REMOTE=true) */
   cloud: boolean;
   harnesses: HarnessState[];
+  /** ~/.skills-sync when it exists: the old library clone or the link to it; nothing reads it any more */
+  oldLibrary: OldLibrary | null;
+  /** the old tool's skills-sync.local.json inside that clone, when it exists; nothing reads it any more */
+  oldLocalFile: string | null;
 }
 
 /**
- * `cwd` is where the run happens: a repository's instruction files there are looked at for old blocks, beside the
- * projects the old local file (~/.skills-sync/skills-sync.local.json) remembers, which is where the old tool wrote them.
+ * `cwd` is where the run happens: a repository's instruction files there are looked at for old blocks. The projects
+ * the old local file remembered are not: that file is a leftover now, reported and never read (ADR-0012); a block in
+ * another repository is found by running there, where its harness would read it.
  */
 export function probe(table: Harness[], env: NodeJS.ProcessEnv = process.env, cwd = process.cwd()): Machine {
   const found = detected(table);
-  const roots = [...oldProjects(), path.resolve(cwd)].filter((r, i, all) => all.findIndex((x) => samePath(x, r)) === i);
+  const roots = [path.resolve(cwd)];
   const globals = found.map(globalFile).filter((f): f is string => !!f);
-  return { cloud: isCloud(env), harnesses: found.map((h) => probeHarness(h, env, roots, globals)) };
+  const hl = homeLibrary(os.homedir());
+  const local = path.join(hl, LOCAL_NAME);
+  return {
+    cloud: isCloud(env),
+    harnesses: found.map((h) => probeHarness(h, env, roots, globals)),
+    oldLibrary: oldLibrary(hl),
+    oldLocalFile: lexists(local) ? local : null,
+  };
 }
 
 /** A claude.ai cloud session: the container sets CLAUDE_CODE_REMOTE=true. */
@@ -114,14 +137,62 @@ export function isCloud(env: NodeJS.ProcessEnv = process.env): boolean {
   return env.CLAUDE_CODE_REMOTE === "true";
 }
 
-/** The projects the old local file names (dev + projects), read leniently: an unreadable file is no project at all. */
-function oldProjects(home = os.homedir()): string[] {
-  const local = readJson(path.join(homeLibrary(home), "skills-sync.local.json"));
-  if (typeof local?.dev !== "string" || !Array.isArray(local.projects)) return [];
-  return (local.projects as unknown[])
-    .filter((n): n is string => typeof n === "string" && !!n)
-    .map((n) => path.resolve(local.dev as string, n))
-    .filter(isDir);
+function oldLibrary(hl: string): OldLibrary | null {
+  if (!lexists(hl)) return null;
+  if (isLink(hl)) return { path: hl, kind: "link", target: linkTarget(hl) ?? "?" };
+  return isDir(hl) ? { path: hl, kind: "folder" } : null;
+}
+
+/**
+ * One note each for what an older version left behind: the clone (or link) at ~/.skills-sync and the answers file in
+ * it. Machine commands never read them; deleting them is a human's. A link to a library checkout (the PC: the old tool
+ * pointed ~/.skills-sync at --repo) is the one leftover there: the checkout is the user's, and the library commands run
+ * inside it still keep its skills-sync.local.json (unavailable, links), so that file gets no line of its own. `text` is
+ * the line status prints.
+ */
+export function oldStateNotes(machine: Machine): Array<{ action: Action; text: string }> {
+  const out: Array<{ action: Action; text: string }> = [];
+  const lib = machine.oldLibrary;
+  const gone = "nothing reads it any more, delete it by hand";
+  const checkout = lib?.kind === "link" && !!lib.target && looksLikeLibrary(lib.target);
+  if (lib) {
+    const how = lib.kind === "link" ? `link -> ${lib.target}` : "folder";
+    const what = checkout
+      ? "the old library link; machine commands no longer use it; delete the link by hand, the checkout stays; its skills-sync.local.json is still used by library commands run inside that checkout"
+      : lib.kind === "link"
+        ? `the old library link; ${gone}`
+        : `the old library clone; ${gone}`;
+    out.push({
+      action: { kind: "note", path: lib.path, ...(lib.target ? { target: lib.target } : {}), note: what },
+      text: `${lib.path} (${how}) is ${what}`,
+    });
+  }
+  if (machine.oldLocalFile && !checkout)
+    out.push({
+      action: { kind: "note", path: machine.oldLocalFile, note: `the old tool's answers file; ${gone}` },
+      text: `${machine.oldLocalFile} is the old tool's answers file; ${gone}`,
+    });
+  return out;
+}
+
+/**
+ * Is `target`, where a loose link points, a copy the tool made? Inside a checkout or clone of the library (a
+ * skills-sync.json naming the release repo's owner and name at the target or an ancestor), inside ~/.skills-sync or
+ * what it points at (the real paths compared too: a Windows short name is the same folder), or gone (a clone that moved
+ * or was deleted leaves its links dangling). An empty target (the link could not be read) is nobody's: never removed.
+ * Anything else is the user's. The one definition of "the tool's leftover" for a link, for the forms and for unlink.
+ */
+export function libraryCopy(target: string, repo: string, home = os.homedir()): boolean {
+  if (!target) return false;
+  if (!lexists(target)) return true;
+  const hl = homeLibrary(home);
+  if (under(target, hl) || under(target, real(hl)) || under(real(target), real(hl))) return true;
+  const [owner, name] = repo.toLowerCase().split("/");
+  for (let dir = target; ; dir = path.dirname(dir)) {
+    const lib = readJson(path.join(dir, "skills-sync.json"))?.library as Record<string, unknown> | undefined;
+    if (lib && String(lib.owner).toLowerCase() === owner && String(lib.name).toLowerCase() === name) return true;
+    if (path.dirname(dir) === dir) return false;
+  }
 }
 
 function probeHarness(h: Harness, env: NodeJS.ProcessEnv, roots: string[], globals: string[]): HarnessState {
