@@ -254,7 +254,9 @@ function gitAsync(cwd: string, args: string[], env: NodeJS.ProcessEnv, timeoutMs
 function stop(child: ChildProcess): void {
   if (!child.pid) return;
   if (process.platform === "win32") {
-    spawnSync("taskkill", ["/pid", String(child.pid), "/T", "/F"], { windowsHide: true, stdio: "ignore" });
+    const r = spawnSync("taskkill", ["/pid", String(child.pid), "/T", "/F"], { windowsHide: true, stdio: "ignore" });
+    // taskkill missing from PATH or refused: end at least the git Node started
+    if (r.error || r.status !== 0) child.kill();
     return;
   }
   try {
