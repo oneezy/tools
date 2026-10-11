@@ -9,9 +9,12 @@ import fs from "node:fs";
 import path from "node:path";
 import YAML from "yaml";
 import { afterAll, afterEach, beforeAll, test } from "vite-plus/test";
+import { hermes as hermesForm } from "../src/forms/hermes.js";
 import { isLink, lexists } from "../src/fs.js";
 import { harnessTable, hermesHomeDir } from "../src/harnesses.js";
 import { hermesNamespace } from "../src/hermes.js";
+import { probe } from "../src/machine.js";
+import { parseRelease } from "../src/release.js";
 import { fixtureRelease, sha, startFakeGithub, type FakeGithub } from "./fixtures/fake-github/fake-github.mjs";
 import {
   cli,
@@ -178,6 +181,11 @@ test("one sync gives Hermes the release's plugins from GitHub at the release com
     r.calls.filter((c) => c.includes("list")),
     [["hermes", "plugins", "list", "--json", "--no-bundled"]],
   );
+  // GitHub was asked once, before the first install, whether the release commit carries the rendering at all
+  assert.deepEqual(
+    r.requests.filter((q) => q.path.includes("/contents/")).map((q) => q.path),
+    [`/repos/${REPO}/contents/dist/hermes?ref=${r17.commit}`],
+  );
   // what a user reads
   const out = lines(r);
   const at = (part: string) => {
@@ -262,6 +270,11 @@ test("a second sync changes nothing: every plugin is a skip, no hermes command t
     r.calls.every((c) => c.includes("--help")),
     JSON.stringify(r.calls),
   );
+  // and GitHub nothing beyond the release: the rendering question is for a run that installs
+  assert.deepEqual(
+    r.requests.filter((q) => q.path.includes("/contents/")).map((q) => q.path),
+    [],
+  );
   const asJson = await cli(m, ["--json"]);
   assert.deepEqual(actions(asJson).map(brief), [
     ["skip", "Hermes: plugin matt-pocock", "installed, 1.3.1"],
@@ -272,6 +285,15 @@ test("a second sync changes nothing: every plugin is a skip, no hermes command t
   assert.equal(quiet.status, 0, quiet.stderr);
   assert.equal(quiet.stdout, "");
   assert.deepEqual(snapshot(m.home), before);
+  // a git with core.autocrlf=true (Git for Windows' default) hands the clone over with CRLF: still the release's NOTICE
+  for (const id of ["matt-pocock", "oneezy", "play"]) {
+    const file = path.join(pluginDir(m, id), "NOTICE.md");
+    fs.writeFileSync(file, fs.readFileSync(file, "utf8").replace(/\n/g, "\r\n"));
+  }
+  const crlf = await cli(m, []);
+  assert.equal(crlf.status, 0, crlf.stderr);
+  assert.equal(lines(crlf).at(-1), "0 changed, 3 already right, 0 left alone");
+  assert.equal(crlf.calls.filter(pluginWrite).length, 0, JSON.stringify(crlf.calls));
 });
 
 test("a failed install is a conflict with hermes's stderr and that plugin's loose links stay; the other plugins are installed and their links go", async () => {
@@ -312,6 +334,15 @@ test("a failed install is a conflict with hermes's stderr and that plugin's loos
     !actions(r).some((a) => a.kind === "remove" && /oneezy-(merge|status)/.test(a.path)),
     "no removal for oneezy's skills",
   );
+  // the failed install is the conflict alone: no install action counted as changed, no namespace for it
+  assert.deepEqual(
+    actions(r)
+      .filter((a) => a.kind === "install" && a.target)
+      .map((a) => a.path),
+    ["Hermes: plugin matt-pocock", "Hermes: plugin play"],
+  );
+  const namespaces = actions(r).find((a) => a.kind === "note" && a.note?.includes("namespaces:"));
+  assert.ok(namespaces && !namespaces.note?.includes("agent-plugin-oneezy"), namespaces?.note);
   // the next sync, with hermes willing, finishes the job
   const again = await cli(m, []);
   assert.equal(again.status, 0, again.stderr + again.stdout);
@@ -464,13 +495,13 @@ test("what the tool did not make is never touched: a link to somewhere else and 
     [
       [
         "conflict",
-        folder,
-        "a real folder, and plugin matt-pocock also carries grilling; left alone (delete it by hand to keep grilling once)",
+        link,
+        `link points outside the library (${mine}) and plugin oneezy also carries oneezy-status; left alone`,
       ],
       [
         "conflict",
-        link,
-        `link points outside the library (${mine}) and plugin oneezy also carries oneezy-status; left alone`,
+        folder,
+        "a real folder, and plugin matt-pocock also carries grilling; left alone (delete it by hand to keep grilling once)",
       ],
     ],
   );
@@ -621,7 +652,8 @@ test("without hermes on PATH the form is one note and nothing is installed or re
   assert.equal(r2.calls.filter(pluginWrite).length, 0);
   assert.ok(
     actions(r2).some(
-      (a) => a.kind === "note" && a.note === "Hermes: plugins not compared; the latest release was not read",
+      (a) =>
+        a.kind === "note" && a.path === "Hermes: plugins" && a.note === "not compared; the latest release was not read",
     ),
     JSON.stringify(actions(r2)),
   );
@@ -646,6 +678,119 @@ test("on a PC with a library the old library-based run no longer links into Herm
   assert.deepEqual(
     r.calls.filter((c) => c[0] === "hermes" && pluginWrite(c)).map((c) => c[2]),
     ["install", "enable", "install", "enable", "install", "enable"],
+  );
+});
+
+test("a release whose commit carries no Hermes rendering yet (the library before its first build with this tool) is one note and no install: GitHub is asked once, hermes runs nothing, the loose links stay, exit 0", async () => {
+  const github = await startFakeGithub();
+  try {
+    const m = machine({}, github);
+    const r17 = latest(github);
+    // no hermesSource(): the fake GitHub has no dist/hermes at the release commit, like oneezy/skills main before #79
+    const links = migrating(m);
+    const before = snapshot(m.home);
+    const r = await cli(m, []);
+    assert.equal(r.status, 0, r.stderr + r.stdout);
+    assert.deepEqual(snapshot(m.home), before);
+    assert.equal(r.calls.filter(pluginWrite).length, 0, JSON.stringify(r.calls));
+    for (const link of Object.values(links)) assert.ok(isLink(link), link);
+    assert.deepEqual(
+      r.requests.filter((q) => q.path.includes("/contents/")).map((q) => q.path),
+      [`/repos/${REPO}/contents/dist/hermes?ref=${r17.commit}`],
+    );
+    const notes = lines(r).filter((l) => l.startsWith(". note"));
+    assert.equal(notes.length, 1, r.stdout);
+    assert.ok(
+      notes[0].includes("Hermes: plugins") &&
+        notes[0].includes(`release-17 carries no Hermes rendering yet, no dist/hermes/ at ${r17.commit.slice(0, 7)}`) &&
+        notes[0].includes("nothing installed, loose links kept"),
+      notes[0],
+    );
+    assert.equal(lines(r).at(-1), "0 changed, 0 already right, 0 left alone");
+    // the same under --plan: a plan asks the same question and records no install
+    const plan = await cli(m, ["--plan", "--json"]);
+    assert.equal(plan.status, 0, plan.stderr);
+    assert.ok(!actions(plan).some((a) => a.kind === "install"), JSON.stringify(actions(plan)));
+  } finally {
+    await github.close();
+  }
+});
+
+test("a plugin ahead of the latest release (installed by hand from main) is a note and stays as it is: never pinned back, its skills' links still come out; the others are installed", async () => {
+  const m = machine();
+  const r17 = latest();
+  hermesSource(m, r17);
+  const links = migrating(m);
+  hermesPlugin(m, "oneezy", { version: "0.99.0", skills: ["oneezy-merge", "oneezy-status"], pinned: false });
+  const r = await cli(m, ["--json"]);
+  assert.equal(r.status, 0, r.stderr);
+  assert.deepEqual(r.calls.filter(pluginWrite), [
+    installCall("matt-pocock", r17.commit),
+    enableCall("matt-pocock"),
+    installCall("play", r17.commit),
+    enableCall("play"),
+  ]);
+  assert.deepEqual(
+    actions(r)
+      .filter((a) => a.path === "Hermes: plugin oneezy")
+      .map(brief),
+    [["note", "Hermes: plugin oneezy", "0.99.0 is ahead of the latest release (0.43.1); left as it is"]],
+  );
+  assert.equal(JSON.parse(fs.readFileSync(path.join(pluginDir(m, "oneezy"), "plugin.json"), "utf8")).version, "0.99.0");
+  for (const link of Object.values(links)) assert.equal(lexists(link), false, link);
+});
+
+test("what no plugin of the release carries is reported, one line each, and left: a link into a library copy, a dangling link, a link to somewhere else and a real folder; a link whose target cannot be read too", async () => {
+  const m = machine();
+  const r17 = latest();
+  hermesSource(m, r17);
+  libraryCopy(m);
+  const copy = looseLink(m, "hermes", "old-skill");
+  const gone = path.join(m.base, "gone", "gone-skill");
+  const dangling = looseLink(m, "hermes", "gone-skill", gone);
+  fs.rmSync(path.dirname(gone), { recursive: true, force: true });
+  const mine = path.join(m.base, "mine", "mine-skill");
+  const foreign = looseLink(m, "hermes", "mine-skill", mine);
+  const folder = skillFolder(m, "hermes", "own-folder");
+  const r = await cli(m, ["--json"]);
+  assert.equal(r.status, 0, r.stderr);
+  assert.deepEqual(
+    actions(r)
+      .filter((a) => a.kind === "note" && a.path.startsWith(hermesSkills(m)))
+      .map(brief),
+    [
+      ["note", dangling, `dangling link; no plugin in release-17 carries gone-skill; left alone`],
+      ["note", foreign, `links to ${mine}, not a library copy; adopt it into ${REPO} or delete it by hand`],
+      ["note", copy, `links into a library copy, but no plugin in release-17 carries old-skill; left alone`],
+      ["note", folder, `not in the latest release; adopt it into ${REPO} or delete it by hand`],
+    ],
+  );
+  assert.ok(!actions(r).some((a) => a.kind === "remove"), JSON.stringify(actions(r)));
+  for (const p of [copy, dangling, foreign]) assert.ok(isLink(p), p);
+  assert.ok(fs.existsSync(path.join(folder, "SKILL.md")));
+  const status = (await cli(m, ["status", "--json"])).json as unknown as StatusJson;
+  assert.deepEqual(status.harnesses.hermes.loose.map((l) => l.name).sort(), ["gone-skill", "mine-skill", "old-skill"]);
+
+  // a link whose target the probe could not read (target ""): the form itself, in plan mode, with such a state; the
+  // fake hermes runs from this process's environment, so the machine's goes there for the call
+  const env = { ...process.env, ...m.env, PATH: [m.bin, ...m.extraPath, process.env.PATH].join(path.delimiter) };
+  const machineNow = probe(harnessTable(m.home, env, process.platform), env, m.home);
+  const state = machineNow.harnesses.find((h) => h.harness.id === "hermes")!;
+  const unreadable = path.join(hermesSkills(m), "grilling");
+  state.loose.push({ name: "grilling", path: unreadable, target: "" });
+  const release = parseRelease(REPO, r17.tag, r17.commit, Buffer.from(JSON.stringify(r17.json)));
+  const saved = { ...process.env };
+  let planned;
+  try {
+    Object.assign(process.env, env);
+    planned = await hermesForm(release, state, machineNow, { plan: true, github: null });
+  } finally {
+    for (const k of Object.keys(process.env)) if (!(k in saved)) delete process.env[k];
+    Object.assign(process.env, saved);
+  }
+  assert.deepEqual(
+    planned.filter((a) => a.path === unreadable).map((a) => [a.kind, a.note]),
+    [["note", "a link whose target cannot be read; left alone"]],
   );
 });
 
@@ -675,6 +820,12 @@ test("Hermes's home resolves as Hermes does: HERMES_HOME first, else %LOCALAPPDA
   assert.equal(row.configDir, path.join(local, "hermes"));
   assert.equal(row.userSkills, path.join(local, "hermes", "skills"));
   assert.equal(row.userInstructions, undefined, "no global instructions file, so no block");
+  // up to 0.7.x the tool linked into ~/.hermes/skills on Windows too: still probed there, so its links come out
+  assert.deepEqual(row.legacyUserSkills, [path.join(home, ".hermes", "skills")]);
+  const set = harnessTable(home, { LOCALAPPDATA: local, HERMES_HOME: path.join("E:", "h") }, "win32");
+  assert.equal(set.find((h) => h.id === "hermes")!.legacyUserSkills, undefined, "HERMES_HOME was the old home too");
+  const posix = harnessTable(posixHome, {}, "linux").find((h) => h.id === "hermes")!;
+  assert.equal(posix.legacyUserSkills, undefined, "~/.hermes is Hermes's home there");
   // the namespace Hermes gives a plugin's skills, from its name: agent-plugin-<slug>-<sha256(name)[:8]>
   assert.equal(hermesNamespace("oneezy"), "agent-plugin-oneezy-80c7eb0f");
   assert.equal(hermesNamespace("matt-pocock"), "agent-plugin-matt-pocock-c0b71e82");

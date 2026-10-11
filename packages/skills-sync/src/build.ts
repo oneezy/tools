@@ -1,10 +1,12 @@
 // build: the plugin form, written into the library from skills-sync.json. One package per plugin under plugins/<id>/
-// (an own group's skills, or a source's working-set copies), with the three host manifests, LICENSE and NOTICE.md; its
-// Hermes rendering under dist/hermes/<id>/ (the same package without metadata.internal, which Hermes's portable loader
-// rejects; `dist` is a folder the skills CLI never scans, so each skill is still listed once); and the two root catalogs
-// that point at ./plugins/<id>; and, on request, the upload archives under artifacts/. Every output is computed in
-// memory first and compared with disk, so a build with nothing new is silent and --check is the same computation that
-// writes nothing.
+// (an own group's skills, or a source's working-set copies), with the three host manifests, LICENSE and NOTICE.md; when
+// the config opts in (renderings.hermes), its Hermes rendering under dist/hermes/<id>/ (the same package without
+// metadata.internal, which Hermes's portable loader rejects; `dist` is a folder the skills CLI never scans, so each
+// skill is still listed once); and the two root catalogs that point at ./plugins/<id>; and, on request, the upload
+// archives under artifacts/. Every output is computed in memory first and compared with disk, so a build with nothing
+// new is silent and --check is the same computation that writes nothing. A new output ships behind a library opt-in so
+// that the publish guard (ADR-0008: this build's --check against the library's main) stays strict for a library that
+// has not opted in yet.
 import { spawnSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
@@ -60,21 +62,28 @@ export interface Head {
 /** The Agent Plugins 1.0 schema the portable manifest declares. */
 export const PLUGIN_SCHEMA = "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json";
 /**
- * Where the Hermes rendering of every package lives in the library, / separators: dist/hermes/<id>. `dist` is in the
- * skills CLI's SKIP_DIRS, so `npx skills add owner/repo` never lists these copies; Claude Code and Codex read plugins/
- * through the catalogs and never look here. `hermes plugins install owner/repo/dist/hermes/<id>` is the install.
+ * Where the Hermes rendering of every package lives in the library, / separators: dist/hermes/<id>, the value
+ * `renderings.hermes` in skills-sync.json takes to opt in. `dist` is in the skills CLI's SKIP_DIRS, so `npx skills add
+ * owner/repo` never lists these copies; Claude Code and Codex read plugins/ through the catalogs and never look here.
+ * `hermes plugins install owner/repo/dist/hermes/<id>` is the install, and this is the folder the machine sync installs
+ * from (the release does not carry the config yet; tools#154).
  */
 export const HERMES_PATH = "dist/hermes";
 const SKILL_MD = /^skills\/([^/]+)\/SKILL\.md$/;
 
-/** dist/hermes under a library root. */
-function hermesRoot(root: string): string {
-  return path.join(root, ...HERMES_PATH.split("/"));
+/** The folder the config sends the Hermes rendering to, / separators; null when the library has not opted in. */
+export function hermesPath(config: Config): string | null {
+  return config.renderings?.hermes ?? null;
 }
 
-/** dist/hermes/<id> under a library root. */
-export function hermesDir(root: string, id: string): string {
-  return path.join(hermesRoot(root), id);
+/** <rendering folder> under a library root. */
+function hermesRoot(root: string, rendering: string): string {
+  return path.join(root, ...rendering.split("/"));
+}
+
+/** <rendering folder>/<id> under a library root. */
+export function hermesDir(root: string, rendering: string, id: string): string {
+  return path.join(hermesRoot(root, rendering), id);
 }
 /** What the ChatGPT interface and the Codex catalog say every package is; the hosts enumerate neither value in their docs. */
 const CATEGORY = "Developer Tools";
@@ -148,6 +157,7 @@ export function build(lib: Library, opts: BuildOptions): BuildResult {
   // a check never looks at artifacts/: the archives are upload material, generated and ignored by git
   const artifacts = opts.artifacts && !opts.check;
   const built: Built[] = [];
+  const rendering = hermesPath(config);
   const empty = emptyGroups(lib, config);
   result.skipped = [...empty.keys()];
   const ids = Object.keys(config.plugins).filter((id) => !empty.has(id));
@@ -162,8 +172,8 @@ export function build(lib: Library, opts: BuildOptions): BuildResult {
             ? { kind: "conflict", path: dir, note: `${note}; a link, not a package built here; left alone` }
             : { kind: "delete", path: dir, note },
         );
-      const hermes = hermesDir(lib.root, id);
-      if (opts.plugins && lexists(hermes))
+      const hermes = rendering ? hermesDir(lib.root, rendering, id) : null;
+      if (opts.plugins && hermes && lexists(hermes))
         changes.add(
           isLink(hermes)
             ? { kind: "conflict", path: hermes, note: `${note}; a link, not a rendering built here; left alone` }
@@ -205,7 +215,7 @@ export function build(lib: Library, opts: BuildOptions): BuildResult {
       result.versions[id] = at.version;
       if (opts.plugins) {
         reconcile(changes, dir, disk.files, files, opts.check);
-        hermesRendering(lib, id, files, changes, opts.check);
+        if (rendering) hermesRendering(lib, rendering, id, files, changes, opts.check);
       }
       // the archive is made from the same files, so it is the package build writes, at the version its manifests carry
       built.push({
@@ -219,7 +229,7 @@ export function build(lib: Library, opts: BuildOptions): BuildResult {
   }
   if (opts.plugins) {
     // packages, and Hermes renderings, for ids no longer in the config; a link there was not built here and is left alone
-    for (const root of [lib.plugins, hermesRoot(lib.root)]) {
+    for (const root of [lib.plugins, ...(rendering ? [hermesRoot(lib.root, rendering)] : [])]) {
       if (!isDir(root)) continue;
       for (const n of fs.readdirSync(root).sort(cmp)) {
         const p = path.join(root, n);
@@ -372,19 +382,26 @@ function resolvePackage(lib: Library, config: Config, id: string, report: Report
 }
 
 /**
- * The Hermes rendering beside the package, dist/hermes/<id>/, reconciled like plugins/<id>/ from the same files: a link
+ * The Hermes rendering beside the package, <rendering>/<id>/, reconciled like plugins/<id>/ from the same files: a link
  * inside is a conflict and the rendering is left alone; a skill Hermes would still skip (a description over its limit, a
  * folder name that is not a valid skill name) is a note, the copy is written all the same so its siblings load.
  */
-function hermesRendering(lib: Library, id: string, files: Map<string, Buffer>, changes: Report, check: boolean): void {
-  const dir = hermesDir(lib.root, id);
+function hermesRendering(
+  lib: Library,
+  rendering: string,
+  id: string,
+  files: Map<string, Buffer>,
+  changes: Report,
+  check: boolean,
+): void {
+  const dir = hermesDir(lib.root, rendering, id);
   const disk = diskFiles(dir);
   if (disk.links.length) {
     for (const l of disk.links)
       changes.add({
         kind: "conflict",
         path: path.join(dir, l),
-        note: `a link inside ${HERMES_PATH}/${id}; build never follows or writes through one; rendering left alone`,
+        note: `a link inside ${rendering}/${id}; build never follows or writes through one; rendering left alone`,
       });
     return;
   }
@@ -501,6 +518,7 @@ function manifests(
 /** NOTICE.md: where the files came from, at which commit, under which license, and why every copy is marked internal. */
 function notice(pkg: Package, config: Config, head: Head): string {
   const lib = config.library ?? {};
+  const rendering = hermesPath(config);
   const o = pkg.origin;
   const libraryName = lib.owner && lib.name ? `${lib.owner}/${lib.name}` : (lib.name ?? "the skills library");
   const commitLine =
@@ -548,8 +566,12 @@ function notice(pkg: Package, config: Config, head: Head): string {
     "",
     "Every `SKILL.md` under `skills/` carries `metadata.internal: true`: the library's own copies are the ones `npx skills` installs and updates, and these are skipped (`INSTALL_INTERNAL_SKILLS=1` re-exposes them).",
     "",
-    `Hermes rejects that flag (its portable loader takes only string-valued metadata), so the copy it loads is \`${HERMES_PATH}/${pkg.id}/\` in the library: this package without the flag, each skill's \`name\` set to its folder. \`hermes plugins install ${lib.owner && lib.name ? `${lib.owner}/${lib.name}` : "<owner>/<repo>"}/${HERMES_PATH}/${pkg.id}\` installs it; Hermes lists its skills as \`${hermesNamespace(pkg.id)}:<skill>\`.`,
-    "",
+    ...(rendering
+      ? [
+          `Hermes rejects that flag (its portable loader takes only string-valued metadata), so the copy it loads is \`${rendering}/${pkg.id}/\` in the library: this package without the flag and every other non-string metadata entry, each skill's \`name\` set to its folder, and without the Claude Code and Codex manifests. \`hermes plugins install ${lib.owner && lib.name ? `${lib.owner}/${lib.name}` : "<owner>/<repo>"}/${rendering}/${pkg.id}\` installs it; Hermes lists its skills as \`${hermesNamespace(pkg.id)}:<skill>\`.`,
+          "",
+        ]
+      : []),
   ].join("\n");
 }
 

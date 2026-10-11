@@ -126,7 +126,8 @@ export function hermesNamespace(id: string): string {
 
 function readJson(file: string): Record<string, unknown> | null {
   try {
-    const v: unknown = JSON.parse(fs.readFileSync(file, "utf8"));
+    // Hermes reads these utf-8-sig: a BOM a Windows editor left in front is not part of the JSON
+    const v: unknown = JSON.parse(fs.readFileSync(file, "utf8").replace(/^\uFEFF/, ""));
     return v && typeof v === "object" && !Array.isArray(v) ? (v as Record<string, unknown>) : null;
   } catch {
     return null;

@@ -717,9 +717,13 @@ export function codexPluginEnabled(m: PretendMachine, id: string, enabled: boole
  */
 export function hermesSource(m: PretendMachine, release: FixtureRelease, repo = "oneezy/skills"): string {
   const checkout = path.join(m.env.FAKE_HERMES_GITHUB, ...repo.split("/"), release.commit);
+  // the fake GitHub's contents API answers for the same commit: the tool asks it whether dist/hermes is there at all
+  const contents = m.github ? ((m.github.fixture.contents ??= {})[release.commit] ??= {}) : null;
   for (const [id, p] of Object.entries(release.plugins))
-    for (const [rel, bytes] of renderHermes(p.files))
+    for (const [rel, bytes] of renderHermes(p.files)) {
       write(path.join(checkout, ...HERMES_PATH.split("/"), id, ...rel.split("/")), bytes);
+      if (contents) contents[`${HERMES_PATH}/${id}/${rel}`] = bytes.toString("utf8");
+    }
   return checkout;
 }
 

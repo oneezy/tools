@@ -29,6 +29,8 @@ export function harnessTable(home = os.homedir(), env = process.env, platform = 
   const claudeHome = env.CLAUDE_CONFIG_DIR?.trim() || path.join(home, ".claude");
   const configHome = env.XDG_CONFIG_HOME?.trim() || path.join(home, ".config");
   const hermesHome = hermesHomeDir(home, env, platform);
+  // what the tool up to 0.7.x took for Hermes's home: HERMES_HOME, else ~/.hermes on every platform
+  const oldHermesHome = env.HERMES_HOME?.trim() || path.join(home, ".hermes");
   return [
     {
       id: "claude-code",
@@ -64,11 +66,14 @@ export function harnessTable(home = os.homedir(), env = process.env, platform = 
     },
     {
       // Hermes reads skills/ and plugins/ under its home; it has no global instructions file this tool knows of, so no
-      // userInstructions and no block (docs/research/hermes-plugin-format.md in oneezy/skills)
+      // userInstructions and no block (docs/research/hermes-plugin-format.md in oneezy/skills). Up to 0.7.x the tool
+      // took ~/.hermes for its home on every platform; on Windows that is not where Hermes looks, but the links the old
+      // tool left there are still this tool's to take out
       id: "hermes",
       name: "Hermes",
       configDir: hermesHome,
       userSkills: path.join(hermesHome, "skills"),
+      ...(oldHermesHome === hermesHome ? {} : { legacyUserSkills: [path.join(oldHermesHome, "skills")] }),
       projectSkills: path.join(".hermes", "skills"),
       universal: false,
     },

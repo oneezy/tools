@@ -82,7 +82,7 @@ How a Harness on a Host gets the Library's skills, one per Harness (ADR-0007): `
 _Avoid_: mode (that is a project's link or copy), install mode
 
 **Hermes rendering**:
-The copy of a Plugin that Hermes loads, written by `build` at `dist/hermes/<id>/` beside `plugins/<id>/`: the package without the Claude and Codex manifests, each skill's `SKILL.md` with `name` set to its folder and `metadata` cut to string entries (Hermes's portable loader rejects the boolean `metadata.internal` the package carries), every other file byte for byte the package's. Installed with `hermes plugins install <owner>/<name>/dist/hermes/<id> --ref <commit>`; not recorded in the Release's `release.json`, whose `files` digests (the shared `NOTICE.md` among them) verify an installed copy.
+The copy of a Plugin that Hermes loads, written by `build` at `dist/hermes/<id>/` beside `plugins/<id>/` once the Library opts in (`renderings.hermes` in its config, naming the folder): the package without the Claude and Codex manifests, each skill's `SKILL.md` with `name` set to its folder and `metadata` cut to string entries (Hermes's portable loader rejects the boolean `metadata.internal` the package carries), every other file byte for byte the package's. Installed with `hermes plugins install <owner>/<name>/dist/hermes/<id> --ref <commit>`; not recorded in the Release's `release.json`, whose `files` digests (the shared `NOTICE.md` among them) verify an installed copy.
 _Avoid_: Hermes package, Hermes plugin (that is the installed copy under Hermes's home)
 
 **Account plugin**:

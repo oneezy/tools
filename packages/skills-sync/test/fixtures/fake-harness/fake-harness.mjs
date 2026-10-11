@@ -20,7 +20,8 @@
 // HERMES_HOME, the ones the real CLI writes and the tool reads: plugins/<name>/ (copied from a pretend GitHub checkout
 // under FAKE_HERMES_GITHUB/<owner>/<repo>/<ref or HEAD>/<subdir>), plugins/.install-metadata.json ({ pinned, revision,
 // source: "<url>#<subdir>" } per name) and config.yaml (plugins.enabled, plugins.disabled). `install` refuses a name whose
-// plugins/<name> is a link, an existing name without --force, a --ref that is not a 40-hex sha; FAKE_HARNESS_FAIL_INSTALL=
+// plugins/<name> is a link, an existing name without --force, a --ref that is not a 40-hex sha; --force without --ref
+// over a pinned row keeps the prior pin, as the real one does; FAKE_HARNESS_FAIL_INSTALL=
 // <names> makes those installs fail; FAKE_HARNESS_CAUTION=<names> gives them a caution scan verdict, which without --force
 // and without a TTY aborts; FAKE_HARNESS_FAIL_ENABLE=<names> makes `enable` fail for those names and FAKE_HARNESS_FAIL_LIST
 // (with hermes in it) makes `list` fail. `list --json` prints the rows the real CLI prints, a bundled one unless --no-bundled.
@@ -420,8 +421,8 @@ function hermes() {
       return {
         name: p.name,
         status: status(p.name),
-        // Python's str(version): "None" for a manifest without one
-        version: p.version === undefined ? "None" : String(p.version),
+        // manifest.get("version", ""): an empty string for a manifest without one
+        version: p.version === undefined ? "" : String(p.version),
         description: p.description,
         source: pin ? `git pinned@${pin.slice(0, 8)}` : "user",
         removed: null,
@@ -429,7 +430,9 @@ function hermes() {
     });
     if (!args.includes("--no-bundled"))
       rows.unshift({ name: "memory-wiki", status: "not enabled", version: "0.1.0", description: "Markdown wiki memory", source: "bundled", removed: null });
-    if (!rows.length) {
+    // the bundled rows are always there, so the "No plugins installed." text shows only without --no-bundled; the
+    // filtered-out list is an empty JSON list
+    if (!rows.length && !args.includes("--no-bundled")) {
       out("No plugins installed.");
       out("Install with: hermes plugins install owner/repo");
     } else if (args.includes("--json")) out(JSON.stringify(rows, null, 2));
@@ -466,8 +469,8 @@ function hermes() {
     const prior = readMeta()[name];
     if (fs.existsSync(target) && !args.includes("--force"))
       fail(`Plugin '${name}' already exists. Use force reinstall or run \`hermes plugins update ${name}\`.`);
-    if (fs.existsSync(target) && !ref && prior?.pinned === true)
-      fail(`Plugin '${name}' is pinned. Reinstall it with an explicit --ref <40-character commit SHA> to change its source or revision.`);
+    // --force without --ref over a pinned row: the prior pin stays (the real CLI keeps the recorded revision)
+    const keep = !ref && prior?.pinned === true && typeof prior.revision === "string";
     if (has(process.env.FAKE_HARNESS_CAUTION, name) && !args.includes("--force")) {
       out("⚠ Security scan flagged this plugin:");
       out("  caution: shell commands in documentation");
@@ -478,13 +481,14 @@ function hermes() {
     fs.mkdirSync(pluginsDir, { recursive: true });
     fs.cpSync(from, target, { recursive: true });
     const meta = readMeta();
-    meta[name] = { pinned: !!ref, revision: ref ?? "0".repeat(40), source };
+    meta[name] = keep ? { pinned: true, revision: prior.revision, source } : { pinned: !!ref, revision: ref ?? "0".repeat(40), source };
     writeMeta(meta);
     out(`✓ Installed ${name}`);
     if (args.includes("--enable")) {
       setLists(name, true);
       out(`✓ Plugin ${name} enabled.`);
-    } else if (args.includes("--no-enable") || prior) out(`Plugin installed but not enabled. Run \`hermes plugins enable ${name}\` to activate.`);
+    } else if (prior && args.includes("--force")) out("Replacement installed; plugin selection was not changed.");
+    else if (args.includes("--no-enable")) out(`Plugin installed but not enabled. Run \`hermes plugins enable ${name}\` to activate.`);
     else out(`Enable '${name}' now? [y/N]`); // EOF: no
   } else if (cmd === "plugins enable" || cmd === "plugins disable") {
     const p = find(words[2] ?? "");

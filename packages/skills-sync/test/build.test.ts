@@ -87,6 +87,8 @@ const MIT =
 const CONFIG = () => ({
   version: 1,
   library: { version: "0.1.0", name: "skills", owner: "oneezy", homepage: "https://github.com/oneezy/skills" },
+  // the Hermes rendering is an opt-in (tools#153): this fixture library takes it, so every test below sees dist/hermes
+  renderings: { hermes: "dist/hermes" },
   sources: {
     up: {
       repo: up.dir,
@@ -549,6 +551,64 @@ test("build --check computes every output in memory, prints each drifted path an
   assert.equal(cli("build", "--check", "--plugins").status, 1, "the package is not");
 });
 
+test("without renderings.hermes in skills-sync.json the build is what it was: no dist/hermes, no Hermes paragraph in NOTICE.md, build --check and check clean; opting in afterwards renders every package and rewrites every NOTICE, nothing else", () => {
+  const { renderings: _off, ...plain } = CONFIG();
+  config(plain);
+  const r = cli("build", "--json");
+  assert.equal(r.status, 0, r.stderr);
+  assert.ok(!fs.existsSync(path.join(root, "dist")), "no rendering was written");
+  for (const id of ["oneezy", "up"]) {
+    const notice = read(`plugins/${id}/NOTICE.md`);
+    assert.ok(!/Hermes|dist\/hermes/.test(notice), `${id}'s NOTICE says nothing of Hermes:\n${notice}`);
+    assert.ok(notice.includes("`INSTALL_INTERNAL_SKILLS=1` re-exposes them).\n"), notice);
+  }
+  assert.ok(!changes(r).some((a) => a.path.includes("dist")), JSON.stringify(changes(r)));
+  const check = cli("build", "--check");
+  assert.equal(check.status, 0, check.stdout + check.stderr);
+  const checked = cli("check");
+  assert.match(checked.stdout, /^check: clean, 3 own skills, 0 flows, 18 generated files as built$/m, checked.stdout);
+  // the opt-in: the renderings appear and every NOTICE gains its paragraph; the packages' other files stay
+  config();
+  const on = cli("build", "--json");
+  assert.equal(on.status, 0, on.stderr);
+  const touched = changes(on)
+    .map((a) => `${a.kind} ${path.relative(root, a.path).split(path.sep).join("/")}`)
+    .sort();
+  assert.ok(
+    touched.includes("write plugins/oneezy/NOTICE.md") && touched.includes("write plugins/up/NOTICE.md"),
+    touched.join("\n"),
+  );
+  assert.ok(
+    touched.filter((t) => !t.includes("dist/hermes/")).every((t) => t.endsWith("/NOTICE.md")),
+    `only NOTICE.md changed outside dist/hermes:\n${touched.join("\n")}`,
+  );
+  assert.deepEqual(fs.readdirSync(path.join(root, "dist", "hermes")).sort(), ["oneezy", "up"]);
+  assert.ok(read("plugins/oneezy/NOTICE.md").includes("`dist/hermes/oneezy/`"));
+  assert.equal(cli("build", "--check").status, 0);
+  // every library command this tool version runs accepts the key (an older tool refuses it as unknown, which is why the
+  // tool ships before the key lands in the library)
+  const frozen = cli("refresh", "--frozen", "--quiet");
+  assert.equal(frozen.status, 0, frozen.stderr);
+  // 18 package and catalog files, and the 11 of the two renderings (the up package has three skills)
+  assert.match(cli("check").stdout, /^check: clean, 3 own skills, 0 flows, 29 generated files as built$/m);
+  // a key the schema does not know is still refused by every one of them, a typo of this one included
+  config({ ...CONFIG(), rendering: { hermes: "dist/hermes" } });
+  for (const args of [["refresh", "--frozen", "--quiet"], ["build", "--check"], ["check"]]) {
+    const typo = cli(...args);
+    assert.equal(typo.status, 1, args.join(" "));
+    assert.match(typo.stdout + typo.stderr, /\$\.rendering: not allowed/, args.join(" "));
+  }
+  // the schema admits the key with a library-relative folder only
+  for (const bad of ["/dist/hermes", "dist/../hermes", "dist/hermes/", "", ".hidden"]) {
+    config({ ...CONFIG(), renderings: { hermes: bad } });
+    const refused = cli("build", "--check");
+    assert.equal(refused.status, 1, bad);
+    assert.match(refused.stderr, /renderings\.hermes/, bad);
+  }
+  config({ ...CONFIG(), renderings: { hermes: "dist/hermes", goose: "dist/goose" } });
+  assert.match(cli("build", "--check").stderr, /renderings\.goose: not allowed/);
+});
+
 test("generate.plugins: false builds nothing and --check ignores the plugin form; a build with no output named writes packages and catalogs and no archive; a library without git gets version 0.0.0+nogit, its archives too", () => {
   config({ ...CONFIG(), generate: { skills: true, plugins: false } });
   const off = cli("build", "--plugins", "--catalogs");
@@ -863,7 +923,7 @@ test("an explicit authored version survives the first commit; only NOTICE proven
   fresh.commit("one");
   const check = cliIn(fresh.dir, "build", "--check", "--json");
   assert.equal(check.status, 1, "the first commit changes NOTICE provenance");
-  assert.deepEqual(drift(check), ["dist/hermes/grp/NOTICE.md", "plugins/grp/NOTICE.md"]);
+  assert.deepEqual(drift(check), ["plugins/grp/NOTICE.md"]);
   assert.equal(cliIn(fresh.dir, "build", "--quiet").status, 0);
   const version = "0.1.0";
   assert.equal(json(manifest).version, version);

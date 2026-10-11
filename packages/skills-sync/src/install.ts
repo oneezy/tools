@@ -299,7 +299,7 @@ export const hermes = {
       .map((p) => ({
         name: p.name as string,
         status: str(p.status) ?? "not enabled",
-        // the CLI prints str(None) for a manifest without a version
+        // the CLI prints manifest.get("version", "") (older builds str(None)) for a manifest without a version
         version: str(p.version) && p.version !== "None" ? (p.version as string) : null,
         source: str(p.source),
       }));
