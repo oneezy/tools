@@ -1,34 +1,27 @@
 #!/usr/bin/env node
-// skills-sync: one skills library, every harness, every project on the machine. One command that works out where it is.
+// skills-sync: one skills library, every harness on this machine. Two kinds of command. The machine commands (sync,
+// status, branches, unlink) act on this machine against the latest release of the library on GitHub and keep nothing of
+// their own here: no library clone, no answers file, nothing remembered between runs (ADR-0012; settings come from the
+// release's skills-sync.json, machine facts are detected on every run). The library commands (update, refresh, versions,
+// add, build, check, the brain and alias migrations) run inside a checkout of the library, named by --repo or found
+// above the current folder, and keep every flag they had.
 import fs from "node:fs";
-import os from "node:os";
 import path from "node:path";
-import * as p from "@clack/prompts";
 import { addSource } from "./add.js";
 import { adoptBrain, rollbackBrain, brainLinks } from "./adoption.js";
 import { aliasLinks, migrateAliases, rollbackAliases } from "./aliases.js";
 import { build } from "./build.js";
 import { check } from "./check.js";
-import { entrypoints, instructionDependencies } from "./entrypoints.js";
-import { LOCAL_NAME, migrateAnswers, readLocal, writeLocal, type LinkMode, type Local } from "./config.js";
-import { gitExclude, isDir, isLink, lexists, linkMode, linkTarget, real, samePath, setLinkMode } from "./fs.js";
+import { entrypoints } from "./entrypoints.js";
+import { readLocal, writeLocal, type LinkMode, type Local } from "./config.js";
+import { isDir, linkMode, real, samePath, setLinkMode } from "./fs.js";
 import { runBranches } from "./commands/branches.js";
 import { runHook } from "./commands/hook.js";
 import { runStatus } from "./commands/status.js";
-import { BUILT_FORMS, runSync, syncFacts, type SyncResult } from "./commands/sync.js";
-import { isCloud } from "./machine.js";
-import { detected, harnessTable, type Harness } from "./harnesses.js";
-import { plugins, removeOwned, pluginDependency, type Form, type Owned } from "./install.js";
-import {
-  cloneLibrary,
-  DEFAULT_LIBRARY,
-  findLibrary,
-  homeLibrary,
-  Library,
-  looksLikeLibrary,
-  pullLibrary,
-  verifyLibraryRevision,
-} from "./library.js";
+import { runSync, syncFacts } from "./commands/sync.js";
+import { runUnlink } from "./commands/unlink.js";
+import { harnessTable } from "./harnesses.js";
+import { findLibrary, Library, looksLikeLibrary, verifyLibraryRevision } from "./library.js";
 import { apply, line, Report } from "./plan.js";
 import { byDirection, type Moved, type Position } from "./changelog.js";
 import { refresh, type RefreshResult } from "./refresh.js";
@@ -36,31 +29,32 @@ import { DEFAULT_REPO, isRepoName } from "./release.js";
 import { lockedSource, readLock } from "./lock.js";
 import { cloneUrl, cmp, configText, readConfig } from "./sources.js";
 import { discard } from "./stage.js";
-import { findProjects, home, isRepo, layers, projects, unlink } from "./steps.js";
 import { VERSION } from "./version.js";
 import { commitsPast, releasesOf, versionLabel } from "./versions.js";
-import { runInWsl, wslDistros } from "./wsl.js";
+import { runInWsl, wslDistros, type WslRun } from "./wsl.js";
 
 const HELP = `skills-sync ${VERSION}
-One skills library, every harness, every project on this machine. Run it anywhere; it works out the rest.
+One skills library, every harness on this machine. Run it anywhere; it keeps nothing of its own here.
 
-  every run                    the skills block in each harness's global instructions file (~/.claude/CLAUDE.md,
-                               ~/.codex/AGENTS.md): how to call a skill per harness, never fetch a SKILL.md to run one.
-                               Never a repository file; a block an older version left in one is reported
-  cloud session                that block and nothing else (CLAUDE_CODE_REMOTE=true): no clone, no links, no plugins
-  outside the cloud            also one session-start hook entry per harness (~/.claude/settings.json, ~/.codex/hooks.json)
-                               running \`npx --yes @oneezy/skills-sync@latest hook\`; other entries are never touched, the
-                               old sync-dev.sh entry goes once the new one is in. Codex asks you to trust it once
-  library present              also, until the plugin forms land: pull it, install the third-party skills its lock
-                               records, rebuild its layers, install its built plugins on Claude Code and Codex, link
-                               the user folders. sync clones nothing; --repo <path> runs that part alone
+Machine commands act on this machine against the latest release of ${DEFAULT_REPO} on GitHub: no library clone, no
+answers file, nothing remembered between runs. Settings come from the release's skills-sync.json; machine facts (the
+harnesses, their plugins and links, the WSL distros) are detected on every run. They take --json, --quiet and
+--library, and --plan where they would write (sync, unlink, branches; status only reads, hook refuses it); an older
+flag is accepted, does nothing, and is named once on stderr; a word they do not expect is refused (exit 2).
 
 Usage: skills-sync [command] [options]
 
 Commands
-  sync (default)   everything above against the latest release of ${DEFAULT_REPO} on GitHub; nothing moves upstream:
-                   with skills-sync.json every third-party skill is installed at the commit the lock records (frozen,
-                   the lock never written); without one, skills-lock.json is restored
+  sync (default)   bring every detected harness to its one form (ADR-0007): Claude Code the account plugins claude.ai
+                   delivers, Codex the library's plugins from GitHub, Hermes its plugins; and the skills block in each
+                   harness's global instructions file (~/.claude/CLAUDE.md, ~/.codex/AGENTS.md): how to call a skill
+                   per harness, never fetch a SKILL.md to run one. Never a repository file; a block an older version
+                   left in one is reported, as is the clone an older version kept at ~/.skills-sync. Outside the cloud
+                   also one session-start hook entry per harness (~/.claude/settings.json, ~/.codex/hooks.json) running
+                   \`npx --yes @oneezy/skills-sync@latest hook\`; other entries are never touched, the old sync-dev.sh
+                   entry goes once the new one is in, Codex asks you to trust it once. In a cloud session
+                   (CLAUDE_CODE_REMOTE=true) the block is the whole sync. On Windows the same sync runs inside every WSL
+                   distro (through npx there; a distro without Node is one note, not a failure)
   status           is this machine done: against the latest release of ${DEFAULT_REPO} on GitHub (no library needed),
                    per harness its form, each plugin's version against the release, every skill name listed twice, the
                    session hook entry and the global block; then the checkouts of oneezy/skills and oneezy/tools in
@@ -81,14 +75,19 @@ Commands
                    a clean one on dev is fast-forwarded to origin/dev, a dirty one or one on another branch is named and
                    left alone, and one line per repository says which branches (counted from the fetch) and open pull
                    requests (one GitHub request) are not in dev yet.
-                   Takes no flags but --library (--plan, --json, --quiet and --agents are refused, exit 2).
+                   Takes no flags but --library (any other flag is refused, exit 2: the entry runs it bare).
                    Prints nothing when nothing changed; exit 0 unless the sync hit a conflict
-  unlink           remove every link this tool made in the user folders, and every plugin and marketplace it installed
+  unlink           take away what this tool put on this machine, and only that: the plugins it installed from the
+                   library's catalog (and the catalog's registration once none is left), its loose links in every
+                   harness skills folder (to a library copy, or dangling), its session hook entry in each harness's user
+                   hooks file, the skills block in each global instructions file (either file too when it held nothing
+                   else). Account plugins, other marketplaces, real folders, other links, other hook entries, Codex's
+                   trust record and repository files are never touched. Offline; exit 1 on a conflict. This machine
+                   only: on Windows run it inside each WSL distro too (the sync there put a block and a hook entry)
   adopt-brain      explicitly adopt only this host's two historical Brain links; propagate verified instructions only
   rollback-brain   restore the exact preserved links in --receipt; refuse later destination edits
   migrate-aliases  back up only explicit historical Skills/Status aliases after verifying installed native replacements
   rollback-aliases restore unchanged aliases from --receipt; keep the installed plugins
-  projects         only the project step
   update [<source>...]
                    resolve the named sources (every one when none is named) at the tip of their ref, or at the version
                    skills-sync.json holds them at (a pinned skill at its pin), and their upstream version (release tag,
@@ -137,6 +136,7 @@ Update, refresh and add
                          removal for latest) for the caller to land; never writes it. A version the source has not
                          released is refused with the ones it has, and nothing is written
   --frozen               every skill at the commit skills-sync.lock.json records; nothing moves, the lock is not written (CI)
+  --retry                look again for skills an earlier run reported gone upstream
   --id <id>              add: the source id (default: owner-repo, or the repo's folder name)
   --root <path>          add: where the skill folders live in the repo (default: skills/ when it exists, else the root)
   --skills <names|*>     add: which skills to take (default: all)
@@ -144,49 +144,56 @@ Update, refresh and add
   --plugin <id>          add: the plugin entry's id (default: the source id); --no-plugin declares none
 
 Options
-  --repo <path>          the skills library (default: $SKILLS_REPO, ~/.skills-sync, a library folder above here)
+  --plan                 show what would change, touch nothing: sync, unlink, branches and the library commands
+  --quiet                for scripts: print only changes and problems
+  --json                 machine output
+  --library <owner/repo> machine commands: the release repo to read (default ${DEFAULT_REPO})
+  --repo <path>          library commands: the skills library checkout (default: $SKILLS_REPO, else a library folder
+                         above here). Never cloned: a machine command needs no library
   --adoption-file <json> version 1 manifest of exact historical Brain paths and expectedTarget values
   --alias-file <json>    version 1 manifest of exact historical Skills/Status alias paths and expectedTarget values
   --receipt <path>       durable adoption/rollback receipt (required for scoped Brain commands)
-  --library <src>        sync, status: the release repo to read (owner/repo; default ${DEFAULT_REPO})
   --expect-revision <sha> verify library HEAD and origin's --remote-ref before any instruction rollout
   --remote-ref <ref>     exact remote branch/tag for that verification (default refs/heads/main)
-  --agents <ids>         harnesses: claude-code,codex,goose,hermes (default: detected)
-  --global / --no-global link into the harnesses' user skills folders (default: yes)
-  --plugins / --links    the user folders' form on Claude Code and Codex. plugin (the default, but links in a cloud
-                         session): the library's built plugins installed through the harness's own commands (never a
-                         settings edit by this tool), verified (listed, and a skill resolving), and only then the loose
-                         links of their skills removed. links: one loose link per skill, and the plugins this tool
-                         installed uninstalled. Goose and projects always get links. Either flag is
-                         remembered in ${LOCAL_NAME}
-  --projects <names|*>   repos under --dev to sync; "*" for all; --no-projects for none
-  --dev <dir>            folder whose git repos are offered (default: here, or the parent when here is a repo)
-  --copy                 projects get real copies instead of links
-  --wsl <distros|*>      Windows: also sync the user folders inside these WSL distros; --no-wsl for none
-  --symlinks             make directory symlinks only (default: a symlink, or a junction when Windows refuses one)
-  --junctions            Windows: make junctions only; either flag is remembered in ${LOCAL_NAME}
-  --no-pull / --pull     skip, or force, the library pull (default: at most every 30 minutes)
-  --no-restore           do not restore missing lock entries from their sources (skips the refresh too)
-  --retry                look again for skills an earlier run reported gone upstream (sync and refresh)
-  --sidecars             generate agents/openai.yaml for own skills that lack one (writes into skills/, so opt-in)
-  --no-layers            leave the library's own layers alone (used inside WSL, where Windows owns them)
-  --no-entrypoints       skip the library's managed instruction blocks (default: sync selected user folders and projects)
-  --no-remember          leave ~/.skills-sync pointing at the existing library (isolated development/test runs)
-  --watch                stay running; redo layers and user folders when skills/ or the lock changes
-  --plan                 show what would change, touch nothing
-  --quiet                for scripts: no prompts, no WSL fan-out, print only changes and problems
-  --json                 machine output
-  -y, --yes              no prompts: flags, then remembered answers, then defaults
-  --ask                  prompt even when answers are remembered
+  --no-entrypoints       adopt-brain: skip the library's managed instruction blocks
+  --symlinks             library commands: make directory symlinks only (default: a symlink, or a junction when Windows
+                         refuses one)
+  --junctions            library commands, Windows: make junctions only
   -h, --help
 
-Answers for this machine (harnesses, projects, WSL distros, link mode) are kept in ${LOCAL_NAME} beside the config.
+Older flags (-y, --agents, --global, --no-projects, --no-wsl, --links, --plugins, --no-pull, --no-remember, --watch,
+--ask, ...) are accepted on a machine command (hook excepted: it takes no flags but --library), do nothing there, and
+are named in one line on stderr. The projects command is retired: nothing links skills into projects any more
+(ADR-0007).
 `;
+
+/** The machine commands: against GitHub, nothing of their own on the machine (hook is what the session hook entry runs). */
+const MACHINE_COMMANDS = new Set(["sync", "status", "hook", "branches", "unlink"]);
+/** The library commands: inside a checkout. */
+const LIBRARY_COMMANDS = new Set([
+  "update",
+  "refresh",
+  "versions",
+  "add",
+  "build",
+  "check",
+  "adopt-brain",
+  "rollback-brain",
+  "migrate-aliases",
+  "rollback-aliases",
+]);
+/** Retired commands: one line saying what replaced each. */
+const RETIRED: Record<string, string> = {
+  projects:
+    "projects: retired; nothing links skills into projects any more (ADR-0007), every harness reads its own plugins or user folder: run sync",
+};
 
 interface Args {
   command: string;
-  /** what follows the command: the source for add, the sources for update, the source for versions */
+  /** what follows the command: the source for add, the sources for update, the source for versions, the repos for branches */
   positional: string[];
+  /** every flag given that a machine command ignores (any but --plan, --json, --quiet, --library), as spelled, once, in order */
+  given: string[];
   frozen: boolean;
   /** update: a plain version, previous or latest, for the one source named */
   to?: string;
@@ -209,54 +216,54 @@ interface Args {
   receipt?: string;
   expectRevision?: string;
   remoteRef?: string;
-  agents?: string[];
-  global?: boolean;
-  projects?: string[] | "*" | false;
-  dev?: string;
-  copy?: boolean;
-  wsl?: string[] | "*" | false;
-  /** --symlinks or --junctions; remembered in the local file */
+  /** --symlinks or --junctions, for the links a library command makes in the checkout */
   links?: LinkMode;
-  /** --plugins or --links: the user folders' form on harnesses with plugins; remembered in the local file */
-  form?: Form;
-  pull: boolean | "force";
-  restore: boolean;
   retry: boolean;
-  sidecars: boolean;
-  layers: boolean;
+  /** adopt-brain: the library's managed instruction blocks too (--no-entrypoints skips them) */
   entrypoints: boolean;
-  remember: boolean;
-  watch: boolean;
   plan: boolean;
   quiet: boolean;
   json: boolean;
-  yes: boolean;
-  ask: boolean;
 }
+
+/** Older flags that take a value: accepted and skipped with it. */
+const OLD_VALUED = new Set(["--agents", "--projects", "--dev", "--wsl"]);
+/** Older flags without a value: accepted and ignored. */
+const OLD_BARE = new Set([
+  "--links",
+  "--global",
+  "--no-global",
+  "--no-projects",
+  "--copy",
+  "--no-wsl",
+  "--no-pull",
+  "--pull",
+  "--no-restore",
+  "--sidecars",
+  "--no-layers",
+  "--no-remember",
+  "--watch",
+  "-y",
+  "--yes",
+  "--ask",
+]);
 
 function parseArgs(argv: string[]): Args {
   const a: Args = {
     command: "sync",
     positional: [],
+    given: [],
     frozen: false,
     as: {},
     plugins: false,
     catalogs: false,
     artifacts: false,
     check: false,
-    pull: true,
-    restore: true,
     retry: false,
-    sidecars: false,
-    layers: true,
     entrypoints: true,
-    remember: true,
-    watch: false,
     plan: false,
     quiet: false,
     json: false,
-    yes: false,
-    ask: false,
   };
   const list = (v: string) =>
     v
@@ -266,11 +273,18 @@ function parseArgs(argv: string[]): Args {
   let command: string | null = null;
   for (let i = 0; i < argv.length; i++) {
     const x = argv[i];
-    const next = () => argv[++i];
+    const next = () => argv[++i] ?? "";
+    // a machine command names every flag but these four as ignored, once, in the order given
+    if (x.startsWith("-") && !["--plan", "--json", "--quiet", "--library", "-h", "--help"].includes(x))
+      if (!a.given.includes(x)) a.given.push(x);
     if (x === "-h" || x === "--help") {
       process.stdout.write(HELP);
       process.exit(0);
-    } else if (x === "--frozen") a.frozen = true;
+    } else if (x === "--plan") a.plan = true;
+    else if (x === "--quiet") a.quiet = true;
+    else if (x === "--json") a.json = true;
+    else if (x === "--library") a.library = next();
+    else if (x === "--frozen") a.frozen = true;
     else if (x === "--to") a.to = next();
     else if (x === "--id") a.id = next();
     else if (x === "--root") a.root = next();
@@ -285,10 +299,7 @@ function parseArgs(argv: string[]): Args {
         if (!from || !to) bail(`--as takes old=new pairs, not ${pair}`);
         a.as[from] = to;
       }
-    } else if (x === "--plugins") {
-      a.plugins = true;
-      a.form = "plugin";
-    } else if (x === "--links") a.form = "links";
+    } else if (x === "--plugins") a.plugins = true;
     else if (x === "--catalogs") a.catalogs = true;
     else if (x === "--artifacts") a.artifacts = true;
     else if (x === "--check") a.check = true;
@@ -296,60 +307,22 @@ function parseArgs(argv: string[]): Args {
     else if (x === "--adoption-file") a.adoptionFile = next();
     else if (x === "--alias-file") a.aliasFile = next();
     else if (x === "--receipt") a.receipt = next();
-    else if (x === "--library") a.library = next();
     else if (x === "--expect-revision") a.expectRevision = next();
     else if (x === "--remote-ref") a.remoteRef = next();
-    else if (x === "--agents") a.agents = list(next());
-    else if (x === "--global") a.global = true;
-    else if (x === "--no-global") a.global = false;
-    else if (x === "--projects") {
-      const v = next();
-      a.projects = v === "*" ? "*" : list(v);
-    } else if (x === "--no-projects") a.projects = false;
-    else if (x === "--dev") a.dev = next();
-    else if (x === "--copy") a.copy = true;
-    else if (x === "--wsl") {
-      const v = next();
-      a.wsl = v === "*" ? "*" : list(v);
-    } else if (x === "--no-wsl") a.wsl = false;
     else if (x === "--symlinks") a.links = "symlink";
     else if (x === "--junctions") a.links = "junction";
-    else if (x === "--no-pull") a.pull = false;
-    else if (x === "--pull") a.pull = "force";
-    else if (x === "--no-restore") a.restore = false;
     else if (x === "--retry") a.retry = true;
-    else if (x === "--sidecars") a.sidecars = true;
-    else if (x === "--no-layers") a.layers = false;
     else if (x === "--no-entrypoints") a.entrypoints = false;
-    else if (x === "--no-remember") a.remember = false;
-    else if (x === "--watch") a.watch = true;
-    else if (x === "--plan") a.plan = true;
-    else if (x === "--quiet") a.quiet = true;
-    else if (x === "--json") a.json = true;
-    else if (x === "-y" || x === "--yes") a.yes = true;
-    else if (x === "--ask") a.ask = true;
-    else if (x.startsWith("-")) {
+    else if (OLD_VALUED.has(x)) next();
+    else if (OLD_BARE.has(x)) {
+      /* accepted; nothing to set */
+    } else if (x.startsWith("-")) {
       process.stderr.write(`unknown option ${x}\n${HELP}`);
       process.exit(2);
     } else if (command === null) command = a.command = x;
     else a.positional.push(x);
   }
-  if (a.quiet) a.yes = true;
   return a;
-}
-
-interface Choices {
-  agents: Harness[];
-  global: boolean;
-  dev: string;
-  projects: string[];
-  mode: "link" | "copy";
-  wsl: string[];
-  unavailable: string[];
-  links: LinkMode;
-  form: Form;
-  /** the form came from --plugins/--links or the local file, so it is remembered; otherwise the default applies */
-  formChosen: boolean;
 }
 
 function bail(msg: string): never {
@@ -359,19 +332,44 @@ function bail(msg: string): never {
 
 async function main(): Promise<void> {
   const args = parseArgs(process.argv.slice(2));
-  const cwd = process.cwd();
-  const userHome = os.homedir();
-  const interactive = !args.yes && !args.json && process.stdin.isTTY && process.stdout.isTTY;
-  const log = (m: string) => (args.json ? undefined : process.stderr.write(m + "\n"));
-  const setup = new Report();
+  if (RETIRED[args.command]) {
+    process.stderr.write(RETIRED[args.command] + "\n");
+    process.exit(2);
+  }
+  if (MACHINE_COMMANDS.has(args.command)) return machineCommand(args);
+  if (LIBRARY_COMMANDS.has(args.command)) return libraryCommand(args);
+  process.stderr.write(`unknown command ${args.command}\n${HELP}`);
+  process.exit(2);
+}
 
-  // Machine commands act on this machine against GitHub and never look for a library: status, sync (the block, the
-  // session hook, and the form work as its tickets land) and hook against the latest release, branches against the
-  // repositories' branch rules. unlink keeps the library-based run below until #154.
+/**
+ * A machine command: dispatched before anything looks for a library, a clone, ~/.skills-sync, a local file or a pull,
+ * none of which it has. --library names the release repo; every older flag is named once and ignored.
+ */
+async function machineCommand(args: Args): Promise<void> {
   const repo = args.library ?? DEFAULT_REPO;
-  if (["status", "sync", "hook"].includes(args.command) && !isRepoName(repo)) {
+  if (!isRepoName(repo)) {
     process.stderr.write(`${args.command}: --library names the release repo as owner/repo, not ${repo}\n`);
     process.exit(2);
+  }
+  // the hook entry runs `hook` bare: a flag on it is a mistake, and --plan on a run that must write would be a silent one
+  if (args.command === "hook" && (args.plan || args.json || args.quiet || args.given.length)) {
+    process.stderr.write("hook takes no flags but --library\n");
+    process.exit(2);
+  }
+  // a word none of them expects (branches takes repos) is a mistake, not something to drop silently
+  if (args.command !== "branches" && args.positional.length) {
+    process.stderr.write(`${args.command}: takes no argument (got ${args.positional.join(" ")})\n`);
+    process.exit(2);
+  }
+  if (args.given.length)
+    process.stderr.write(
+      `ignored: ${args.given.join(", ")} (settings come from the release's skills-sync.json; machine facts are detected on every run)\n`,
+    );
+  const cwd = process.cwd();
+  if (args.command === "hook") {
+    process.exitCode = await runHook({ repo, cwd });
+    return;
   }
   if (args.command === "status") {
     process.exitCode = await runStatus({ repo, json: args.json, quiet: args.quiet });
@@ -386,28 +384,52 @@ async function main(): Promise<void> {
     });
     return;
   }
-  if (args.command === "hook") {
-    // the entry runs it bare; a flag here is a mistake, and --plan on a run that must write would be a silent one
-    if (args.plan || args.json || args.quiet || args.agents) {
-      process.stderr.write("hook takes no flags but --library\n");
-      process.exit(2);
-    }
-    process.exitCode = await runHook({ repo, cwd });
-    return;
+  if (args.command === "unlink") {
+    const r = runUnlink({ repo, plan: args.plan, cwd });
+    if (r.report.conflicts().length) process.exitCode = 1;
+    return printReport(r.report, args, { oldLibrary: r.machine.oldLibrary, oldLocalFile: r.machine.oldLocalFile });
   }
-  // sync with --repo <path> is still the library-based run of that checkout alone (the publish guard plans against one),
-  // until #154 retires the flag; a cloud session never is: there the block is the whole sync (ADR-0007).
-  const cloud = isCloud();
-  let machineSync: SyncResult | null = null;
-  if (args.command === "sync" && (cloud || !args.repo)) {
-    machineSync = await runSync({ repo, plan: args.plan, agents: args.agents, cwd });
-    if (machineSync.report.conflicts().length) process.exitCode = 1;
-    // until #149, #150, #153 and #154: the old library-based sync keeps PCs working. It runs only where a library already
-    // is (~/.skills-sync, $SKILLS_REPO, a checkout above here): none is cloned any more (ADR-0007), and in the cloud
-    // nothing but the block is written. Its instruction blocks stay off: the block above is the only one (ADR-0011).
-    if (cloud || !findLibrary(cwd)) return printReport(machineSync.report, args, syncFacts(machineSync));
-    args.entrypoints = false;
+  const r = await runSync({ repo, plan: args.plan, cwd });
+  // Windows: the same sync inside every WSL distro (ADR-0010), each a machine of its own; never from the cloud
+  const wsl = r.machine.cloud ? [] : fanOut(r.report, args);
+  if (r.report.conflicts().length) process.exitCode = 1;
+  printReport(r.report, args, {
+    ...syncFacts(r),
+    wsl: wsl.map(({ distro, ok, noNode, output }) => ({ distro, ok, noNode, output })),
+  });
+}
+
+/**
+ * The machine sync inside each WSL distro, with this run's flags, as one line each in the report: a note when it ran
+ * (its last line), a note when the distro has no Node to run it with, a conflict when it failed.
+ */
+function fanOut(report: Report, args: Args): WslRun[] {
+  // this run's flags travel: the distro plans, prints and reads the same release repo as the host
+  const flags = [
+    ...(args.plan ? ["--plan"] : []),
+    ...(args.json ? ["--json"] : []),
+    ...(args.quiet ? ["--quiet"] : []),
+    ...(args.library ? ["--library", args.library] : []),
+  ];
+  const runs: WslRun[] = [];
+  for (const distro of wslDistros()) {
+    const r = runInWsl(distro, flags);
+    runs.push(r);
+    const last = r.output.split("\n").filter(Boolean).at(-1);
+    if (r.noNode)
+      report.add({ kind: "note", path: `WSL ${distro}`, note: "no npx in the distro; install Node there to sync it" });
+    else if (!r.ok)
+      report.add({ kind: "conflict", path: `WSL ${distro}`, note: `sync failed there${last ? `: ${last}` : ""}` });
+    else report.add({ kind: "note", path: `WSL ${distro}`, note: `synced${last && !args.json ? `: ${last}` : ""}` });
   }
+  return runs;
+}
+
+/** A library command: inside the checkout --repo names, or the one above the current folder. Never clones one. */
+async function libraryCommand(args: Args): Promise<void> {
+  const cwd = process.cwd();
+  const log = (m: string) => (args.json ? undefined : process.stderr.write(m + "\n"));
+  const setup = new Report();
 
   const scopedBrain = args.command === "adopt-brain" || args.command === "rollback-brain";
   const scopedAliases = args.command === "migrate-aliases" || args.command === "rollback-aliases";
@@ -420,32 +442,12 @@ async function main(): Promise<void> {
     if (args.command === "migrate-aliases" && !args.aliasFile) bail("migrate-aliases requires --alias-file");
   }
 
-  // 1. the library: find it, or get one
-  let root = args.repo ? real(path.resolve(args.repo)) : findLibrary(cwd);
-  // check reads what is there: it never clones a library to have one to check
-  if (!root && !args.plan && args.command !== "check") {
-    let source = args.library ?? DEFAULT_LIBRARY;
-    if (interactive) {
-      p.intro("skills-sync");
-      const v = await p.text({
-        message: "No skills library on this machine. Clone which one into ~/.skills-sync?",
-        initialValue: source,
-        placeholder: "owner/repo, a git URL, or a local path",
-      });
-      if (p.isCancel(v)) return p.cancel("nothing changed");
-      source = String(v);
-    }
-    if (looksLikeLibrary(source)) root = real(path.resolve(source));
-    else {
-      const c = cloneLibrary(source, userHome, log);
-      if (!c.ok) bail(`could not clone ${source}: ${c.error}`);
-      root = c.root;
-    }
-  }
+  // the library: --repo, $SKILLS_REPO, or a library folder above here; never cloned
+  const root = args.repo ? real(path.resolve(args.repo)) : findLibrary(cwd);
   // the first add is how a library gets its config: with --repo, skills/ alone is enough for it
   const firstAdd = args.command === "add" && !!args.repo && !!root && isDir(path.join(root, "skills"));
   if (!root || (!looksLikeLibrary(root) && !firstAdd))
-    bail("no skills library found: run this inside one, or pass --repo <path> or --library owner/repo");
+    bail("no skills library found: run this inside one, or pass --repo <path>");
   const lib = new Library(root);
   if (scopedAliases) {
     const report = new Report();
@@ -500,135 +502,27 @@ async function main(): Promise<void> {
       const changedRevision = verifyLibraryRevision(lib.root, args.expectRevision, args.remoteRef);
       if (changedRevision) report.add({ kind: "conflict", path: lib.root, note: changedRevision });
       else {
-        entrypoints(
-          lib,
-          hosts,
-          true,
-          [],
-          instructions,
-          true,
-          args.plan ? report : undefined,
-          false,
-          false,
-          "oneezy-brain",
-        );
+        entrypoints(lib, hosts, true, [], instructions, true, args.plan ? report : undefined, false, "oneezy-brain");
         apply(instructions, args.plan);
         report.merge(instructions);
       }
     }
     const verified = args.entrypoints
-      ? entrypoints(
-          lib,
-          hosts,
-          true,
-          [],
-          new Report(),
-          true,
-          args.plan ? report : undefined,
-          false,
-          false,
-          "oneezy-brain",
-        )
+      ? entrypoints(lib, hosts, true, [], new Report(), true, args.plan ? report : undefined, false, "oneezy-brain")
       : [];
     if (report.conflicts().length || (!args.plan && verified.some((item) => item.state !== "current")))
       process.exitCode = 1;
     return printReport(report, args, { entrypoints: verified, receipt: path.resolve(args.receipt) });
   }
 
-  // 2. this machine's answers: the local file, after a 0.2.0 answers file is moved there once
-  if (!args.plan && args.command !== "check") migrateAnswers(lib.root, setup);
-  apply(setup, args.plan);
-  // the machine sync's actions (already applied) lead the one report the old run prints at its end
-  if (machineSync) setup.actions.unshift(...machineSync.report.actions);
-  const local = readLocal(lib.root);
-  setLinkMode(args.links ?? local.links ?? "auto");
-
-  // check reads the library it is pointed at; refresh, add and build edit it and nothing else: no pull, no ~/.skills-sync, no harness
+  // how the working set's links are made in this checkout: the flag, else what the checkout's local file says
+  setLinkMode(args.links ?? readLocal(lib.root).links ?? "auto");
   if (args.command === "check") return runCheck(lib, args);
   if (args.command === "update" || args.command === "refresh") return runUpdate(lib, args, log, setup);
   if (args.command === "versions") return runVersions(lib, args, log);
   if (args.command === "add") return runAdd(lib, args, log, setup);
-  if (args.command === "build") return runBuild(lib, args, log, setup);
-
-  // ~/.skills-sync points at the library from now on, so every later run finds it from anywhere
-  const hl = homeLibrary(userHome);
-  const remember = new Report();
-  if (args.remember && !samePath(real(hl), lib.root)) {
-    if (!lexists(hl))
-      remember.add({ kind: "link", path: hl, target: lib.root, note: "remembers where the library is" });
-    else if (isLink(hl)) remember.add({ kind: "relink", path: hl, target: lib.root, note: `was ${linkTarget(hl)}` });
-    else
-      remember.add({
-        kind: "conflict",
-        path: hl,
-        note: "a folder is in the way; ~/.skills-sync is not a link to the library",
-      });
-  }
-  apply(remember, args.plan);
-  setup.merge(remember);
-
-  // 3. Only clean compatible checkouts fast-forward. Dirty locks are preserved;
-  // the refresh that follows remains frozen at the committed source pins.
-  if (args.pull && !args.plan) {
-    if (args.pull === "force") {
-      try {
-        fs.unlinkSync(path.join(lib.root, ".git", "skills-sync-pulled"));
-      } catch {
-        /* nothing to reset */
-      }
-    }
-    const r = pullLibrary(
-      lib.root,
-      30,
-      log,
-      lib.hasConfig() ? [path.basename(lib.lockFile), path.basename(lib.npxLockFile)] : [],
-    );
-    if (r === "pulled" && !args.quiet) log("library pulled");
-    if (r === "dirty" && !args.quiet) log("library has local changes; pull skipped");
-  }
-
-  const table = harnessTable();
-
-  if (args.command === "unlink") {
-    const r = new Report();
-    unlink(lib, table, r);
-    apply(r, args.plan);
-    const owned = removeOwned(table, local.plugins ?? {}, r, args.plan);
-    if (!args.plan) rememberPlugins(lib.root, owned);
-    return printReport(r, args);
-  }
-
-  // 4. the choices: flags, then remembered answers, then defaults; prompts fill the gaps when interactive
-  const choices = await decide(args, local, lib, table, cwd, interactive);
-  if (!choices) return p.cancel("nothing changed");
-  if (!args.plan) saveLocal(lib.root, choices);
-  // until #153 and #154: a harness whose form the machine sync above built (Claude Code's account plugins, Codex's
-  // plugins from GitHub) is its alone; the old run would put the tool's plugins and links back there, so it serves the
-  // other harnesses only. The answers saved above remember every harness all the same
-  if (machineSync) {
-    choices.agents = choices.agents.filter((h) => !BUILT_FORMS.has(h.id));
-    if (!choices.agents.length) return printReport(setup, args, { entrypoints: [] });
-  }
-
-  // 5. run
-  await runOnce(lib, choices, args, cwd, setup);
-  if (args.watch) {
-    log(`watching ${lib.own}, ${path.basename(lib.configFile)} and ${path.basename(lib.lockFile)}; ctrl-c to stop`);
-    let timer: NodeJS.Timeout | null = null;
-    const trigger = (why: string) => {
-      if (timer) clearTimeout(timer);
-      timer = setTimeout(() => {
-        log(`change in ${why}`);
-        runOnce(lib, choices, { ...args, restore: false }, cwd, new Report()).catch((e) => log(String(e)));
-      }, 400);
-    };
-    fs.watch(lib.own, { recursive: true }, (_e, f) => trigger(String(f ?? "skills/")));
-    for (const f of [lib.lockFile, lib.npxLockFile, lib.configFile])
-      if (fs.existsSync(f)) fs.watch(f, () => trigger(path.basename(f)));
-    await new Promise(() => undefined);
-  }
+  return runBuild(lib, args, log, setup);
 }
-
 /**
  * update (refresh is the same command): the named sources (every one when none is named) at the tip of their ref, pins
  * and --frozen excepted; every other source stays at the lock. Gone-upstream skills are remembered like restore's.
@@ -902,297 +796,6 @@ function runCheck(lib: Library, args: Args): void {
     process.stdout.write(
       `check: clean, ${count(r.skills, "own skill")}, ${count(r.flows, "flow")}, ${count(r.generated, "generated file")} as built\n`,
     );
-}
-
-function saveLocal(root: string, c: Choices): void {
-  const saved: Local = {
-    agents: c.agents.map((h) => h.id),
-    global: c.global,
-    dev: c.dev,
-    projects: c.projects,
-    mode: c.mode,
-    wsl: c.wsl,
-    links: c.links,
-  };
-  if (c.unavailable.length) saved.unavailable = c.unavailable;
-  if (c.formChosen) saved.form = c.form;
-  // the plugin step's record of what it installed is not an answer: it survives every save
-  const owned = readLocal(root).plugins;
-  if (owned && Object.keys(owned).length) saved.plugins = owned;
-  writeLocal(root, saved);
-}
-
-/** The plugin step's ownership record, written into the local file beside the answers. */
-function rememberPlugins(root: string, owned: Record<string, Owned>): void {
-  const local = readLocal(root);
-  const next: Local = { ...local, plugins: owned };
-  if (!Object.keys(owned).length) delete next.plugins;
-  if (JSON.stringify(next) !== JSON.stringify(local)) writeLocal(root, next);
-}
-
-async function decide(
-  args: Args,
-  local: Local,
-  lib: Library,
-  table: Harness[],
-  cwd: string,
-  interactive: boolean,
-): Promise<Choices | null> {
-  const found = detected(table);
-  const byId = new Map(table.map((h) => [h.id, h]));
-  // first run with nothing remembered: only the two harnesses this tool is built around, unless asked
-  let agentIds =
-    args.agents ?? local.agents ?? found.filter((h) => h.id === "claude-code" || h.id === "codex").map((h) => h.id);
-  let global = args.global ?? local.global ?? true;
-  const here = path.resolve(cwd);
-  let dev = args.dev
-    ? path.resolve(args.dev)
-    : (local.dev ?? (isRepo(here) && !looksLikeLibrary(here) ? path.dirname(here) : here));
-  const offered = findProjects(dev, lib).map((pp) => path.basename(pp));
-  let projectNames: string[] =
-    args.projects === false ? [] : args.projects === "*" ? offered : (args.projects ?? local.projects ?? []);
-  let mode: "link" | "copy" = args.copy ? "copy" : (local.mode ?? "link");
-  const distros = args.quiet ? [] : wslDistros();
-  let wsl: string[] = args.wsl === false ? [] : args.wsl === "*" ? distros : (args.wsl ?? local.wsl ?? []);
-
-  const remembered = Object.keys(local).length > 0;
-  if (interactive && (args.ask || !remembered || args.command === "projects")) {
-    if (!remembered) p.intro("skills-sync: first run on this machine");
-    const agentsPick = await p.multiselect({
-      message: "Harnesses to sync (checked = detected on this machine)",
-      options: table.map((h) => ({ value: h.id, label: h.name, hint: found.includes(h) ? "detected" : "not found" })),
-      initialValues: agentIds,
-      required: true,
-    });
-    if (p.isCancel(agentsPick)) return null;
-    agentIds = agentsPick as string[];
-
-    const whereOptions = [
-      { value: "global", label: "User folders", hint: "every project on this machine; edits are live" },
-    ];
-    if (offered.length)
-      whereOptions.push({
-        value: "projects",
-        label: `Projects in ${dev}`,
-        hint: `${offered.length} git repos; only for repos that must carry copies`,
-      });
-    const where = await p.multiselect({
-      message: "Where",
-      options: whereOptions,
-      initialValues: [global ? "global" : "", projectNames.length ? "projects" : ""].filter(Boolean),
-      required: false,
-    });
-    if (p.isCancel(where)) return null;
-    global = (where as string[]).includes("global");
-    if ((where as string[]).includes("projects")) {
-      const pick = await p.multiselect({
-        message: "Which projects (space to check)",
-        options: offered.map((n) => ({ value: n, label: n })),
-        initialValues: projectNames.length ? projectNames : offered,
-        required: false,
-      });
-      if (p.isCancel(pick)) return null;
-      projectNames = pick as string[];
-      const m = await p.select({
-        message: "Project mode",
-        options: [
-          { value: "link", label: "link", hint: "machine-local, hidden from git through .git/info/exclude" },
-          { value: "copy", label: "copy", hint: "committed, travels with the repo" },
-        ],
-        initialValue: mode,
-      });
-      if (p.isCancel(m)) return null;
-      mode = m as "link" | "copy";
-    } else projectNames = [];
-    if (distros.length) {
-      const m = await p.multiselect({
-        message: "Machines",
-        options: [
-          { value: "__win__", label: "Windows", hint: "this one" },
-          ...distros.map((d) => ({ value: d, label: `WSL: ${d}` })),
-        ],
-        initialValues: ["__win__", ...wsl],
-        required: true,
-      });
-      if (p.isCancel(m)) return null;
-      wsl = (m as string[]).filter((x) => x !== "__win__");
-    }
-  }
-  const agents = agentIds.map((id) => byId.get(id)).filter((h): h is Harness => !!h);
-  if (!agents.length) bail("no harness selected; pass --agents claude-code,codex");
-  return {
-    agents,
-    global,
-    dev,
-    projects: projectNames,
-    mode,
-    wsl,
-    unavailable: args.retry ? [] : (local.unavailable ?? []),
-    links: args.links ?? local.links ?? "auto",
-    // a cloud session never gets here: its sync is the global block alone
-    form: args.form ?? local.form ?? "plugin",
-    formChosen: !!(args.form ?? local.form),
-  };
-}
-
-/** One pass over the steps. A config library's refresh is always frozen: every third-party skill at the lock's commit. */
-async function runOnce(lib: Library, c: Choices, args: Args, cwd: string, report: Report): Promise<void> {
-  const log = (m: string) => (args.json ? undefined : process.stderr.write(m + "\n"));
-  if (args.expectRevision || args.remoteRef) {
-    const reason = verifyLibraryRevision(lib.root, args.expectRevision, args.remoteRef);
-    if (reason) {
-      report.add({ kind: "conflict", path: lib.root, note: reason });
-      process.exitCode = 1;
-      printReport(report, args, { entrypoints: [] });
-      return;
-    }
-  }
-
-  const missing = lib.missingFromLock().filter((n) => !c.unavailable.includes(n));
-  let required: ReturnType<typeof instructionDependencies> = [];
-  try {
-    if (args.entrypoints) required = instructionDependencies(lib);
-  } catch (error) {
-    report.add({ kind: "conflict", path: lib.root, note: String(error) });
-    process.exitCode = 1;
-    printReport(report, args, { entrypoints: [] });
-    return;
-  }
-  if (lib.hasConfig() && args.restore && args.command !== "projects" && !args.plan) {
-    // a config library: the frozen refresh rebuilds the working set at the lock's commits and never writes the lock
-    const r = refresh(lib, { frozen: true, plan: false, unavailable: c.unavailable, log });
-    c.unavailable = reportRefresh(lib, r, c.unavailable, args, log, false);
-    report.merge(r.report);
-  } else if (lib.hasConfig() && missing.length)
-    log(
-      `${missing.length} lock entries are not installed yet (run without --plan or --no-restore for the refresh that restores them)`,
-    );
-  else if (args.restore && args.command !== "projects" && missing.length && !args.plan) {
-    const r = lib.restore(log, missing);
-    log(`restored ${r.restored.length} skill(s) from skills-lock.json`);
-    for (const m of r.moved) log(`  moved upstream: ${m}`);
-    for (const m of r.missing) log(`  gone upstream: ${m}`);
-    if (r.missing.length)
-      log(
-        `  (npx skills remove <name> drops it from the lock; a copy in skills/ keeps it as your own; --retry checks again)`,
-      );
-    for (const m of r.failed) log(`  failed: ${m}`);
-    c.unavailable = [...new Set([...c.unavailable, ...r.missing.map((m) => m.split(":")[0])])];
-    saveLocal(lib.root, c);
-  } else if (missing.length)
-    log(`${missing.length} lock entries are not installed yet (run without --plan or --no-restore to restore them)`);
-  if (c.unavailable.length && !args.quiet && !lib.hasConfig())
-    log(
-      `${c.unavailable.length} lock entr${c.unavailable.length === 1 ? "y is" : "ies are"} gone upstream (${c.unavailable.join(", ")}); --retry to check again`,
-    );
-
-  if (args.command !== "projects") {
-    if (args.layers) {
-      const s = new Report();
-      layers(lib, c.agents, s, args.sidecars);
-      apply(s, args.plan);
-      report.merge(s);
-    }
-    if (c.global) {
-      // plugins first: a skill's loose link goes only once a verified plugin carries it on that harness
-      const pr = new Report();
-      const installed = plugins(lib, c.agents, c.form, readLocal(lib.root).plugins ?? {}, pr, args.plan);
-      for (const h of c.agents)
-        for (const dependency of required) {
-          const covered = installed.covered.get(h.id);
-          if (
-            covered?.has(dependency.skill) &&
-            !pluginDependency(lib, h, dependency.skill, dependency.files, args.plan)
-          ) {
-            covered.delete(dependency.skill);
-            pr.add({
-              kind: "conflict",
-              path: path.join(h.userSkills, dependency.skill),
-              note: "required plugin skill or references are unverified; loose link retained",
-            });
-          }
-        }
-      if (!args.plan) rememberPlugins(lib.root, installed.owned);
-      report.merge(pr);
-      const u = new Report();
-      home(lib, c.agents, u, installed.covered);
-      apply(u, args.plan);
-      report.merge(u);
-    }
-  }
-  if (c.projects.length) {
-    const targets = c.projects.map((n) => path.join(c.dev, n)).filter((pp) => isDir(pp));
-    const pr = new Report();
-    projects(lib, c.agents, targets, null, c.mode, pr);
-    apply(pr, args.plan, gitExclude);
-    report.merge(pr);
-  }
-
-  const instructionProjects = c.projects.map((name) => path.join(c.dev, name)).filter(isDir);
-  const instructionGlobal = c.global && args.command !== "projects";
-  const instructions = new Report();
-  if (args.entrypoints) {
-    if (args.expectRevision || args.remoteRef) {
-      const reason = verifyLibraryRevision(lib.root, args.expectRevision, args.remoteRef);
-      if (reason) {
-        report.add({ kind: "conflict", path: lib.root, note: reason });
-        process.exitCode = 1;
-        printReport(report, args, { entrypoints: [] });
-        return;
-      }
-    }
-    entrypoints(
-      lib,
-      c.agents,
-      instructionGlobal,
-      instructionProjects,
-      instructions,
-      true,
-      args.plan ? report : undefined,
-      c.mode === "copy",
-      c.form === "plugin",
-    );
-    apply(instructions, args.plan);
-    report.merge(instructions);
-  }
-  const verified = args.entrypoints
-    ? entrypoints(
-        lib,
-        c.agents,
-        instructionGlobal,
-        instructionProjects,
-        new Report(),
-        true,
-        args.plan ? report : undefined,
-        c.mode === "copy",
-        c.form === "plugin",
-      )
-    : [];
-  if (instructions.conflicts().length || (!args.plan && verified.some((item) => item.state !== "current")))
-    process.exitCode = 1;
-  printReport(report, args, { entrypoints: verified });
-  if (c.wsl.length && args.command !== "projects" && !args.quiet) {
-    for (const d of c.wsl) {
-      const r = runInWsl(
-        d,
-        lib.root,
-        [
-          // the distro runs the published old flow, which knows no machine sync: name the harnesses this run serves,
-          // so it never touches Claude Code there either (until #154 deletes the fan-out)
-          "--agents",
-          c.agents.map((h) => h.id).join(","),
-          ...(!args.entrypoints ? ["--no-entrypoints"] : []),
-          ...(!args.remember ? ["--no-remember"] : []),
-          ...(args.form ? [args.form === "plugin" ? "--plugins" : "--links"] : []),
-          ...(args.expectRevision ? ["--expect-revision", args.expectRevision] : []),
-          ...(args.remoteRef ? ["--remote-ref", args.remoteRef] : []),
-        ],
-        args.plan,
-      );
-      if (!r.ok) process.exitCode = 1;
-      log(`WSL ${d}: ${r.ok ? "ok" : "failed"}${r.output ? "\n  " + r.output.split("\n").slice(-3).join("\n  ") : ""}`);
-    }
-  }
 }
 
 function printReport(r: Report, args: Args, extra: Record<string, unknown> = {}): void {

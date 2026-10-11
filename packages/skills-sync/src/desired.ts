@@ -1,16 +1,18 @@
 // One form per harness (ADR-0007): the plugin form wherever the harness has a plugin route, the loose-skill form only
 // where it has none. Claude Code gets the account plugins claude.ai delivers, Codex the library's marketplace from
 // GitHub, Hermes the library's plugins straight from GitHub (hermes plugins install owner/repo/path, oneezy/skills#68
-// said go). Goose is dropped. desired() turns the release and the probe into the plan sync applies: per harness the
-// managed block in its global instructions file (ADR-0011), a cleanup line for every block an older skills-sync left in
-// a repository, and, outside the cloud, the session hook entry in its user hooks file (ADR-0010) and whatever the
-// harness's form module in src/forms/ asks for. --plan and apply share this one code path; only apply() differs.
+// said go). Goose is dropped. desired() turns the release and the probe into the plan sync applies: a note for what an
+// older version left on the machine, then per harness the managed block in its global instructions file (ADR-0011), a
+// cleanup line for every block an older skills-sync left in a repository, and, outside the cloud, the session hook entry
+// in its user hooks file (ADR-0010) and whatever the harness's form module in src/forms/ asks for. The release's
+// skills-sync.json (ADR-0012) says which harnesses are served and which plugins each gets; pluginsFor() is the one place
+// a form reads its plugin list. --plan and apply share this one code path; only apply() differs.
 import { blockAction } from "./block.js";
 import type { GitHub } from "./github.js";
 import { hookActions } from "./hooks.js";
-import type { HarnessState, Machine } from "./machine.js";
+import { LIBRARY_MARKETPLACE, oldStateNotes, type HarnessState, type Machine } from "./machine.js";
 import { Report, type Action } from "./plan.js";
-import type { Release } from "./release.js";
+import type { Release, ReleasePlugin } from "./release.js";
 
 export type MachineForm = "account-plugins" | "github-plugins" | "loose";
 
@@ -58,9 +60,43 @@ export type FormFn = (
   options: FormOptions,
 ) => Action[] | Promise<Action[]>;
 
+/** The catalog name a library's build gives its marketplaces when its config names none: <owner>-<name> of the repo. */
+export function catalogFor(repo: string): string {
+  return repo.replace("/", "-");
+}
+
+/**
+ * The catalog name the library's plugins come from on Claude Code and Codex: the release's config names it, else the
+ * release repo's <owner>-<name>; the constant only when no release was read at all.
+ */
+export function catalogOf(release: Release | null): string {
+  return release?.config?.catalog ?? (release ? catalogFor(release.repo) : LIBRARY_MARKETPLACE);
+}
+
+/** Whether the release's config serves this harness: every detected one, unless machines.harnesses names a list. */
+export function serves(release: Release | null, harnessId: string): boolean {
+  const list = release?.config?.harnesses;
+  return !list || list.includes(harnessId);
+}
+
+/** Why a harness is not served: the harnesses the release's skills-sync.json names, for the one note that says so. */
+export function notServed(release: Release | null): string {
+  return `the release's skills-sync.json names harnesses ${(release?.config?.harnesses ?? []).join(", ")}`;
+}
+
+/**
+ * The release plugins a harness gets, sorted by id: every one the release ships, narrowed to the ids the release's
+ * config names for the harness (machines.plugins.<harness>, else machines.plugins["*"]) when it names any. An id the
+ * release does not ship is nothing. The one place a form module takes its plugin list from.
+ */
+export function pluginsFor(release: Release, harnessId: string): ReleasePlugin[] {
+  const chosen = release.config?.plugins[harnessId] ?? release.config?.plugins["*"];
+  return Object.values(release.plugins)
+    .filter((p) => !chosen || chosen.includes(p.id))
+    .sort((a, b) => a.id.localeCompare(b.id));
+}
+
 export interface DesiredOptions {
-  /** only these harness ids (--agents); every detected one when unset */
-  agents?: string[];
   /** --plan: the forms run no plugin command that changes anything */
   plan?: boolean;
   /** the GitHub client the release was read with, handed to the forms */
@@ -78,9 +114,18 @@ export async function desired(
   options: DesiredOptions = {},
 ): Promise<Report> {
   const report = new Report();
+  for (const old of oldStateNotes(machine)) report.add(old.action);
   for (const state of machine.harnesses) {
     const id = state.harness.id;
-    if (!formOf(id) || (options.agents && !options.agents.includes(id))) continue;
+    if (!formOf(id)) continue;
+    if (!serves(release, id)) {
+      report.add({
+        kind: "note",
+        path: state.harness.name,
+        note: `not served: ${notServed(release)}; nothing changed here`,
+      });
+      continue;
+    }
     if (state.block) report.add(blockAction(state.block.file));
     for (const old of state.repoBlocks)
       report.add({

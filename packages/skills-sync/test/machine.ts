@@ -2,9 +2,11 @@
 // asks for, the fake claude and codex CLIs on PATH (fixtures/fake-harness), the fake GitHub named through
 // SKILLS_SYNC_GITHUB_API, and nothing of the session's own (no CLAUDE_CODE_REMOTE, no real harness folders). The
 // helpers lay down what a machine may have before a run: account plugins, tool-installed plugins, loose links, real
-// skill folders, an old ~/.skills-sync link, a hook entry, a Codex trust record, a global block, and git checkouts of
-// the tended repositories with a bare origin each. Tests assert only what a user sees: files and links, the fake CLIs'
-// calls, the fake GitHub's requests, printed output, --json, exit codes, the checkouts' heads.
+// skill folders, an old ~/.skills-sync link and its answers file, a hook entry, a Codex trust record, a global block,
+// and git checkouts of the tended repositories with a bare origin each. The fake wsl.exe (fixtures/fake-wsl) stands in
+// for the real one on every pretend machine, so a sync never reaches the WSL distros of the machine running the tests;
+// a test names the distros it should list. Tests assert only what a user sees: files and links, the fake CLIs' calls,
+// the fake wsl's calls, the fake GitHub's requests, printed output, --json, exit codes, the checkouts' heads.
 import { spawn, spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import fs from "node:fs";
@@ -20,6 +22,7 @@ import { fixtureRelease, type FakeGithub, type FixtureRelease } from "./fixtures
 
 const CLI = path.resolve(import.meta.dirname, "..", "dist", "src", "cli.js");
 const FAKE_HARNESS = path.resolve(import.meta.dirname, "fixtures", "fake-harness", "fake-harness.mjs");
+const FAKE_WSL = path.resolve(import.meta.dirname, "fixtures", "fake-wsl", "fake-wsl.mjs");
 
 export type HarnessId = "claude-code" | "codex" | "hermes";
 export type CliName = "claude" | "codex" | "hermes";
@@ -34,6 +37,8 @@ export interface PretendMachine {
   bin: string;
   /** FAKE_HARNESS_LOG: one JSON array per CLI call */
   log: string;
+  /** FAKE_WSL_LOG: one JSON array [distro, command] per run inside a distro */
+  wslLog: string;
   github: FakeGithub | null;
   /** the environment every run gets; a test may add to it */
   env: Record<string, string>;
@@ -48,6 +53,8 @@ export interface MachineOptions {
   clis?: CliName[];
   /** the fake GitHub the run talks to; null for a machine with no GitHub reachable */
   github?: FakeGithub | null;
+  /** the WSL distros the fake wsl.exe lists (default: none, as on a Windows machine without WSL, or any other OS) */
+  wsl?: string[];
   env?: Record<string, string>;
   /** the real git on PATH too (its folder after the fake CLIs), for a command that runs git on checkouts */
   git?: boolean;
@@ -61,6 +68,8 @@ export interface Run {
   json: Record<string, unknown> | null;
   /** the fake CLIs' calls, each as [host, ...args] */
   calls: string[][];
+  /** the runs inside WSL distros, each as [distro, command] */
+  wsl: string[][];
   /** the fake GitHub's requests during this run */
   requests: FakeGithub["requests"];
 }
@@ -109,6 +118,10 @@ export function pretendMachine(options: MachineOptions = {}): PretendMachine {
     FAKE_HERMES_GITHUB: path.join(base, "github-hermes"),
     // a machine with no GitHub reachable points at a port nothing listens on
     SKILLS_SYNC_GITHUB_API: github?.url ?? "http://127.0.0.1:9",
+    // the fake wsl.exe always: the real one, on a Windows host, would run the sync inside the host's own distros
+    SKILLS_SYNC_WSL_EXE: FAKE_WSL,
+    FAKE_WSL_DISTROS: (options.wsl ?? []).join(","),
+    FAKE_WSL_LOG: path.join(base, "wsl.log"),
     ...options.env,
   };
   return {
@@ -119,6 +132,7 @@ export function pretendMachine(options: MachineOptions = {}): PretendMachine {
     hermesHome,
     bin,
     log: env.FAKE_HARNESS_LOG,
+    wslLog: env.FAKE_WSL_LOG,
     github,
     env,
     extraPath: options.git ? gitFolders() : [],
@@ -168,21 +182,30 @@ export async function cli(
 ): Promise<Run> {
   const env: NodeJS.ProcessEnv = { ...process.env };
   const pathKey = Object.keys(env).find((k) => k.toUpperCase() === "PATH") ?? "PATH";
-  for (const k of ["CLAUDE_CODE_REMOTE", "SKILLS_REPO", "GITHUB_TOKEN", "GH_TOKEN", "NODE_USE_ENV_PROXY"])
+  for (const k of [
+    "CLAUDE_CODE_REMOTE",
+    "SKILLS_REPO",
+    "GITHUB_TOKEN",
+    "GH_TOKEN",
+    "NODE_USE_ENV_PROXY",
+    "SKILLS_SYNC_WSL_BIN",
+  ])
     delete env[k];
   // only the fake CLIs (and git when asked); on Windows the .cmd shims still run, because the shell comes from ComSpec
   env[pathKey] = [m.bin, ...m.extraPath].join(path.delimiter);
   Object.assign(env, m.env, extra);
-  if (fs.existsSync(m.log)) fs.rmSync(m.log);
+  for (const log of [m.log, m.wslLog]) if (fs.existsSync(log)) fs.rmSync(log);
   const before = m.github?.requests.length ?? 0;
   const r = await spawnCli(args, env, cwd);
-  const calls = fs.existsSync(m.log)
-    ? fs
-        .readFileSync(m.log, "utf8")
-        .split("\n")
-        .filter(Boolean)
-        .map((l) => JSON.parse(l) as string[])
-    : [];
+  const lines = (log: string): string[][] =>
+    fs.existsSync(log)
+      ? fs
+          .readFileSync(log, "utf8")
+          .split("\n")
+          .filter(Boolean)
+          .map((l) => JSON.parse(l) as string[])
+      : [];
+  const calls = lines(m.log);
   let json: Run["json"] = null;
   try {
     json = JSON.parse(r.stdout);
@@ -195,6 +218,7 @@ export async function cli(
     stderr: r.stderr,
     json,
     calls,
+    wsl: lines(m.wslLog),
     requests: m.github ? m.github.requests.slice(before) : [],
   };
 }
@@ -387,8 +411,8 @@ export function skillFolder(m: PretendMachine, harness: HarnessId, name: string,
 /**
  * The pretend old library clone under the machine (where `looseLink` points by default), marked as a checkout of
  * `repo`: a skills-sync.json naming library.owner and library.name, as the real library's does. A link into it is then
- * a link to a library copy, which the tool made and may remove (ADR-0007). Nothing makes ~/.skills-sync point at it, so
- * the old library-based run does not find it. Returns the clone's root.
+ * a link to a library copy, which the tool made and may remove (ADR-0007). Nothing makes ~/.skills-sync point at it; no
+ * command looks for a library on the machine any more (ADR-0012). Returns the clone's root.
  */
 export function libraryCopy(m: PretendMachine, repo = "oneezy/skills"): string {
   const root = path.join(m.base, "old-library");
@@ -402,7 +426,8 @@ export function libraryCopy(m: PretendMachine, repo = "oneezy/skills"): string {
 
 /**
  * The old ~/.skills-sync link to a library clone (default: a pretend clone under the machine, with the `brain`
- * instruction entrypoint the real library had, so the old run would write that block). Returns the link.
+ * instruction entrypoint the real library had): a leftover every machine command names in one note and never reads.
+ * Returns the link.
  */
 export function oldLibraryLink(m: PretendMachine, target?: string): string {
   const to = target ?? path.join(m.base, "old-library");

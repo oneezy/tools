@@ -397,3 +397,21 @@ test("a skill folder in the play group must be named play-<name>: skills/play/un
   assert.equal(good.status, 0, good.stdout);
   assert.match(good.stdout, /^check: clean, 6 own skills, 1 flow\b/m);
 });
+
+test("two own skills with one folder name: the first by path wins and check fails naming the other; a SKILL.md two levels below a group is not a skill and fails with its path", () => {
+  write("skills/trident/own-one/SKILL.md", skillMd("own-one")); // beside skills/oneezy/own-one, which wins
+  write("skills/oneezy/deep/x/SKILL.md", skillMd("x")); // skills/oneezy/deep holds no SKILL.md and is not a group
+  const r = cli("check");
+  assert.equal(r.status, 1, r.stdout + r.stderr);
+  assert.deepEqual(
+    problems(r).filter((l) => l.startsWith("skills/")),
+    [
+      "skills/oneezy/deep: no SKILL.md: not a skill, and only folders directly under skills/ are groups; ignored",
+      "skills/trident/own-one: same name as skills/oneezy/own-one, which wins; ignored",
+    ],
+  );
+  assert.match(r.stdout, /^check: 2 problems\b/m);
+  fs.rmSync(path.join(root, "skills", "trident"), { recursive: true });
+  fs.rmSync(path.join(root, "skills", "oneezy", "deep"), { recursive: true });
+  assert.equal(cli("check").status, 0);
+});

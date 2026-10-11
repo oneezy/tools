@@ -11,10 +11,6 @@ import { afterAll, beforeAll, beforeEach, test } from "vite-plus/test";
 import { isLink, lexists } from "../src/fs.js";
 import { Library } from "../src/library.js";
 
-// a cloud session (CLAUDE_CODE_REMOTE=true, which the session running these tests may be) writes only the global block;
-// these tests run the library-based sync, so the flag never reaches the CLI children
-delete process.env.CLAUDE_CODE_REMOTE;
-
 let base: string;
 let lib: Library;
 let homeDir: string;
@@ -253,205 +249,31 @@ test("latest by default: a new upstream commit moves unpinned skills on refresh,
   );
 });
 
-test("sync with a config never moves a source upstream: after an upstream commit, sync with --no-pull, --pull or a due pull installs every source at the lock's commit and never rewrites the lock; without a config it behaves as 0.2.0", async () => {
-  const { harnessTable } = await import("../src/harnesses.js");
-  const table = harnessTable(homeDir, {});
-  for (const h of table) if (h.id === "claude-code" || h.id === "codex") fs.mkdirSync(h.configDir, { recursive: true });
-  const claude = table.find((h) => h.id === "claude-code")!;
+test("refresh --frozen never moves a source upstream: after an upstream commit it installs every source at the lock's commit, from a clone that has only the config and the lock, and never rewrites the lock; a second frozen refresh changes nothing", () => {
   config({ up: source(up) });
   assert.equal(cli("refresh", "--quiet").status, 0);
   const lockText = fs.readFileSync(lib.lockFile, "utf8");
   up.skill("a", "a, newer than the lock");
   up.commit("later");
-  // what a fresh clone of the library has: the config and the lock, no generated folders, no answers
+  // what a fresh clone of the library has: the config and the lock, no generated folders, no local file
   fs.rmSync(lib.upstream, { recursive: true });
   fs.rmSync(lib.agents, { recursive: true });
   fs.rmSync(lib.localFile, { force: true });
 
-  const sync = (...extra: string[]) =>
-    cli("--quiet", "--json", "--no-projects", "--no-wsl", "--agents", "claude-code,codex", ...extra);
-  const frozen = sync("--no-pull");
+  const frozen = cli("refresh", "--frozen", "--quiet", "--json");
   assert.equal(frozen.status, 0, frozen.stderr);
-  assert.ok(!body("a").includes("newer"), "--no-pull: restored at the commit in the lock, not the tip");
+  assert.ok(!body("a").includes("newer"), "restored at the commit in the lock, not the tip");
   assert.equal(fs.readFileSync(lib.lockFile, "utf8"), lockText, "the lock was not rewritten");
   assert.ok(fs.existsSync(path.join(lib.upstream, "up", "skills", "a", "SKILL.md")));
-  for (const n of ["a", "b", "own-one"])
-    assert.ok(isLink(path.join(claude.userSkills, n)), `${n} linked into the user folder`);
-  assert.ok(isLink(path.join(lib.root, claude.projectSkills, "a")), "a in the Claude layer");
-  assert.deepEqual(changes(sync("--no-pull")), [], "a second frozen sync changes nothing");
-
-  // --pull forces the library pull, never an upstream move; a plain run (the pull due, this library no clone) the same
-  for (const extra of [["--pull"], []]) {
-    const how = extra.join(" ") || "plain";
-    const r = sync(...extra);
-    assert.equal(r.status, 0, r.stderr);
-    assert.ok(!body("a").includes("newer"), `${how}: still at the lock's commit`);
-    assert.equal(fs.readFileSync(lib.lockFile, "utf8"), lockText, `${how}: the lock was not rewritten`);
-    assert.deepEqual(changes(r), [], `${how}: nothing moved`);
-  }
-
-  // a library with only skills-lock.json: no config, no refresh, no snapshot; the lock is restored as 0.2.0 did and left alone
-  const legacy = new Library(path.join(base, "dev", "legacy"));
-  fs.mkdirSync(path.join(legacy.own, "mine"), { recursive: true });
-  fs.writeFileSync(path.join(legacy.own, "mine", "SKILL.md"), "---\nname: mine\ndescription: mine\n---\nmine\n");
-  const legacyText =
-    JSON.stringify(
-      {
-        version: 1,
-        skills: {
-          c: {
-            source: up.dir,
-            sourceUrl: up.dir,
-            sourceType: "git",
-            skillPath: "skills/c/SKILL.md",
-            computedHash: "x",
-          },
-        },
-      },
-      null,
-      2,
-    ) + "\n";
-  fs.writeFileSync(legacy.npxLockFile, legacyText);
-  const env: NodeJS.ProcessEnv = { ...process.env, HOME: homeDir, USERPROFILE: homeDir };
-  for (const k of HARNESS_ENV) delete env[k];
-  const r = spawnSync(
-    process.execPath,
-    [
-      CLI,
-      "--quiet",
-      "--json",
-      "--pull",
-      "--no-projects",
-      "--no-wsl",
-      "--agents",
-      "claude-code,codex",
-      "--repo",
-      legacy.root,
-    ],
-    { encoding: "utf8", cwd: legacy.root, env },
+  // the own skills stay where they are, under skills/: no command links them into .agents/skills any more
+  assert.equal(lexists(path.join(lib.agents, "own-one")), false);
+  assert.deepEqual(
+    changes(cli("refresh", "--frozen", "--quiet", "--json")),
+    [],
+    "a second frozen refresh changes nothing",
   );
-  assert.equal(r.status, 0, r.stderr);
-  assert.ok(fs.existsSync(path.join(legacy.agents, "c", "SKILL.md")), "restored from the lock");
-  assert.ok(!isLink(path.join(legacy.agents, "c")));
-  assert.ok(!fs.existsSync(legacy.upstream), "no snapshot without a config");
-  assert.equal(fs.readFileSync(legacy.npxLockFile, "utf8"), legacyText, "the lock is left exactly as it was");
-  assert.ok(!fs.existsSync(legacy.lockFile), "and no skills-sync.lock.json is written beside it");
-  assert.ok(!fs.existsSync(legacy.configFile), "no config was written");
-});
-
-test("frozen sync preserves dirty locks; only a clean library fast-forwards and installs a landed lock; failed pulls and authored edits preserve work", async () => {
-  const { harnessTable } = await import("../src/harnesses.js");
-  const table = harnessTable(homeDir, {});
-  for (const h of table) if (h.id === "claude-code" || h.id === "codex") fs.mkdirSync(h.configDir, { recursive: true });
-  const claude = table.find((h) => h.id === "claude-code")!;
-  // the library's origin, committed as oneezy/skills is: config, lock and own skills tracked, generated folders ignored
-  const originLib = lib;
-  const origin = new Upstream(lib.root);
-  origin.git("init", "-q", "-b", "main");
-  fs.writeFileSync(
-    path.join(lib.root, ".gitignore"),
-    ".agents/\n.claude/\n.goose/\n.hermes/\nupstream/\nskills-sync.local.json\n",
-  );
-  config({ up: source(up) });
-  assert.equal(cli("refresh", "--quiet").status, 0);
-  origin.commit("library");
-  const ownSkill = (name: string) => {
-    fs.mkdirSync(path.join(origin.dir, "skills", "oneezy", name), { recursive: true });
-    fs.writeFileSync(
-      path.join(origin.dir, "skills", "oneezy", name, "SKILL.md"),
-      `---\nname: ${name}\ndescription: mine\n---\nmine\n`,
-    );
-    origin.commit(name);
-  };
-  // another machine: a clone of the origin; from here on the CLI runs against the clone
-  const cloned = spawnSync("git", [...GIT, "clone", "-q", origin.dir, path.join(base, "dev", "clone")], {
-    encoding: "utf8",
-  });
-  assert.equal(cloned.status, 0, cloned.stderr);
-  lib = new Library(path.join(base, "dev", "clone"));
-  const cloneLib = lib;
-  const clone = new Upstream(lib.root);
-  clone.git("config", "core.autocrlf", "true");
-  const lockName = path.basename(lib.lockFile);
-  const originLock = () => fs.readFileSync(path.join(origin.dir, lockName), "utf8");
-  const cloneLock = () => fs.readFileSync(lib.lockFile, "utf8");
-  const sync = (...extra: string[]) =>
-    cli("--quiet", "--json", "--no-projects", "--no-wsl", "--agents", "claude-code,codex", ...extra);
-  // porcelain lines kept whole: the leading space is the unstaged column, which Upstream.git would trim away
-  const dirty = () =>
-    spawnSync("git", ["-C", lib.root, "status", "--porcelain", "--untracked-files=no"], { encoding: "utf8" })
-      .stdout.split("\n")
-      .filter(Boolean)
-      .sort();
-  const due = () => fs.rmSync(path.join(lib.root, ".git", "skills-sync-pulled"), { force: true });
-
-  const first = sync("--pull");
-  assert.equal(first.status, 0, first.stderr);
-  assert.equal(cloneLock(), originLock(), "nothing moved: the clone's lock says what the origin's says");
-
-  up.skill("a", "a, newer than the committed lock");
-  up.commit("two");
-  const moved = sync("--pull");
-  assert.equal(moved.status, 0, moved.stderr);
-  assert.equal(cloneLock(), originLock(), "an upstream commit moves nothing: the lock is the committed one");
-  assert.ok(!body("a").includes("newer"), "and a is installed at the lock's commit");
-  assert.deepEqual(dirty(), [], "the sync left the tree clean");
-
-  // A local explicit update is dirty work: sync must never discard its lock.
-  assert.equal(cli("refresh", "--quiet").status, 0);
-  assert.deepEqual(dirty(), [` M ${lockName}`]);
-  ownSkill("own-two");
-  const localLock = cloneLock();
-  const localHead = clone.head();
-  const pulled = sync("--pull");
-  assert.equal(pulled.status, 0, pulled.stderr);
-  assert.equal(clone.head(), localHead, "dirty lock blocks fast-forward");
-  assert.equal(cloneLock(), localLock, "dirty lock bytes preserved");
-  assert.deepEqual(dirty(), [` M ${lockName}`]);
-  // The fixture owner explicitly resolves its local update; sync may now pull.
-  clone.git("-c", "core.autocrlf=false", "checkout", "--", lockName);
-  assert.equal(sync("--pull").status, 0);
-  assert.equal(clone.head(), origin.head(), "clean compatible clone fast-forwarded");
-  assert.ok(fs.existsSync(path.join(lib.own, "oneezy", "own-two", "SKILL.md")), "own-two arrived");
-  assert.ok(isLink(path.join(claude.userSkills, "own-two")), "and is linked into the user folder");
-  assert.equal(cloneLock(), originLock(), "the pull put the lock back at the library's");
-  assert.ok(!body("a").includes("newer"), "and the working set with it");
-  assert.deepEqual(dirty(), []);
-
-  // the library moves its lock (an update landed on the origin): the next plain run once the 30-minute window has passed installs it
-  lib = originLib;
-  assert.equal(cli("refresh", "--quiet").status, 0);
-  lib = cloneLib;
-  origin.commit("update up");
-  ownSkill("own-three");
-  due();
-  const plain = sync();
-  assert.equal(plain.status, 0, plain.stderr);
-  assert.equal(clone.head(), origin.head(), "pulled on the plain run");
-  assert.equal(cloneLock(), originLock(), "the library's new lock arrived");
-  assert.ok(body("a").includes("newer"), "and is installed");
-  assert.ok(isLink(path.join(claude.userSkills, "own-three")));
-  assert.deepEqual(dirty(), [], "still nothing written to the lock");
-
-  // a pull that fails leaves the lock exactly as it was, and the frozen refresh that follows reads it
-  clone.git("remote", "set-url", "origin", path.join(base, "nowhere"));
-  const before = cloneLock();
-  due();
-  const failed = sync();
-  assert.equal(failed.status, 0, failed.stderr);
-  assert.equal(cloneLock(), before, "the lock is as it was before the pull");
-  assert.ok(body("a").includes("newer"), "and the working set with it");
-  clone.git("remote", "set-url", "origin", origin.dir);
-
-  // any other local change still blocks the pull, as before
-  fs.appendFileSync(path.join(lib.own, "oneezy", "own-one", "SKILL.md"), "edited on this machine\n");
-  ownSkill("own-four");
-  due();
-  const blocked = sync("--pull");
-  assert.equal(blocked.status, 0, blocked.stderr);
-  assert.notEqual(clone.head(), origin.head(), "not pulled over a local edit");
-  assert.ok(!fs.existsSync(path.join(lib.own, "oneezy", "own-four")));
-  assert.deepEqual(dirty(), [" M skills/oneezy/own-one/SKILL.md"], "nothing of the user's was touched");
+  assert.equal(fs.readFileSync(lib.lockFile, "utf8"), lockText);
+  assert.ok(!fs.existsSync(lib.localFile), "and no local file appeared");
 });
 
 test("a rename (tdd -> pstack-tdd) yields .agents/skills/pstack-tdd with name: pstack-tdd, an untouched snapshot, and a lock entry under the new name recording the upstream path", () => {
@@ -520,13 +342,20 @@ test("the config and the local file validate against the shipped schemas; the sk
     "both switches default to true",
   );
   assert.equal(cli("refresh", "--quiet").status, 0);
-  const sync = cli("--quiet", "--no-pull", "--no-projects", "--no-wsl", "--agents", "claude-code,codex", "--no-global");
-  assert.equal(sync.status, 0, sync.stderr);
-  assert.deepEqual(
-    validate(shippedSchema("skills-sync.local"), json(lib.localFile)),
-    [],
-    "the sync wrote a valid local file",
+  // the local file an older version left in a checkout, every key it could write: still a valid one, so update reads it
+  fs.writeFileSync(
+    lib.localFile,
+    JSON.stringify({
+      agents: ["claude-code", "codex"],
+      global: true,
+      mode: "link",
+      wsl: [],
+      links: "auto",
+      unavailable: [],
+    }) + "\n",
   );
+  assert.deepEqual(validate(shippedSchema("skills-sync.local"), json(lib.localFile)), []);
+  assert.equal(cli("refresh", "--quiet").status, 0, "an old local file does not stop a refresh");
 
   const switched = { ...json(lib.configFile), generate: { skills: false, plugins: true } };
   fs.writeFileSync(lib.configFile, JSON.stringify(switched));

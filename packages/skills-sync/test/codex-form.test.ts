@@ -104,8 +104,8 @@ function machine(options: Parameters<typeof pretendMachine>[0] = {}, release = r
 
 const lines = (r: { stdout: string }) => r.stdout.trimEnd().split("\n");
 /**
- * ~/.skills-sync as the old tool left it, pointing at a folder under the machine (where `looseLink` puts its targets).
- * The folder is bare, so the old library-based run (still behind the machine sync on a PC until #154) does not start.
+ * ~/.skills-sync as the old tool left it, pointing at a folder under the machine (where `looseLink` puts its targets):
+ * a leftover the sync names in one note and never reads (tools#154).
  */
 function oldSkillsSync(m: PretendMachine): string {
   const to = path.join(m.base, "old-library");
@@ -589,6 +589,7 @@ test("--plan lists every action and changes nothing: no file, no link, no plugin
   assert.deepEqual(
     actions(r).map((a) => [a.kind, a.path]),
     [
+      ["note", path.join(m.home, ".skills-sync")],
       ["write", path.join(m.codexHome, "AGENTS.md")],
       ["write", hooksFile(m, "codex")],
       ["note", hooksFile(m, "codex")],

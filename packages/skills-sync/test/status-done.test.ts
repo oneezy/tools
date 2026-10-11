@@ -13,7 +13,12 @@ import fs from "node:fs";
 import path from "node:path";
 import { afterAll, afterEach, beforeAll, test } from "vite-plus/test";
 import { linkTarget, real } from "../src/fs.js";
-import { startFakeGithub, type FakeGithub, type FixtureRelease } from "./fixtures/fake-github/fake-github.mjs";
+import {
+  fixtureConfig,
+  startFakeGithub,
+  type FakeGithub,
+  type FixtureRelease,
+} from "./fixtures/fake-github/fake-github.mjs";
 import {
   advanceOrigin,
   blockIn,
@@ -581,6 +586,35 @@ test("what sync leaves in Codex's skills folders because it is not the library's
     `${mine}: a skill folder not in release-17`,
   ]);
   assert.match(step.steps[2], /^To adopt one: add it under skills\/ in oneezy\/skills/);
+});
+
+test("a harness the release's skills-sync.json does not serve owes no manual step; the account-plugins step names only the plugins the config gives Claude Code", async () => {
+  const m = machine();
+  const { skills } = await synced(m);
+  fs.rmSync(path.join(m.codexHome, "config.toml"));
+  skillFolder(m, "codex", "my-notes", codexLegacySkills(m));
+  for (const id of ["matt-pocock", "play"])
+    fs.rmSync(path.join(m.claudeHome, "plugins", "synced", "org-1111_bucket-2222", id), { recursive: true });
+  const served = json(await cli(m, ["status", "--json"], {}, skills));
+  assert.deepEqual(
+    served.manualSteps.map((s) => s.id),
+    ["claude-plugins", "codex-trust", "adopt-or-delete"],
+  );
+  const contents = gh.fixture.contents![r17.commit];
+  const was = contents["skills-sync.json"];
+  contents["skills-sync.json"] = fixtureConfig("oneezy/skills", "0.43.1", {
+    machines: { harnesses: ["claude-code"], plugins: { "*": ["oneezy", "play"] } },
+  });
+  try {
+    const j = json(await cli(m, ["status", "--json"], {}, skills));
+    assert.deepEqual(Object.keys(j.harnesses), ["claude-code"]);
+    assert.deepEqual(
+      j.manualSteps.map((s) => [s.id, s.title]),
+      [["claude-plugins", "Switch on the account plugins claude.ai does not deliver to Claude Code yet: play"]],
+    );
+  } finally {
+    contents["skills-sync.json"] = was;
+  }
 });
 
 test("in the cloud status shows the block lines and the manual steps only, reads no release, and the exit code follows the block", async () => {

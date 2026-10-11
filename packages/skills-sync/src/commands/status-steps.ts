@@ -5,12 +5,12 @@
 // at claude.ai), a Claude Code that lists no account plugin at all (a sign-in), the Codex hook trust (its TUI, once per
 // machine), the duplicate Codex plugins from other marketplaces (ChatGPT's), what is left in Codex's skills folders to
 // adopt or delete, and, in the cloud, the old setup line that still cloned the old library and linked every skill a
-// second time. The rules for "a library copy" and "the release's own files" are the forms' own (library-copy.ts, the
-// Codex form's sameFiles), so status and sync agree on what sync removes and what it leaves for a person.
-import { formOf } from "../desired.js";
+// second time. The rules for "a library copy" and "the release's own files" are the forms' own (machine.ts's libraryCopy,
+// the Codex form's sameFiles), so status and sync agree on what sync removes and what it leaves for a person.
+import { catalogOf, formOf, pluginsFor, serves } from "../desired.js";
 import { sameFiles } from "../forms/codex.js";
-import { dangling, isLibraryCopy } from "../forms/library-copy.js";
-import { LIBRARY_MARKETPLACE, type HarnessState, type Machine } from "../machine.js";
+import { lexists } from "../fs.js";
+import { libraryCopy, type HarnessState, type Machine } from "../machine.js";
 import type { Release } from "../release.js";
 
 export interface ManualStep {
@@ -41,7 +41,8 @@ export function manualSteps(machine: Machine, release: Release | null): ManualSt
     return step ? [step] : [];
   }
   for (const state of machine.harnesses) {
-    if (!formOf(state.harness.id)) continue;
+    // a harness the release does not serve is one note in status and nothing is owed for it (ADR-0012)
+    if (!formOf(state.harness.id) || !serves(release, state.harness.id)) continue;
     if (state.harness.id === "claude-code") push(out, claudePlugins(state, release));
     // the other-marketplace plugins and the folder rules below are Codex's (Hermes's form has its own and prints them)
     if (state.harness.id === "codex") {
@@ -51,6 +52,11 @@ export function manualSteps(machine: Machine, release: Release | null): ManualSt
     }
   }
   return out;
+}
+
+/** The release plugins this harness gets (the release's skills-sync.json may narrow them), sorted: sync's list. */
+function ids(release: Release, state: HarnessState): string[] {
+  return pluginsFor(release, state.harness.id).map((p) => p.id);
 }
 
 function push(out: ManualStep[], step: ManualStep | null): void {
@@ -81,11 +87,11 @@ function claudePlugins(state: HarnessState, release: Release | null): ManualStep
       steps: [
         "Run claude and check it is signed in with the claude.ai account that holds the plugins (/login), not an API key.",
         "Check ~/.claude/settings.json does not set syncClaudeAiPlugins to false.",
-        `Start a new Claude Code session; claude plugin list should then show ${Object.keys(release.plugins).sort().join(", ")} as <id>@synced. Run status again.`,
+        `Start a new Claude Code session; claude plugin list should then show ${ids(release, state).join(", ")} as <id>@synced. Run status again.`,
       ],
     };
   const delivered = new Set(state.synced.filter((p) => p.enabled).map((p) => p.id));
-  const missing = Object.keys(release.plugins)
+  const missing = ids(release, state)
     .filter((id) => !delivered.has(id))
     .sort();
   if (!missing.length) return null;
@@ -128,7 +134,7 @@ function otherPlugins(state: HarnessState, release: Release | null): ManualStep 
   if (!release) return null;
   const others = state.installed
     // a plugin switched off loads nothing, so it doubles nothing
-    .filter((p) => p.enabled && p.marketplace !== LIBRARY_MARKETPLACE && release.plugins[p.id])
+    .filter((p) => p.enabled && p.marketplace !== catalogOf(release) && ids(release, state).includes(p.id))
     .sort((a, b) => a.id.localeCompare(b.id));
   if (!others.length) return null;
   const name = state.harness.name;
@@ -153,7 +159,7 @@ function otherPlugins(state: HarnessState, release: Release | null): ManualStep 
  */
 function adoptOrDelete(state: HarnessState, release: Release | null): ManualStep | null {
   if (!release) return null;
-  const plugins = Object.values(release.plugins);
+  const plugins = pluginsFor(release, state.harness.id);
   const carrier = (skill: string) => plugins.find((p) => p.skills.includes(skill));
   const items: string[] = [];
   for (const l of state.loose) {
@@ -161,7 +167,7 @@ function adoptOrDelete(state: HarnessState, release: Release | null): ManualStep
       items.push(`${l.path}: a link whose target cannot be read`);
       continue;
     }
-    const copy = dangling(l.target) ? "dangling" : isLibraryCopy(l.target, release.repo) ? "library" : null;
+    const copy = libraryCopy(l.target, release.repo) ? (lexists(l.target) ? "library" : "dangling") : null;
     if (!copy) items.push(`${l.path}: links to ${l.target}, not a library copy`);
     else if (!carrier(l.name))
       items.push(

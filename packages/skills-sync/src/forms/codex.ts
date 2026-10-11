@@ -1,6 +1,6 @@
 // Codex's form: the library's plugins from the GitHub marketplace oneezy/skills (ADR-0007). The marketplace is added
 // from GitHub (an old registration of the same name from a local folder, the ~/.skills-sync form, is replaced), every
-// plugin the release lists is installed through `codex plugin add`, a plugin behind the release is brought up with one
+// plugin the release's skills-sync.json gives Codex (desired.ts's pluginsFor) is installed through `codex plugin add`, a plugin behind the release is brought up with one
 // `codex plugin marketplace upgrade` (it refreshes the snapshot and reinstalls every plugin from it), and each plugin is
 // verified through Codex's own listing and the skills it loads. Only then do the copies of its skills go: loose links to
 // a library copy (a checkout, ~/.skills-sync, or a target that is gone) in ~/.agents/skills and the deprecated
@@ -10,10 +10,9 @@
 // plugin) lists every skill twice; it is never removed here, the line says how. Shapes: notes/skills-66.md and
 // docs/research/codex-hook-trust-and-account-plugins.md in oneezy/skills.
 import fs from "node:fs";
-import os from "node:os";
 import path from "node:path";
-import type { FormFn } from "../desired.js";
-import { lexists, real, toHash, under } from "../fs.js";
+import { catalogOf, pluginsFor, type FormFn } from "../desired.js";
+import { lexists, toHash } from "../fs.js";
 import {
   addMarketplace,
   codexPluginSkills,
@@ -24,8 +23,7 @@ import {
   upgradeMarketplace,
   type Run,
 } from "../install.js";
-import { homeLibrary } from "../library.js";
-import { LIBRARY_MARKETPLACE, type CliPlugin, type HarnessState } from "../machine.js";
+import { libraryCopy, type CliPlugin, type HarnessState } from "../machine.js";
 import type { Action } from "../plan.js";
 import type { ReleasePlugin } from "../release.js";
 import { compareVersions, plainVersion } from "../versions.js";
@@ -34,7 +32,7 @@ export const codex: FormFn = (release, state, _machine, options) => {
   const plan = options.plan;
   const h = state.harness;
   const where = (what: string) => `${h.name}: ${what}`;
-  const mkt = LIBRARY_MARKETPLACE;
+  const mkt = catalogOf(release);
   const out: Action[] = [];
   const conflict = (what: string, note: string, run?: Run): void => {
     out.push({ kind: "conflict", path: where(what), note, ...(run?.failure ? { diagnostic: run.failure } : {}) });
@@ -104,8 +102,8 @@ export const codex: FormFn = (release, state, _machine, options) => {
     } else marketplaceChanged = true;
   }
 
-  // 2. the plugins: every plugin of the release, until tools#154 reads the selection from skills-sync.json at the release
-  const wanted = Object.values(release.plugins).sort((a, b) => a.id.localeCompare(b.id));
+  // 2. the plugins: the release's, narrowed to what its skills-sync.json names for Codex (ADR-0012)
+  const wanted = pluginsFor(release, h.id);
   const have = marketplaceChanged && !plan ? inventory(h, run) : state.installed;
   if (!have) {
     conflict(form, "codex could not list its plugins after the marketplace change; nothing installed, nothing removed");
@@ -234,7 +232,7 @@ export const codex: FormFn = (release, state, _machine, options) => {
       out.push({ kind: "note", path: l.path, note: "a link whose target cannot be read; left alone" });
       continue;
     }
-    const copy = libraryCopy(l.target, release.repo);
+    const copy = libraryCopy(l.target, release.repo) ? (lexists(l.target) ? "library" : "dangling") : null;
     if (!copy) {
       out.push({
         kind: "note",
@@ -370,40 +368,6 @@ function filesIn(dir: string): string[] | null {
     return walk(dir, "") ? out : null;
   } catch {
     return null;
-  }
-}
-
-/**
- * Is `target` a copy the tool, or an older sync, made from the library: inside ~/.skills-sync (the link or where it
- * points), inside a checkout of the release repo (a skills-sync.json naming it as the library at some ancestor), or
- * gone ("dangling": the tool's leftover). Null for anything else, which is never removed.
- */
-function libraryCopy(target: string, repo: string): "library" | "dangling" | null {
-  if (!target) return null;
-  if (!lexists(target)) return "dangling";
-  const home = homeLibrary(os.homedir());
-  if (under(target, home)) return "library";
-  // the link may name the folder one way and the target another (a Windows short name): compare the real paths too
-  if (lexists(home) && (under(target, real(home)) || under(real(target), real(home)))) return "library";
-  for (let dir = target; ; dir = path.dirname(dir)) {
-    if (isCheckoutOf(dir, repo)) return "library";
-    if (path.dirname(dir) === dir) return null;
-  }
-}
-
-/** A library checkout: skills-sync.json whose library.owner/name is the release repo. */
-function isCheckoutOf(dir: string, repo: string): boolean {
-  try {
-    const v = JSON.parse(fs.readFileSync(path.join(dir, "skills-sync.json"), "utf8")) as {
-      library?: { owner?: unknown; name?: unknown };
-    };
-    const owner = v?.library?.owner;
-    const name = v?.library?.name;
-    return (
-      typeof owner === "string" && typeof name === "string" && `${owner}/${name}`.toLowerCase() === repo.toLowerCase()
-    );
-  } catch {
-    return false;
   }
 }
 

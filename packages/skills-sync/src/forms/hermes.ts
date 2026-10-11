@@ -8,7 +8,9 @@
 // link of that name is reported and left, and so is every link or folder no plugin of the release carries (one line
 // each, adopt or delete by hand). A plugin behind the release is re-installed at the new commit with --force (that is
 // how a pinned install moves; `update` refuses one); one ahead of it (installed by hand from main) is a note and stays.
-// Before the first install of a run, GitHub is asked once whether the release commit carries dist/hermes at all: until
+// The plugin list is pluginsFor() (the release's skills-sync.json narrows it), the rendering folder the config's
+// renderings.hermes (dist/hermes when it names none), and a link is the tool's by machine.ts's libraryCopy, as on Codex.
+// Before the first install of a run, GitHub is asked once whether the release commit carries the rendering at all: until
 // the library's first release built with this tool it does not, and that is one note, not seven failed clones. A
 // failed step is a conflict and the loose links stay; nothing hermes did not install for this library is ever touched.
 // --plan runs no hermes command that changes anything; a steady-state sync (every plugin current, nothing redundant)
@@ -17,16 +19,15 @@
 import fs from "node:fs";
 import path from "node:path";
 import { HERMES_PATH, hermesSkillProblems } from "../build.js";
-import type { FormFn } from "../desired.js";
-import { isDir, isLink, isSkillDir, toHash } from "../fs.js";
+import { pluginsFor, type FormFn } from "../desired.js";
+import { isDir, isLink, isSkillDir, lexists, toHash } from "../fs.js";
 import { GitHubError, type GitHub } from "../github.js";
 import { githubRepo, hermesNamespace, hermesPlugins, type HermesPlugin } from "../hermes.js";
 import { hermes as cli, runner } from "../install.js";
-import type { CliPlugin } from "../machine.js";
+import { libraryCopy, type CliPlugin } from "../machine.js";
 import type { Action } from "../plan.js";
 import type { Release, ReleasePlugin } from "../release.js";
 import { versionGap } from "./codex.js";
-import { dangling, isLibraryCopy } from "./library-copy.js";
 
 export const hermes: FormFn = async (release, state, _machine, { plan, github }) => {
   const h = state.harness;
@@ -54,7 +55,8 @@ export const hermes: FormFn = async (release, state, _machine, { plan, github })
 
   const home = h.configDir;
   const commit = release.commit.slice(0, 7);
-  const plugins = Object.values(release.plugins).sort((a, b) => a.id.localeCompare(b.id));
+  const plugins = pluginsFor(release, h.id);
+  const rendering = renderingOf(release);
 
   // 1. what each plugin needs, from the probe alone: nothing runs yet
   type Need = { p: ReleasePlugin; have: CliPlugin | undefined; install: string | null; ahead: boolean };
@@ -79,7 +81,7 @@ export const hermes: FormFn = async (release, state, _machine, { plan, github })
       fail(what, "installed but disabled (plugins.disabled in config.yaml); left alone, loose links kept");
       continue;
     }
-    if (have && isAhead(have, p)) {
+    if (have && isAhead(have, p, rendering)) {
       // installed by hand from main, which runs ahead of releases/latest: nothing to pin it back to
       out.push({
         kind: "note",
@@ -89,16 +91,16 @@ export const hermes: FormFn = async (release, state, _machine, { plan, github })
       needs.push({ p, have, install: null, ahead: true });
       continue;
     }
-    needs.push({ p, have, install: have ? behind(have, p, release) : "not installed", ahead: false });
+    needs.push({ p, have, install: have ? behind(have, p, release, rendering) : "not installed", ahead: false });
   }
 
   // 2. the release commit must carry the rendering before anything is installed from it: one GitHub question, asked
   // only when an install is due (the library's releases before the first one built with this tool have none)
-  if (needs.some((n) => n.install) && !(await hasRendering(github, release))) {
+  if (needs.some((n) => n.install) && !(await hasRendering(github, release, rendering))) {
     out.push({
       kind: "note",
       path: where("plugins"),
-      note: `${release.tag} carries no Hermes rendering yet, no ${HERMES_PATH}/ at ${commit}; nothing installed, loose links kept`,
+      note: `${release.tag} carries no Hermes rendering yet, no ${rendering}/ at ${commit}; nothing installed, loose links kept`,
     });
     return out;
   }
@@ -111,7 +113,7 @@ export const hermes: FormFn = async (release, state, _machine, { plan, github })
   for (const n of needs) {
     const { p, have } = n;
     const what = `plugin ${p.id}`;
-    const identifier = `${release.repo}/${HERMES_PATH}/${p.id}`;
+    const identifier = `${release.repo}/${rendering}/${p.id}`;
     if (n.install) {
       const action: Action = {
         kind: "install",
@@ -186,7 +188,7 @@ export const hermes: FormFn = async (release, state, _machine, { plan, github })
             ? `no plugin.json under ${path.join(home, "plugins", p.id)}`
             : ahead
               ? null // a newer package than the release's: its own files, not the release's, are what it holds
-              : (behind(disk, p, release) ?? skillsProblem(disk, p));
+              : (behind(disk, p, release, rendering) ?? skillsProblem(disk, p));
       if (reason) {
         fail(what, `installed but not verified (${reason}); loose links kept`, undefined);
         continue;
@@ -204,7 +206,7 @@ export const hermes: FormFn = async (release, state, _machine, { plan, github })
       out.push({ kind: "note", path: l.path, note: "a link whose target cannot be read; left alone" });
       continue;
     }
-    const copy = dangling(l.target) ? "dangling" : isLibraryCopy(l.target, release.repo) ? "library" : null;
+    const copy = libraryCopy(l.target, release.repo) ? (lexists(l.target) ? "library" : "dangling") : null;
     const p = carrier(l.name);
     if (!p) {
       out.push({
@@ -251,14 +253,22 @@ export const hermes: FormFn = async (release, state, _machine, { plan, github })
 };
 
 /**
- * Does the release commit carry the Hermes rendering (dist/hermes/ in the library at that commit)? Asked of GitHub
- * once per run, before the first install: a 404 is a plain no; without a client, or when GitHub answers anything else,
- * the installs go ahead and hermes's own message tells.
+ * The library folder that holds the Hermes rendering of every package (`<folder>/<id>`): the release's config names it
+ * (renderings.hermes, the opt-in build reads), else dist/hermes, where build writes it.
  */
-async function hasRendering(github: GitHub | null | undefined, release: Release): Promise<boolean> {
+function renderingOf(release: Release): string {
+  return release.config?.renderings?.hermes ?? HERMES_PATH;
+}
+
+/**
+ * Does the release commit carry the Hermes rendering (its folder in the library at that commit)? Asked of GitHub once
+ * per run, before the first install: a 404 is a plain no; without a client, or when GitHub answers anything else, the
+ * installs go ahead and hermes's own message tells.
+ */
+async function hasRendering(github: GitHub | null | undefined, release: Release, rendering: string): Promise<boolean> {
   if (!github) return true;
   try {
-    await github.getJson(`/repos/${release.repo}/contents/${HERMES_PATH}?ref=${release.commit}`);
+    await github.getJson(`/repos/${release.repo}/contents/${rendering}?ref=${release.commit}`);
     return true;
   } catch (e) {
     return !(e instanceof GitHubError && e.status === 404);
@@ -269,8 +279,8 @@ async function hasRendering(github: GitHub | null | undefined, release: Release)
  * Is the installed plugin this tool's kind of install (from the rendering) at a newer version than the release's: one
  * installed by hand from main, which runs ahead of releases/latest. Semver, as Codex's form reads it.
  */
-function isAhead(have: CliPlugin, p: ReleasePlugin): boolean {
-  return have.install?.subdir === `${HERMES_PATH}/${p.id}` && versionGap(have, p) === "ahead";
+function isAhead(have: CliPlugin, p: ReleasePlugin, rendering: string): boolean {
+  return have.install?.subdir === `${rendering}/${p.id}` && versionGap(have, p) === "ahead";
 }
 
 /**
@@ -279,8 +289,8 @@ function isAhead(have: CliPlugin, p: ReleasePlugin): boolean {
  * (an upstream snapshot can move without a version change; its NOTICE names the commit, so its sha256 in release.json
  * tells; a copy whose git turned its line endings to CRLF still counts).
  */
-function behind(have: CliPlugin | HermesPlugin, p: ReleasePlugin, release: Release): string | null {
-  const subdir = `${HERMES_PATH}/${p.id}`;
+function behind(have: CliPlugin | HermesPlugin, p: ReleasePlugin, release: Release, rendering: string): string | null {
+  const subdir = `${rendering}/${p.id}`;
   if (have.install?.subdir !== subdir)
     return `installed from ${have.install?.subdir ?? "the repository root"}, not ${subdir}`;
   if (versionGap(have, p) === "behind")

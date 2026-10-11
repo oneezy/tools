@@ -86,7 +86,7 @@ A Group or a Source's skills packaged for a Harness's plugin system, with its ow
 _Avoid_: package, bundle
 
 **Form**:
-How a Harness on a Host gets the Library's skills, one per Harness (ADR-0007): `account plugins` (Claude Code: the Plugins enabled on the claude.ai account, delivered as `<id>@synced`) or `plugins from GitHub` (Codex: the Library's marketplace added from GitHub; Hermes: each Plugin's Hermes rendering installed from the Release's commit through `hermes plugins install`). `loose skills` (one link per skill in the User folder) is no Harness's form any more. Never two on one Harness, so no skill name is listed twice. Claude Code, Codex and Hermes are on their forms; the older `plugin` and `links` pair in `sync` serves only Goose until the old run is retired.
+How a Harness on a Host gets the Library's skills, one per Harness (ADR-0007): `account plugins` (Claude Code: the Plugins enabled on the claude.ai account, delivered as `<id>@synced`) or `plugins from GitHub` (Codex: the Library's marketplace added from GitHub; Hermes: each Plugin's Hermes rendering installed from the Release's commit through `hermes plugins install`). `loose skills` (one link per skill in the User folder) is no Harness's form any more. Never two on one Harness, so no skill name is listed twice. Claude Code, Codex and Hermes are on their forms; the older `plugin` and `links` pair is gone with the library-based run.
 _Avoid_: mode (that is a project's link or copy), install mode
 
 **Hermes rendering**:
@@ -98,11 +98,11 @@ A Plugin claude.ai syncs into Claude Code for the account, listed by `claude plu
 _Avoid_: synced plugin (the harness's word), cloud plugin
 
 **Library copy**:
-A checkout or clone of the Library on a Host (a `skills-sync.json` naming the Library's owner and name at its root), or `~/.skills-sync`. A loose link into one, or whose target is gone (a dangling link counts as the tool's leftover, whatever it once pointed at), is the tool's own leftover and goes once a Plugin on that Harness carries the skill (ADR-0007). A link to anywhere else is the user's and only ever named; so is a real skill folder, unless it holds exactly the Release's files for a skill (the copy an older sync or Codex's skill installer left), which goes the same way on Codex.
+A checkout or clone of the Library on a Host (a `skills-sync.json` naming the Library's owner and name at its root), or `~/.skills-sync`. A loose link into one, or whose target is gone (a dangling link counts as the tool's leftover, whatever it once pointed at; a link whose target cannot be read at all is nobody's and is left alone), is the tool's own leftover and goes once a Plugin on that Harness carries the skill (ADR-0007). A link to anywhere else is the user's and only ever named; so is a real skill folder, unless it holds exactly the Release's files for a skill (the copy an older sync or Codex's skill installer left), which goes the same way on Codex.
 _Avoid_: leftover, stale link
 
 **Machine command**:
-A run that acts on this Host against the latest Release on GitHub and needs no Library on disk: `status` and `sync` today, then `hook`, `branches` and `unlink` as they move over. The opposite is a library command (`update`, `versions`, `add`, `build`, `check`), which runs inside a checkout; `sync --repo <path>` is still one until the old run is retired.
+A run that acts on this Host against the latest Release on GitHub and keeps nothing of its own on the Host (ADR-0012): no Library clone, no answers file, nothing remembered between runs; settings come from the Release's `skills-sync.json`, Host facts (the Harnesses, their plugins and links, the WSL distros) are detected on every run. `sync`, `status`, `hook`, `branches` and `unlink`. It takes `--plan`, `--json`, `--quiet` and `--library` (`hook` only `--library`); an older flag is accepted, does nothing and is named once on stderr. The opposite is a library command (`update`, `refresh`, `versions`, `add`, `build`, `check`, the brain and alias migrations), which runs inside a checkout named by `--repo` or found above the current folder and keeps every flag it had.
 _Avoid_: remote command, online command
 
 **Global block**:
@@ -125,3 +125,7 @@ _Avoid_: protected branch (GitHub's own setting, which `branches` reads and leav
 **Archive tag**:
 The tag `archive/<branch>` that `branches` puts at the head of a branch whose pull request was closed without merging, before deleting the branch, so nothing is lost. A tag of that name at another commit stops the delete.
 _Avoid_: backup tag
+
+**Daily cleanup**:
+The scheduled run of `branches` in oneezy/tools (`.github/workflows/branches.yml`, 10:17 UTC) with the `PROJECT_PAT` secret over every repository its user owns, after a token check that names each repository the run will touch, skips one the token cannot write and refuses `layerdbiz/*` by name. A run by hand is a plan unless told otherwise.
+_Avoid_: branch sweep, nightly GC

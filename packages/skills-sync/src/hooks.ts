@@ -146,17 +146,32 @@ function withOwn(doc: Json, harnessId: string): Json {
   return next;
 }
 
-/** A copy of `doc` without the sync-dev.sh handlers; a group that held nothing else goes with them. */
-function withoutOld(doc: Json): Json {
+/** A copy of `doc` without the handlers `drop` names; a group that held nothing else goes with them. */
+function without(doc: Json, drop: (command: unknown) => boolean): Json {
   const next = structuredClone(doc);
   const hooks = next.hooks as Json;
   hooks.SessionStart = (hooks.SessionStart as unknown[]).filter((g) => {
     if (!isObject(g) || !Array.isArray(g.hooks)) return true;
-    const kept = g.hooks.filter((h) => !(isObject(h) && isOldCommand(h.command)));
+    const kept = g.hooks.filter((h) => !(isObject(h) && drop(h.command)));
     const emptied = kept.length === 0 && g.hooks.length > 0;
     g.hooks = kept;
     return !emptied;
   });
+  return next;
+}
+
+/** A copy of `doc` without the sync-dev.sh handlers; a group that held nothing else goes with them. */
+const withoutOld = (doc: Json): Json => without(doc, isOldCommand);
+
+/**
+ * A copy of `doc` without the tool's own entry (unlink's half of withOwn): its handlers, a group left empty, and a
+ * SessionStart list or hooks object left empty by that, so a file the tool alone wrote into reads as before it did.
+ */
+function withoutOwn(doc: Json): Json {
+  const next = without(doc, isOwnCommand);
+  const hooks = next.hooks as Json;
+  if (Array.isArray(hooks.SessionStart) && !hooks.SessionStart.length) delete hooks.SessionStart;
+  if (!Object.keys(hooks).length) delete next.hooks;
   return next;
 }
 
@@ -204,6 +219,30 @@ export function hookActions(h: Harness, hook: HookState): Action[] {
       actions.push({ kind: "note", path: file, note: CODEX_TRUST_STEP });
   }
   return actions;
+}
+
+/**
+ * The action that takes the tool's own entry out of the harness's hooks file (unlink): a write of the file without it,
+ * checked against the file's bytes at apply time, every other entry and key kept byte for byte as when the entry was
+ * written; a delete when the file then holds nothing, so it was the tool's alone; a conflict when the file cannot be
+ * edited; null when there is no file or no own entry, so a second unlink has nothing to do. Codex's trust record in
+ * config.toml is Codex's own and stays.
+ */
+export function hookRemoval(h: Harness, hook: HookState): Action | null {
+  const file = hook.file;
+  const r = inspect(file);
+  if (!r.ok) return { kind: "conflict", path: file, note: `${r.reason}; left alone` };
+  if (!r.parsed.bytes || !ownPosition(groupsOf(r.parsed.doc))) return null;
+  const next = withoutOwn(r.parsed.doc);
+  if (!Object.keys(next).length)
+    return { kind: "delete", path: file, note: `held only the skills-sync session hook (${h.name})` };
+  return {
+    kind: "write",
+    path: file,
+    payload: serialise(next, r.parsed.format),
+    expectedHash: toHash(r.parsed.bytes),
+    note: "session hook removed",
+  };
 }
 
 /**

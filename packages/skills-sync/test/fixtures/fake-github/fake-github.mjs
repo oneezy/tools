@@ -79,8 +79,39 @@ export function fixtureRelease({ repo = "oneezy/skills", number, previous = null
 }
 
 /**
+ * The library's committed skills-sync.json as the release's commit carries it, in the real file's shape (version,
+ * library, generate, sources, plugins), with `version` as library.version and `extra` merged in (a `machines` key, say).
+ * The CLI reads it from GET /contents/skills-sync.json?ref=<commit>; a test narrows what a machine installs through it.
+ */
+export function fixtureConfig(repo = "oneezy/skills", version = "0.43.1", extra = {}) {
+  const [owner, name] = repo.split("/");
+  const config = {
+    version: 1,
+    library: { name, owner, homepage: `https://github.com/${repo}`, version },
+    generate: { skills: true, plugins: true },
+    sources: {
+      "matt-pocock": {
+        repo: "mattpocock/skills",
+        ref: "main",
+        root: "skills",
+        skills: ["grilling", "tdd"],
+        attribution: ["LICENSE"],
+      },
+    },
+    plugins: {
+      oneezy: { displayName: "Oneezy", description: "the library's own skills", group: "oneezy" },
+      "matt-pocock": { displayName: "Matt Pocock", description: "Matt Pocock's skills", source: "matt-pocock" },
+      play: { displayName: "Play", description: "the playground", group: "play" },
+    },
+    ...extra,
+  };
+  return JSON.stringify(config, null, 2) + "\n";
+}
+
+/**
  * The default fixture library: three plugins with a couple of skills each, released twice. release-16 is the older
- * cut; release-17 bumps oneezy and matt-pocock and leaves play as it was, so a machine on release-16 is behind.
+ * cut; release-17 bumps oneezy and matt-pocock and leaves play as it was, so a machine on release-16 is behind. Each
+ * release's commit carries the library's skills-sync.json (fixtureConfig) at that version.
  */
 export function fixtureLibrary(repo = "oneezy/skills") {
   const r16 = fixtureRelease({
@@ -105,7 +136,11 @@ export function fixtureLibrary(repo = "oneezy/skills") {
       play: { version: "0.43.0", skills: ["play-unslop"] },
     },
   });
-  return { repo, releases: [r16, r17], contents: {}, repos: {} };
+  const contents = {
+    [r16.commit]: { "skills-sync.json": fixtureConfig(repo, "0.43.0") },
+    [r17.commit]: { "skills-sync.json": fixtureConfig(repo, "0.43.1") },
+  };
+  return { repo, releases: [r16, r17], contents, repos: {} };
 }
 
 /** A 40-character commit sha a test can read: the seed repeated. */

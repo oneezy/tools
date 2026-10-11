@@ -21,6 +21,8 @@ export interface Config {
   plugins: Record<string, Plugin>;
   /** the ChatGPT upload record per plugin id, written by hand after each upload; read by build --artifacts */
   releases?: Record<string, Release>;
+  /** what every machine takes from this file at a release (read from GitHub by the machine commands): the harnesses served, the plugins each gets */
+  machines?: { harnesses?: string[]; plugins?: Record<string, string[]> };
 }
 
 /** What the last ChatGPT upload of a plugin returned, and the archive it was: the next build says whether it changed. */

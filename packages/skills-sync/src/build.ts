@@ -66,7 +66,7 @@ export const PLUGIN_SCHEMA = "https://agent-plugins.org/schemas/1.0.0/plugin.sch
  * `renderings.hermes` in skills-sync.json takes to opt in. `dist` is in the skills CLI's SKIP_DIRS, so `npx skills add
  * owner/repo` never lists these copies; Claude Code and Codex read plugins/ through the catalogs and never look here.
  * `hermes plugins install owner/repo/dist/hermes/<id>` is the install, and this is the folder the machine sync installs
- * from (the release does not carry the config yet; tools#154).
+ * from when the release's config names none (release.ts reads `renderings.hermes` from the release's skills-sync.json).
  */
 export const HERMES_PATH = "dist/hermes";
 const SKILL_MD = /^skills\/([^/]+)\/SKILL\.md$/;

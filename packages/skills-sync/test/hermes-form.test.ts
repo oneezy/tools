@@ -183,7 +183,7 @@ test("one sync gives Hermes the release's plugins from GitHub at the release com
   );
   // GitHub was asked once, before the first install, whether the release commit carries the rendering at all
   assert.deepEqual(
-    r.requests.filter((q) => q.path.includes("/contents/")).map((q) => q.path),
+    r.requests.filter((q) => q.path.includes("/contents/dist/")).map((q) => q.path),
     [`/repos/${REPO}/contents/dist/hermes?ref=${r17.commit}`],
   );
   // what a user reads
@@ -270,9 +270,9 @@ test("a second sync changes nothing: every plugin is a skip, no hermes command t
     r.calls.every((c) => c.includes("--help")),
     JSON.stringify(r.calls),
   );
-  // and GitHub nothing beyond the release: the rendering question is for a run that installs
+  // and GitHub nothing beyond the release (and its skills-sync.json): the rendering question is for a run that installs
   assert.deepEqual(
-    r.requests.filter((q) => q.path.includes("/contents/")).map((q) => q.path),
+    r.requests.filter((q) => q.path.includes("/contents/dist/")).map((q) => q.path),
     [],
   );
   const asJson = await cli(m, ["--json"]);
@@ -660,13 +660,22 @@ test("without hermes on PATH the form is one note and nothing is installed or re
   for (const link of Object.values(links2)) assert.ok(isLink(link));
 });
 
-test("on a PC with a library the old library-based run no longer links into Hermes's skills folder: the plugins are its form, and a sync leaves the folder empty (Codex, named too, is the machine sync's as well: nothing of the old run's there either)", async () => {
+test("on a PC with the old ~/.skills-sync link beside Hermes nothing links into its skills folder any more: the plugins are its form, the folder stays empty, the old link is one note and never read, and the old flags are named once (Codex, named too, gets nothing of the old run's either)", async () => {
   const m = machine({ harnesses: ["hermes", "codex"], clis: ["hermes"] });
   const r17 = latest();
   hermesSource(m, r17);
-  oldLibraryLink(m);
+  const old = oldLibraryLink(m);
   const r = await cli(m, ["--no-wsl", "--agents", "codex,hermes"]);
   assert.equal(r.status, 0, r.stderr + r.stdout);
+  assert.equal(
+    r.stderr,
+    "ignored: --no-wsl, --agents (settings come from the release's skills-sync.json; machine facts are detected on every run)\n",
+  );
+  assert.ok(isLink(old), "the old link is left as it was");
+  assert.ok(
+    lines(r).some((l) => l.startsWith(". note") && l.includes(old) && l.includes("the old library link")),
+    r.stdout,
+  );
   assert.equal(lexists(hermesSkills(m)), false, "no loose link from the old run, not even the folder");
   assert.equal(lexists(path.join(m.home, ".agents", "skills")), false, "nor for Codex");
   assert.deepEqual(fs.readdirSync(path.join(m.hermesHome, "plugins")).sort(), [
@@ -695,7 +704,7 @@ test("a release whose commit carries no Hermes rendering yet (the library before
     assert.equal(r.calls.filter(pluginWrite).length, 0, JSON.stringify(r.calls));
     for (const link of Object.values(links)) assert.ok(isLink(link), link);
     assert.deepEqual(
-      r.requests.filter((q) => q.path.includes("/contents/")).map((q) => q.path),
+      r.requests.filter((q) => q.path.includes("/contents/dist/")).map((q) => q.path),
       [`/repos/${REPO}/contents/dist/hermes?ref=${r17.commit}`],
     );
     const notes = lines(r).filter((l) => l.startsWith(". note"));

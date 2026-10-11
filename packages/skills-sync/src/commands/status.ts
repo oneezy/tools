@@ -2,25 +2,28 @@
 // --json object /oneezy-status reads with the same facts: its form, each library plugin against the latest release,
 // every skill name listed twice, the session hook entry in its user hooks file, the managed block in its global
 // instructions file, and any block an older skills-sync left in a repository. Then, once per machine, the checkouts of
-// oneezy/skills and oneezy/tools in reach (the repository the current folder is in and the folders beside it, as the
-// hook finds them): on dev and clean, or not. Last the manual steps only a person can take, step by step. A red line
-// (`!`) is something the machine has wrong; the exit code is 1 when there is one. A manual step is the person's, not the
-// machine's: it never hides a red line (red lines print first) and alone leaves the exit code 0. Nothing is written, no
-// library is looked for, every git call is read-only. In a cloud session the account plugins arrive on their own and
-// no hook or checkout exists, so status shows the block lines and the manual steps only, and reads no release: a
-// session there must not go red over a GitHub it cannot reach.
+// oneezy/skills and oneezy/tools in reach (the repository the current folder is in, its main worktree from a linked
+// one, and the folders beside it, as the hook finds them): on dev and clean, or not. Last the manual steps only a person
+// can take, step by step. A red line (`!`) is something the machine has wrong; the exit code is 1 when there is one. A
+// manual step is the person's, not the machine's: it never hides a red line (red lines print first) and alone leaves
+// the exit code 0. Nothing is written, no library is looked for, every git call is read-only; what an older version
+// left on the machine (the clone at ~/.skills-sync, its answers file) is one note each. The release's skills-sync.json
+// names the catalog the library's plugins come from and which harnesses are served (ADR-0012). In a cloud session the
+// account plugins arrive on their own and no hook or checkout exists, so status shows the block lines and the manual
+// steps only, and reads no release: a session there must not go red over a GitHub it cannot reach.
 import type { BlockState } from "../block.js";
-import { FORM_LABEL, formOf, type MachineForm } from "../desired.js";
+import { catalogOf, FORM_LABEL, formOf, notServed, serves, type MachineForm } from "../desired.js";
 import { versionGap } from "../forms/codex.js";
 import { github } from "../github.js";
 import { harnessTable } from "../harnesses.js";
 import type { HookState } from "../hooks.js";
 import {
-  LIBRARY_MARKETPLACE,
+  oldStateNotes,
   probe,
   type HarnessState,
   type LooseLink,
   type Machine,
+  type OldLibrary,
   type SkillFolder,
 } from "../machine.js";
 import { latestRelease, type Release, type ReleasePlugin } from "../release.js";
@@ -123,8 +126,12 @@ export interface StatusReport {
   /** why the release could not be read, when it could not */
   error?: string;
   cloud: boolean;
+  /** ~/.skills-sync when an older version left it: the old clone or the link to it; nothing reads it */
+  oldLibrary: OldLibrary | null;
+  /** the old tool's answers file beside that clone, when it is there; nothing reads it */
+  oldLocalFile: string | null;
   harnesses: Record<string, StatusHarness>;
-  /** lines about the machine as a whole: the release line */
+  /** lines about the machine as a whole: the release line, the leftovers, a harness the release does not serve */
   lines: StatusLine[];
   /** empty in the cloud, and when no checkout is in reach */
   checkouts: StatusCheckout[];
@@ -179,17 +186,25 @@ export function statusReport(
   checkouts: StatusCheckout[] = [],
 ): StatusReport {
   const lines: StatusLine[] = [];
-  // the cloud reads no release: the line would be red over a GitHub a session start cannot reach
-  if (!machine.cloud)
+  // the cloud reads no release: the line would be red over a GitHub a session start cannot reach; and the old clone
+  // there is the cloud-setup step's evidence, not a note of its own
+  if (!machine.cloud) {
     lines.push(
       release
         ? green(`latest: ${release.repo} ${release.tag} (${release.commit.slice(0, 7)})`)
         : red(`latest release of ${repo}: ${error ?? "not read"}`),
     );
+    for (const old of oldStateNotes(machine)) lines.push(note(old.text));
+  }
   const harnesses: Record<string, StatusHarness> = {};
   for (const state of machine.harnesses) {
     const form = formOf(state.harness.id);
-    if (form) harnesses[state.harness.id] = harnessReport(state, form, release, machine.cloud);
+    if (!form) continue;
+    if (!serves(release, state.harness.id)) {
+      lines.push(note(`${state.harness.name}: not served; ${notServed(release)}`));
+      continue;
+    }
+    harnesses[state.harness.id] = harnessReport(state, form, release, machine.cloud);
   }
   const all = [...lines, ...Object.values(harnesses).flatMap((h) => h.lines)];
   const redCount = all.filter((l) => !l.ok).length + checkouts.filter((c) => !c.ok).length;
@@ -199,6 +214,8 @@ export function statusReport(
       : null,
     ...(error ? { error } : {}),
     cloud: machine.cloud,
+    oldLibrary: machine.oldLibrary,
+    oldLocalFile: machine.oldLocalFile,
     harnesses,
     lines,
     checkouts,
@@ -299,7 +316,7 @@ function harnessReport(state: HarnessState, form: MachineForm, release: Release 
   }
   for (const p of byId(state.installed)) {
     if (p.enabled) for (const s of p.skills ?? []) place(s, `${p.id}@${p.marketplace}`);
-    if (p.marketplace !== LIBRARY_MARKETPLACE) {
+    if (p.marketplace !== catalogOf(release)) {
       other.push({ id: p.id, marketplace: p.marketplace, scope: "installed", version: p.version, skills: p.skills });
       continue;
     }
