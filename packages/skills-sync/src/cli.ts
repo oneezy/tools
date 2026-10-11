@@ -77,8 +77,9 @@ Commands
                    ones directly inside the current folder. One with a dev branch and an origin, on dev with a clean
                    tree, is fetched (15 s at most) and fast-forwarded to origin/dev; a dirty one or one on another
                    branch is named and left alone; one with no dev or no origin is not mentioned. Never a rebase, a
-                   reset or a branch switch. One line per repository fetched says which branches (counted from the
-                   fetch) and, for a GitHub origin, which open pull requests (one GitHub request) are not in dev yet.
+                   reset or a branch switch; six at a time, no fetch begins 90 s after the hook started. For the
+                   session's own repository only, one line says which branches (counted from the fetch) and, for a
+                   GitHub origin, which open pull requests (one GitHub request) are not in dev yet.
                    Takes no flags but --library (any other flag is refused, exit 2: the entry runs it bare).
                    Prints nothing when nothing changed; exit 0 unless the sync hit a conflict
   unlink           take away what this tool put on this machine, and only that: the plugins it installed from the

@@ -4,14 +4,16 @@
 // repositories beside it, or, outside any repository, the ones directly inside the current folder; found on every run,
 // nothing remembered (ADR-0012). A repository with a dev branch and an origin takes part: on dev with a clean tree it is
 // fetched and fast-forwarded, never rebased, reset or switched; a dirty one or one on another branch is named and left
-// alone, not even fetched. One with no dev or no origin is not mentioned. Last, one line per repository fetched: the
-// branches ahead of dev, counted from the refs the fetch just brought (no request spent: the hook often runs without a
-// token, and anonymous GitHub allows 60 requests an hour), and, for a GitHub origin, the open pull requests into dev,
-// one GitHub request; eight names at most of each, the rest a count, since the harness feeds stdout to the model as
-// session context. Stdout carries only what a user should read, and problems go to stderr. The exit code is 0 unless
-// the sync hit a conflict a person must fix: GitHub out of reach, a fetch that fails or a checkout that cannot
-// fast-forward are reported, not failures of the session start. The repositories are tended six at a time, a fetch gets
-// 15 s and any other git call 30 s, so a black-holed network cannot run the hook past the 120 s its entry allows.
+// alone, not even fetched. One with no dev or no origin is not mentioned. Last, for the session's own repository only
+// (a folder of forty repositories must not flood the session, nor spend anonymous GitHub's 60 requests an hour, which
+// the sync's release read needs), one line: the branches ahead of dev, counted from the refs the fetch just brought,
+// and, for a GitHub origin, the open pull requests into dev, one GitHub request; eight names at most of each, the rest
+// a count, since the harness feeds stdout to the model as session context. Stdout carries only what a user should read,
+// and problems go to stderr. The exit code is 0 unless the sync hit a conflict a person must fix: GitHub out of reach, a
+// fetch that fails or a checkout that cannot fast-forward are reported, not failures of the session start. The
+// repositories are tended six at a time and a fetch gets 15 s. 90 s after the hook started no fetch begins and no drift
+// is read (one line counts what was skipped), so with a fetch in flight and the local git calls after it the hook ends
+// well inside the 120 s its entry allows, even on a black-holed network.
 import { spawn, spawnSync, type ChildProcess } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
@@ -30,6 +32,12 @@ export const FETCH_TIMEOUT_MS = 15_000;
 /** How many repositories are tended at once. */
 export const CONCURRENCY = 6;
 
+/**
+ * How long after the hook started a fetch may still begin and the drift still be read; `SKILLS_SYNC_HOOK_DEADLINE_MS`
+ * overrides it (tests).
+ */
+export const DEADLINE_MS = 90_000;
+
 export interface HookOptions {
   /** the release repo, owner/repo (default: the library) */
   repo?: string;
@@ -47,6 +55,8 @@ export interface Repository {
   repo: string | null;
   /** whether it has an origin remote at all */
   origin: boolean;
+  /** the repository the session started in (its main checkout); none when it started outside any repository */
+  session: boolean;
 }
 
 /** A local clone of one of the CHECKOUT_REPOS, as `status` reads it. */
@@ -66,6 +76,8 @@ interface Tended {
   err: string[];
   /** fetched and origin has dev: the drift line can be counted */
   fetched: boolean;
+  /** it would have been fetched, but the deadline had passed */
+  late: boolean;
 }
 
 const count = (n: number, one: string, many = `${one}s`): string => `${n} ${n === 1 ? one : many}`;
@@ -80,13 +92,22 @@ const some = (names: string[]): string =>
 const detail = (e: unknown): string =>
   e instanceof GitHubError ? e.detail : e instanceof Error ? e.message : String(e);
 
-function fetchTimeout(env: NodeJS.ProcessEnv): number {
-  const n = Number(env.SKILLS_SYNC_FETCH_TIMEOUT_MS);
-  return Number.isFinite(n) && n > 0 ? n : FETCH_TIMEOUT_MS;
+/** A positive number of milliseconds from the environment, else `fallback`. */
+function millis(value: string | undefined, fallback: number): number {
+  const n = Number(value);
+  return value && Number.isFinite(n) && n > 0 ? n : fallback;
 }
 
+/** A 401, 403 or 404 without a token: what GitHub tells anyone about a private repository, so not worth a line. */
+const privateToAnonymous = (e: unknown, gh: GitHub): boolean =>
+  !gh.hasToken && e instanceof GitHubError && [401, 403, 404].includes(e.status);
+
 export async function runHook(options: HookOptions = {}): Promise<number> {
+  const started = Date.now();
   const env = options.env ?? process.env;
+  const allowed = millis(env.SKILLS_SYNC_HOOK_DEADLINE_MS, DEADLINE_MS);
+  const deadline = started + allowed;
+  const outOfTime = `out of time (${allowed / 1000} s since the hook started)`;
   const cwd = options.cwd ?? process.cwd();
   const repo = options.repo ?? DEFAULT_REPO;
   const write = options.write ?? ((text: string) => void process.stdout.write(text));
@@ -107,29 +128,37 @@ export async function runHook(options: HookOptions = {}): Promise<number> {
   const releaseConflict = (a: (typeof conflicts)[number]) => sync.error !== null && a.path === repo && !a.failed;
   const code = conflicts.some((a) => !releaseConflict(a)) ? 1 : 0;
 
-  // 2. every repository in reach, a few at a time; the lines in the order the repositories were found. The first
-  // repository fetched answers for its GitHub name (or its path) below
+  // 2. every repository in reach, a few at a time; the lines in the order the repositories were found
   const repos = findRepositories(cwd, env);
-  const timeout = fetchTimeout(env);
-  const tended = await inPool(repos, CONCURRENCY, (r) => tend(r, env, timeout));
-  const fetched = new Map<string, Repository>();
-  repos.forEach((r, i) => {
-    const t = tended[i];
+  const timeout = millis(env.SKILLS_SYNC_FETCH_TIMEOUT_MS, FETCH_TIMEOUT_MS);
+  const tended = await inPool(repos, CONCURRENCY, (r) => tend(r, env, timeout, deadline));
+  for (const t of tended) {
     for (const l of t.out) write(l + "\n");
     for (const l of t.err) warn(l + "\n");
-    const key = r.repo?.toLowerCase() ?? r.path;
-    if (t.fetched && !fetched.has(key)) fetched.set(key, r);
-  });
+  }
+  const late = tended.filter((t) => t.late).length;
+  if (late) warn(`${count(late, "repository", "repositories")} not fetched: ${outOfTime}\n`);
 
-  // 3. what is not in dev yet, one line per repository; the pull requests are not asked for when GitHub already failed
-  // the release read (one red line is enough), the branches still count
+  // 3. what is not in dev yet, for the session's repository only, when it was fetched and there is time left; the pull
+  // requests are not asked for when GitHub already failed the release read (one red line is enough), the branches
+  // still count
+  const i = repos.findIndex((r) => r.session);
+  if (i < 0 || !tended[i].fetched) return code;
+  if (Date.now() >= deadline) {
+    if (!late) warn(`${repos[i].path}: drift not read: ${outOfTime}\n`);
+    return code;
+  }
+  const r = repos[i];
   const gh = sync.error === null ? github(env) : null;
-  for (const r of fetched.values()) {
-    try {
-      const text = await drift(r, gh, env);
+  try {
+    const text = await drift(r, gh, env, AbortSignal.timeout(Math.max(1, deadline - Date.now())));
+    if (text) write(text + "\n");
+  } catch (e) {
+    if (!gh || !privateToAnonymous(e, gh)) warn(`${r.repo ?? r.path}: open pull requests not read: ${detail(e)}\n`);
+    else {
+      // a private repository read without a token: its branches still count, its pull requests go unsaid
+      const text = await drift(r, null, env);
       if (text) write(text + "\n");
-    } catch (e) {
-      warn(`${r.repo ?? r.path}: open pull requests not read: ${detail(e)}\n`);
     }
   }
   return code;
@@ -176,9 +205,10 @@ export function git(cwd: string, args: string[], env: NodeJS.ProcessEnv): GitRes
 
 /**
  * git in `cwd` without blocking, so several repositories are tended at once; never prompting, and cut off after
- * `timeoutMs`. Outside Windows it runs in a process group of its own, so the cut-off also ends what git started (the
- * ssh of a fetch, which would otherwise keep the pipes open), and with no terminal, so ssh cannot sit at a passphrase
- * prompt. A call that is cut off answers at once, whatever its children still do.
+ * `timeoutMs`. The cut-off ends the whole tree git started (the real git behind Git for Windows' launcher, the ssh of
+ * a fetch), which would otherwise keep the pipes open, hold the repository folder and leave ref locks behind: outside
+ * Windows git runs in a process group of its own (and with no terminal, so ssh cannot sit at a passphrase prompt),
+ * on Windows taskkill ends the tree. A call that is cut off answers at once.
  */
 function gitAsync(cwd: string, args: string[], env: NodeJS.ProcessEnv, timeoutMs = 30_000): Promise<GitResult> {
   return new Promise((resolve) => {
@@ -220,13 +250,17 @@ function gitAsync(cwd: string, args: string[], env: NodeJS.ProcessEnv, timeoutMs
   });
 }
 
-/** End a git call and, outside Windows, the process group it leads. */
+/** End a git call and every process it started: its process group, or on Windows its process tree. */
 function stop(child: ChildProcess): void {
+  if (!child.pid) return;
+  if (process.platform === "win32") {
+    spawnSync("taskkill", ["/pid", String(child.pid), "/T", "/F"], { windowsHide: true, stdio: "ignore" });
+    return;
+  }
   try {
-    if (process.platform !== "win32" && child.pid) process.kill(-child.pid, "SIGKILL");
-    else child.kill();
+    process.kill(-child.pid, "SIGKILL");
   } catch {
-    child.kill();
+    child.kill("SIGKILL");
   }
 }
 
@@ -255,15 +289,16 @@ export function repoOf(url: string): string | null {
 export function findRepositories(cwd: string, env: NodeJS.ProcessEnv = process.env): Repository[] {
   const top = git(cwd, ["rev-parse", "--show-toplevel"], env);
   let dirs: string[];
-  if (top.ok && top.out.trim()) {
+  const inside = top.ok && top.out.trim() !== "";
+  if (inside) {
     const root = mainWorktree(cwd, env) ?? path.resolve(top.out.trim());
     dirs = [root, ...repositoriesIn(path.dirname(root), root)];
   } else dirs = repositoriesIn(path.resolve(cwd));
-  return dirs.map((dir) => {
+  return dirs.map((dir, i) => {
     // the URL as configured: `remote get-url` would show it after any insteadOf rewrite, which is not the repository's name
     const url = git(dir, ["config", "--get", "remote.origin.url"], env);
     const origin = url.ok && url.out.trim() !== "";
-    return { path: dir, repo: origin ? repoOf(url.out) : null, origin };
+    return { path: dir, repo: origin ? repoOf(url.out) : null, origin, session: inside && i === 0 };
   });
 }
 
@@ -315,11 +350,13 @@ function mainWorktree(cwd: string, env: NodeJS.ProcessEnv): string | null {
  * repository with no dev branch (its own or origin's) or no origin takes no part in the dev flow and is not mentioned.
  * Otherwise: on dev with a clean tree, fetch origin (every branch, gone ones pruned: dev for the fast-forward, the rest
  * for the drift line; cut off after `timeout` ms), fast-forward only and say so when it moved; on another branch or
- * dirty, name the branch and the dirty files and touch nothing, not even a fetch (stories 33, 34, 75). Never a rebase,
- * a reset or a switch. A fetch or a merge that fails, or an origin with no dev, is a line, not a stop.
+ * dirty, name the branch and the dirty files and touch nothing, not even a fetch (stories 33, 34, 75). Past `deadline`
+ * no fetch starts: the repository is counted late and left as it is. Just before the merge, the branch and the tree
+ * are read again: one switched or edited while the fetch ran is left alone. Never a rebase, a reset or a switch. A fetch
+ * or a merge that fails, or an origin with no dev, is a line, not a stop.
  */
-async function tend(r: Repository, env: NodeJS.ProcessEnv, timeout: number): Promise<Tended> {
-  const t: Tended = { out: [], err: [], fetched: false };
+async function tend(r: Repository, env: NodeJS.ProcessEnv, timeout: number, deadline: number): Promise<Tended> {
+  const t: Tended = { out: [], err: [], fetched: false, late: false };
   const status = await gitAsync(r.path, ["--no-optional-locks", "status", "--porcelain"], env);
   if (!status.ok) {
     t.err.push(`${r.path}: git status not read ${reason(status)}; left alone`);
@@ -338,6 +375,10 @@ async function tend(r: Repository, env: NodeJS.ProcessEnv, timeout: number): Pro
     t.err.push(`${r.path}: on ${branch}${dirty ? `, dirty (${count(dirty, "file")})` : ""}; left alone`);
     return t;
   }
+  if (Date.now() >= deadline) {
+    t.late = true;
+    return t;
+  }
   const fetched = await gitAsync(r.path, ["fetch", "--quiet", "--prune", "origin"], env, timeout);
   if (!fetched.ok) {
     t.err.push(`${r.path}: fetch of origin failed ${reason(fetched)}`);
@@ -348,6 +389,13 @@ async function tend(r: Repository, env: NodeJS.ProcessEnv, timeout: number): Pro
     return t;
   }
   t.fetched = true;
+  // the fetch took a while: someone may have switched the branch or edited a file meanwhile
+  const still = await gitAsync(r.path, ["symbolic-ref", "-q", "HEAD"], env);
+  const tree = await gitAsync(r.path, ["--no-optional-locks", "status", "--porcelain"], env);
+  if (still.out.trim() !== "refs/heads/dev" || !tree.ok || tree.out.trim() !== "") {
+    t.err.push(`${r.path}: changed while origin was fetched; left alone`);
+    return t;
+  }
   const before = (await gitAsync(r.path, ["rev-parse", "HEAD"], env)).out.trim();
   const merged = await gitAsync(r.path, ["merge", "--ff-only", "--quiet", "origin/dev"], env);
   if (!merged.ok) {
@@ -362,27 +410,30 @@ async function tend(r: Repository, env: NodeJS.ProcessEnv, timeout: number): Pro
 /**
  * The repository's drift from dev as one line (story 35): the branches with commits dev lacks (main and dev left out),
  * counted in the checkout from the remote-tracking refs its fetch just refreshed; and, for a GitHub origin, the open
- * pull requests into dev, one GitHub request, or none when `gh` is null. Named by its GitHub owner/name, else its path.
- * Null when there is neither.
+ * pull requests into dev, one GitHub request (given up at `signal`), or none when `gh` is null. Named by its GitHub
+ * owner/name, else its path. Null when there is neither.
  */
 export async function drift(
   r: Pick<Repository, "path" | "repo">,
   gh: GitHub | null,
   env: NodeJS.ProcessEnv = process.env,
+  signal?: AbortSignal,
 ): Promise<string | null> {
-  const refs = git(r.path, ["for-each-ref", "--format=%(refname:lstrip=3)", "refs/remotes/origin/"], env);
-  const others = refs.out
-    .split(/\r?\n/)
-    .filter((n) => n && n !== "HEAD" && n !== "main" && n !== "dev")
-    .sort();
-  const ahead: string[] = [];
-  for (const name of others) {
-    const n = git(r.path, ["rev-list", "--count", `origin/dev..origin/${name}`], env);
-    if (n.ok && Number(n.out.trim()) > 0) ahead.push(name);
-  }
+  // one git call: every remote-tracking branch with a commit origin/dev lacks
+  const refs = await gitAsync(
+    r.path,
+    ["for-each-ref", "--no-merged=refs/remotes/origin/dev", "--format=%(refname:lstrip=3)", "refs/remotes/origin/"],
+    env,
+  );
+  const ahead = refs.ok
+    ? refs.out
+        .split(/\r?\n/)
+        .filter((n) => n && n !== "HEAD" && n !== "main" && n !== "dev")
+        .sort()
+    : [];
   const numbers: number[] = [];
   if (gh && r.repo) {
-    const pulls = await gh.getList<Pull>(`/repos/${r.repo}/pulls?state=open&base=dev&per_page=100`);
+    const pulls = await gh.getList<Pull>(`/repos/${r.repo}/pulls?state=open&base=dev&per_page=100`, signal);
     numbers.push(...pulls.map((p) => p.number).sort((a, b) => a - b));
   }
   if (!ahead.length && !numbers.length) return null;
