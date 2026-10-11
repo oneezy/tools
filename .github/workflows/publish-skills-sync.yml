@@ -3,10 +3,17 @@
 # workflow, and only this workflow, publish the package, with a provenance statement tying each version to its commit.
 #
 # Runs on every push to main that touches the package or this file, and by hand from the Actions tab
-# (workflow_dispatch, e.g. to retry). A pull request touching them runs the same build and tests and publishes
+# (workflow_dispatch, e.g. to retry). A pull request touching them runs the same build, tests and guard and publishes
 # nothing. A version already on npm is skipped, so a promotion that does not bump `version` in
 # packages/skills-sync/package.json publishes nothing. Windows, the primary host (AGENTS.md): the junction tests in
 # test/build.test.ts only pass there, and `prepublishOnly` reruns the whole suite.
+#
+# The guard (oneezy/skills ADR-0008): every machine runs `@oneezy/skills-sync@latest`, so a broken version on npm
+# would reach all of them at once. Before publishing, the new build runs against a fresh checkout of oneezy/skills
+# main, the library it serves: `refresh --frozen` installs the lock, `build --check` and `check` prove that the
+# committed plugins and generated files are what this version builds, and `sync --plan` on an empty pretend machine
+# proves that a first sync plans without error (a plan writes nothing). A failing step fails the job under its own
+# name, and nothing publishes.
 #
 # One-time setup on npmjs.com (works from a phone): @oneezy/skills-sync -> Settings -> Trusted Publisher ->
 # GitHub Actions, organization or user `oneezy`, repository `tools`, workflow filename `publish-skills-sync.yml`,
@@ -40,6 +47,10 @@ jobs:
       run:
         shell: bash
         working-directory: packages/skills-sync
+    env:
+      # the guard's library checkout, relative to the working directory above: actions/checkout places a repository
+      # only under the workspace, so it sits beside packages/
+      LIBRARY: ../../skills-main
     steps:
       # The runner's Git sets core.autocrlf true; the tests' own temp repos and clones must keep LF, as a
       # contributor's checkout does (README: a package holds LF). System level, because the CLI children the tests
@@ -74,28 +85,78 @@ jobs:
           npm --version
           pnpm --version
 
-      - name: Build and test (pull request)
-        if: github.event_name == 'pull_request'
-        run: |
-          pnpm install --frozen-lockfile
-          pnpm test
-
-      - name: Is this version on npm yet
-        if: github.event_name != 'pull_request'
+      # A pull request builds, tests and guards the version and publishes nothing. A push or dispatch publishes it
+      # unless npm has it already, in which case nothing below runs.
+      - name: Publish this version, or only test and guard it
         id: version
         run: |
           v=$(node -p "require('./package.json').version")
           echo "version=$v" >> "$GITHUB_OUTPUT"
-          if npm view "@oneezy/skills-sync@$v" version >/dev/null 2>&1; then
+          if [ "$GITHUB_EVENT_NAME" = pull_request ]; then
+            echo "pull request: @oneezy/skills-sync $v is built, tested and guarded, not published."
+            echo "publish=false" >> "$GITHUB_OUTPUT"
+            echo "guard=true" >> "$GITHUB_OUTPUT"
+          elif npm view "@oneezy/skills-sync@$v" version >/dev/null 2>&1; then
             echo "@oneezy/skills-sync $v is already on npm; nothing to publish."
             echo "publish=false" >> "$GITHUB_OUTPUT"
+            echo "guard=false" >> "$GITHUB_OUTPUT"
           else
             echo "publish=true" >> "$GITHUB_OUTPUT"
+            echo "guard=true" >> "$GITHUB_OUTPUT"
           fi
 
       - name: Install
-        if: steps.version.outputs.publish == 'true'
+        if: steps.version.outputs.guard == 'true'
         run: pnpm install --frozen-lockfile
+
+      - name: Build
+        if: steps.version.outputs.guard == 'true'
+        run: pnpm run build
+
+      - name: Test (pull request)
+        if: github.event_name == 'pull_request'
+        run: pnpm test
+
+      # The guard's library: oneezy/skills main, the release every machine syncs from. Read-only here; the frozen
+      # refresh writes only its gitignored working set (upstream/, .agents/skills/).
+      - name: Check out oneezy/skills main
+        if: steps.version.outputs.guard == 'true'
+        uses: actions/checkout@v5
+        with:
+          repository: oneezy/skills
+          ref: main
+          path: skills-main
+          persist-credentials: false
+
+      # The guard: one command of the built CLI per step, so the step that fails names what broke. Library commands
+      # keep their flags across versions; a machine command accepts an old flag with a warning, so these keep working.
+      - name: Guard, refresh --frozen (the lock installs)
+        if: steps.version.outputs.guard == 'true'
+        run: node dist/src/cli.js refresh --frozen --repo "$LIBRARY"
+
+      - name: Guard, build --check (the committed plugins are what this version builds)
+        if: steps.version.outputs.guard == 'true'
+        run: node dist/src/cli.js build --check --repo "$LIBRARY"
+
+      - name: Guard, check (the library is consistent)
+        if: steps.version.outputs.guard == 'true'
+        run: node dist/src/cli.js check --repo "$LIBRARY"
+
+      # An empty pretend machine: a home under the runner's temp folder with bare .claude and .codex folders and no
+      # claude or codex CLI on PATH, like a fresh PC. --plan prints what a first sync would do and writes nothing; the
+      # flags keep the run inside that home (no projects, no WSL distros, no library pull, no ~/.skills-sync link, no
+      # instruction blocks). HOME is for the tool, USERPROFILE for Node on Windows, the two config folders for the
+      # harness table. The CLI runs on the real node binary, as the tests do (process.execPath): a version manager's
+      # node shim would look for its runtime under the pretend home. A conflict in the plan exits 1, as for a user.
+      - name: Guard, sync --plan on an empty machine
+        if: steps.version.outputs.guard == 'true'
+        run: |
+          machine="$RUNNER_TEMP/skills-sync-machine"
+          mkdir -p "$machine/.claude" "$machine/.codex"
+          node_bin="$(node -p 'process.execPath')"
+          HOME="$machine" USERPROFILE="$machine" CLAUDE_CONFIG_DIR="$machine/.claude" CODEX_HOME="$machine/.codex" \
+            "$node_bin" dist/src/cli.js sync --plan --repo "$LIBRARY" --agents claude-code,codex \
+              --no-projects --no-pull --no-wsl --no-remember --no-entrypoints -y --json
 
       - name: Publish (prepublishOnly builds and runs the tests)
         if: steps.version.outputs.publish == 'true'
