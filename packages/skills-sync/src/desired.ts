@@ -60,7 +60,7 @@ export function desired(
       report.add({
         kind: "note",
         path: old.file,
-        note: `skills-sync block (${old.ids.join(", ")}) in a repository file; remove it by hand, the block lives only in ${state.harness.name}'s global file now`,
+        note: `skills-sync block (${old.ids.join(", ")}) outside the global file; remove it by hand, the block lives only in ${state.harness.name}'s global file now`,
       });
     if (!machine.cloud) for (const a of forms[id]?.(release, state, machine) ?? []) report.add(a);
   }

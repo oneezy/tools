@@ -48,7 +48,7 @@ One skills library, every harness, every project on this machine. Run it anywher
   cloud session                that block and nothing else (CLAUDE_CODE_REMOTE=true): no clone, no links, no plugins
   library present              also, until the plugin forms land: pull it, install the third-party skills its lock
                                records, rebuild its layers, install its built plugins on Claude Code and Codex, link
-                               the user folders. No library is cloned any more; --repo <path> runs that part alone
+                               the user folders. sync clones nothing; --repo <path> runs that part alone
 
 Usage: skills-sync [command] [options]
 
@@ -979,9 +979,8 @@ async function decide(
     wsl,
     unavailable: args.retry ? [] : (local.unavailable ?? []),
     links: args.links ?? local.links ?? "auto",
-    // a cloud session keeps loose links unless told: claude.ai syncs its own plugins into the container, and the
-    // repos' instructions read a skill from ~/.claude/skills/<name>
-    form: args.form ?? local.form ?? (process.env.CLAUDE_CODE_REMOTE === "true" ? "links" : "plugin"),
+    // a cloud session never gets here: its sync is the global block alone
+    form: args.form ?? local.form ?? "plugin",
     formChosen: !!(args.form ?? local.form),
   };
 }

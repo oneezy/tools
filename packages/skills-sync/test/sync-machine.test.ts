@@ -15,6 +15,7 @@ import {
   destroy,
   globalBlock,
   globalFile,
+  names,
   oldLibraryLink,
   oldLocalFile,
   pretendMachine,
@@ -65,13 +66,13 @@ function machine(options: Parameters<typeof pretendMachine>[0] = {}): PretendMac
 
 const read = (file: string) => fs.readFileSync(file, "utf8");
 const count = (text: string, part: string) => text.split(part).length - 1;
-/** The entries `after` has that `before` had not; fails when `before` lost any. */
+/** The paths `after` has that `before` had not; fails when any entry of `before` changed or went. */
 function added(before: string[], after: string[]): string[] {
   assert.ok(
     before.every((e) => after.includes(e)),
-    `lost: ${before.filter((e) => !after.includes(e)).join(", ")}`,
+    `changed or lost: ${before.filter((e) => !after.includes(e)).join(", ")}`,
   );
-  return after.filter((e) => !before.includes(e));
+  return names(after.filter((e) => !before.includes(e)));
 }
 /** A plugin write through a harness CLI: install, add, uninstall, remove, or a marketplace change. */
 const pluginWrite = (c: string[]) =>
@@ -95,7 +96,7 @@ function assertBlock(text: string): void {
     block,
   );
   assert.ok(
-    block.includes("Never fetch a `SKILL.md` from GitHub, or run one from any copy this harness did not load"),
+    block.includes("Never fetch a `SKILL.md` from GitHub, or run one from any folder this harness does not read"),
     block,
   );
   assert.ok(block.includes("When a typed skill does not resolve, show this table instead of improvising."), block);
@@ -209,6 +210,20 @@ test("text around the markers stays byte for byte: the old brain block is replac
   assert.equal(read(codex), x);
 });
 
+test("a marker mentioned in prose, or inline in a fenced example, is not a marker: the block is appended and the mention kept", async () => {
+  const m = machine();
+  const claude = globalFile(m, "claude-code");
+  // a marker is a whole line: one quoted mid-sentence, or sharing its line with other text, is prose
+  const mine =
+    "The tool writes `<!-- skills-sync:skills:start -->` markers.\n\n```\n<!-- skills-sync:brain:start --> routing <!-- skills-sync:brain:end -->\n```\n";
+  write(claude, mine);
+  const r = await cli(m, []);
+  assert.equal(r.status, 0, r.stderr);
+  const text = read(claude);
+  assert.ok(text.startsWith(mine), text);
+  assertBlock(text.slice(mine.length));
+});
+
 test("a file with two managed blocks is left alone and red; the other harness's file is still written", async () => {
   const m = machine();
   globalBlock(m, "claude-code", "brain", "one");
@@ -249,7 +264,7 @@ test("blocks the old tool wrote into repository files are reported, never edited
   const notes = r.stdout
     .trimEnd()
     .split("\n")
-    .filter((l) => l.startsWith(". note") && l.includes("skills-sync block (brain) in a repository file"));
+    .filter((l) => l.startsWith(". note") && l.includes("skills-sync block (brain) outside the global file"));
   // the line is `. note         <path>  (<note>)`; the path may hold spaces
   const noted = notes.map((l) => /^\. note\s+(.*?)  \(/.exec(l)?.[1] ?? l);
   assert.equal(noted.length, repoFiles.length, r.stdout);
@@ -274,13 +289,22 @@ test("a repository block is also reported outside the cloud, and a global file i
   const file = blockIn(path.join(here, "AGENTS.md"), "brain", "old");
   const r = await cli(m, [], {}, here);
   assert.equal(r.status, 0, r.stderr);
-  const notes = r.stdout.split("\n").filter((l) => l.includes("in a repository file"));
+  const notes = r.stdout.split("\n").filter((l) => l.includes("outside the global file"));
   assert.equal(notes.length, 1, r.stdout);
   assert.ok(samePath(/^\. note\s+(.*?)  \(/.exec(notes[0])?.[1] ?? "", file), notes[0]);
-  // run from inside ~/.codex: its AGENTS.md is the global file, written, not a repository leftover
+  // run from inside ~/.codex: its AGENTS.md is the global file, written, not a leftover
   const again = await cli(m, [], {}, m.codexHome);
   assert.equal(again.status, 0, again.stderr);
-  assert.ok(!again.stdout.includes("in a repository file"), again.stdout);
+  assert.ok(!again.stdout.includes("outside the global file"), again.stdout);
+  // a stale block in Codex's second global file is a leftover too: reported, left alone
+  const override = blockIn(path.join(m.codexHome, "AGENTS.override.md"), "brain", "old");
+  const text = read(override);
+  const third = await cli(m, []);
+  assert.equal(third.status, 0, third.stderr);
+  const left = third.stdout.split("\n").filter((l) => l.includes("outside the global file"));
+  assert.equal(left.length, 1, third.stdout);
+  assert.ok(samePath(/^\. note\s+(.*?)  \(/.exec(left[0])?.[1] ?? "", override), left[0]);
+  assert.equal(read(override), text);
 });
 
 for (const [name, line] of [
@@ -319,6 +343,30 @@ for (const [name, line] of [
     assert.equal(again.stdout, "");
     assert.equal(again.stderr, "");
   });
+
+test("in the cloud the release is not read: with no GitHub reachable the plain line still exits 0, prints no problem and writes both blocks", async () => {
+  const m = machine({ github: null });
+  const r = await cli(m, PLAIN_LINE, CLOUD);
+  assert.equal(r.status, 0, r.stderr);
+  assert.equal(r.stderr, "");
+  // --quiet prints the changes and nothing else: two writes, no red line, no word about a release
+  const lines = r.stdout.trimEnd().split("\n");
+  assert.equal(lines.filter((l) => l.startsWith("+ write")).length, 2, r.stdout);
+  assert.ok(!r.stdout.includes("!") && !r.stdout.includes("release"), r.stdout);
+  for (const h of ["claude-code", "codex"] as const) assertBlock(read(globalFile(m, h)));
+  // the session's next start says nothing at all
+  const next = await cli(m, PLAIN_LINE, CLOUD);
+  assert.equal(next.status, 0, next.stderr);
+  assert.equal(next.stdout + next.stderr, "");
+  // and --json says the release was not asked for
+  const j = await cli(m, ["--json"], CLOUD);
+  assert.equal(j.status, 0, j.stderr);
+  const s = j.json as unknown as SyncJson;
+  assert.equal(s.cloud, true);
+  assert.equal(s.release, null);
+  assert.equal(s.error, undefined);
+  assert.equal(s.actions.filter((a) => a.kind === "conflict").length, 0);
+});
 
 test("in the cloud, --repo <checkout> does not bring the library-based run back: the block is the whole sync", async () => {
   const m = machine();
@@ -446,4 +494,34 @@ test("a PC with a library keeps the old library-based sync after the block, with
   const again = await cli(m, ["--no-wsl"]);
   assert.equal(again.status, 0, again.stderr);
   assert.ok(again.stdout.trimEnd().split("\n").at(-1)?.startsWith("0 changed"), again.stdout);
+});
+
+test("sync --repo <lib> (the old run with its instruction blocks on) never puts a brain block beside the skills block: it is reported as superseded, and the plain sync after it stays green", async () => {
+  const m = machine();
+  const library = linkTarget(oldLibraryLink(m))!;
+  const first = await cli(m, ["--no-wsl"]);
+  assert.equal(first.status, 0, first.stderr);
+  const texts = (["claude-code", "codex"] as const).map((h) => read(globalFile(m, h)));
+  // the line the library's release notes print
+  const old = await cli(m, ["--repo", library, "--no-pull", "-y", "--global", "--no-projects", "--no-wsl"]);
+  assert.equal(old.status, 1, old.stderr);
+  const superseded = old.stdout
+    .split("\n")
+    .filter((l) => l.startsWith("!") && l.includes("superseded by the global skills block"));
+  assert.equal(superseded.length, 2, old.stdout);
+  assert.deepEqual(
+    (["claude-code", "codex"] as const).map((h) => read(globalFile(m, h))),
+    texts,
+  );
+  const plain = await cli(m, ["--no-wsl"]);
+  assert.equal(plain.status, 0, plain.stderr);
+  assert.ok(plain.stdout.trimEnd().split("\n").at(-1)?.startsWith("0 changed"), plain.stdout);
+  for (const h of ["claude-code", "codex"] as const) {
+    const text = read(globalFile(m, h));
+    assert.deepEqual(
+      [...text.matchAll(/<!-- skills-sync:([\w-]+):start -->/g)].map((x) => x[1]),
+      ["skills"],
+      text,
+    );
+  }
 });
