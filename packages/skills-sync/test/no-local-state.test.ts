@@ -68,7 +68,7 @@ afterAll(async () => {
 afterEach(() => {
   for (const m of machines.splice(0)) destroy(m);
   // a test may have narrowed the release's config; every test starts from the fixture's own
-  gh.fixture.contents[R17]["skills-sync.json"] = fixtureConfig("oneezy/skills", "0.43.1");
+  gh.fixture.contents![R17]["skills-sync.json"] = fixtureConfig("oneezy/skills", "0.43.1");
 });
 
 function machine(options: Parameters<typeof pretendMachine>[0] = {}): PretendMachine {
@@ -119,7 +119,9 @@ test("an existing ~/.skills-sync link and its local file are reported by sync an
   const m = machine();
   const link = oldLibraryLink(m);
   const target = linkTarget(link)!;
-  const local = oldLocalFile(m, { dev: path.join(m.base, "dev"), projects: ["app"] });
+  // the answers file lives in the clone; the tool names it under the link, where the old tool wrote it
+  oldLocalFile(m, { dev: path.join(m.base, "dev"), projects: ["app"] });
+  const local = path.join(link, "skills-sync.local.json");
   const libraryBefore = snapshot(target);
   const homeBefore = snapshot(m.home);
   const r = await cli(m, []);
@@ -221,7 +223,7 @@ for (const [name, line] of [
       r.requests.some((q) => q.path === "/repos/oneezy/skills/releases/latest"),
       "the release was read",
     );
-    assert.ok(r.stdout.includes("form:"), r.stdout);
+    assert.ok(r.stdout.includes("CLAUDE.md") && r.stdout.includes("AGENTS.md"), r.stdout);
     // the warning is stderr's alone: --json stays parseable, --quiet stays quiet on stdout
     const j = await cli(m, [...args, "--json"]);
     assert.equal(j.status, 0, j.stderr);
@@ -251,11 +253,11 @@ test("the ignored line names every older flag once, in the order given, and a li
   // --plan, --json, --quiet and --library are the machine commands' own
   const own = await cli(m, ["--plan", "--json", "--quiet", "--library", "oneezy/skills"]);
   assert.equal(own.stderr, "");
-  // a library command keeps its flags and says nothing about them (a bad checkout is its own error)
-  const library = await cli(m, ["check", "--repo", path.join(m.base, "nowhere"), "--json"]);
-  assert.equal(library.status, 1);
+  // a library command keeps its flags and says nothing about them; it looks for a checkout, never clones one
+  const library = await cli(m, ["check", "--no-pull", "--json"]);
+  assert.notEqual(library.status, 0);
   assert.ok(!library.stderr.includes("ignored:"), library.stderr);
-  assert.match(library.stderr, /no skills library found/);
+  assert.match(library.stderr, /no skills library found: run this inside one, or pass --repo <path>/);
   assert.equal(lexists(path.join(m.home, ".skills-sync")), false, "no clone was offered or made");
 });
 
@@ -274,7 +276,7 @@ test("the settings come from the release's skills-sync.json at its commit: the c
     "Codex served by default",
   );
 
-  gh.fixture.contents[R17]["skills-sync.json"] = narrowed;
+  gh.fixture.contents![R17]["skills-sync.json"] = narrowed;
   const before = snapshot(m.home);
   const r = await cli(m, ["--json"]);
   assert.equal(r.status, 0, r.stderr);
@@ -329,7 +331,7 @@ test("the settings come from the release's skills-sync.json at its commit: the c
 
 test("a release whose commit has no skills-sync.json, or one that is not JSON, still syncs: config null, every harness served, every plugin", async () => {
   const m = machine();
-  delete gh.fixture.contents[R17]["skills-sync.json"];
+  delete gh.fixture.contents![R17]["skills-sync.json"];
   const none = await cli(m, ["--plan", "--json"]);
   assert.equal(none.status, 0, none.stderr);
   const s = none.json as unknown as SyncJson;
@@ -339,7 +341,7 @@ test("a release whose commit has no skills-sync.json, or one that is not JSON, s
     s.actions.filter((a) => a.kind === "write").map((a) => path.basename(a.path)),
     ["CLAUDE.md", "AGENTS.md"],
   );
-  gh.fixture.contents[R17]["skills-sync.json"] = "not json";
+  gh.fixture.contents![R17]["skills-sync.json"] = "not json";
   const bad = await cli(m, ["--plan", "--json"]);
   assert.equal(bad.status, 0, bad.stderr);
   assert.equal((bad.json as unknown as SyncJson).release?.config, null);
@@ -422,7 +424,7 @@ test("on Windows the machine sync runs itself inside every WSL distro through np
       ),
     failed.stdout,
   );
-  assert.ok(failed.stdout.includes("CLAUDE.md"), failed.stdout);
+  assert.ok(failed.stdout.includes("0 changed, 2 already right, 1 left alone"), failed.stdout);
   // not from the cloud (a Linux container), not for status, not for unlink
   for (const [args, env] of [
     [["--quiet"], CLOUD],

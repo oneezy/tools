@@ -125,6 +125,12 @@ export function fixtureRelease(options: {
 
 export function fixtureLibrary(repo?: string): Fixture;
 
+/**
+ * The library's committed skills-sync.json as the release's commit carries it, in the real file's shape, with
+ * `version` as library.version and `extra` merged in (a `machines` key, say). Returns the file's text.
+ */
+export function fixtureConfig(repo?: string, version?: string, extra?: Record<string, unknown>): string;
+
 /** A 40-character commit sha a test can read: the seed repeated. */
 export function sha(seed: string): string;
 

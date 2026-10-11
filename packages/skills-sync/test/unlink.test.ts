@@ -11,6 +11,7 @@ import { afterAll, afterEach, beforeAll, test } from "vite-plus/test";
 import { lexists } from "../src/fs.js";
 import { startFakeGithub, type FakeGithub } from "./fixtures/fake-github/fake-github.mjs";
 import {
+  blockIn,
   cli,
   codexLegacySkills,
   destroy,
@@ -65,7 +66,7 @@ const state = (dir: string) =>
   };
 /** A plugin write through a harness CLI: install, add, uninstall, remove, or a marketplace change. */
 const pluginWrite = (c: string[]) =>
-  c.some((w) => ["install", "add", "uninstall", "remove", "update", "upgrade"].includes(w));
+  !c.includes("--help") && c.some((w) => ["install", "add", "uninstall", "remove", "update", "upgrade"].includes(w));
 /** `text` without its skills block and the newline that closed it: what unlink must leave of a file. */
 const without = (text: string) => text.slice(0, text.indexOf(START)) + text.slice(text.indexOf(END) + END.length + 1);
 
@@ -102,13 +103,13 @@ async function seeded(): Promise<Seeded> {
   const tdd = looseLink(m, "codex", "tdd", undefined, codexLegacySkills(m));
   // a hook entry someone else wrote
   const claudeSettings = hookEntry(m, "claude-code", "echo hello");
-  // the blocks, as sync writes them: Claude's among the user's own text, Codex's alone in its file
+  // the blocks, as a sync left them: Claude's among the user's own text, Codex's alone in its file (a sync here would
+  // already take the tool's plugin off Claude Code: the account plugin above outranks it)
   const claudeMd = globalFile(m, "claude-code");
   write(claudeMd, "# Mine\n\nAbove the block.\n");
-  const sync = await cli(m, ["--quiet"]);
-  assert.equal(sync.status, 0, sync.stderr);
+  blockIn(claudeMd, "skills", "the skills block");
   fs.appendFileSync(claudeMd, "\nBelow the block.\n");
-  const codexMd = globalFile(m, "codex");
+  const codexMd = blockIn(globalFile(m, "codex"), "skills", "the skills block");
   assert.ok(read(codexMd).startsWith(START) && read(codexMd).endsWith(`${END}\n`));
   return { m, claudeSettings, claudeMd, codexMd, mine, real, grilling, gone, tdd };
 }
@@ -170,7 +171,7 @@ test("unlink removes the tool's plugins, its marketplace registration, its links
   assert.ok(fs.existsSync(path.join(s.real, "SKILL.md")), "a real folder stays");
   // the blocks: Claude's text around it byte for byte, Codex's file gone, the hook file untouched
   assert.equal(read(s.claudeMd), without(claudeBefore));
-  assert.equal(read(s.claudeMd), "# Mine\n\nAbove the block.\n\n\nBelow the block.\n");
+  assert.equal(read(s.claudeMd), "# Mine\n\nAbove the block.\n\nBelow the block.\n");
   assert.equal(fs.existsSync(s.codexMd), false);
   assert.equal(read(s.claudeSettings), settingsBefore);
   assert.equal(r.stdout.trimEnd().split("\n").at(-1), "10 changed, 0 already right, 0 left alone");
@@ -219,10 +220,7 @@ test("without the harness CLIs only the links and the blocks go: nothing is unin
   const grilling = looseLink(m, "claude-code", "grilling");
   const claudeMd = globalFile(m, "claude-code");
   write(claudeMd, `Mine\n${START}\nhalf a block\n`);
-  const sync = await cli(m, ["--quiet"]);
-  assert.equal(sync.status, 1, sync.stderr);
-  const codexMd = globalFile(m, "codex");
-  assert.ok(read(codexMd).startsWith(START));
+  const codexMd = blockIn(globalFile(m, "codex"), "skills", "the skills block");
   const r = await cli(m, ["unlink"]);
   assert.equal(r.status, 1, r.stderr);
   assert.deepEqual(r.calls, []);

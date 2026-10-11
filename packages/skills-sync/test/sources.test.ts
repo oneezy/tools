@@ -265,7 +265,8 @@ test("refresh --frozen never moves a source upstream: after an upstream commit i
   assert.ok(!body("a").includes("newer"), "restored at the commit in the lock, not the tip");
   assert.equal(fs.readFileSync(lib.lockFile, "utf8"), lockText, "the lock was not rewritten");
   assert.ok(fs.existsSync(path.join(lib.upstream, "up", "skills", "a", "SKILL.md")));
-  assert.ok(isLink(path.join(lib.agents, "own-one")), "the own skill is linked into the working set");
+  // the own skills stay where they are, under skills/: no command links them into .agents/skills any more
+  assert.equal(lexists(path.join(lib.agents, "own-one")), false);
   assert.deepEqual(
     changes(cli("refresh", "--frozen", "--quiet", "--json")),
     [],
