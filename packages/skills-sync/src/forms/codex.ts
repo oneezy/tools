@@ -42,10 +42,10 @@ export const codex: FormFn = (release, state, _machine, options) => {
     return [{ kind: "note", path: where(form), note: "latest release not read; nothing installed, nothing removed" }];
   if (!state.cli)
     return [{ kind: "note", path: where(form), note: "no codex on PATH; nothing installed, nothing removed" }];
-  // the probe's note for a codex that cannot list its plugins; its other note (the prompt input) leaves the listing
-  // usable, and shows per plugin at verification
-  if (state.note?.endsWith("cannot list its plugins")) {
-    conflict(form, `${state.note}; nothing installed, nothing removed`);
+  // the probe could not list codex's plugins; its other note (the prompt input) leaves the listing usable, and shows per
+  // plugin at verification
+  if (!state.listed) {
+    conflict(form, `${state.note ?? "codex cannot list its plugins"}; nothing installed, nothing removed`);
     return out;
   }
   const run = runner(state.cli);

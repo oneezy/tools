@@ -10,7 +10,7 @@ import fs from "node:fs";
 import path from "node:path";
 import YAML from "yaml";
 import { afterAll, afterEach, beforeAll, test } from "vite-plus/test";
-import { isLink, lexists } from "../src/fs.js";
+import { isLink, lexists, makeLink } from "../src/fs.js";
 import { HOOK_COMMAND } from "../src/hooks.js";
 import { libraryCopy as isLibraryCopy } from "../src/machine.js";
 import { startFakeGithub, type FakeGithub } from "./fixtures/fake-github/fake-github.mjs";
@@ -320,6 +320,32 @@ test("unlink --library acme/skills takes the acme-skills plugins and registratio
   assert.equal(lexists(link), false);
 });
 
+test("unlink --library Oneezy/Skills is the same library as oneezy/skills: GitHub names are not case-sensitive, so its plugins, its registrations and its links go", async () => {
+  const m = machine();
+  libraryCopy(m);
+  installedPlugin(m, "claude-code", "oneezy", { version: "1.0.0", skills: ["a"] });
+  installedPlugin(m, "codex", "play", { version: "1.0.0", skills: ["b"] });
+  const link = looseLink(m, "claude-code", "x");
+  const r = await cli(m, ["unlink", "--library", "Oneezy/Skills", "--json"]);
+  assert.equal(r.status, 0, r.stderr + r.stdout);
+  assert.equal(r.stderr, "");
+  const actions = (r.json as { actions: ActionJson[] }).actions;
+  assert.deepEqual(
+    actions.filter((a) => a.kind !== "note").map((a) => [a.kind, a.path]),
+    [
+      ["uninstall", "Claude Code: plugin oneezy@oneezy-skills"],
+      ["uninstall", "Claude Code: marketplace oneezy-skills"],
+      ["remove", link],
+      ["uninstall", "Codex: plugin play@oneezy-skills"],
+      ["uninstall", "Codex: marketplace oneezy-skills"],
+    ],
+  );
+  assert.deepEqual(Object.keys(state(m.claudeHome).plugins), []);
+  assert.deepEqual(Object.keys(state(m.claudeHome).marketplaces), []);
+  assert.deepEqual(Object.keys(state(m.codexHome).plugins), []);
+  assert.equal(lexists(link), false);
+});
+
 test("an older claude whose write commands take no --json: unlink asks each command's help once and sends the uninstall and the marketplace remove without it", async () => {
   const m = machine({ clis: ["claude"] });
   installedPlugin(m, "claude-code", "oneezy", { version: "1.0.0", skills: ["a"] });
@@ -355,6 +381,22 @@ test("a block sync appended to a file goes with the blank line sync put before i
   // the rule unlink and the forms share: an empty target (the link could not be read) is never a dangling link
   assert.equal(isLibraryCopy("", "oneezy/skills", m.home), false);
   assert.equal(isLibraryCopy(path.join(m.base, "nowhere"), "oneezy/skills", m.home), true);
+});
+
+test("a link into ~/.skills-sync through another name for it (a link to that folder, as a Windows short name is) is the tool's: the real paths are compared", () => {
+  const m = machine({ clis: [] });
+  // the old clone at ~/.skills-sync, no skills-sync.json in it: only the place says it is the tool's
+  const skill = path.join(m.home, ".skills-sync", ".agents", "skills", "grilling");
+  write(path.join(skill, "SKILL.md"), "grilling");
+  const alias = path.join(m.base, "alias");
+  makeLink(path.join(m.home, ".skills-sync"), alias);
+  const target = path.join(alias, ".agents", "skills", "grilling");
+  assert.ok(fs.existsSync(path.join(target, "SKILL.md")));
+  assert.equal(isLibraryCopy(target, "oneezy/skills", m.home), true);
+  // the same folder elsewhere, reached by no such link, is not
+  const elsewhere = path.join(m.base, "elsewhere", "grilling");
+  write(path.join(elsewhere, "SKILL.md"), "grilling");
+  assert.equal(isLibraryCopy(elsewhere, "oneezy/skills", m.home), false);
 });
 
 test("Hermes: unlink removes the plugins hermes recorded as installed from the library (hermes plugins remove) and the tool's links; a folder hermes did not record, one from another repository and a link to somewhere else stay; --plan runs no remove; without hermes on PATH the plugins are named and stay", async () => {
