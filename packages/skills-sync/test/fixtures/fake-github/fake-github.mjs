@@ -364,7 +364,8 @@ export async function startFakeGithub(fixture = fixtureLibrary()) {
           const s = ref[1] === "tags" ? repo.tags[ref[2]] : (b?.movedTo ?? b?.sha);
           return s ? send(200, refJson(`refs/${ref[1]}/${ref[2]}`, s)) : notFound();
         }
-        return notFound();
+        // the release repo keeps its release routes beside its branch routes (the hook reads both)
+        if (full !== fixture.repo) return notFound();
       }
       if (req.method === "POST" && rest === "/git/refs") {
         if (repo.writable === false) return forbidden();
@@ -385,7 +386,7 @@ export async function startFakeGithub(fixture = fixtureLibrary()) {
         delete store[del[2]];
         return send(204);
       }
-      return notFound();
+      if (full !== fixture.repo || req.method !== "GET") return notFound();
     }
     if (full !== fixture.repo || req.method !== "GET") return notFound();
     const sorted = [...fixture.releases].sort((a, b) => b.number - a.number);

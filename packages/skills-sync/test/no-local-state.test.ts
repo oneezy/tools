@@ -50,7 +50,8 @@ interface StatusJson {
 }
 
 const CLOUD = { CLAUDE_CODE_REMOTE: "true" };
-const GLOBALS = [".claude/CLAUDE.md", ".codex/AGENTS.md"];
+/** What a sync writes on a machine with Claude Code and Codex: the two blocks and the two session hook entries. */
+const GLOBALS = [".claude/CLAUDE.md", ".claude/settings.json", ".codex/AGENTS.md", ".codex/hooks.json"];
 /** The one line a machine command prints for the older flags: each as given, once, in order. */
 const ignored = (...flags: string[]) =>
   `ignored: ${flags.join(", ")} (settings come from the release's skills-sync.json; machine facts are detected on every run)\n`;
@@ -103,7 +104,7 @@ test("no run creates or changes ~/.skills-sync or a local file: sync, status, un
     assert.ok(r.status === 0 || args[0] === "status", `${args.join(" ")}: ${r.stderr}`);
     assert.equal(r.stderr, "", args.join(" "));
   }
-  // unlink took the blocks away (the files held nothing else); nothing else of the home moved
+  // unlink took the blocks and the hook entries away (the files held nothing else); nothing else of the home moved
   assert.deepEqual(
     snapshot(m.home),
     after.filter((e) => !GLOBALS.some((g) => e.startsWith(g))),
@@ -287,7 +288,7 @@ test("the settings come from the release's skills-sync.json at its commit: the c
     plugins: { codex: ["oneezy"], "*": ["oneezy", "play"] },
   });
   assert.ok(r.requests.some((q) => q.path === `/repos/oneezy/skills/contents/skills-sync.json?ref=${R17}`));
-  assert.deepEqual(added(before, snapshot(m.home)), [".claude/CLAUDE.md"]);
+  assert.deepEqual(added(before, snapshot(m.home)), [".claude/CLAUDE.md", ".claude/settings.json"]);
   assert.deepEqual(
     s.actions.filter((a) => a.path === "Codex").map((a) => [a.kind, a.note]),
     [["note", "not served: the release's skills-sync.json names harnesses claude-code; nothing changed here"]],
@@ -339,7 +340,7 @@ test("a release whose commit has no skills-sync.json, or one that is not JSON, s
   assert.equal(s.release?.config, null);
   assert.deepEqual(
     s.actions.filter((a) => a.kind === "write").map((a) => path.basename(a.path)),
-    ["CLAUDE.md", "AGENTS.md"],
+    ["CLAUDE.md", "settings.json", "AGENTS.md", "hooks.json"],
   );
   gh.fixture.contents![R17]["skills-sync.json"] = "not json";
   const bad = await cli(m, ["--plan", "--json"]);
@@ -353,7 +354,7 @@ test("a harness that disappears is absent from the next run's report: nothing is
   assert.equal(first.status, 0, first.stderr);
   assert.deepEqual(
     (first.json as unknown as SyncJson).actions.filter((a) => a.kind !== "note").map((a) => path.basename(a.path)),
-    ["CLAUDE.md", "AGENTS.md"],
+    ["CLAUDE.md", "settings.json", "AGENTS.md", "hooks.json"],
   );
   fs.rmSync(m.codexHome, { recursive: true, force: true });
   const next = await cli(m, ["--json"]);
@@ -365,7 +366,10 @@ test("a harness that disappears is absent from the next run's report: nothing is
   );
   assert.deepEqual(
     s.actions.filter((a) => a.kind !== "note").map((a) => [a.kind, path.basename(a.path)]),
-    [["skip", "CLAUDE.md"]],
+    [
+      ["skip", "CLAUDE.md"],
+      ["skip", "settings.json"],
+    ],
   );
   const status = (await cli(m, ["status", "--json"])).json as unknown as StatusJson;
   assert.deepEqual(Object.keys(status.harnesses), ["claude-code"]);
@@ -424,7 +428,7 @@ test("on Windows the machine sync runs itself inside every WSL distro through np
       ),
     failed.stdout,
   );
-  assert.ok(failed.stdout.includes("0 changed, 2 already right, 1 left alone"), failed.stdout);
+  assert.ok(failed.stdout.includes("0 changed, 4 already right, 1 left alone"), failed.stdout);
   // not from the cloud (a Linux container), not for status, not for unlink
   for (const [args, env] of [
     [["--quiet"], CLOUD],

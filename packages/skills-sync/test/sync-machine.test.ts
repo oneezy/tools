@@ -118,7 +118,13 @@ test("sync on a machine with no library writes the skills block into both global
   const before = snapshot(m.home);
   const r = await cli(m, []);
   assert.equal(r.status, 0, r.stderr);
-  assert.deepEqual(added(before, snapshot(m.home)), [".claude/CLAUDE.md", ".codex/AGENTS.md"]);
+  // the two global blocks and the two session hook entries (test/hooks.test.ts has the hooks' own tests)
+  assert.deepEqual(added(before, snapshot(m.home)), [
+    ".claude/CLAUDE.md",
+    ".claude/settings.json",
+    ".codex/AGENTS.md",
+    ".codex/hooks.json",
+  ]);
   for (const h of ["claude-code", "codex"] as const) {
     const text = read(globalFile(m, h));
     assertBlock(text);
@@ -134,7 +140,7 @@ test("sync on a machine with no library writes the skills block into both global
     lines.some((l) => l.startsWith("+ write") && l.includes("AGENTS.md") && l.includes("(skills block)")),
     r.stdout,
   );
-  assert.equal(lines.at(-1), "2 changed, 0 already right, 0 left alone");
+  assert.equal(lines.at(-1), "4 changed, 0 already right, 0 left alone");
   // Claude Code's form is the account plugins: claude lists none here, which is one line about the sign-in, not one
   // manual step per plugin of the release
   assert.ok(
@@ -167,7 +173,7 @@ test("a second sync changes nothing and says so; --quiet then prints nothing; --
   const before = snapshot(m.home);
   const r = await cli(m, []);
   assert.equal(r.status, 0, r.stderr);
-  assert.equal(r.stdout.trimEnd().split("\n").at(-1), "0 changed, 2 already right, 0 left alone");
+  assert.equal(r.stdout.trimEnd().split("\n").at(-1), "0 changed, 4 already right, 0 left alone");
   assert.deepEqual(files.map(read), texts);
   assert.deepEqual(snapshot(m.home), before);
   const quiet = await cli(m, ["--quiet"]);
@@ -190,7 +196,9 @@ test("a second sync changes nothing and says so; --quiet then prints nothing; --
     s.actions.filter((a) => a.kind !== "note").map((a) => [a.kind, path.basename(a.path), a.note]),
     [
       ["skip", "CLAUDE.md", "skills block current"],
+      ["skip", "settings.json", "session hook current"],
       ["skip", "AGENTS.md", "skills block current"],
+      ["skip", "hooks.json", "session hook current"],
     ],
   );
 });
@@ -251,7 +259,7 @@ test("a file with two managed blocks is left alone and red; the other harness's 
     .filter((l) => l.startsWith("!"));
   assert.equal(reds.length, 1, r.stdout);
   assert.ok(reds[0].includes("CLAUDE.md") && reds[0].includes("2 managed blocks (brain, other)"), reds[0]);
-  assert.equal(r.stdout.trimEnd().split("\n").at(-1), "1 changed, 0 already right, 1 left alone");
+  assert.equal(r.stdout.trimEnd().split("\n").at(-1), "3 changed, 0 already right, 1 left alone");
 });
 
 test("blocks the old tool wrote into repository files are reported, never edited: in the current directory; the projects the old local file remembers are not looked at, that file is never read", async () => {
@@ -420,7 +428,7 @@ test("--plan writes nothing and says what would change, in text and --json", asy
   assert.equal(r.status, 0, r.stderr);
   assert.deepEqual(snapshot(m.home), before);
   assert.deepEqual([read(globalFile(m, "codex"))], texts);
-  assert.equal(r.stdout.trimEnd().split("\n").at(-1), "plan: 2 would change, 0 already right, 0 left alone");
+  assert.equal(r.stdout.trimEnd().split("\n").at(-1), "plan: 4 would change, 0 already right, 0 left alone");
   const j = await cli(m, ["--plan", "--json"]);
   assert.equal(j.status, 0, j.stderr);
   const s = j.json as unknown as SyncJson;
@@ -429,7 +437,9 @@ test("--plan writes nothing and says what would change, in text and --json", asy
     s.actions.filter((a) => a.kind === "write").map((a) => [path.basename(a.path), a.note]),
     [
       ["CLAUDE.md", "skills block"],
+      ["settings.json", "session hook"],
       ["AGENTS.md", "skills block replaces brain"],
+      ["hooks.json", "session hook"],
     ],
   );
   assert.deepEqual(snapshot(m.home), before);
@@ -446,7 +456,7 @@ test("GitHub unreachable: the block is still written, one red line names the rel
     .filter((l) => l.startsWith("!"));
   assert.equal(reds.length, 1, r.stdout);
   assert.ok(reds[0].includes("oneezy/skills") && reds[0].includes("latest release not read"), reds[0]);
-  assert.equal(r.stdout.trimEnd().split("\n").at(-1), "2 changed, 0 already right, 1 left alone");
+  assert.equal(r.stdout.trimEnd().split("\n").at(-1), "4 changed, 0 already right, 1 left alone");
   const j = await cli(m, ["--json"]);
   assert.equal(j.status, 1, j.stderr);
   const s = j.json as unknown as SyncJson;
@@ -456,7 +466,7 @@ test("GitHub unreachable: the block is still written, one red line names the rel
   // the block stayed current: the red line is the only thing wrong
   assert.deepEqual(
     s.actions.filter((a) => a.kind === "skip").map((a) => path.basename(a.path)),
-    ["CLAUDE.md", "AGENTS.md"],
+    ["CLAUDE.md", "settings.json", "AGENTS.md", "hooks.json"],
   );
 });
 
@@ -484,7 +494,12 @@ test("--agents picks nothing any more: every detected harness is served and the 
   const r = await cli(m, ["--agents", "codex,hermes"]);
   assert.equal(r.status, 0, r.stderr);
   assert.equal(r.stderr, ignored("--agents"));
-  assert.deepEqual(added(before, snapshot(m.home)), [".claude/CLAUDE.md", ".codex/AGENTS.md"]);
+  assert.deepEqual(added(before, snapshot(m.home)), [
+    ".claude/CLAUDE.md",
+    ".claude/settings.json",
+    ".codex/AGENTS.md",
+    ".codex/hooks.json",
+  ]);
   assert.ok(r.stdout.includes("Claude Code"), r.stdout);
   assert.ok(
     r.stdout

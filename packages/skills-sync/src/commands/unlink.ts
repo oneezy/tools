@@ -1,18 +1,20 @@
 // unlink, a machine command: take away what this tool put on the machine, and only that. Per detected harness with a
 // form: the plugins installed from the library's catalog (installed[].marketplace is the catalog name) and the catalog's
 // registration once none of them remains, through the harness's own plugin commands; every loose link in its skills
-// folders (Codex's old folder too) that points into a library copy or at nothing; the skills block in its global
-// instructions file (the file itself when it held nothing else). Account plugins, plugins from other marketplaces, real
-// skill folders, links to anywhere else, other hook entries and blocks in repository files are never touched. Offline:
-// no release is read, so the catalog name is the library's constant and the library is --library's repo or the default.
-// The tool's hook entry (tools#151) and Hermes's plugins (tools#153) join here when their modules land. Under --plan no
-// plugin command that changes anything runs and apply() writes nothing; the caller exits 1 when anything is red.
+// folders (Codex's old folder too) that points into a library copy or at nothing; its session hook entry in the
+// harness's user hooks file (hooks.ts; the file itself when it held nothing else); the skills block in its global
+// instructions file (likewise). Account plugins, plugins from other marketplaces, real skill folders, links to anywhere
+// else, other hook entries, Codex's trust record and blocks in repository files are never touched. Offline: no release
+// is read, so the catalog name is the library's constant and the library is --library's repo or the default. Hermes's
+// plugins (tools#153) join here when its module lands. Under --plan no plugin command that changes anything runs and
+// apply() writes nothing; the caller exits 1 when anything is red.
 import os from "node:os";
 import path from "node:path";
 import { blockRemoval } from "../block.js";
 import { formOf } from "../desired.js";
 import { lexists } from "../fs.js";
 import { harnessTable } from "../harnesses.js";
+import { hookRemoval } from "../hooks.js";
 import { listMarketplaces, refused, removeMarketplace, runner, supportsPlugins, uninstallPlugin } from "../install.js";
 import { libraryCopy, LIBRARY_MARKETPLACE, oldStateNotes, probe, type HarnessState, type Machine } from "../machine.js";
 import { apply, Report, type Action } from "../plan.js";
@@ -48,6 +50,10 @@ export function runUnlink(options: UnlinkOptions): UnlinkResult {
           target: l.target,
           note: lexists(l.target) ? "a link to a library copy" : "a dangling link",
         });
+    if (state.hook) {
+      const a = hookRemoval(state.harness, state.hook);
+      if (a) report.add(a);
+    }
     if (state.block) {
       const a = blockRemoval(state.block.file);
       if (a) report.add(a);

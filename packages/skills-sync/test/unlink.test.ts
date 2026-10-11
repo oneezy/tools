@@ -2,18 +2,21 @@
 // catalog (and the catalog's registration once none is left), its loose links (to a library copy, or dangling) in every
 // harness skills folder, Codex's old one included, and the skills block in each global instructions file (the file too
 // when it held nothing else). An account plugin, a plugin from another marketplace, a link to somewhere else, a real
-// skill folder, a hook entry someone else wrote and the text around the block stay byte for byte. --plan removes nothing
-// and runs no plugin command that changes anything; a second unlink has nothing to do.
+// skill folder, a hook entry someone else wrote, Codex's trust record and the text around the block stay byte for byte;
+// the tool's own session hook entry goes (the hooks file too when it held nothing else). --plan removes nothing and runs
+// no plugin command that changes anything; a second unlink has nothing to do.
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
 import { afterAll, afterEach, beforeAll, test } from "vite-plus/test";
 import { lexists } from "../src/fs.js";
+import { HOOK_COMMAND } from "../src/hooks.js";
 import { startFakeGithub, type FakeGithub } from "./fixtures/fake-github/fake-github.mjs";
 import {
   blockIn,
   cli,
   codexLegacySkills,
+  codexTrust,
   destroy,
   globalFile,
   hookEntry,
@@ -73,6 +76,10 @@ const without = (text: string) => text.slice(0, text.indexOf(START)) + text.slic
 interface Seeded {
   m: PretendMachine;
   claudeSettings: string;
+  /** Claude Code's settings.json before the tool's entry joined the user's: what unlink must leave */
+  settingsBefore: string;
+  codexHooks: string;
+  codexConfig: string;
   claudeMd: string;
   codexMd: string;
   mine: string;
@@ -101,8 +108,12 @@ async function seeded(): Promise<Seeded> {
   const mine = looseLink(m, "claude-code", "mine", path.join(m.base, "mine", "mine"));
   const real = skillFolder(m, "claude-code", "real");
   const tdd = looseLink(m, "codex", "tdd", undefined, codexLegacySkills(m));
-  // a hook entry someone else wrote
+  // a hook entry someone else wrote, then the tool's own in both harnesses (as a sync left them); Codex trusted the tool's
   const claudeSettings = hookEntry(m, "claude-code", "echo hello");
+  const settingsBefore = read(claudeSettings);
+  hookEntry(m, "claude-code", HOOK_COMMAND);
+  const codexHooks = hookEntry(m, "codex", HOOK_COMMAND);
+  const codexConfig = codexTrust(m, 0);
   // the blocks, as a sync left them: Claude's among the user's own text, Codex's alone in its file (a sync here would
   // already take the tool's plugin off Claude Code: the account plugin above outranks it)
   const claudeMd = globalFile(m, "claude-code");
@@ -111,14 +122,27 @@ async function seeded(): Promise<Seeded> {
   fs.appendFileSync(claudeMd, "\nBelow the block.\n");
   const codexMd = blockIn(globalFile(m, "codex"), "skills", "the skills block");
   assert.ok(read(codexMd).startsWith(START) && read(codexMd).endsWith(`${END}\n`));
-  return { m, claudeSettings, claudeMd, codexMd, mine, real, grilling, gone, tdd };
+  return {
+    m,
+    claudeSettings,
+    settingsBefore,
+    codexHooks,
+    codexConfig,
+    claudeMd,
+    codexMd,
+    mine,
+    real,
+    grilling,
+    gone,
+    tdd,
+  };
 }
 
-test("unlink removes the tool's plugins, its marketplace registration, its links and its blocks, and nothing else; --plan changes nothing; a second unlink has nothing to do", async () => {
+test("unlink removes the tool's plugins, its marketplace registration, its links, its hook entries and its blocks, and nothing else; --plan changes nothing; a second unlink has nothing to do", async () => {
   const s = await seeded();
   const { m } = s;
   const claudeBefore = read(s.claudeMd);
-  const settingsBefore = read(s.claudeSettings);
+  const configBefore = read(s.codexConfig);
   const before = snapshot(m.home);
   const claudeState = state(m.claudeHome);
   const codexState = state(m.codexHome);
@@ -138,11 +162,13 @@ test("unlink removes the tool's plugins, its marketplace registration, its links
       ["uninstall", "Claude Code: marketplace oneezy-skills", "registered by this tool"],
       ["remove", s.gone, "a dangling link"],
       ["remove", s.grilling, "a link to a library copy"],
+      ["write", s.claudeSettings, "session hook removed"],
       ["write", s.claudeMd, "skills-sync block (skills) removed"],
       ["uninstall", "Codex: plugin matt-pocock@oneezy-skills", "installed by this tool"],
       ["uninstall", "Codex: plugin play@oneezy-skills", "installed by this tool"],
       ["uninstall", "Codex: marketplace oneezy-skills", "registered by this tool"],
       ["remove", s.tdd, "a link to a library copy"],
+      ["delete", s.codexHooks, "held only the skills-sync session hook (Codex)"],
       ["delete", s.codexMd, "held only the skills-sync block (skills)"],
     ],
   );
@@ -173,8 +199,12 @@ test("unlink removes the tool's plugins, its marketplace registration, its links
   assert.equal(read(s.claudeMd), without(claudeBefore));
   assert.equal(read(s.claudeMd), "# Mine\n\nAbove the block.\n\nBelow the block.\n");
   assert.equal(fs.existsSync(s.codexMd), false);
-  assert.equal(read(s.claudeSettings), settingsBefore);
-  assert.equal(r.stdout.trimEnd().split("\n").at(-1), "10 changed, 0 already right, 0 left alone");
+  // the hook entries: the user's stays as it was written, the tool's went with the file it alone wrote; Codex's trust
+  // record is Codex's
+  assert.equal(read(s.claudeSettings), s.settingsBefore);
+  assert.equal(fs.existsSync(s.codexHooks), false);
+  assert.equal(read(s.codexConfig), configBefore);
+  assert.equal(r.stdout.trimEnd().split("\n").at(-1), "12 changed, 0 already right, 0 left alone");
 
   const again = await cli(m, ["unlink", "--json"]);
   assert.equal(again.status, 0, again.stderr);
@@ -185,14 +215,14 @@ test("unlink removes the tool's plugins, its marketplace registration, its links
   );
   const quiet = await cli(m, ["unlink", "--quiet"]);
   assert.equal(quiet.stdout + quiet.stderr, "");
-  // and a sync afterwards puts the blocks back, nothing else of the old state
+  // and a sync afterwards puts the blocks and the hook entries back, nothing else of the old state
   const sync = await cli(m, ["--json"]);
   assert.equal(sync.status, 0, sync.stderr);
   assert.deepEqual(
     (sync.json as { actions: ActionJson[] }).actions
       .filter((a) => a.kind === "write")
       .map((a) => path.basename(a.path)),
-    ["CLAUDE.md", "AGENTS.md"],
+    ["CLAUDE.md", "settings.json", "AGENTS.md", "hooks.json"],
   );
   assert.equal(read(s.claudeMd).includes("Above the block."), true);
 });

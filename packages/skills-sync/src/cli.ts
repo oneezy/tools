@@ -16,6 +16,7 @@ import { entrypoints } from "./entrypoints.js";
 import { readLocal, writeLocal, type LinkMode, type Local } from "./config.js";
 import { isDir, linkMode, real, samePath, setLinkMode } from "./fs.js";
 import { runBranches } from "./commands/branches.js";
+import { runHook } from "./commands/hook.js";
 import { runStatus } from "./commands/status.js";
 import { runSync, syncFacts } from "./commands/sync.js";
 import { runUnlink } from "./commands/unlink.js";
@@ -47,9 +48,12 @@ Commands
                    delivers, Codex the library's plugins from GitHub, Hermes its plugins; and the skills block in each
                    harness's global instructions file (~/.claude/CLAUDE.md, ~/.codex/AGENTS.md): how to call a skill
                    per harness, never fetch a SKILL.md to run one. Never a repository file; a block an older version
-                   left in one is reported, as is the clone an older version kept at ~/.skills-sync. In a cloud
-                   session (CLAUDE_CODE_REMOTE=true) the block is the whole sync. On Windows the same sync runs inside
-                   every WSL distro (through npx there; a distro without Node is one note, not a failure)
+                   left in one is reported, as is the clone an older version kept at ~/.skills-sync. Outside the cloud
+                   also one session-start hook entry per harness (~/.claude/settings.json, ~/.codex/hooks.json) running
+                   \`npx --yes @oneezy/skills-sync@latest hook\`; other entries are never touched, the old sync-dev.sh
+                   entry goes once the new one is in, Codex asks you to trust it once. In a cloud session
+                   (CLAUDE_CODE_REMOTE=true) the block is the whole sync. On Windows the same sync runs inside every WSL
+                   distro (through npx there; a distro without Node is one note, not a failure)
   status           this machine against the latest release of ${DEFAULT_REPO} on GitHub (no library needed): per harness
                    its form, each plugin's version against the release, every skill name listed twice; --json for
                    scripts; exit 1 on any red line. Reads only: nothing cloned, linked or written
@@ -62,11 +66,19 @@ Commands
                    or the base of an open one stays. --plan lists every tag and delete without making them; --json
                    carries the same lists; a repository the token cannot read or write is reported and skipped. Exit 1
                    when anything was reported, 2 without a token to list your repositories
+  hook             what the session-start hook runs: the sync above, quietly (only what changed or went wrong is
+                   printed), then the checkouts of ${DEFAULT_REPO} and oneezy/tools in and beside the current repository:
+                   a clean one on dev is fast-forwarded to origin/dev, a dirty one or one on another branch is named and
+                   left alone, and one line per repository says which branches (counted from the fetch) and open pull
+                   requests (one GitHub request) are not in dev yet.
+                   Takes no flags but --library (any other flag is refused, exit 2: the entry runs it bare).
+                   Prints nothing when nothing changed; exit 0 unless the sync hit a conflict
   unlink           take away what this tool put on this machine, and only that: the plugins it installed from the
                    library's catalog (and the catalog's registration once none is left), its loose links in every
-                   harness skills folder (to a library copy, or dangling), the skills block in each global instructions
-                   file (the file too when it held nothing else). Account plugins, other marketplaces, real folders,
-                   other links, other hook entries and repository files are never touched. Offline; exit 1 on a conflict
+                   harness skills folder (to a library copy, or dangling), its session hook entry in each harness's user
+                   hooks file, the skills block in each global instructions file (either file too when it held nothing
+                   else). Account plugins, other marketplaces, real folders, other links, other hook entries, Codex's
+                   trust record and repository files are never touched. Offline; exit 1 on a conflict
   adopt-brain      explicitly adopt only this host's two historical Brain links; propagate verified instructions only
   rollback-brain   restore the exact preserved links in --receipt; refuse later destination edits
   migrate-aliases  back up only explicit historical Skills/Status aliases after verifying installed native replacements
@@ -145,12 +157,13 @@ Options
   -h, --help
 
 Older flags (-y, --agents, --global, --no-projects, --no-wsl, --links, --plugins, --no-pull, --no-remember, --watch,
---ask, ...) are accepted on a machine command, do nothing there, and are named in one line on stderr. The projects
-command is retired: nothing links skills into projects any more (ADR-0007).
+--ask, ...) are accepted on a machine command (hook excepted: it takes no flags but --library), do nothing there, and
+are named in one line on stderr. The projects command is retired: nothing links skills into projects any more
+(ADR-0007).
 `;
 
-/** The machine commands: against GitHub, nothing of their own on the machine. */
-const MACHINE_COMMANDS = new Set(["sync", "status", "branches", "unlink"]);
+/** The machine commands: against GitHub, nothing of their own on the machine (hook is what the session hook entry runs). */
+const MACHINE_COMMANDS = new Set(["sync", "status", "hook", "branches", "unlink"]);
 /** The library commands: inside a checkout. */
 const LIBRARY_COMMANDS = new Set([
   "update",
@@ -334,11 +347,20 @@ async function machineCommand(args: Args): Promise<void> {
     process.stderr.write(`${args.command}: --library names the release repo as owner/repo, not ${repo}\n`);
     process.exit(2);
   }
+  // the hook entry runs `hook` bare: a flag on it is a mistake, and --plan on a run that must write would be a silent one
+  if (args.command === "hook" && (args.plan || args.json || args.quiet || args.given.length)) {
+    process.stderr.write("hook takes no flags but --library\n");
+    process.exit(2);
+  }
   if (args.given.length)
     process.stderr.write(
       `ignored: ${args.given.join(", ")} (settings come from the release's skills-sync.json; machine facts are detected on every run)\n`,
     );
   const cwd = process.cwd();
+  if (args.command === "hook") {
+    process.exitCode = await runHook({ repo, cwd });
+    return;
+  }
   if (args.command === "status") {
     process.exitCode = await runStatus({ repo, json: args.json, quiet: args.quiet });
     return;

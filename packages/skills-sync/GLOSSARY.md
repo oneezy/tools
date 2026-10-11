@@ -53,6 +53,14 @@ _Avoid_: install, refresh
 The run that moves a Source to its latest release, a Hold, or a version asked for (`--to`), and rewrites the Lock. Justin also says upgrade or downgrade.
 _Avoid_: refresh (the internal step), bump
 
+**Session hook**:
+The one `SessionStart` entry `sync` keeps in a Harness's user hooks file (`~/.claude/settings.json`, `~/.codex/hooks.json`) that runs `npx --yes @oneezy/skills-sync@latest hook` when a session starts or resumes (ADR-0010 in oneezy/skills). Known by its command, never by its position; every other entry is left alone. Codex runs it only once Justin has trusted it in the TUI, a manual step the report names.
+_Avoid_: startup hook, the old `sync-dev.sh`
+
+**Checkout**:
+A local clone of `oneezy/skills` or `oneezy/tools` the `hook` command tends: fetched, fast-forwarded on a clean `dev`, named and left alone when dirty or on another branch. Found on every run among the repository the session started in and the folders beside it, by its `origin` URL.
+_Avoid_: worktree (a Remote sessions word), working copy
+
 **Working set**:
 One entry per skill the Library offers: a copy per third-party skill, a link per Own skill, under `.agents/skills/`.
 
@@ -82,7 +90,7 @@ A checkout or clone of the Library on a Host (a `skills-sync.json` naming the Li
 _Avoid_: leftover, stale link
 
 **Machine command**:
-A run that acts on this Host against the latest Release on GitHub and keeps nothing of its own on the Host (ADR-0012): no Library clone, no answers file, nothing remembered between runs; settings come from the Release's `skills-sync.json`, Host facts (the Harnesses, their plugins and links, the WSL distros) are detected on every run. `sync`, `status`, `branches` and `unlink`, then `hook`. It takes `--plan`, `--json`, `--quiet` and `--library`; an older flag is accepted, does nothing and is named once on stderr. The opposite is a library command (`update`, `refresh`, `versions`, `add`, `build`, `check`, the brain and alias migrations), which runs inside a checkout named by `--repo` or found above the current folder and keeps every flag it had.
+A run that acts on this Host against the latest Release on GitHub and keeps nothing of its own on the Host (ADR-0012): no Library clone, no answers file, nothing remembered between runs; settings come from the Release's `skills-sync.json`, Host facts (the Harnesses, their plugins and links, the WSL distros) are detected on every run. `sync`, `status`, `hook`, `branches` and `unlink`. It takes `--plan`, `--json`, `--quiet` and `--library` (`hook` only `--library`); an older flag is accepted, does nothing and is named once on stderr. The opposite is a library command (`update`, `refresh`, `versions`, `add`, `build`, `check`, the brain and alias migrations), which runs inside a checkout named by `--repo` or found above the current folder and keeps every flag it had.
 _Avoid_: remote command, online command
 
 **Global block**:

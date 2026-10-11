@@ -1,11 +1,11 @@
 // The probe: which harnesses this machine has and what each one holds right now, read on every run and never written
 // down (ADR-0012). Per harness: the account plugins claude.ai delivered (<id>@synced), the plugins installed through the
 // harness's own CLI (from the library's catalog, or from anywhere else), the loose links in its user skills folder and
-// where they point, the real skill folders there, the state of the managed block in its global instructions file, and
-// the blocks an older skills-sync left in repository files. For the machine: what an older version left behind, the
-// clone or link at ~/.skills-sync and its answers file, detected and reported, never read. The plugin CLIs are asked
-// through install.ts's runner, read-only listings only; when a CLI is missing, the account plugins are read from their
-// folders instead.
+// where they point, the real skill folders there, the state of the managed block in its global instructions file, the
+// session hook entry in its user hooks file, and the blocks an older skills-sync left in repository files. For the
+// machine: what an older version left behind, the clone or link at ~/.skills-sync and its answers file, detected and
+// reported, never read. The plugin CLIs are asked through install.ts's runner, read-only listings only; when a CLI is
+// missing, the account plugins are read from their folders instead.
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -13,6 +13,7 @@ import { globalFile, readBlock, repoBlocks, type BlockState, type RepoBlock } fr
 import { LOCAL_NAME } from "./config.js";
 import { isDir, isLink, isSkillDir, lexists, linkTarget, real, under } from "./fs.js";
 import { detected, RESERVED, type Harness } from "./harnesses.js";
+import { readHook, type HookState } from "./hooks.js";
 import { codexPluginSkills, harnessCli, listInstalled, runner, supportsPlugins } from "./install.js";
 import { homeLibrary } from "./library.js";
 import type { Action } from "./plan.js";
@@ -71,6 +72,8 @@ export interface HarnessState {
   block: BlockState | null;
   /** blocks an older skills-sync left outside the global file (repository files, AGENTS.override.md): reported, never edited */
   repoBlocks: RepoBlock[];
+  /** the session hook entry in the harness's user hooks file (ADR-0010); null when its table row names no such file */
+  hook: HookState | null;
 }
 
 /** The old tool's ~/.skills-sync: a link to its library clone, or the clone itself. Detected; never read, never removed. */
@@ -181,6 +184,7 @@ function probeHarness(h: Harness, env: NodeJS.ProcessEnv, roots: string[], globa
       ...repoBlocks(roots, h.projectInstructions ?? [], globals),
       ...repoBlocks([h.configDir], (h.userInstructions ?? []).slice(1), globals),
     ],
+    hook: readHook(h),
   };
   const cli = harnessCli(h, env);
   if (cli) {

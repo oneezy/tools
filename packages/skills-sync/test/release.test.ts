@@ -42,6 +42,7 @@ test("--help lists the machine commands, the library commands and every flag; an
     "sync",
     "status",
     "branches",
+    "hook",
     "unlink",
     "adopt-brain",
     "rollback-brain",
@@ -98,6 +99,9 @@ test("--help lists the machine commands, the library commands and every flag; an
   assert.match(help, /main, dev and any \*-keep branch are never deleted/);
   assert.match(help, /tagged archive\/<name> at its head,\s+then deleted/);
   assert.match(help, /--plan lists every tag and delete without making\s+them/);
+  // what the session hook promises: silent when nothing changed, a dirty checkout left alone
+  assert.match(help, /Prints nothing when nothing changed; exit 0 unless the sync hit a conflict/);
+  assert.match(help, /a dirty one or one on another branch is named and\s+left alone/);
   // what a library's CI has to know about its checkout: neither a check nor a build needs history, and versions only go up
   assert.match(help, /Needs no history: clean in a shallow clone/);
   assert.match(help, /Builds never bump a version or append a commit hash/);
