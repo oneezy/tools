@@ -157,7 +157,8 @@ const readBody = (req) =>
  * Start the server on a free local port. `fixture.repo` is the one repository with releases; `fixture.releases` the
  * releases (the highest number is the latest); `fixture.contents[<ref>][<path>]` the files GET /contents serves (a
  * path with files below it and none at it is a directory: the listing GitHub gives, one entry per child);
- * `fixture.token`, when set, is the only bearer token accepted. A release with `noReleaseJson: true` is cut without
+ * `fixture.token`, when set, is the only bearer token accepted; `fixture.failures[<path>]`, a status every request for
+ * that path (without its query) is answered with. A release with `noReleaseJson: true` is cut without
  * its release.json asset.
  *
  * `fixture.repos["owner/name"]` is a repository `branches` works on: { branches: { <name>: { sha, protected?, ahead?,
@@ -235,6 +236,9 @@ export async function startFakeGithub(fixture = fixtureLibrary()) {
     const notFound = () => send(404, { message: "Not Found", documentation_url: docs });
     if (fixture.token && req.headers.authorization !== `Bearer ${fixture.token}`)
       return send(401, { message: "Bad credentials", documentation_url: docs });
+    // a path the test says is failing (GitHub having a bad moment for one file): that status, whatever the query
+    const failing = fixture.failures?.[url.pathname];
+    if (failing) return send(failing, { message: "Server Error", documentation_url: docs });
     const base = `http://${req.headers.host}`;
     /** One page of a list, with GitHub's Link header when more pages follow. */
     const page = (items) => {

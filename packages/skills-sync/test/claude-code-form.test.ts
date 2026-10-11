@@ -459,6 +459,11 @@ test("GitHub unreachable: nothing is compared or removed, one note says so besid
       .map(brief),
     [
       ["conflict", "oneezy/skills", actions(r)[0].note],
+      [
+        "note",
+        "SHARED.md",
+        `not read: ${actions(r)[0].note}; blocks already there kept as they are, a missing one gets the built-in text`,
+      ],
       ["note", "Claude Code: account plugins", "nothing compared or removed: the latest release was not read"],
     ],
   );

@@ -759,7 +759,9 @@ test("a release whose config names another rendering folder (renderings.hermes: 
     // the rendering question names the config's folder, once
     assert.deepEqual(
       r.requests
-        .filter((q) => q.path.includes("/contents/") && !q.path.includes("skills-sync.json"))
+        .filter(
+          (q) => q.path.includes("/contents/") && !q.path.includes("skills-sync.json") && !q.path.includes("SHARED.md"),
+        )
         .map((q) => q.path),
       [`/repos/${REPO}/contents/${folder}?ref=${r17.commit}`],
     );

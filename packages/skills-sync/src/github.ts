@@ -1,7 +1,9 @@
 // The one GitHub REST client the machine commands use. Every network call goes through it, so a test stands a fake
 // GitHub in with one environment variable: SKILLS_SYNC_GITHUB_API names the base URL (default https://api.github.com).
 // A token comes from GITHUB_TOKEN, else GH_TOKEN, and is sent as a bearer token when present; without one the public
-// release endpoints still answer, at GitHub's anonymous rate limit. Node's global fetch does the work.
+// release endpoints still answer, at GitHub's anonymous rate limit. Node's global fetch does the work, through
+// proxy.ts's tunnel when HTTPS_PROXY (or HTTP_PROXY) applies: Node's fetch alone ignores those variables.
+import { proxyFetch } from "./proxy.js";
 import { VERSION } from "./version.js";
 
 export const DEFAULT_API = "https://api.github.com";
@@ -50,7 +52,7 @@ function nextPage(link: string | null): string | null {
   return m ? m[1] : null;
 }
 
-export function github(env: NodeJS.ProcessEnv = process.env, fetchImpl: typeof fetch = fetch): GitHub {
+export function github(env: NodeJS.ProcessEnv = process.env, fetchImpl: typeof fetch = proxyFetch(env)): GitHub {
   const baseUrl = (env.SKILLS_SYNC_GITHUB_API?.trim() || DEFAULT_API).replace(/\/+$/, "");
   const token = env.GITHUB_TOKEN?.trim() || env.GH_TOKEN?.trim() || "";
   const headers = (accept: string, body?: string): Record<string, string> => ({

@@ -565,5 +565,6 @@ test("in the cloud, the setup line's old flags are named once and the blocks are
   for (const h of ["claude-code", "codex"] as const)
     assert.ok(read(globalFile(m, h)).includes("skills-sync:skills:start"));
   assert.deepEqual(snapshot(library), before);
-  assert.equal(r.requests.length, 0, "the cloud reads no release");
+  // the cloud reads the release for the block's text alone, and only reads
+  assert.ok(r.requests.length > 0 && r.requests.every((q) => q.method === "GET"), JSON.stringify(r.requests));
 });

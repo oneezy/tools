@@ -236,7 +236,7 @@ test("nothing changed, nothing ahead, nothing open: hook prints nothing and exit
   assert.ok(git(m, skills, ["for-each-ref", "refs/remotes/origin/"]).includes("refs/remotes/origin/main"));
 });
 
-test("GitHub unreachable: the sync's red line goes to stderr, the pull requests are not asked for, the branches ahead still count, the checkout is still fast-forwarded, exit 0; pull requests GitHub refuses are one stderr line", async () => {
+test("GitHub unreachable: the sync's red line goes to stderr, the kept block's one line to stdout, the pull requests are not asked for, the branches ahead still count, the checkout is still fast-forwarded, exit 0; pull requests GitHub refuses are one stderr line", async () => {
   const offline = machine({ github: null });
   const skills = checkoutOf(offline, "oneezy/skills");
   const settle = await cli(offline, []);
@@ -245,7 +245,13 @@ test("GitHub unreachable: the sync's red line goes to stderr, the pull requests 
   originBranch(offline, "oneezy/skills", "feat/offline", 1);
   const r = await cli(offline, ["hook"], {}, skills);
   assert.equal(r.status, 0, r.stderr);
+  const blockLine = lines(r.stdout)[0];
+  assert.match(
+    blockLine,
+    /^\. note\s+SHARED\.md {2}\(not read: latest release not read: .*; blocks already there kept as they are, a missing one gets the built-in text\)$/,
+  );
   assert.deepEqual(lines(r.stdout), [
+    blockLine,
     `${skills}: dev fast-forwarded to ${moved.slice(0, 7)}`,
     "oneezy/skills: 1 branch ahead of dev (feat/offline)",
   ]);

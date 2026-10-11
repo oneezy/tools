@@ -93,6 +93,8 @@ export interface Fixture {
   token?: string;
   /** when set, lists come in pages of at most this many items, so the client has to turn pages */
   pageSize?: number;
+  /** path (without its query) -> the error status every request for it is answered with */
+  failures?: Record<string, number>;
 }
 
 export interface RecordedRequest {
