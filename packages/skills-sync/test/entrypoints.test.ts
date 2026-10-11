@@ -193,7 +193,7 @@ test("unselected projects and generated folders stay untouched; status planning 
   assert.equal(report.changes().length, 0);
 });
 
-test("CLI plan/apply/status uses the same workflow and exits nonzero on an instruction conflict", () => {
+test("CLI plan and apply use the same workflow, a plan after apply verifies, and an instruction conflict exits nonzero", () => {
   const cli = path.resolve(import.meta.dirname, "..", "dist", "src", "cli.js");
   const args = [
     "--repo",
@@ -227,14 +227,15 @@ test("CLI plan/apply/status uses the same workflow and exits nonzero on an instr
     ).length,
     0,
   );
-  const status = run("status");
-  assert.equal(status.status, 0, status.stderr);
-  assert.ok(JSON.parse(status.stdout).entrypoints.every((item: { state: string }) => item.state === "current"));
-  const selectedStatus = spawnSync(process.execPath, [cli, "status", ...args, "--no-projects"], {
+  // a plan after the apply verifies every destination without writing: all current, nothing planned
+  const verified = run("--plan");
+  assert.equal(verified.status, 0, verified.stderr);
+  assert.ok(JSON.parse(verified.stdout).entrypoints.every((item: { state: string }) => item.state === "current"));
+  const selected = spawnSync(process.execPath, [cli, "--plan", ...args, "--no-projects"], {
     encoding: "utf8",
   });
-  assert.equal(selectedStatus.status, 0, selectedStatus.stderr);
-  assert.deepEqual(JSON.parse(selectedStatus.stdout).entrypoints, []);
+  assert.equal(selected.status, 0, selected.stderr);
+  assert.deepEqual(JSON.parse(selected.stdout).entrypoints, []);
   write(path.join(project, "AGENTS.md"), start);
   const conflict = run();
   assert.equal(conflict.status, 1);

@@ -11,6 +11,8 @@ export interface Harness {
   configDir: string;
   /** user-level skills folder read by the harness */
   userSkills: string;
+  /** older user-level skills folders the harness still reads (Codex's ~/.codex/skills); probed, never linked into */
+  legacyUserSkills?: string[];
   /** project-level skills folder, relative to a repo root */
   projectSkills: string;
   /** the harness reads .agents/skills itself, so no project link layer is needed */
@@ -40,8 +42,9 @@ export function harnessTable(home = os.homedir(), env = process.env): Harness[] 
       id: "codex",
       name: "Codex",
       configDir: codexHome,
-      // Codex reads ~/.agents/skills; ~/.codex/skills is its deprecated location
+      // Codex reads ~/.agents/skills; ~/.codex/skills is its deprecated location, still read
       userSkills: path.join(home, ".agents", "skills"),
+      legacyUserSkills: [path.join(codexHome, "skills")],
       projectSkills: path.join(".agents", "skills"),
       universal: true,
       userInstructions: ["AGENTS.md", "AGENTS.override.md"],
