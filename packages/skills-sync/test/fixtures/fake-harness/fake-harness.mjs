@@ -1,8 +1,10 @@
 // A stand-in for the claude and codex CLIs' plugin commands, put on PATH by the install tests so they never touch
-// the machine's real harnesses. It answers with the shapes the real CLIs print (Claude Code 2.1.293, Codex 0.161.0),
+// the machine's real harnesses. It answers with the shapes the real CLIs print (Claude Code 2.1.296, Codex 0.161.0),
 // keeps its state in fake-harness.json in the harness's config folder (CLAUDE_CONFIG_DIR, CODEX_HOME), and appends
 // every call to FAKE_HARNESS_LOG. FAKE_HARNESS_OLD=<claude,codex> makes one a CLI without plugin commands;
-// FAKE_HARNESS_BROKEN=<claude,codex> one that installs but never resolves a plugin's skills.
+// FAKE_HARNESS_BROKEN=<claude,codex> one that installs but never resolves a plugin's skills. Claude also lists the
+// account plugins claude.ai synced into <CLAUDE_CONFIG_DIR>/plugins/synced/<bucket>/<name>/ as <name>@synced, exactly
+// as the real CLI does (version "unknown" unless the Claude manifest carries one), and answers details for them.
 import fs from "node:fs";
 import path from "node:path";
 import {spawnSync} from "node:child_process";
@@ -41,6 +43,28 @@ const resolve = (id) => {
   return { name, mkt, dir: path.resolve(root, entry.source) };
 };
 const codexVersion = (dir) => JSON.parse(fs.readFileSync(path.join(dir, ".codex-plugin", "plugin.json"), "utf8")).version;
+// the account plugins: every folder under plugins/synced/<bucket>/, the bucket's manifest.json and *.meta.json skipped
+const synced = () => {
+  const root = path.join(home, "plugins", "synced");
+  if (host !== "claude" || !fs.existsSync(root)) return [];
+  const out = [];
+  for (const bucket of fs.readdirSync(root).sort()) {
+    const dir = path.join(root, bucket);
+    if (bucket.startsWith(".") || !fs.statSync(dir).isDirectory()) continue;
+    for (const name of fs.readdirSync(dir).sort()) {
+      const installPath = path.join(dir, name);
+      if (name.startsWith(".") || !fs.statSync(installPath).isDirectory()) continue;
+      let version = "unknown";
+      try {
+        version = JSON.parse(fs.readFileSync(path.join(installPath, ".claude-plugin", "plugin.json"), "utf8")).version ?? "unknown";
+      } catch {
+        /* no Claude manifest, or none with a version */
+      }
+      out.push({ id: `${name}@synced`, version, scope: "synced", enabled: true, installPath });
+    }
+  }
+  return out;
+};
 
 if (args[0] === "plugin" && args.includes("--help")) {
   if (cmd === "plugin update" && process.env.FAKE_HARNESS_NO_UPDATE) fail("unknown command update");
@@ -78,8 +102,11 @@ if (args[0] === "plugin" && args.includes("--help")) {
   const rows = Object.entries(state.plugins);
   out(
     host === "claude"
-      ? rows.map(([id, p]) => ({ id, version: p.version, scope: "user", enabled: p.enabled,
-          ...(process.env.FAKE_HARNESS_CACHE ? {installPath: p.dir} : {readFromFolder: p.dir}) }))
+      ? [
+          ...rows.map(([id, p]) => ({ id, version: p.version, scope: "user", enabled: p.enabled,
+            ...(process.env.FAKE_HARNESS_CACHE ? {installPath: p.dir} : {readFromFolder: p.dir}) })),
+          ...synced(),
+        ]
       : {
           installed: rows.map(([id, p]) => ({
             pluginId: id,
@@ -136,7 +163,8 @@ if (args[0] === "plugin" && args.includes("--help")) {
   out({ outcome: "ok" });
 } else if (host === "claude" && cmd === "plugin details") {
   if (has(process.env.FAKE_HARNESS_FAIL_DETAILS, args[2])) fail(`fixture details failed: ${args[2]}`);
-  const p = state.plugins[words[2]];
+  const account = synced().find((s) => s.id === words[2]);
+  const p = state.plugins[words[2]] ?? (account ? { dir: account.installPath } : null);
   if (!p) fail(`Plugin "${words[2]}" not found.`);
   const skills = has(process.env.FAKE_HARNESS_BROKEN, host) ? [] : skillsOf(p.dir);
   out(`${words[2]}\n\nComponent inventory\n  Skills (${skills.length})  ${skills.join(", ")}\n  Agents (0)`);

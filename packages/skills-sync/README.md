@@ -34,7 +34,7 @@ A skills library is a folder with `skills/` beside `skills-sync.json`, `skills-s
 
 A library with a config gets its third-party skills through `refresh` (see [Third-party sources](#third-party-sources)). A library with only `skills-lock.json` keeps working exactly as before: `sync` restores from that lock and `npx skills update` owns the copies.
 
-A folder directly under `skills/` that holds `SKILL.md` is a flat own skill. One without `SKILL.md` is a **group**: its children are own skills, and the group's name (`oneezy`, `trident`) is the plugin id they will be packaged under. A skill is known everywhere by its folder name alone, so `skills/oneezy/oneezy-status` links as `oneezy-status`, exactly as `skills/oneezy-status` would, and moving a skill into a group retargets its links without dropping any. Groups do not nest: a `SKILL.md` two levels below a group, or a second skill with a name already taken, is reported once on every run and never linked. `status --json` lists each own skill with its `plugin` (null when flat) and its `path` under the library.
+A folder directly under `skills/` that holds `SKILL.md` is a flat own skill. One without `SKILL.md` is a **group**: its children are own skills, and the group's name (`oneezy`, `trident`) is the plugin id they will be packaged under. A skill is known everywhere by its folder name alone, so `skills/oneezy/oneezy-status` links as `oneezy-status`, exactly as `skills/oneezy-status` would, and moving a skill into a group retargets its links without dropping any. Groups do not nest: a `SKILL.md` two levels below a group, or a second skill with a name already taken, is reported once on every run and never linked.
 
 The group named `play` is the playground: a place to try a skill (your own idea, or one copied from someone else's repo) before promoting it into another group. It is packaged, cataloged and linked exactly like any other group, and every skill in it is named `play-<name>` (`skills/play/play-unslop`, used as `/play-unslop`), so it never clashes with a skill from a source; `check` fails on one that is not. Other groups' skill names are not held to a prefix.
 
@@ -228,7 +228,25 @@ The harnesses write their own settings while they install (Claude Code's `extraK
 
 **Rollback.** `sync --links` uninstalls the plugins the tool installed (`claude plugin uninstall --scope user`, `codex plugin remove`), keeps the marketplace registered, and restores the loose links; a second `--links` changes nothing. `--plugins` goes back. Either flag is remembered as `form` in `skills-sync.local.json`; with neither, the form is `plugin`, or `links` in a cloud session (`CLAUDE_CODE_REMOTE=true`), where claude.ai already syncs plugins of the same names into the container and the repos' instructions read `~/.claude/skills/<name>/SKILL.md`. `unlink` removes both forms the tool owns: its links, its plugins, then its marketplace (Codex's marketplace remove does not take its plugins with it, so they go first).
 
-**status** adds, per harness, `form: plugin | links` (with why, for links) and per built plugin its installed and built versions and a `match` flag; `status --json` puts it under `harnesses`. Claude Code's plugin matches when it is read in place from the built package or its cached version is the library's current Git revision; Codex's when its version is the built one. A successful update response that leaves a stale or disabled plugin is reported as unverified and keeps owned loose links.
+**status** is a machine command (below): it compares what each harness has with the latest release of the library on GitHub, not with a checkout.
+
+## Status
+
+`status` needs no library on the machine. It reads the latest release of `oneezy/skills` from GitHub (`--library owner/repo` for another release repo; `GITHUB_TOKEN` or `GH_TOKEN` is sent when set, the base URL comes from `SKILLS_SYNC_GITHUB_API` so tests point it at a fake) and probes this machine, writing nothing: the account plugins claude.ai synced into Claude Code (`<id>@synced`), the plugins installed through each harness's CLI (from the library's catalog `oneezy-skills`, or from anywhere else), the loose links in each user folder (`~/.claude/skills`, `~/.agents/skills`, Codex's old `~/.codex/skills`) and the real skill folders there. Per detected harness it prints its form (Claude Code: account plugins; Codex: plugins from GitHub; Hermes: loose skills), one line per library plugin against the release, and one line per skill name listed in more than one place:
+
+```
+latest: oneezy/skills release-17 (ae92a54)
+Claude Code  form: account plugins
+= oneezy@synced 0.43.1 (latest 0.43.1)
+! matt-pocock@synced 1.3.0 (latest 1.3.1)
+! oneezy-status listed twice: oneezy@synced, loose link -> /root/.skills-sync/skills/oneezy/oneezy-status
+. 5 other plugins left alone: data@synced (anthropic-plugin-directory), ...
+Codex  form: plugins from GitHub
+! no plugins installed (latest release-17)
+status: 3 red lines
+```
+
+`=` is green, `!` red, `.` a note. Red: a plugin behind the release (its version, or its skill set), a plugin the tool installed on Claude Code (the account plugin of the same name is the form there, and a CLI install hides it), nothing of the library installed on a plugin harness, a duplicate skill name, or the release not readable. Any red line exits 1; `--quiet` prints only the red lines. `--json` carries the same facts under stable keys: `release` (`repo`, `tag`, `number`, `commit`, `tool`), `cloud`, `lines`, `ok`, and per harness `name`, `form`, `cli`, `plugins.synced` / `plugins.installed` (each with `version`, `latest`, `current`, `skills`) / `plugins.other`, `loose`, `folders`, `duplicates`, `lines`.
 
 ## Artifacts
 
@@ -301,6 +319,7 @@ Every answer is also a flag, so scripts and agents never see a prompt:
 --symlinks | --junctions
 --plugins | --links
 --library owner/repo   --pull | --no-pull
+status: --json  --quiet  --library owner/repo
 --no-restore  --retry  --sidecars  --no-layers
 --watch  --plan  --quiet  --json  -y  --ask
 update | refresh: [<source>...]  --to <version>|previous|latest  --frozen  --retry  --json
@@ -310,7 +329,7 @@ build: --plugins  --catalogs  --artifacts  --check
 check: --json  --quiet
 ```
 
-Commands: `sync` (default), `status`, `unlink` (remove every link this tool made in the user folders, then every plugin and marketplace it installed), `projects` (only step 7), `update` (alias `refresh`), `versions <source>` and `add <source>` (see [Third-party sources](#third-party-sources)), `build` (see [Plugins and catalogs](#plugins-and-catalogs) and [Artifacts](#artifacts)), `check` (see [Check](#check)).
+Commands: `sync` (default), `status` (this machine against the latest release, see [Status](#status)), `unlink` (remove every link this tool made in the user folders, then every plugin and marketplace it installed), `projects` (only step 7), `update` (alias `refresh`), `versions <source>` and `add <source>` (see [Third-party sources](#third-party-sources)), `build` (see [Plugins and catalogs](#plugins-and-catalogs) and [Artifacts](#artifacts)), `check` (see [Check](#check)).
 
 `--watch` keeps running and redoes layers and user folders when `skills/`, the config or the lock changes, so a skill you add is linked the moment its folder appears.
 

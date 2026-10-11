@@ -2,7 +2,7 @@
 // verifies them, and only then drops the loose links of their skills; --links rolls back; unlink removes both forms;
 // status says which form each harness has. The harnesses are fake CLIs on PATH (fixtures/fake-harness), never the machine's own.
 import assert from "node:assert/strict";
-import { spawnSync } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -13,6 +13,7 @@ import { ENTRYPOINTS_NAME } from "../src/entrypoints.js";
 import { Library } from "../src/library.js";
 import { harnessTable } from "../src/harnesses.js";
 import { pluginDependency } from "../src/install.js";
+import { fixtureRelease, startFakeGithub, type FakeGithub } from "./fixtures/fake-github/fake-github.mjs";
 
 const CLI = path.resolve(import.meta.dirname, "..", "dist", "src", "cli.js");
 const FAKE = path.resolve(import.meta.dirname, "fixtures", "fake-harness", "fake-harness.mjs");
@@ -24,6 +25,8 @@ let claudeHome: string;
 let codexHome: string;
 let bin: string;
 let log: string;
+/** The release status compares the installed plugins with: the library's plugins at the versions a rebuild below takes. */
+let gh: FakeGithub;
 
 function write(file: string, body: string): void {
   fs.mkdirSync(path.dirname(file), { recursive: true });
@@ -48,10 +51,24 @@ function catalogs(ids: string[]): void {
   write(path.join(root, ".agents", "plugins", "marketplace.json"), JSON.stringify({ name: "oneezy-skills", plugins }));
 }
 
-beforeAll(() => {
+beforeAll(async () => {
   base = fs.mkdtempSync(path.join(os.tmpdir(), "skills-sync-install-"));
+  gh = await startFakeGithub({
+    repo: "oneezy/skills",
+    releases: [
+      fixtureRelease({
+        number: 2,
+        commit: "0202020202020202020202020202020202020202",
+        plugins: {
+          oneezy: { version: "0.2.0+bbbbbbbbbbbb", skills: ["oneezy-merge", "oneezy-status"] },
+          "matt-pocock": { version: "0.1.0+aaaaaaaaaaaa", skills: ["grilling"] },
+        },
+      }),
+    ],
+  });
 });
-afterAll(() => {
+afterAll(async () => {
+  await gh.close();
   fs.rmSync(base, { recursive: true, force: true });
 });
 beforeEach(() => {
@@ -98,29 +115,70 @@ interface Run {
       note?: string;
       diagnostic?: { command: string[]; exitCode: number | null; stderr: string; stdout: string };
     }>;
-    harnesses?: Record<string, HarnessJson>;
-    user?: Record<string, { linked: number; plugin: number; missing: string[] }>;
   };
   calls: string[][];
 }
-interface HarnessJson {
-  form: string;
-  plugins: Array<{ name: string; installed: string | null; built: string | null; match: boolean; owned: boolean }>;
+/** status --json, the parts these tests read */
+interface StatusJson {
+  harnesses: Record<
+    string,
+    {
+      form: string;
+      plugins: {
+        installed: Array<{
+          id: string;
+          marketplace: string;
+          version: string | null;
+          latest: string | null;
+          current: boolean;
+        }>;
+      };
+      lines: Array<{ ok: boolean; text: string }>;
+    }
+  >;
 }
 
-function cli(args: string[], extra: Record<string, string> = {}, entrypoints = false): Run {
+function envFor(extra: Record<string, string>): NodeJS.ProcessEnv {
   const env: NodeJS.ProcessEnv = { ...process.env };
   const pathKey = Object.keys(env).find((k) => k.toUpperCase() === "PATH") ?? "PATH";
   env[pathKey] = bin + path.delimiter + (env[pathKey] ?? "");
-  delete env.CLAUDE_CODE_REMOTE;
+  for (const k of ["CLAUDE_CODE_REMOTE", "GITHUB_TOKEN", "GH_TOKEN", "NODE_USE_ENV_PROXY"]) delete env[k];
   Object.assign(env, {
     HOME: homeDir,
     USERPROFILE: homeDir,
     CLAUDE_CONFIG_DIR: claudeHome,
     CODEX_HOME: codexHome,
     FAKE_HARNESS_LOG: log,
+    SKILLS_SYNC_GITHUB_API: gh.url,
     ...extra,
   });
+  return env;
+}
+
+/**
+ * status, a machine command: it reads the release from the fake GitHub, which lives in this process, so the CLI runs
+ * asynchronously (a blocking spawn would never let the server answer).
+ */
+async function statusJson(extra: Record<string, string> = {}): Promise<{ status: number | null; json: StatusJson }> {
+  const r = await new Promise<{ status: number | null; stdout: string; stderr: string }>((resolve, reject) => {
+    const child = spawn(process.execPath, [CLI, "status", "--json"], {
+      env: envFor(extra),
+      cwd: base,
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+    let stdout = "";
+    let stderr = "";
+    child.stdout.setEncoding("utf8").on("data", (d: string) => (stdout += d));
+    child.stderr.setEncoding("utf8").on("data", (d: string) => (stderr += d));
+    child.on("error", reject);
+    child.on("close", (status) => resolve({ status, stdout, stderr }));
+  });
+  assert.ok(r.stdout.startsWith("{"), r.stderr);
+  return { status: r.status, json: JSON.parse(r.stdout) as StatusJson };
+}
+
+function cli(args: string[], extra: Record<string, string> = {}, entrypoints = false): Run {
+  const env = envFor(extra);
   if (fs.existsSync(log)) fs.rmSync(log);
   const r = spawnSync(
     process.execPath,
@@ -400,34 +458,60 @@ test("a harness that could only take plugins through a settings edit is reported
   for (const s of PLUGIN_SKILLS) assert.equal(fs.existsSync(path.join(codexSkills(), s)), false, `codex ${s}`);
 });
 
-test("status --json names each harness's form and whether each installed plugin is the built version; sync re-adds a rebuilt Codex plugin", () => {
-  const none = cli(["status"]);
-  assert.equal(none.status, 0, none.stderr);
-  assert.equal(none.json.harnesses!["claude-code"].form, "links");
-  assert.equal(none.json.harnesses!.codex.form, "links");
-
-  cli([]);
-  const s = cli(["status"]);
-  assert.equal(s.status, 0, s.stderr);
+test("status --json tells the tool's plugins from the rest and compares each with the latest release; sync re-adds a rebuilt Codex plugin", async () => {
+  const none = await statusJson();
+  assert.equal(none.status, 1);
   for (const id of ["claude-code", "codex"]) {
-    assert.equal(s.json.harnesses![id].form, "plugin");
+    assert.deepEqual(none.json.harnesses[id].plugins.installed, []);
     assert.ok(
-      s.json.harnesses![id].plugins.every((p) => p.match && p.owned && p.installed !== null),
+      none.json.harnesses[id].lines.some((l) => !l.ok && l.text.startsWith("no plugins installed")),
       id,
     );
   }
-  assert.equal(s.json.harnesses!.codex.plugins.find((p) => p.name === "oneezy")!.built, "0.1.0+aaaaaaaaaaaa");
-  // a skill a plugin carries is not missing from the user folder
-  assert.deepEqual(s.json.user![codexSkills()], { linked: 1, plugin: 3, missing: [] });
+
+  cli([]);
+  const s = await statusJson();
+  assert.equal(s.status, 1);
+  for (const id of ["claude-code", "codex"])
+    assert.deepEqual(
+      s.json.harnesses[id].plugins.installed.map((p) => [p.id, p.marketplace]),
+      [
+        ["matt-pocock", "oneezy-skills"],
+        ["oneezy", "oneezy-skills"],
+      ],
+      id,
+    );
+  // Claude Code's form is the account plugin: what the tool installed through claude is red whatever its version
+  assert.ok(
+    s.json.harnesses["claude-code"].lines
+      .filter((l) => !l.ok)
+      .every((l) => l.text.endsWith(" installed by the tool; the form is account plugins")),
+    JSON.stringify(s.json.harnesses["claude-code"].lines),
+  );
+  // Codex: each installed version against the release's; oneezy is one rebuild behind
+  assert.deepEqual(
+    s.json.harnesses.codex.plugins.installed.map((p) => [p.id, p.version, p.latest, p.current]),
+    [
+      ["matt-pocock", "0.1.0+aaaaaaaaaaaa", "0.1.0+aaaaaaaaaaaa", true],
+      ["oneezy", "0.1.0+aaaaaaaaaaaa", "0.2.0+bbbbbbbbbbbb", false],
+    ],
+  );
+  assert.deepEqual(
+    s.json.harnesses.codex.lines.filter((l) => !l.ok).map((l) => l.text),
+    ["oneezy@oneezy-skills 0.1.0+aaaaaaaaaaaa (latest 0.2.0+bbbbbbbbbbbb)"],
+  );
 
   // a rebuild that took the next version: Codex runs its cached copy until the plugin is added again
   plugin("oneezy", ["oneezy-merge", "oneezy-status"], "0.2.0+bbbbbbbbbbbb");
-  const stale = cli(["status"]).json.harnesses!.codex.plugins.find((p) => p.name === "oneezy")!;
-  assert.deepEqual([stale.installed, stale.built, stale.match], ["0.1.0+aaaaaaaaaaaa", "0.2.0+bbbbbbbbbbbb", false]);
   const r = cli([]);
   assert.ok(call(r, "codex", "plugin", "add", "oneezy@oneezy-skills"));
   assert.ok(!call(r, "claude", "plugin", "install"), "Claude reads the package in place");
-  assert.ok(cli(["status"]).json.harnesses!.codex.plugins.every((p) => p.match));
+  const after = await statusJson();
+  assert.ok(after.json.harnesses.codex.plugins.installed.every((p) => p.current));
+  assert.deepEqual(
+    after.json.harnesses.codex.lines.filter((l) => !l.ok),
+    [],
+  );
 });
 
 function commitFixture(message: string): string {
@@ -451,7 +535,7 @@ function rebuildCachedFixture(): string {
   return commitFixture("release B");
 }
 
-test("cached Claude upgrade uses scoped update, verifies new cache bytes and leaves repeat sync unchanged", () => {
+test("cached Claude upgrade uses scoped update, verifies new cache bytes and leaves repeat sync unchanged", async () => {
   const extra = { FAKE_HARNESS_CACHE: "true" };
   const first = commitFixture("release A");
   assert.equal(cli(["--plugins"], extra).status, 0);
@@ -475,7 +559,8 @@ test("cached Claude upgrade uses scoped update, verifies new cache bytes and lea
   assert.equal(fs.readFileSync(path.join(cache, "skills", "oneezy-status", "revision.txt"), "utf8"), "release B");
   assert.equal(fs.existsSync(path.join(oldCache, "skills", "oneezy-status", "revision.txt")), false);
   assert.equal(fs.existsSync(path.join(claudeSkills(), "oneezy-status")), false);
-  assert.ok(cli(["status"], extra).json.harnesses!["claude-code"].plugins.every((p) => p.match));
+  const status = await statusJson(extra);
+  assert.equal(status.json.harnesses["claude-code"].plugins.installed.find((p) => p.id === "oneezy")?.version, next);
   const after = fs.readFileSync(path.join(claudeHome, "fake-harness.json"));
   const repeat = cli([], extra);
   assert.equal(repeat.status, 0, repeat.stderr);
