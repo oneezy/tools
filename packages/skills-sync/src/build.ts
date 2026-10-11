@@ -1,13 +1,19 @@
 // build: the plugin form, written into the library from skills-sync.json. One package per plugin under plugins/<id>/
-// (an own group's skills, or a source's working-set copies), with the three host manifests, LICENSE and NOTICE.md; and
-// the two root catalogs that point at ./plugins/<id>; and, on request, the upload archives under artifacts/. Every output
-// is computed in memory first and compared with disk, so a build with nothing new is silent and --check is the same
-// computation that writes nothing.
+// (an own group's skills, or a source's working-set copies), with the three host manifests, LICENSE and NOTICE.md; when
+// the config opts in (renderings.hermes), its Hermes rendering under dist/hermes/<id>/ (the same package without
+// metadata.internal, which Hermes's portable loader rejects; `dist` is a folder the skills CLI never scans, so each
+// skill is still listed once); and the two root catalogs that point at ./plugins/<id>; and, on request, the upload
+// archives under artifacts/. Every output is computed in memory first and compared with disk, so a build with nothing
+// new is silent and --check is the same computation that writes nothing. A new output ships behind a library opt-in so
+// that the publish guard (ADR-0008: this build's --check against the library's main) stays strict for a library that
+// has not opted in yet.
 import { spawnSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
+import YAML from "yaml";
 import { archives, type Built } from "./artifacts.js";
 import { isDir, isLink, isSkillDir, lexists } from "./fs.js";
+import { hermesNamespace } from "./hermes.js";
 import { Library } from "./library.js";
 import { apply, Report } from "./plan.js";
 import { cmp, githubSlug, isoDate, readConfig, selection, type Config, type Plugin, type Source } from "./sources.js";
@@ -55,6 +61,30 @@ export interface Head {
 
 /** The Agent Plugins 1.0 schema the portable manifest declares. */
 export const PLUGIN_SCHEMA = "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json";
+/**
+ * Where the Hermes rendering of every package lives in the library, / separators: dist/hermes/<id>, the value
+ * `renderings.hermes` in skills-sync.json takes to opt in. `dist` is in the skills CLI's SKIP_DIRS, so `npx skills add
+ * owner/repo` never lists these copies; Claude Code and Codex read plugins/ through the catalogs and never look here.
+ * `hermes plugins install owner/repo/dist/hermes/<id>` is the install, and this is the folder the machine sync installs
+ * from (the release does not carry the config yet; tools#154).
+ */
+export const HERMES_PATH = "dist/hermes";
+const SKILL_MD = /^skills\/([^/]+)\/SKILL\.md$/;
+
+/** The folder the config sends the Hermes rendering to, / separators; null when the library has not opted in. */
+export function hermesPath(config: Config): string | null {
+  return config.renderings?.hermes ?? null;
+}
+
+/** <rendering folder> under a library root. */
+function hermesRoot(root: string, rendering: string): string {
+  return path.join(root, ...rendering.split("/"));
+}
+
+/** <rendering folder>/<id> under a library root. */
+export function hermesDir(root: string, rendering: string, id: string): string {
+  return path.join(hermesRoot(root, rendering), id);
+}
 /** What the ChatGPT interface and the Codex catalog say every package is; the hosts enumerate neither value in their docs. */
 const CATEGORY = "Developer Tools";
 const CAPABILITIES = ["Interactive"];
@@ -127,6 +157,7 @@ export function build(lib: Library, opts: BuildOptions): BuildResult {
   // a check never looks at artifacts/: the archives are upload material, generated and ignored by git
   const artifacts = opts.artifacts && !opts.check;
   const built: Built[] = [];
+  const rendering = hermesPath(config);
   const empty = emptyGroups(lib, config);
   result.skipped = [...empty.keys()];
   const ids = Object.keys(config.plugins).filter((id) => !empty.has(id));
@@ -140,6 +171,13 @@ export function build(lib: Library, opts: BuildOptions): BuildResult {
           isLink(dir)
             ? { kind: "conflict", path: dir, note: `${note}; a link, not a package built here; left alone` }
             : { kind: "delete", path: dir, note },
+        );
+      const hermes = rendering ? hermesDir(lib.root, rendering, id) : null;
+      if (opts.plugins && hermes && lexists(hermes))
+        changes.add(
+          isLink(hermes)
+            ? { kind: "conflict", path: hermes, note: `${note}; a link, not a rendering built here; left alone` }
+            : { kind: "delete", path: hermes, note },
         );
     }
     for (const id of ids) {
@@ -175,7 +213,10 @@ export function build(lib: Library, opts: BuildOptions): BuildResult {
       const at = unchanged ? prior : target;
       const files = unchanged ? atPrior : render(pkg, config, at);
       result.versions[id] = at.version;
-      if (opts.plugins) reconcile(changes, dir, disk.files, files, opts.check);
+      if (opts.plugins) {
+        reconcile(changes, dir, disk.files, files, opts.check);
+        if (rendering) hermesRendering(lib, rendering, id, files, changes, opts.check);
+      }
       // the archive is made from the same files, so it is the package build writes, at the version its manifests carry
       built.push({
         id,
@@ -187,10 +228,11 @@ export function build(lib: Library, opts: BuildOptions): BuildResult {
     }
   }
   if (opts.plugins) {
-    // packages for ids no longer in the config; a link there was not built here and is left alone
-    if (isDir(lib.plugins)) {
-      for (const n of fs.readdirSync(lib.plugins).sort(cmp)) {
-        const p = path.join(lib.plugins, n);
+    // packages, and Hermes renderings, for ids no longer in the config; a link there was not built here and is left alone
+    for (const root of [lib.plugins, ...(rendering ? [hermesRoot(lib.root, rendering)] : [])]) {
+      if (!isDir(root)) continue;
+      for (const n of fs.readdirSync(root).sort(cmp)) {
+        const p = path.join(root, n);
         if (n.startsWith(".") || ids.includes(n) || empty.has(n) || !isDir(p)) continue;
         if (isLink(p)) changes.add({ kind: "conflict", path: p, note: "a link, not a package built here; left alone" });
         else changes.add({ kind: "delete", path: p, note: "no longer in skills-sync.json" });
@@ -339,6 +381,61 @@ function resolvePackage(lib: Library, config: Config, id: string, report: Report
   };
 }
 
+/**
+ * The Hermes rendering beside the package, <rendering>/<id>/, reconciled like plugins/<id>/ from the same files: a link
+ * inside is a conflict and the rendering is left alone; a skill Hermes would still skip (a description over its limit, a
+ * folder name that is not a valid skill name) is a note, the copy is written all the same so its siblings load.
+ */
+function hermesRendering(
+  lib: Library,
+  rendering: string,
+  id: string,
+  files: Map<string, Buffer>,
+  changes: Report,
+  check: boolean,
+): void {
+  const dir = hermesDir(lib.root, rendering, id);
+  const disk = diskFiles(dir);
+  if (disk.links.length) {
+    for (const l of disk.links)
+      changes.add({
+        kind: "conflict",
+        path: path.join(dir, l),
+        note: `a link inside ${rendering}/${id}; build never follows or writes through one; rendering left alone`,
+      });
+    return;
+  }
+  const rendered = renderHermes(files);
+  for (const [rel, bytes] of rendered) {
+    const m = SKILL_MD.exec(rel);
+    if (!m) continue;
+    const problems = hermesSkillProblems(bytes.toString("utf8"), m[1]);
+    if (problems.length)
+      changes.add({
+        kind: "note",
+        path: path.join(dir, ...rel.split("/")),
+        note: `Hermes would skip this skill: ${problems.join("; ")}`,
+      });
+  }
+  reconcile(changes, dir, disk.files, rendered, check);
+}
+
+/**
+ * The Hermes rendering of a package from the package's own files: the same plugin.json, LICENSE, NOTICE.md and skill
+ * folders, each skill's root SKILL.md through forHermes(); the Claude and Codex manifests left out (Hermes skips those
+ * folders as another harness's). Every file but the root SKILL.md files is byte for byte the package's, so the
+ * release's sha256 of NOTICE.md says whether an installed Hermes copy is the release's package.
+ */
+export function renderHermes(files: Map<string, Buffer>): Map<string, Buffer> {
+  const out = new Map<string, Buffer>();
+  for (const [rel, bytes] of files) {
+    if (rel.startsWith(".claude-plugin/") || rel.startsWith(".codex-plugin/")) continue;
+    const m = SKILL_MD.exec(rel);
+    out.set(rel, m ? Buffer.from(forHermes(bytes.toString("utf8"), m[1]), "utf8") : bytes);
+  }
+  return out;
+}
+
 /** Every file of the package, relative path (/ separators) -> bytes, for the given version and library commit. */
 function render(pkg: Package, config: Config, head: Head): Map<string, Buffer> {
   const out = new Map<string, Buffer>();
@@ -421,6 +518,7 @@ function manifests(
 /** NOTICE.md: where the files came from, at which commit, under which license, and why every copy is marked internal. */
 function notice(pkg: Package, config: Config, head: Head): string {
   const lib = config.library ?? {};
+  const rendering = hermesPath(config);
   const o = pkg.origin;
   const libraryName = lib.owner && lib.name ? `${lib.owner}/${lib.name}` : (lib.name ?? "the skills library");
   const commitLine =
@@ -468,6 +566,12 @@ function notice(pkg: Package, config: Config, head: Head): string {
     "",
     "Every `SKILL.md` under `skills/` carries `metadata.internal: true`: the library's own copies are the ones `npx skills` installs and updates, and these are skipped (`INSTALL_INTERNAL_SKILLS=1` re-exposes them).",
     "",
+    ...(rendering
+      ? [
+          `Hermes rejects that flag (its portable loader takes only string-valued metadata), so the copy it loads is \`${rendering}/${pkg.id}/\` in the library: this package without the flag and every other non-string metadata entry, each skill's \`name\` set to its folder, and without the Claude Code and Codex manifests. \`hermes plugins install ${lib.owner && lib.name ? `${lib.owner}/${lib.name}` : "<owner>/<repo>"}/${rendering}/${pkg.id}\` installs it; Hermes lists its skills as \`${hermesNamespace(pkg.id)}:<skill>\`.`,
+          "",
+        ]
+      : []),
   ].join("\n");
 }
 
@@ -535,6 +639,141 @@ export function withInternal(md: string): string {
     }
   }
   return `---${open}${next.join(open)}${close}---` + md.slice(whole.length);
+}
+
+/**
+ * The SKILL.md Hermes loads, from the package copy. Hermes's portable loader (hermes_cli/agent_plugins.py) skips a skill
+ * whose `metadata` holds anything but string values, or whose `name` is not its folder's name; the `skills` CLI needs the
+ * boolean `metadata.internal: true` the package copy carries. So the Hermes copy drops `internal` and every other
+ * non-string entry of `metadata` (a nested map, a list, a number, a boolean), drops `metadata` when nothing is left, and
+ * sets `name` to the folder; every other byte stays. Applying it twice gives the same text, which is what lets --check
+ * compare the package after the transform with disk.
+ */
+export function forHermes(md: string, folder: string): string {
+  const fm = /^---(\r?\n)([\s\S]*?)(\r?\n)---/.exec(md);
+  if (!fm) return md;
+  const [whole, open, body, close] = fm;
+  const lines = body.split(open);
+  const out: string[] = [];
+  let named = false;
+  for (let i = 0; i < lines.length; i++) {
+    const l = lines[i];
+    if (l.startsWith("name:")) {
+      out.push(`name: ${folder}`);
+      named = true;
+      continue;
+    }
+    if (!l.startsWith("metadata:")) {
+      out.push(l);
+      continue;
+    }
+    const rest = l.slice("metadata:".length).trim();
+    if (rest && !rest.startsWith("#")) {
+      // a flow map on one line: its string entries, or nothing
+      const kept = flowStrings(rest);
+      if (kept) out.push(`metadata: ${kept}`);
+      continue;
+    }
+    // a block map: the deeper-indented lines that follow are its entries
+    let j = i + 1;
+    while (j < lines.length && /^\s+\S/.test(lines[j])) j++;
+    const kept = stringEntries(lines.slice(i + 1, j));
+    if (kept.length) out.push("metadata:", ...kept);
+    i = j - 1;
+  }
+  if (!named) out.unshift(`name: ${folder}`);
+  return `---${open}${out.join(open)}${close}---` + md.slice(whole.length);
+}
+
+/**
+ * The lines of a block map's entries whose value is a string: the entry's key line and its continuation lines, as
+ * written, comments between them included; nothing when no entry is left (a map of comments alone would read as null).
+ */
+function stringEntries(children: string[]): string[] {
+  const out: string[] = [];
+  if (!children.length) return out;
+  let entries = 0;
+  const indent = /^\s*/.exec(children[0])![0].length;
+  for (let k = 0; k < children.length;) {
+    const m = /^(\s+)([^\s#][^:]*?):(?:\s+(.*))?$/.exec(children[k]);
+    // the entry runs until the next line at its own indent: a nested map, a list or a wrapped scalar belongs to it
+    let e = k + 1;
+    while (e < children.length && /^\s*/.exec(children[e])![0].length > indent) e++;
+    const entry = children.slice(k, e);
+    k = e;
+    if (!m || m[1].length !== indent) {
+      // a comment, or a line that is not an entry: kept as written
+      out.push(...entry);
+      continue;
+    }
+    const value = (m[3] ?? "").trim();
+    if (m[2] === "internal" || value === "") continue;
+    if (/^[|>]/.test(value) || isYamlString(value)) {
+      out.push(...entry);
+      entries++;
+    }
+  }
+  return entries ? out : [];
+}
+
+/** A flow map `{a: b, c: 1}` cut to its string entries, as a flow map again; null when none is left. */
+function flowStrings(flow: string): string | null {
+  let v: unknown;
+  try {
+    v = YAML.parse(flow);
+  } catch {
+    return null;
+  }
+  if (!v || typeof v !== "object" || Array.isArray(v)) return null;
+  const entries = Object.entries(v as Record<string, unknown>).filter(
+    ([k, x]) => k !== "internal" && typeof x === "string",
+  );
+  return entries.length ? `{ ${entries.map(([k, x]) => `${k}: ${JSON.stringify(x)}`).join(", ")} }` : null;
+}
+
+/** Does this scalar, as YAML, read as a string (quoted, or a plain scalar that is neither a number, a boolean nor null)? */
+function isYamlString(scalar: string): boolean {
+  try {
+    return typeof YAML.parse(scalar) === "string";
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Why Hermes's portable loader would skip this SKILL.md as the skill in folder `folder` (hermes_cli/agent_plugins.py:
+ * `name` equal to the folder, 1 to 64 characters of lowercase letters, digits and single hyphens; a `description` of 1
+ * to 1024 characters; `metadata`, when present, a map of strings; `license`, `compatibility` and `allowed-tools`
+ * strings). Empty when Hermes loads it. The generator notes these; the Hermes form checks an installed copy with them.
+ */
+export function hermesSkillProblems(md: string, folder: string): string[] {
+  const fm = /^---(\r?\n)([\s\S]*?)(\r?\n)---/.exec(md);
+  if (!fm) return ["no frontmatter"];
+  let v: unknown;
+  try {
+    v = YAML.parse(fm[2]);
+  } catch {
+    return ["frontmatter is not YAML"];
+  }
+  if (!v || typeof v !== "object" || Array.isArray(v)) return ["frontmatter is not a map"];
+  const f = v as Record<string, unknown>;
+  const out: string[] = [];
+  if (f.name !== folder) out.push(`name must be ${folder}`);
+  else if (!/^(?!.*--)[a-z0-9]+(?:-[a-z0-9]+)*$/.test(folder) || folder.length > 64)
+    out.push(`${folder} is not a skill name Hermes accepts (lowercase letters, digits, single hyphens, at most 64)`);
+  if (typeof f.description !== "string" || !f.description.trim() || f.description.length > 1024)
+    out.push("description must be 1 to 1024 characters");
+  if (
+    f.metadata !== undefined &&
+    (!f.metadata ||
+      typeof f.metadata !== "object" ||
+      Array.isArray(f.metadata) ||
+      Object.values(f.metadata as Record<string, unknown>).some((x) => typeof x !== "string"))
+  )
+    out.push("metadata must map string keys to string values");
+  for (const key of ["license", "compatibility", "allowed-tools"])
+    if (f[key] !== undefined && typeof f[key] !== "string") out.push(`${key} must be a string`);
+  return out;
 }
 
 /**

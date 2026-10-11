@@ -45,6 +45,18 @@
         }
       }
     },
+    "renderings": {
+      "description": "Renderings of the packages for harnesses that cannot load plugins/<id>/ as built, each behind the folder it is written to (relative to the library root, / separators). Absent: none is written and build's output is the packages and catalogs alone. hermes: the Hermes rendering of every package at <folder>/<id>/ (the package without the Claude Code and Codex manifests, each skill's metadata cut to string entries), and a paragraph in every NOTICE.md naming it. Read by build; the machine sync installs from dist/hermes.",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "hermes": {
+          "description": "Where the Hermes rendering of every package is written, relative to the library root with / separators: dist/hermes (the folder the machine sync installs from).",
+          "type": "string",
+          "pattern": "^[a-z0-9_-][a-z0-9._-]*(/[a-z0-9_-][a-z0-9._-]*)*$"
+        }
+      }
+    },
     "sources": {
       "description": "One entry per source id; the id names the snapshot folder upstream/<id> and the plugin built from it.",
       "type": "object",

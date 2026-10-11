@@ -11,6 +11,12 @@ export interface Config {
   library?: { name?: string; owner?: string; homepage?: string; version?: string };
   /** the two forms, each behind a switch: the loose-skill layers and the plugin packages; both true when absent */
   generate: { skills: boolean; plugins: boolean };
+  /**
+   * renderings of the packages for harnesses that cannot load plugins/<id>/ as built, each behind the folder it goes to
+   * (library-relative, / separators); absent: build writes the packages and catalogs alone. hermes: the Hermes rendering
+   * at <folder>/<id>/ and the NOTICE paragraph that names it (tools#153); the machine sync installs from dist/hermes
+   */
+  renderings?: { hermes?: string };
   sources: Record<string, Source>;
   plugins: Record<string, Plugin>;
   /** the ChatGPT upload record per plugin id, written by hand after each upload; read by build --artifacts */
