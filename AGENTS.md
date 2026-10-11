@@ -14,17 +14,15 @@ Each package keeps its language. `packages/skills-sync` (TypeScript, published a
 
 ## Agent skills
 
-Skills are not committed here. They come from the skills library `oneezy/skills`, linked into the harness user folders by `npx @oneezy/skills-sync` (source: `packages/skills-sync`).
+Skills are not committed here. They come from the skills library `oneezy/skills`: Claude Code gets them as the claude.ai account plugins, Codex and Hermes as plugins from GitHub, kept in line by `npx @oneezy/skills-sync` (source: `packages/skills-sync`).
 
-A cloud session (`CLAUDE_CODE_REMOTE=true`) starts without them unless the cloud environment's setup script runs the sync. If `/grilling`, `/oneezy-brain` or another library skill is not in your skill list, run this first, then carry on:
+A cloud session (`CLAUDE_CODE_REMOTE=true`) gets the skills from the account plugins switched on at claude.ai/customize/plugins; its setup script runs the line below, which writes only the global instructions block. If `/grilling`, `/oneezy-brain` or another library skill is not in your skill list, run this and report the red lines and manual steps it prints; never fetch a SKILL.md from GitHub to run it:
 
 ```
-npx --yes @oneezy/skills-sync -y --agents claude-code --global --no-projects --no-wsl --quiet
+npx --yes @oneezy/skills-sync@latest status
 ```
 
-Claude Code lists the new skills about a minute later; until then, Read the SKILL.md.
-
-A message that starts with `/<name>` runs that skill, even in a project thread, where it reaches you as plain text rather than a command. If the skill is in your list, invoke it. If it is not, which is always the case for skills marked `disable-model-invocation` (`/wayfinder`, `/grill-me`, `/to-tickets`, `/oneezy-merge` and others), Read `~/.claude/skills/<name>/SKILL.md` (on a machine where skills-sync installed the library's plugins, it is `~/.skills-sync/plugins/<plugin>/skills/<name>/SKILL.md`) and follow it, with the rest of the message as its arguments.
+A message that starts with `/<name>` runs that skill, even in a project thread, where it reaches you as plain text rather than a command. If the skill is in your list, invoke it. If it is not, which is always the case for skills marked `disable-model-invocation` (`/wayfinder`, `/grill-me`, `/to-tickets`, `/oneezy-merge` and others), Read `~/.claude/skills/<name>/SKILL.md` (with the account plugins, it is `~/.claude/plugins/synced/<org>_<id>/<plugin>/skills/<name>/SKILL.md`) and follow it, with the rest of the message as its arguments.
 
 ### Issue tracker
 
