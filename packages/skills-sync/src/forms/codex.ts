@@ -341,7 +341,7 @@ function sameRepo(source: string, repo: string): boolean {
  * Does the folder hold exactly the release's files for the skill (the plugin's `skills/<name>/...` entries), each with
  * the release's sha256: nothing missing, nothing added, nothing edited. Anything else is the user's.
  */
-function sameFiles(folder: string, p: ReleasePlugin, prefix: string): boolean {
+export function sameFiles(folder: string, p: ReleasePlugin, prefix: string): boolean {
   const want = new Map(
     Object.entries(p.files)
       .filter(([rel]) => rel.startsWith(prefix))

@@ -12,7 +12,7 @@
 import { spawnSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
-import { isDir, lexists, samePath } from "../fs.js";
+import { isDir, samePath } from "../fs.js";
 import { github, GitHubError, type GitHub } from "../github.js";
 import { line } from "../plan.js";
 import { DEFAULT_REPO } from "../release.js";
@@ -95,7 +95,7 @@ export async function runHook(options: HookOptions = {}): Promise<number> {
   return code;
 }
 
-interface GitResult {
+export interface GitResult {
   ok: boolean;
   out: string;
   err: string;
@@ -107,7 +107,7 @@ interface GitResult {
  * git in `cwd`, never prompting: a remote that wants credentials fails instead of hanging the session start, and a
  * call gets 30 s (the release read has 30 s too, and the hook's entry allows 120 s in all).
  */
-function git(cwd: string, args: string[], env: NodeJS.ProcessEnv): GitResult {
+export function git(cwd: string, args: string[], env: NodeJS.ProcessEnv): GitResult {
   const r = spawnSync("git", args, {
     cwd,
     encoding: "utf8",
@@ -124,7 +124,7 @@ function git(cwd: string, args: string[], env: NodeJS.ProcessEnv): GitResult {
  * Why a git call failed, for the user and for a bug report: how it ended, then git's own words (the first three lines
  * of its stderr), or that it said nothing. `(exit 128): fatal: not a git repository`.
  */
-function reason(r: GitResult): string {
+export function reason(r: GitResult): string {
   const said = r.err.trim().split(/\r?\n/).filter(Boolean).slice(0, 3).join(" | ");
   return `(${r.why})${said ? `: ${said}` : ", nothing on stderr"}`;
 }
@@ -137,12 +137,15 @@ export function repoOf(url: string): string | null {
 
 /**
  * The checkouts of the tended repositories in reach of `cwd`: the repository `cwd` is in, and every folder beside its
- * root that is a git repository, each known by its origin URL. Nowhere near a repository: none, and nothing to do.
+ * root that is a git repository, each known by its origin URL. A linked worktree (a task's, in
+ * `<repo>/.claude/worktrees/<name>`) stands for its main worktree: that is the checkout, and the folders beside it are
+ * the others; a folder beside it that is itself a linked worktree (its `.git` a file) is none. Nowhere near a
+ * repository: none, and nothing to do.
  */
 export function findCheckouts(cwd: string, env: NodeJS.ProcessEnv = process.env): Checkout[] {
   const top = git(cwd, ["rev-parse", "--show-toplevel"], env);
   if (!top.ok || !top.out.trim()) return [];
-  const root = path.resolve(top.out.trim());
+  const root = mainWorktree(cwd, env) ?? path.resolve(top.out.trim());
   const dirs = [root];
   const parent = path.dirname(root);
   let siblings: string[] = [];
@@ -153,7 +156,7 @@ export function findCheckouts(cwd: string, env: NodeJS.ProcessEnv = process.env)
   }
   for (const name of siblings.sort()) {
     const dir = path.join(parent, name);
-    if (name.startsWith(".") || samePath(dir, root) || !isDir(dir) || !lexists(path.join(dir, ".git"))) continue;
+    if (name.startsWith(".") || samePath(dir, root) || !isDir(dir) || !isDir(path.join(dir, ".git"))) continue;
     dirs.push(dir);
   }
   const out: Checkout[] = [];
@@ -168,15 +171,33 @@ export function findCheckouts(cwd: string, env: NodeJS.ProcessEnv = process.env)
 }
 
 /**
+ * The main worktree of the repository `cwd` is in: the folder that holds the common `.git` folder. Null when git cannot
+ * say (older than 2.31) or the common folder is not a worktree's `.git` (a bare repository, a submodule).
+ */
+function mainWorktree(cwd: string, env: NodeJS.ProcessEnv): string | null {
+  const r = git(cwd, ["rev-parse", "--path-format=absolute", "--git-common-dir"], env);
+  const common = r.ok ? r.out.trim() : "";
+  if (!common || path.basename(common) !== ".git") return null;
+  const root = path.dirname(path.resolve(common));
+  return isDir(root) ? root : null;
+}
+
+/**
  * One checkout: on dev with a clean tree, fetch origin (every branch, gone ones pruned: dev for the fast-forward, the
- * rest for the drift line), fast-forward and say so when it moved; otherwise name the branch and the dirty files and
- * touch nothing, not even a fetch, which it would get no fast-forward from and which is up to 30 s of a session start
+ * rest for the drift line), fast-forward and say so when it moved; otherwise name the branch and the dirty files (or
+ * that git status could not be read, which is never taken for clean) and touch nothing, not even a fetch, which it would get no fast-forward from and which is up to 30 s of a session start
  * (stories 33, 34, 75). A fetch or a merge that fails is a line, not a stop. Returns whether the fetch worked, which
  * is what the drift line needs.
  */
 function tend(c: Checkout, env: NodeJS.ProcessEnv, write: (t: string) => void, warn: (t: string) => void): boolean {
   const branch = git(c.path, ["rev-parse", "--abbrev-ref", "HEAD"], env).out.trim() || "HEAD";
-  const dirty = git(c.path, ["status", "--porcelain"], env).out.split(/\r?\n/).filter(Boolean).length;
+  const status = git(c.path, ["status", "--porcelain"], env);
+  // a status git could not give is no clean tree: nothing is fetched or merged on a guess
+  if (!status.ok) {
+    warn(`${c.path}: git status not read ${reason(status)}; left alone\n`);
+    return false;
+  }
+  const dirty = status.out.split(/\r?\n/).filter(Boolean).length;
   if (branch !== "dev" || dirty) {
     warn(`${c.path}: on ${branch}${dirty ? `, dirty (${count(dirty, "file")})` : ""}; left alone\n`);
     return false;

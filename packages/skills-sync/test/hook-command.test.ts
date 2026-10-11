@@ -152,6 +152,23 @@ test("a dirty checkout and one on another branch are named on stderr and left al
   assert.ok(lines(again.stderr).includes(`${tools}: on feat/x; left alone`), again.stderr);
 });
 
+test("a checkout whose git status cannot be read is named on stderr and left alone, not fetched, never taken for clean", async () => {
+  const m = machine();
+  const { skills } = checkouts(m);
+  await cli(m, []);
+  advanceOrigin(m, "oneezy/skills");
+  const skillsHead = head(m, skills);
+  write(path.join(skills, ".git", "index"), "not an index");
+  const r = await cli(m, ["hook"], {}, skills);
+  assert.equal(r.status, 0, r.stderr);
+  const err = lines(r.stderr).filter((l) => l.startsWith(`${skills}:`));
+  assert.equal(err.length, 1, r.stderr);
+  assert.match(err[0], /: git status not read \(exit 128\)/);
+  assert.ok(err[0].endsWith("; left alone"), r.stderr);
+  assert.equal(head(m, skills), skillsHead);
+  assert.equal(git(m, skills, ["rev-parse", "origin/dev"]), skillsHead);
+});
+
 test("a drift line names eight branches and eight pull requests at most, the rest is a count", async () => {
   const m = machine();
   const { skills } = checkouts(m);
