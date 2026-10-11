@@ -63,13 +63,13 @@ Commands
                    any red line, never for a manual step alone. Reads only: nothing cloned, linked or written
   branches [owner/repo ...]
                    the branch rules on GitHub (no library needed), for each repository named or, with none, every
-                   repository the token owns: main, dev and any *-keep branch are never deleted (nor the repository's
-                   default branch); a branch whose pull request was merged into dev (or whose commits are all in dev)
-                   is deleted; one whose pull request was closed without merging is tagged archive/<name> at its head,
-                   then deleted; every other branch is left alone and listed. Pull requests are never touched: the head
-                   or the base of an open one stays. --plan lists every tag and delete without making them; --json
-                   carries the same lists; a repository the token cannot read or write is reported and skipped. Exit 1
-                   when anything was reported, 2 without a token to list your repositories
+                   repository the token owns: main, dev and any *-keep, research/* or prototype/* branch are never
+                   deleted (nor the repository's default branch); a branch whose pull request was merged into dev (or
+                   whose commits are all in dev) is deleted; one whose pull request was closed without merging is tagged
+                   archive/<name> at its head, then deleted; every other branch is left alone and listed. Pull requests
+                   are never touched: the head or the base of an open one stays. --plan lists every tag and delete
+                   without making them; --json carries the same lists; a repository the token cannot read or write is
+                   reported and skipped. Exit 1 when anything was reported, 2 without a token to list your repositories
   hook             what the session-start hook runs: the sync above, quietly (only what changed or went wrong is
                    printed), then the checkouts of ${DEFAULT_REPO} and oneezy/tools in and beside the current repository:
                    a clean one on dev is fast-forwarded to origin/dev, a dirty one or one on another branch is named and
