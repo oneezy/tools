@@ -14,7 +14,11 @@ import { DEFAULT_REPO } from "./release.js";
 /** The block's id in its markers: <!-- skills-sync:skills:start --> ... <!-- skills-sync:skills:end -->. */
 export const BLOCK_ID = "skills";
 
-/** The one block, without its markers. Short on purpose: an agent reads it at the start of every session. */
+/**
+ * The one block, without its markers. Short on purpose: an agent reads it at the start of every session. The Brain
+ * section is the text the old `brain` block carried (the library's brain-routing.md), kept word for word so agent
+ * behaviour on every machine stays as it was; it lives here now, release-independent.
+ */
 export const BLOCK_BODY = `## Skills
 
 This block is written by skills-sync; edits here are overwritten. Skills come from the library ${DEFAULT_REPO}, installed into each harness in one form. Call one the way the harness you are in resolves it:
@@ -25,7 +29,13 @@ This block is written by skills-sync; edits here are overwritten. Skills come fr
 | Codex | \`$<skill>\` in the prompt (a plugin's skill: \`$<plugin>:<skill>\`), the \`/skills\` picker, or \`@<skill>\` on ChatGPT web |
 | Hermes | \`/<skill>\` for a loose skill; a plugin's skill: \`/agent-plugin-<id>-<hash>:<skill>\` |
 
-Never fetch a \`SKILL.md\` from GitHub, or run one from any copy this harness did not load: that bypasses the harness's own resolution and \`disable-model-invocation\`. When a typed skill does not resolve, show this table instead of improvising.`;
+Never fetch a \`SKILL.md\` from GitHub, or run one from any copy this harness did not load: that bypasses the harness's own resolution and \`disable-model-invocation\`. When a typed skill does not resolve, show this table instead of improvising.
+
+## Brain
+
+For Brain capture, lookup, agenda, triage, task status or durable context, load \`/oneezy-brain\` and follow its current registry. The skill resolves the canonical Google Drive Brain and owns locations, schema, account selection and verification.
+
+This delegation supersedes earlier Brain destinations in these instructions and their imports. Retain pinned sources, GitHub and Spaces as historical evidence. If the installed skill or its supported Drive route is unavailable, report that exact blocker and stop dependent Brain operations.`;
 
 const MARKER = /<!-- skills-sync:([\w-]+):(start|end) -->/g;
 

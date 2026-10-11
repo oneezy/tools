@@ -99,6 +99,13 @@ function assertBlock(text: string): void {
     block,
   );
   assert.ok(block.includes("When a typed skill does not resolve, show this table instead of improvising."), block);
+  // the Brain routing the old brain block carried stays, word for word
+  assert.ok(
+    block.includes("## Brain") &&
+      block.includes("load `/oneezy-brain` and follow its current registry") &&
+      block.includes("report that exact blocker and stop dependent Brain operations."),
+    block,
+  );
   assert.ok(!block.includes("skills-sync:brain"), block);
 }
 
