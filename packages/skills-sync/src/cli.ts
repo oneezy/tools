@@ -49,7 +49,7 @@ One skills library, every harness, every project on this machine. Run it anywher
   cloud session                that block and nothing else (CLAUDE_CODE_REMOTE=true): no clone, no links, no plugins
   library present              also, until the plugin forms land: pull it, install the third-party skills its lock
                                records, rebuild its layers, install its built plugins on Claude Code and Codex, link
-                               the user folders. No library is cloned any more; --repo <path> runs that part alone
+                               the user folders. sync clones nothing; --repo <path> runs that part alone
 
 Usage: skills-sync [command] [options]
 
@@ -351,8 +351,9 @@ async function main(): Promise<void> {
   const log = (m: string) => (args.json ? undefined : process.stderr.write(m + "\n"));
   const setup = new Report();
 
-  // Machine commands act on this machine against the latest release on GitHub and never look for a library: status,
-  // and sync (the block, and the form work as its tickets land). unlink keeps the library-based run below until #154.
+  // Machine commands act on this machine against GitHub and never look for a library: status and sync (the block, and
+  // the form work as its tickets land) against the latest release, branches against the repositories' branch rules.
+  // unlink keeps the library-based run below until #154.
   const repo = args.library ?? DEFAULT_REPO;
   if ((args.command === "status" || args.command === "sync") && !isRepoName(repo)) {
     process.stderr.write(`${args.command}: --library names the release repo as owner/repo, not ${repo}\n`);
@@ -998,9 +999,8 @@ async function decide(
     wsl,
     unavailable: args.retry ? [] : (local.unavailable ?? []),
     links: args.links ?? local.links ?? "auto",
-    // a cloud session keeps loose links unless told: claude.ai syncs its own plugins into the container, and the
-    // repos' instructions read a skill from ~/.claude/skills/<name>
-    form: args.form ?? local.form ?? (process.env.CLAUDE_CODE_REMOTE === "true" ? "links" : "plugin"),
+    // a cloud session never gets here: its sync is the global block alone
+    form: args.form ?? local.form ?? "plugin",
     formChosen: !!(args.form ?? local.form),
   };
 }
