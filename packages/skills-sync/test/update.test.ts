@@ -865,3 +865,85 @@ test('the config schema admits "skills": "*" and a "rename" map beside it; "rena
   assert.equal(mapped.status, 1);
   assert.match(mapped.stderr, /\$\.sources\.up\.skills: must be "\*" \(beside rename\)/);
 });
+
+test('a folder a "*" source gains upstream never displaces a name another source ships (whichever id sorts first) or an own skill: it is left out, named in `shadowed` and on stderr with --json, and the other skill stays; a rename takes it', () => {
+  const star = new Upstream(path.join(base, "star"));
+  star.skill("only-star");
+  star.commit("one");
+  // "first" sorts before "s", "zlast" after it; both ship a skill from up
+  config({
+    first: source(up, { skills: ["a"] }),
+    s: source(star, { skills: "*" }),
+    zlast: source(up, { skills: ["b"] }),
+  });
+  assert.equal(cli("update", "--quiet").status, 0);
+  const shipped = { a: working("a"), b: working("b") };
+
+  for (const n of ["a", "b", "own-one"]) star.skill(n, `star's ${n}`);
+  star.commit("names others have");
+  const r = cli("update", "--json");
+  assert.equal(r.status, 0, r.stderr);
+  const report = JSON.parse(r.stdout);
+  assert.deepEqual(report.shadowed, ["s:a", "s:b", "s:own-one"]);
+  assert.match(
+    r.stderr,
+    /^s: not taken from upstream, the name is already another's: a \(first\), b \(zlast\), own-one \(an own skill\); give each a "rename" to take it/m,
+  );
+  const lock = json(LOCK);
+  assert.deepEqual(Object.keys(lock.sources.first.skills), ["a"]);
+  assert.deepEqual(Object.keys(lock.sources.zlast.skills), ["b"]);
+  assert.deepEqual(Object.keys(lock.sources.s.skills), ["only-star"]);
+  assert.equal(working("a"), shipped.a, "first keeps its a");
+  assert.equal(working("b"), shipped.b, "zlast keeps its b");
+  assert.ok(!fs.existsSync(path.join(root, ".agents", "skills", "own-one")), "no copy over the own skill's name");
+  assert.ok(!fs.existsSync(path.join(root, "upstream", "s", "skills", "a")), "not snapshotted either");
+  const check = cli("check");
+  assert.equal(check.status, 0, check.stdout + check.stderr);
+
+  config({
+    first: source(up, { skills: ["a"] }),
+    s: source(star, { skills: "*", rename: { a: "star-a", b: "star-b", "own-one": "star-own" } }),
+    zlast: source(up, { skills: ["b"] }),
+  });
+  const renamed = cli("update", "--json");
+  assert.equal(renamed.status, 0, renamed.stderr);
+  assert.deepEqual(JSON.parse(renamed.stdout).shadowed, []);
+  assert.deepEqual(Object.keys(json(LOCK).sources.s.skills), ["only-star", "star-a", "star-b", "star-own"]);
+  assert.equal(working("star-a"), "---\nname: star-a\ndescription: a skill\n---\nstar's a\n");
+  assert.equal(working("a"), shipped.a);
+});
+
+test("every conflict a refresh reports reaches stderr under --json too, so the daily run shows it", () => {
+  const other = new Upstream(path.join(base, "other"));
+  other.skill("a", "other a");
+  other.commit("one");
+  config({ other: source(other, { skills: ["a"] }), up: source(up, { skills: ["a", "b"] }) });
+  const r = cli("update", "--json");
+  assert.equal(r.status, 0, r.stderr);
+  assert.match(r.stderr, /up also selects a as a; other wins; rename one in skills-sync\.json/);
+});
+
+test('a "*" source whose rename names a folder upstream also has (two skills, one name) is refused with the reason, and nothing of it is locked', () => {
+  config({ up: source(up, { skills: "*", rename: { a: "b" } }) });
+  const r = cli("update", "--json");
+  assert.equal(r.status, 1);
+  assert.deepEqual(JSON.parse(r.stdout).problems, [
+    "up: rename a -> b takes the name of the folder b upstream also has; pick another name",
+  ]);
+  assert.ok(!fs.existsSync(path.join(root, LOCK)) || !json(LOCK).sources.up, "nothing locked");
+});
+
+test('update <other> while a "*" source has no lock entry keeps that source\'s working copies, as it does for a list source', () => {
+  const other = new Upstream(path.join(base, "other"));
+  other.skill("x");
+  other.commit("one");
+  config({ star: source(up, { skills: "*" }), other: source(other, { skills: ["x"] }) });
+  assert.equal(cli("update", "--quiet").status, 0);
+  const lock = json(LOCK);
+  delete lock.sources.star;
+  fs.writeFileSync(path.join(root, LOCK), JSON.stringify(lock, null, 2) + "\n");
+  const r = cli("update", "other", "--json");
+  assert.equal(r.status, 0, r.stderr);
+  for (const n of ["a", "b", "c"]) assert.ok(fs.existsSync(path.join(root, ".agents", "skills", n, "SKILL.md")), n);
+  assert.ok(!JSON.parse(r.stdout).actions.some((a: { kind: string }) => a.kind === "delete"), "nothing deleted");
+});

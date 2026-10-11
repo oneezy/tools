@@ -97,7 +97,9 @@ Commands
                    the sections of its upstream CHANGELOG.md between the two versions (a downgrade: the ones it undoes).
                    A source that selects by a list or a map gets one "not selected upstream: <names>" line naming every
                    skill folder under its root it leaves out (also with --json and --quiet, \`unselected\` in --json, a
-                   ::warning:: under GitHub Actions; never an exit code). "skills": "*" takes every one instead.
+                   ::warning:: under GitHub Actions; never an exit code). "skills": "*" takes every one instead, except
+                   a new name another source or an own skill already has: left out and named the same way
+                   (\`shadowed\`). Under --json every conflict is printed on stderr too.
                    Never writes skills-sync.json
   refresh          the same as update (kept for scripts and CI); refresh --frozen installs the lock as it is
   versions <source>
@@ -563,6 +565,7 @@ function runUpdate(lib: Library, args: Args, log: (m: string) => void, report: R
     config: r.config,
     gone: r.gone,
     unselected: r.unselected,
+    shadowed: r.shadowed,
     unlocked: r.unlocked,
     problems: r.problems,
   });
@@ -627,6 +630,13 @@ function reportRefresh(
       `skills-sync ${args.command}`,
       `${id}: not selected upstream: ${names.join(", ")} (select them in ${path.basename(lib.configFile)}, or take every skill under the root with "skills": "*")`,
     );
+  for (const [id, names] of bySource(r.shadowed))
+    warn(
+      `skills-sync ${args.command}`,
+      `${id}: not taken from upstream, the name is already another's: ${names.map((n) => `${n} (${r.shadowedBy[`${id}:${n}`]})`).join(", ")}; give each a "rename" to take it`,
+    );
+  // text output prints every conflict with the file actions; --json would carry them only in its actions
+  if (args.json) for (const a of r.report.conflicts()) warn(`skills-sync ${args.command}`, line(a).trim());
   const gone = r.gone.map((g) => g.split(":")[1]);
   const remembered = [...new Set([...unavailable, ...gone])];
   if (remembered.length && !args.quiet)
@@ -755,6 +765,7 @@ function runAdd(lib: Library, args: Args, log: (m: string) => void, report: Repo
     updated: res.updated,
     gone: res.gone,
     unselected: res.unselected,
+    shadowed: res.shadowed,
     unlocked: res.unlocked,
     problems: res.problems,
   });
