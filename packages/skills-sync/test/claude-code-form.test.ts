@@ -7,7 +7,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
 import { afterAll, afterEach, beforeAll, test } from "vite-plus/test";
-import { isLink, lexists } from "../src/fs.js";
+import { isLink, lexists, linkTarget } from "../src/fs.js";
 import { startFakeGithub, type FakeGithub } from "./fixtures/fake-github/fake-github.mjs";
 import {
   cli,
@@ -16,6 +16,8 @@ import {
   libraryCopy,
   looseLink,
   names,
+  oldLibraryLink,
+  oldLocalFile,
   pretendMachine,
   skillFolder,
   snapshot,
@@ -292,10 +294,7 @@ test("a plugin of the same name from another marketplace, and an account plugin 
   assert.deepEqual(status.harnesses["claude-code"].duplicates, [
     {
       skill: "design-critique",
-      in: [
-        "design@synced",
-        `loose link -> ${path.join(m.base, "old-library", ".agents", "skills", "design-critique")}`,
-      ],
+      in: ["design@synced", `loose link -> ${linkTarget(link)!}`],
     },
     { skill: "oneezy-status", in: ["oneezy@synced", "oneezy@elsewhere"] },
   ]);
@@ -384,9 +383,9 @@ test("--plan lists every removal and changes nothing: no plugin command that wri
   assert.equal(r.status, 0, r.stderr);
   assert.deepEqual(snapshot(m.home), before);
   assert.equal(r.calls.filter(pluginWrite).length, 0, JSON.stringify(r.calls));
-  // a plan may still ask claude read-only questions; here its plugin and marketplace lists
+  // a plan may still ask claude read-only questions; here whether the marketplace is registered
   assert.ok(
-    r.calls.some((c) => c.includes("list")),
+    r.calls.some((c) => JSON.stringify(c) === JSON.stringify(["claude", "plugin", "marketplace", "list", "--json"])),
     JSON.stringify(r.calls),
   );
   const planned = actions(r);
@@ -464,3 +463,27 @@ test("GitHub unreachable: nothing is compared or removed, one note says so besid
   );
   assert.match(actions(r)[0].note ?? "", /^latest release not read: /);
 });
+
+// The old run's WSL fan-out spawns wsl.exe by name: on Linux a shim of that name in the pretend machine's bin records
+// the command line; on Windows the real wsl.exe in System32 would win the lookup, so the check stays off there.
+test.skipIf(process.platform === "win32")(
+  "on a PC with a library and a remembered WSL distro, the old run inside the distro is told which harnesses it serves, never Claude Code",
+  async () => {
+    const m = machine({ harnesses: ["claude-code", "codex"], clis: ["claude", "codex"] });
+    oldLibraryLink(m);
+    oldLocalFile(m, { wsl: ["ubuntu"] });
+    const log = path.join(m.base, "wsl.log");
+    const shim = path.join(m.bin, "wsl.exe");
+    fs.writeFileSync(shim, `#!/bin/sh\nprintf '%s\\n' "$@" > "${log}"\n`);
+    fs.chmodSync(shim, 0o755);
+    const r = await cli(m, []);
+    assert.equal(r.status, 0, r.stderr + r.stdout);
+    assert.ok(fs.existsSync(log), "wsl.exe was not run");
+    const argv = fs.readFileSync(log, "utf8").trimEnd().split("\n");
+    assert.deepEqual(argv.slice(0, 5), ["-d", "ubuntu", "--", "bash", "-lic"]);
+    const command = argv.slice(5).join("\n");
+    assert.ok(command.includes(" --agents codex "), command);
+    assert.ok(!command.includes("claude-code"), command);
+    assert.equal(lexists(path.join(m.claudeHome, "skills")), false);
+  },
+);

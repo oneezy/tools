@@ -128,14 +128,23 @@ export const claudeCode: FormFn = (release, state, _machine, { plan }) => {
   if (mine.length && mine.every((p) => gone.has(`${p.id}@${p.marketplace}`)))
     out.push(...marketplace(state, run, plan));
 
+  // claude listed fine and not one account plugin: the sync itself is off, not a plugin (a token or API-key sign-in,
+  // syncClaudeAiPlugins: false, a Claude Code older than 2.1.273), so one line, not one per plugin
+  if (!state.synced.length)
+    out.push({
+      kind: "note",
+      path: state.harness.name,
+      note: "claude lists no account plugins; check it is logged in with the claude.ai account and that syncClaudeAiPlugins is not off",
+    });
   // what the account does not deliver yet keeps whatever it has today; switching it on is a click at claude.ai
-  for (const id of Object.keys(release.plugins).sort())
-    if (!delivered.has(id))
-      out.push({
-        kind: "note",
-        path: state.harness.name,
-        note: `${id}: not delivered by the claude.ai account yet; switch it on at claude.ai (Customize > Plugins), then sync again`,
-      });
+  else
+    for (const id of Object.keys(release.plugins).sort())
+      if (!delivered.has(id))
+        out.push({
+          kind: "note",
+          path: state.harness.name,
+          note: `${id}: not delivered by the claude.ai account yet; switch it on at claude.ai (Customize > Plugins), then sync again`,
+        });
   return out;
 };
 
