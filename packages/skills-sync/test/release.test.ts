@@ -5,6 +5,7 @@ import { spawnSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import { test } from "vite-plus/test";
+import { VERSION } from "../src/version.js";
 
 const CLI = path.resolve(import.meta.dirname, "..", "dist", "src", "cli.js");
 /** The package's own folder, wherever the workspace keeps it: two levels above the compiled tests. */
@@ -19,11 +20,11 @@ function cli(...args: string[]): { status: number | null; stdout: string; stderr
   return spawnSync(process.execPath, [CLI, ...args], { encoding: "utf8", cwd: PACKAGE });
 }
 
-test("the package is 0.7.6 and --help opens with that version: the banner and package.json never differ", () => {
-  assert.equal(manifest.version, "0.7.6");
+test("package.json, src/version.ts and the --help banner carry one version and never differ", () => {
+  assert.equal(manifest.version, VERSION);
   const r = cli("--help");
   assert.equal(r.status, 0);
-  assert.equal(r.stdout.split("\n")[0], "skills-sync 0.7.6");
+  assert.equal(r.stdout.split("\n")[0], `skills-sync ${VERSION}`);
 });
 
 test("--help lists every command and every flag of build, check, update (refresh), versions and add beside the 0.2.0 ones; an unknown option exits 2 with the same help", () => {
