@@ -14,7 +14,7 @@ import { LOCAL_NAME, migrateAnswers, readLocal, writeLocal, type LinkMode, type 
 import { gitExclude, isDir, isLink, lexists, linkMode, linkTarget, real, samePath, setLinkMode } from "./fs.js";
 import { runBranches } from "./commands/branches.js";
 import { runStatus } from "./commands/status.js";
-import { runSync, syncFacts, type SyncResult } from "./commands/sync.js";
+import { BUILT_FORMS, runSync, syncFacts, type SyncResult } from "./commands/sync.js";
 import { isCloud } from "./machine.js";
 import { detected, harnessTable, type Harness } from "./harnesses.js";
 import { plugins, removeOwned, pluginDependency, type Form, type Owned } from "./install.js";
@@ -579,10 +579,11 @@ async function main(): Promise<void> {
   const choices = await decide(args, local, lib, table, cwd, interactive);
   if (!choices) return p.cancel("nothing changed");
   if (!args.plan) saveLocal(lib.root, choices);
-  // until #154: Claude Code's form is the account plugins and Hermes's the plugins from GitHub (ADR-0007), which the
-  // machine sync above served; the old run would put the tool's plugins and links back there, so it serves the others only
+  // until #153 and #154: a harness whose form the machine sync above built (Claude Code's account plugins, Codex's
+  // plugins from GitHub) is its alone; the old run would put the tool's plugins and links back there, so it serves the
+  // other harnesses only. The answers saved above remember every harness all the same
   if (machineSync) {
-    choices.agents = choices.agents.filter((h) => h.id !== "claude-code" && h.id !== "hermes");
+    choices.agents = choices.agents.filter((h) => !BUILT_FORMS.has(h.id));
     if (!choices.agents.length) return printReport(setup, args, { entrypoints: [] });
   }
 

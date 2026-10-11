@@ -4,7 +4,7 @@
 // helpers lay down what a machine may have before a run: account plugins, tool-installed plugins, loose links, real
 // skill folders, an old ~/.skills-sync link, a hook entry, a global block. Tests assert only what a user sees: files
 // and links, the fake CLIs' calls, the fake GitHub's requests, printed output, --json, exit codes.
-import { spawn } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import fs from "node:fs";
 import os from "node:os";
@@ -97,8 +97,9 @@ export function pretendMachine(options: MachineOptions = {}): PretendMachine {
     HERMES_HOME: hermesHome,
     XDG_CONFIG_HOME: path.join(home, ".config"),
     FAKE_HARNESS_LOG: path.join(base, "calls.log"),
-    // the pretend GitHub checkouts the fake hermes clones from: <owner>/<repo>/<commit>/<subdir> (see hermesSource)
-    FAKE_HERMES_GITHUB: path.join(base, "github"),
+    // the pretend GitHub checkouts the fake hermes clones from: <owner>/<repo>/<commit>/<subdir> (see hermesSource);
+    // apart from the fake codex's FAKE_HARNESS_GITHUB, whose checkouts are <owner>/<repo> at one revision
+    FAKE_HERMES_GITHUB: path.join(base, "github-hermes"),
     // a machine with no GitHub reachable points at a port nothing listens on
     SKILLS_SYNC_GITHUB_API: github?.url ?? "http://127.0.0.1:9",
     ...options.env,
@@ -431,12 +432,118 @@ export function oldLocalFile(m: PretendMachine, local: Record<string, unknown>):
 }
 
 /**
+ * The pretend GitHub the fake codex clones a marketplace from: <base>/github/<owner>/<repo> is a checkout of the
+ * library at `release`, with the Codex catalog (named `marketplace`), every plugin's files, the config that names it
+ * as the library (so a link into it is a library copy) and `.git-revision` = the release's commit, so a newer release
+ * laid down here is a moved remote for `codex plugin marketplace upgrade`. Returns the checkout.
+ */
+export function githubClone(
+  m: PretendMachine,
+  release: FixtureRelease,
+  repo = "oneezy/skills",
+  marketplace = "oneezy-skills",
+): string {
+  const [owner, name] = repo.split("/");
+  const github = path.join(m.base, "github");
+  const dir = path.join(github, owner, name);
+  fs.rmSync(dir, { recursive: true, force: true });
+  const plugins = Object.keys(release.plugins)
+    .sort()
+    .map((id) => ({
+      name: id,
+      source: `./plugins/${id}`,
+      policy: { installation: "AVAILABLE", authentication: "ON_USE" },
+    }));
+  write(
+    path.join(dir, ".agents", "plugins", "marketplace.json"),
+    JSON.stringify({ name: marketplace, interface: { displayName: repo }, plugins }, null, 2) + "\n",
+  );
+  for (const [id, p] of Object.entries(release.plugins))
+    for (const [rel, bytes] of p.files) write(path.join(dir, "plugins", id, ...rel.split("/")), bytes);
+  write(path.join(dir, "skills-sync.json"), JSON.stringify({ version: 1, library: { owner, name } }, null, 2) + "\n");
+  write(path.join(dir, ".git-revision"), `${release.commit}\n`);
+  m.env.FAKE_HARNESS_GITHUB = github;
+  return dir;
+}
+
+/**
+ * A checkout of the library somewhere on the machine (default: <base>/checkout), as far as the tool tells one: the
+ * config naming `repo` as the library. A link into it is a library copy. Returns the folder.
+ */
+export function libraryCheckout(
+  m: PretendMachine,
+  dir = path.join(m.base, "checkout"),
+  repo = "oneezy/skills",
+): string {
+  const [owner, name] = repo.split("/");
+  write(path.join(dir, "skills-sync.json"), JSON.stringify({ version: 1, library: { owner, name } }, null, 2) + "\n");
+  return dir;
+}
+
+/**
+ * A real folder in the harness's user skills folder (or `dir`) holding the release's own bytes of the skill's
+ * SKILL.md: the copy an older sync or Codex's skill installer left. Returns the folder.
+ */
+export function releaseCopy(
+  m: PretendMachine,
+  harness: HarnessId,
+  name: string,
+  release: FixtureRelease,
+  dir = userSkills(m, harness),
+): string {
+  const file = `skills/${name}/SKILL.md`;
+  const plugin = Object.values(release.plugins).find((p) => p.files.has(file));
+  if (!plugin) throw new Error(`${name}: no plugin of ${release.tag} carries it`);
+  const folder = path.join(dir, name);
+  write(path.join(folder, "SKILL.md"), plugin.files.get(file)!);
+  return folder;
+}
+
+/** One of Codex's own bundled skills, ~/.codex/skills/.system/<name>: Codex's, never the tool's. Returns the folder. */
+export function systemSkill(m: PretendMachine, name: string): string {
+  const folder = path.join(codexLegacySkills(m), ".system", name);
+  write(path.join(folder, "SKILL.md"), skillMd(name));
+  return folder;
+}
+
+/**
+ * A fake CLI run directly on the pretend machine, as a user would at a prompt (`codex plugin list --json` after a
+ * sync): its exit code, output and the JSON it printed. Not logged as one of the tool's calls.
+ */
+export function fakeCli(
+  m: PretendMachine,
+  host: CliName,
+  args: string[],
+): { status: number | null; stdout: string; json: Record<string, unknown> | null } {
+  const r = spawnSync(process.execPath, [FAKE_HARNESS, host, ...args], {
+    encoding: "utf8",
+    env: { ...process.env, ...m.env, FAKE_HARNESS_LOG: "" },
+  });
+  let json: Record<string, unknown> | null = null;
+  try {
+    json = JSON.parse(r.stdout);
+  } catch {
+    /* text, or a failure the caller reads from status */
+  }
+  return { status: r.status, stdout: r.stdout, json };
+}
+
+/** Switch a plugin the fake codex has installed on or off, as the user would through Codex. */
+export function codexPluginEnabled(m: PretendMachine, id: string, enabled: boolean): void {
+  const file = path.join(m.codexHome, "fake-harness.json");
+  const state = JSON.parse(fs.readFileSync(file, "utf8"));
+  if (!state.plugins[id]) throw new Error(`${id}: not installed on the fake codex`);
+  state.plugins[id].enabled = enabled;
+  write(file, JSON.stringify(state, null, 2));
+}
+
+/**
  * The release's Hermes renderings as GitHub would serve them to `hermes plugins install owner/repo/dist/hermes/<id>
- * --ref <commit>`: <base>/github/<owner>/<repo>/<commit>/dist/hermes/<id>/ for every plugin of the release, built from
+ * --ref <commit>`: <base>/github-hermes/<owner>/<repo>/<commit>/dist/hermes/<id>/ for every plugin of the release, built from
  * the fixture's package files exactly as build does (renderHermes). Returns the checkout folder.
  */
 export function hermesSource(m: PretendMachine, release: FixtureRelease, repo = "oneezy/skills"): string {
-  const checkout = path.join(m.base, "github", ...repo.split("/"), release.commit);
+  const checkout = path.join(m.env.FAKE_HERMES_GITHUB, ...repo.split("/"), release.commit);
   for (const [id, p] of Object.entries(release.plugins))
     for (const [rel, bytes] of renderHermes(p.files))
       write(path.join(checkout, ...HERMES_PATH.split("/"), id, ...rel.split("/")), bytes);
