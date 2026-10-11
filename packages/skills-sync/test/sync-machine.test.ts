@@ -132,17 +132,18 @@ test("sync on a machine with no library writes the skills block into both global
     r.stdout,
   );
   assert.equal(lines.at(-1), "2 changed, 0 already right, 0 left alone");
-  // Claude Code's form is the account plugins: with none delivered, each of the release's plugins is a manual step
-  for (const id of ["matt-pocock", "oneezy", "play"])
-    assert.ok(
-      lines.some(
-        (l) =>
-          l.startsWith(". note") &&
-          l.includes("Claude Code") &&
-          l.includes(`${id}: not delivered by the claude.ai account yet; switch it on at claude.ai`),
-      ),
-      r.stdout,
-    );
+  // Claude Code's form is the account plugins: claude lists none here, which is one line about the sign-in, not one
+  // manual step per plugin of the release
+  assert.ok(
+    lines.some(
+      (l) =>
+        l.startsWith(". note") &&
+        l.includes("Claude Code") &&
+        l.includes("claude lists no account plugins; check it is logged in with the claude.ai account"),
+    ),
+    r.stdout,
+  );
+  assert.ok(!r.stdout.includes("not delivered"), r.stdout);
   // the other forms are named, not acted on, until their tickets land
   assert.ok(
     lines.some((l) => l.startsWith(". note") && l.includes("Codex") && l.includes("form: plugins from GitHub")),

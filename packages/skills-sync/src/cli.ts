@@ -1153,6 +1153,10 @@ async function runOnce(lib: Library, c: Choices, args: Args, cwd: string, report
         d,
         lib.root,
         [
+          // the distro runs the published old flow, which knows no machine sync: name the harnesses this run serves,
+          // so it never touches Claude Code there either (until #154 deletes the fan-out)
+          "--agents",
+          c.agents.map((h) => h.id).join(","),
           ...(!args.entrypoints ? ["--no-entrypoints"] : []),
           ...(!args.remember ? ["--no-remember"] : []),
           ...(args.form ? [args.form === "plugin" ? "--plugins" : "--links"] : []),
