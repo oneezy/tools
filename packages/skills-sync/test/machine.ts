@@ -9,7 +9,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { isLink, linkTarget, makeLink } from "../src/fs.js";
-import type { FakeGithub } from "./fixtures/fake-github/fake-github.mjs";
+import { fixtureRelease, type FakeGithub } from "./fixtures/fake-github/fake-github.mjs";
 
 const CLI = path.resolve(import.meta.dirname, "..", "dist", "src", "cli.js");
 const FAKE_HARNESS = path.resolve(import.meta.dirname, "fixtures", "fake-harness", "fake-harness.mjs");
@@ -118,19 +118,12 @@ export async function cli(
   const pathKey = Object.keys(env).find((k) => k.toUpperCase() === "PATH") ?? "PATH";
   for (const k of ["CLAUDE_CODE_REMOTE", "SKILLS_REPO", "GITHUB_TOKEN", "GH_TOKEN", "NODE_USE_ENV_PROXY"])
     delete env[k];
+  // only the fake CLIs; on Windows the .cmd shims still run, because the shell comes from ComSpec, not PATH
   env[pathKey] = m.bin;
   Object.assign(env, m.env, extra);
   if (fs.existsSync(m.log)) fs.rmSync(m.log);
   const before = m.github?.requests.length ?? 0;
-  const r = await new Promise<{ status: number | null; stdout: string; stderr: string }>((resolve, reject) => {
-    const child = spawn(process.execPath, [CLI, ...args], { env, cwd, stdio: ["ignore", "pipe", "pipe"] });
-    let stdout = "";
-    let stderr = "";
-    child.stdout.setEncoding("utf8").on("data", (d: string) => (stdout += d));
-    child.stderr.setEncoding("utf8").on("data", (d: string) => (stderr += d));
-    child.on("error", reject);
-    child.on("close", (status) => resolve({ status, stdout, stderr }));
-  });
+  const r = await spawnCli(args, env, cwd);
   const calls = fs.existsSync(m.log)
     ? fs
         .readFileSync(m.log, "utf8")
@@ -152,6 +145,26 @@ export async function cli(
     calls,
     requests: m.github ? m.github.requests.slice(before) : [],
   };
+}
+
+/**
+ * The built CLI as a child process, awaited: a test that stands a server in its own process (the fake GitHub) must
+ * not block its event loop while the CLI talks to it.
+ */
+export function spawnCli(
+  args: string[],
+  env: NodeJS.ProcessEnv,
+  cwd: string,
+): Promise<{ status: number | null; stdout: string; stderr: string }> {
+  return new Promise((resolve, reject) => {
+    const child = spawn(process.execPath, [CLI, ...args], { env, cwd, stdio: ["ignore", "pipe", "pipe"] });
+    let stdout = "";
+    let stderr = "";
+    child.stdout.setEncoding("utf8").on("data", (d: string) => (stdout += d));
+    child.stderr.setEncoding("utf8").on("data", (d: string) => (stderr += d));
+    child.on("error", reject);
+    child.on("close", (status) => resolve({ status, stdout, stderr }));
+  });
 }
 
 /** Every entry under `dir`, relative, links marked, so a test can say "nothing changed". */
@@ -179,6 +192,10 @@ function userSkills(m: PretendMachine, harness: HarnessId): string {
   return path.join(m.hermesHome, "skills");
 }
 
+function configDir(m: PretendMachine, harness: "claude-code" | "codex"): string {
+  return harness === "claude-code" ? m.claudeHome : m.codexHome;
+}
+
 /** Codex's deprecated user skills folder, still read by Codex. */
 export function codexLegacySkills(m: PretendMachine): string {
   return path.join(m.codexHome, "skills");
@@ -191,19 +208,16 @@ export interface PluginFiles {
   files?: Map<string, Buffer>;
 }
 
+/** The plugin's files on disk: a fixture release's bytes as they are, or the same shapes built for `version` and `skills`. */
 function writePlugin(dir: string, id: string, p: PluginFiles): void {
-  if (p.files) {
-    for (const [rel, bytes] of p.files) write(path.join(dir, ...rel.split("/")), bytes);
-    return;
-  }
-  const version = p.version ?? null;
-  write(path.join(dir, "plugin.json"), JSON.stringify({ name: id, ...(version ? { version } : {}) }, null, 2) + "\n");
-  write(path.join(dir, ".claude-plugin", "plugin.json"), JSON.stringify({ name: id }, null, 2) + "\n");
-  write(
-    path.join(dir, ".codex-plugin", "plugin.json"),
-    JSON.stringify({ name: id, ...(version ? { version } : {}), skills: "./skills/" }, null, 2) + "\n",
-  );
-  for (const s of p.skills ?? []) write(path.join(dir, "skills", s, "SKILL.md"), skillMd(s));
+  const files =
+    p.files ??
+    fixtureRelease({
+      number: 0,
+      commit: "0".repeat(40),
+      plugins: { [id]: { version: p.version ?? null, skills: p.skills ?? [] } },
+    }).plugins[id].files;
+  for (const [rel, bytes] of files) write(path.join(dir, ...rel.split("/")), bytes);
 }
 
 /**
@@ -259,11 +273,10 @@ export function installedPlugin(
   p: PluginFiles & { marketplace?: string; enabled?: boolean } = {},
 ): string {
   const marketplace = p.marketplace ?? "oneezy-skills";
-  const configDir = harness === "claude-code" ? m.claudeHome : m.codexHome;
   const root = path.join(m.base, "marketplaces", harness, marketplace);
   const dir = path.join(root, "plugins", id);
   writePlugin(dir, id, p);
-  const file = path.join(configDir, "fake-harness.json");
+  const file = path.join(configDir(m, harness), "fake-harness.json");
   const state = fs.existsSync(file) ? JSON.parse(fs.readFileSync(file, "utf8")) : { marketplaces: {}, plugins: {} };
   state.marketplaces[marketplace] = root;
   const skills = fs.existsSync(path.join(dir, "skills"))
@@ -316,8 +329,7 @@ export function oldLibraryLink(m: PretendMachine, target?: string): string {
  * ~/.codex/hooks.json. Other entries in the file are kept. Returns the file.
  */
 export function hookEntry(m: PretendMachine, harness: "claude-code" | "codex", command: string): string {
-  const file =
-    harness === "claude-code" ? path.join(m.claudeHome, "settings.json") : path.join(m.codexHome, "hooks.json");
+  const file = path.join(configDir(m, harness), harness === "claude-code" ? "settings.json" : "hooks.json");
   const settings = fs.existsSync(file) ? JSON.parse(fs.readFileSync(file, "utf8")) : {};
   settings.hooks ??= {};
   settings.hooks.SessionStart ??= [];
@@ -331,7 +343,7 @@ export function hookEntry(m: PretendMachine, harness: "claude-code" | "codex", c
  * markers skills-sync writes; text already in the file stays above it. Returns the file.
  */
 export function globalBlock(m: PretendMachine, harness: "claude-code" | "codex", id: string, body: string): string {
-  const file = harness === "claude-code" ? path.join(m.claudeHome, "CLAUDE.md") : path.join(m.codexHome, "AGENTS.md");
+  const file = path.join(configDir(m, harness), harness === "claude-code" ? "CLAUDE.md" : "AGENTS.md");
   const existing = fs.existsSync(file) ? fs.readFileSync(file, "utf8") : "";
   write(
     file,

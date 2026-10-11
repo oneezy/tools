@@ -210,6 +210,7 @@ test("account plugins from other marketplaces, tool-installed plugins and plugin
   installedPlugin(m, "claude-code", "foo", { version: "1.0.0", skills: ["foo-skill"], marketplace: "elsewhere" });
   installedPlugin(m, "codex", "oneezy", { version: "0.43.0", skills: ["oneezy-merge", "oneezy-status"] });
   installedPlugin(m, "codex", "matt-pocock", { version: "1.3.1", skills: ["grilling", "tdd"] });
+  installedPlugin(m, "codex", "play", { version: "0.43.0", skills: ["play-unslop"], enabled: false });
   const r = await cli(m, ["status", "--json"]);
   assert.equal(r.status, 1, r.stderr);
   const s = r.json as unknown as StatusJson;
@@ -240,9 +241,14 @@ test("account plugins from other marketplaces, tool-installed plugins and plugin
     [
       ["matt-pocock", "1.3.1", "1.3.1", true],
       ["oneezy", "0.43.0", "0.43.1", false],
+      ["play", "0.43.0", "0.43.0", false],
     ],
   );
-  assert.deepEqual(red(codex.lines), ["oneezy@oneezy-skills 0.43.0 (latest 0.43.1)"]);
+  // a disabled plugin loads nothing, whatever its version
+  assert.deepEqual(red(codex.lines), [
+    "oneezy@oneezy-skills 0.43.0 (latest 0.43.1)",
+    "play@oneezy-skills 0.43.0 installed but disabled",
+  ]);
   const text = await cli(m, ["status"]);
   assert.ok(
     text.stdout.includes("\n. 2 other plugins left alone: data@synced (anthropic-plugin-directory), foo@elsewhere\n"),
@@ -250,10 +256,43 @@ test("account plugins from other marketplaces, tool-installed plugins and plugin
   );
   assert.ok(
     text.stdout.includes(
-      "\nCodex  form: plugins from GitHub\n= matt-pocock@oneezy-skills 1.3.1 (latest 1.3.1)\n! oneezy@oneezy-skills 0.43.0 (latest 0.43.1)\n",
+      "\nCodex  form: plugins from GitHub\n= matt-pocock@oneezy-skills 1.3.1 (latest 1.3.1)\n! oneezy@oneezy-skills 0.43.0 (latest 0.43.1)\n! play@oneezy-skills 0.43.0 installed but disabled\n",
     ),
     text.stdout,
   );
+});
+
+test("Hermes keeps the loose form: nothing in its skills folder is red, links and folders there are counted and green", async () => {
+  const m = machine({ harnesses: ["hermes"], clis: [] });
+  const empty = await cli(m, ["status"]);
+  assert.equal(empty.status, 1, empty.stderr);
+  assert.equal(
+    empty.stdout,
+    [
+      "latest: oneezy/skills release-17 (1717171)",
+      "Hermes  form: loose skills",
+      "! no skills (latest release-17)",
+      "status: 1 red line",
+      "",
+    ].join("\n"),
+  );
+  const link = looseLink(m, "hermes", "grilling");
+  const folder = skillFolder(m, "hermes", "oneezy-status");
+  const r = await cli(m, ["status", "--json"]);
+  assert.equal(r.status, 0, r.stdout + r.stderr);
+  const hermes = (r.json as unknown as StatusJson).harnesses.hermes;
+  assert.equal(hermes.form, "loose");
+  assert.deepEqual(
+    hermes.loose.map((l) => [l.name, l.target]),
+    [["grilling", linkTarget(link)!]],
+  );
+  assert.deepEqual(hermes.folders, [{ name: "oneezy-status", path: folder }]);
+  assert.deepEqual(hermes.duplicates, []);
+  assert.deepEqual(
+    hermes.lines.map((l) => [l.ok, l.text]),
+    [[true, "1 loose link, 1 skill folder"]],
+  );
+  assert.deepEqual(r.calls, []);
 });
 
 test("--quiet prints only the red lines under their harness and the summary; a green machine prints nothing", async () => {

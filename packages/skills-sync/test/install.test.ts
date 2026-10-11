@@ -1,8 +1,9 @@
 // The plugin form: sync installs a library's built plugins on Claude Code and Codex through their own commands,
 // verifies them, and only then drops the loose links of their skills; --links rolls back; unlink removes both forms;
-// status says which form each harness has. The harnesses are fake CLIs on PATH (fixtures/fake-harness), never the machine's own.
+// status compares what each harness has with the latest release (test/status.test.ts has the rest of it). The harnesses are
+// fake CLIs on PATH (fixtures/fake-harness), never the machine's own.
 import assert from "node:assert/strict";
-import { spawn, spawnSync } from "node:child_process";
+import { spawnSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -14,6 +15,7 @@ import { Library } from "../src/library.js";
 import { harnessTable } from "../src/harnesses.js";
 import { pluginDependency } from "../src/install.js";
 import { fixtureRelease, startFakeGithub, type FakeGithub } from "./fixtures/fake-github/fake-github.mjs";
+import { spawnCli } from "./machine.js";
 
 const CLI = path.resolve(import.meta.dirname, "..", "dist", "src", "cli.js");
 const FAKE = path.resolve(import.meta.dirname, "fixtures", "fake-harness", "fake-harness.mjs");
@@ -160,19 +162,7 @@ function envFor(extra: Record<string, string>): NodeJS.ProcessEnv {
  * asynchronously (a blocking spawn would never let the server answer).
  */
 async function statusJson(extra: Record<string, string> = {}): Promise<{ status: number | null; json: StatusJson }> {
-  const r = await new Promise<{ status: number | null; stdout: string; stderr: string }>((resolve, reject) => {
-    const child = spawn(process.execPath, [CLI, "status", "--json"], {
-      env: envFor(extra),
-      cwd: base,
-      stdio: ["ignore", "pipe", "pipe"],
-    });
-    let stdout = "";
-    let stderr = "";
-    child.stdout.setEncoding("utf8").on("data", (d: string) => (stdout += d));
-    child.stderr.setEncoding("utf8").on("data", (d: string) => (stderr += d));
-    child.on("error", reject);
-    child.on("close", (status) => resolve({ status, stdout, stderr }));
-  });
+  const r = await spawnCli(["status", "--json"], envFor(extra), base);
   assert.ok(r.stdout.startsWith("{"), r.stderr);
   return { status: r.status, json: JSON.parse(r.stdout) as StatusJson };
 }
