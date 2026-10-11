@@ -176,7 +176,8 @@ const claude: Driver = {
         ...(str(p.scope) ? { scope: p.scope as string } : {}),
       }));
   },
-  addMarketplace: (run, root) => (claudeWrite(run, ["plugin", "marketplace", "add"], [root]) ? { name: null } : null),
+  addMarketplace: (run, root) =>
+    claudeWrite(run, ["plugin", "marketplace", "add"], [root]) ? { name: null, alreadyAdded: false } : null,
   removeMarketplace: (run, name) => claudeWrite(run, ["plugin", "marketplace", "remove"], [name]),
   install: (run, id) => claudeWrite(run, ["plugin", "install"], [id, "--scope", "user"]),
   update: (run, id) => claudeWrite(run, ["plugin", "update"], [id, "--scope", "user"]),
@@ -382,17 +383,21 @@ export function codexPluginSkills(run: Run): Map<string, string[]> | null {
   return out;
 }
 
-/** What a marketplace add answered: the name the harness gave the marketplace (Codex says it; Claude Code does not). */
+/**
+ * What a marketplace add answered: the name the harness gave the marketplace (Codex says it; Claude Code does not) and
+ * whether it was registered from that source already (Codex: `alreadyAdded`, exit 0, nothing changed).
+ */
 export interface MarketplaceAdded {
   name: string | null;
+  alreadyAdded: boolean;
 }
 
 /** `codex plugin marketplace add <source> --json`: its answer when it worked, null when it failed (run.failure says why). */
 function codexMarketplaceAdd(run: Run, source: string): MarketplaceAdded | null {
   const r = run(["plugin", "marketplace", "add", source, "--json"]);
   if (!r.ok) return null;
-  const v = json(r.out) as { marketplaceName?: unknown } | null;
-  return { name: str(v?.marketplaceName) };
+  const v = json(r.out) as { marketplaceName?: unknown; alreadyAdded?: unknown } | null;
+  return { name: str(v?.marketplaceName), alreadyAdded: v?.alreadyAdded === true };
 }
 
 /**

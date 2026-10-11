@@ -23,6 +23,7 @@ import {
   destroy,
   fakeCli,
   githubClone,
+  hooksFile,
   installedPlugin,
   libraryCheckout,
   releaseCopy,
@@ -164,7 +165,8 @@ test("on a machine with nothing installed, sync adds the marketplace from GitHub
     ),
     r.stdout,
   );
-  assert.equal(out.at(-1), "5 changed, 0 already right, 0 left alone");
+  // the block, the session hook, the marketplace, three plugins
+  assert.equal(out.at(-1), "6 changed, 0 already right, 0 left alone");
   // status agrees: current, nothing listed twice, exit 0
   const s = await cli(m, ["status", "--json"]);
   assert.equal(s.status, 0, s.stdout);
@@ -182,7 +184,7 @@ test("a second sync changes nothing: every plugin and the marketplace are skips,
   const before = snapshot(m.home);
   const r = await cli(m, []);
   assert.equal(r.status, 0, r.stderr);
-  assert.equal(lines(r).at(-1), "0 changed, 5 already right, 0 left alone");
+  assert.equal(lines(r).at(-1), "0 changed, 6 already right, 0 left alone");
   assert.deepEqual(r.calls.filter(mutating), []);
   assert.deepEqual(snapshot(m.home), before);
   const j = await cli(m, ["--json"]);
@@ -200,24 +202,26 @@ test("a second sync changes nothing: every plugin and the marketplace are skips,
   assert.deepEqual(installed(m), ALL_17);
 });
 
+/** Two releases of a small library: oneezy moves 0.43.1 -> 0.43.2 and the unversioned design gains a skill. */
+const older = fixtureRelease({
+  number: 17,
+  commit: "1717171717171717171717171717171717171717",
+  plugins: {
+    oneezy: { version: "0.43.1", skills: ["oneezy-merge", "oneezy-status"] },
+    design: { version: null, skills: ["frontend-design"] },
+  },
+});
+const newer = fixtureRelease({
+  number: 18,
+  previous: "release-17",
+  commit: "1818181818181818181818181818181818181818",
+  plugins: {
+    oneezy: { version: "0.43.2", skills: ["oneezy-merge", "oneezy-status"] },
+    design: { version: null, skills: ["frontend-design", "slop-check"] },
+  },
+});
+
 test("a newer release triggers one marketplace upgrade for the harness: a plugin behind by version, and an unversioned one behind by its skill set, both follow it", async () => {
-  const older = fixtureRelease({
-    number: 17,
-    commit: "1717171717171717171717171717171717171717",
-    plugins: {
-      oneezy: { version: "0.43.1", skills: ["oneezy-merge", "oneezy-status"] },
-      design: { version: null, skills: ["frontend-design"] },
-    },
-  });
-  const newer = fixtureRelease({
-    number: 18,
-    previous: "release-17",
-    commit: "1818181818181818181818181818181818181818",
-    plugins: {
-      oneezy: { version: "0.43.2", skills: ["oneezy-merge", "oneezy-status"] },
-      design: { version: null, skills: ["frontend-design", "slop-check"] },
-    },
-  });
   const own = await startFakeGithub({ repo: "oneezy/skills", releases: [older], contents: {} });
   try {
     const m = machine({ github: own }, older);
@@ -247,6 +251,74 @@ test("a newer release triggers one marketplace upgrade for the harness: a plugin
     assert.equal(again.status, 0, again.stderr);
     assert.deepEqual(again.calls.filter(mutating), []);
     assert.ok(lines(again).at(-1)?.startsWith("0 changed"), again.stdout);
+  } finally {
+    await own.close();
+  }
+});
+
+test("a plugin ahead of the latest release (the marketplace snapshot is main) is a note, not an upgrade: its skills verify it and the sync converges", async () => {
+  // GitHub's latest release is 17; main, which the marketplace snapshots, already carries release-18's plugins
+  const own = await startFakeGithub({ repo: "oneezy/skills", releases: [older], contents: {} });
+  try {
+    const m = machine({ github: own }, newer);
+    oldSkillsSync(m);
+    const link = looseLink(m, "codex", "oneezy-status");
+    const first = await cli(m, ["--json"]);
+    assert.equal(first.status, 0, first.stderr + first.stdout);
+    assert.deepEqual(installed(m), [
+      ["design@oneezy-skills", null, true, "git"],
+      ["oneezy@oneezy-skills", "0.43.2", true, "git"],
+    ]);
+    assert.equal(lexists(link), false, "verified by its skills, so the copy went");
+    const r = await cli(m, ["--json"]);
+    assert.equal(r.status, 0, r.stderr + r.stdout);
+    assert.deepEqual(r.calls.filter(mutating), [], JSON.stringify(r.calls));
+    const note = actions(r).find((a) => a.path === "Codex: plugin oneezy@oneezy-skills");
+    assert.deepEqual(
+      [note?.kind, note?.note],
+      ["note", "oneezy 0.43.2 is ahead of the latest release (0.43.1); nothing to do"],
+    );
+    assert.deepEqual(
+      actions(r).filter((a) => a.kind === "conflict"),
+      [],
+    );
+  } finally {
+    await own.close();
+  }
+});
+
+test("errors the marketplace upgrade reports are a conflict: the plugin it could not reinstall stays behind, unverified, with its copies", async () => {
+  const own = await startFakeGithub({ repo: "oneezy/skills", releases: [older], contents: {} });
+  try {
+    const m = machine({ github: own }, older);
+    assert.equal((await cli(m, [])).status, 0);
+    oldSkillsSync(m);
+    const link = looseLink(m, "codex", "oneezy-status");
+    own.addRelease(newer);
+    githubClone(m, newer);
+    const r = await cli(m, ["--json"], { FAKE_HARNESS_UPGRADE_ERRORS: "oneezy@oneezy-skills" });
+    assert.equal(r.status, 1, r.stderr);
+    assert.equal(calls(r, UPGRADE), 1, JSON.stringify(r.calls));
+    assert.deepEqual(
+      actions(r)
+        .filter((a) => a.kind === "conflict")
+        .map((a) => [a.path, a.note]),
+      [
+        [
+          `Codex: marketplace ${MKT}`,
+          "codex plugin marketplace upgrade reported: Error: failed to install plugin `oneezy@oneezy-skills`: fixture upgrade denied",
+        ],
+        [
+          "Codex: plugin oneezy@oneezy-skills",
+          "installed but not verified (installed 0.43.1, the release has 0.43.2); its copies stay",
+        ],
+      ],
+    );
+    assert.ok(isLink(link));
+    assert.deepEqual(installed(m), [
+      ["design@oneezy-skills", null, true, "git"],
+      ["oneezy@oneezy-skills", "0.43.1", true, "git"],
+    ]);
   } finally {
     await own.close();
   }
@@ -346,34 +418,45 @@ test("each skill name is listed once afterwards: status shows no duplicate, no l
   assert.deepEqual(again.calls.filter(mutating), []);
 });
 
-test(".system is never listed or touched; a folder that is not the library's stays and is listed adopt-or-delete, so is a link to somewhere else", async () => {
+test(".system and dot-named folders are never listed or touched; a folder that is not the library's stays and is listed adopt-or-delete, so is a link to somewhere else", async () => {
   const m = machine();
   const system = systemSkill(m, "skill-installer");
+  const hidden = skillFolder(m, "codex", ".hidden", codexLegacySkills(m));
   const own = skillFolder(m, "codex", "my-own", codexLegacySkills(m));
   const mine = skillFolder(m, "codex", "mine-too");
   // a library skill's name, but not the library's bytes: Justin's to judge
   const edited = skillFolder(m, "codex", "tdd", codexLegacySkills(m));
+  // the release's files and one more of Justin's: not the library's copy either
+  const extra = releaseCopy(m, "codex", "grilling", r17, codexLegacySkills(m));
+  fs.writeFileSync(path.join(extra, "my-notes.md"), "mine\n");
   const elsewhere = looseLink(m, "codex", "elsewhere", path.join(m.base, "elsewhere", "elsewhere"));
   const systemBefore = snapshot(system);
+  const hiddenBefore = snapshot(hidden);
   const r = await cli(m, ["--json"]);
   assert.equal(r.status, 0, r.stderr);
-  for (const f of [own, mine, edited]) assert.ok(fs.existsSync(path.join(f, "SKILL.md")), f);
+  for (const f of [own, mine, edited, extra]) assert.ok(fs.existsSync(path.join(f, "SKILL.md")), f);
+  assert.ok(fs.existsSync(path.join(extra, "my-notes.md")));
   assert.ok(isLink(elsewhere));
   assert.deepEqual(snapshot(system), systemBefore);
-  assert.ok(!JSON.stringify(r.json).includes(".system"), r.stdout);
-  const notes = actions(r).filter((a) => a.kind === "note" && !a.path.startsWith("Codex"));
+  assert.deepEqual(snapshot(hidden), hiddenBefore);
+  assert.ok(!JSON.stringify(r.json).includes(".system") && !JSON.stringify(r.json).includes(".hidden"), r.stdout);
+  // the notes about Codex's skill folders: not the form's own lines, not the session hook's trust step
+  const notes = actions(r).filter(
+    (a) => a.kind === "note" && !a.path.startsWith("Codex") && a.path !== hooksFile(m, "codex"),
+  );
   const byPath = (a: [string, string | undefined], b: [string, string | undefined]) => a[0].localeCompare(b[0]);
   assert.deepEqual(
     notes.map((a): [string, string | undefined] => [a.path, a.note]).sort(byPath),
     (
       [
         [edited, "not from the library; adopt it into oneezy/skills or delete it by hand"],
+        [extra, "not from the library; adopt it into oneezy/skills or delete it by hand"],
         [
           elsewhere,
           `links to ${path.join(m.base, "elsewhere", "elsewhere")}, not a library copy; adopt it into oneezy/skills or delete it by hand`,
         ],
-        [mine, "not from the library; adopt it into oneezy/skills or delete it by hand"],
-        [own, "not from the library; adopt it into oneezy/skills or delete it by hand"],
+        [mine, "not in the latest release; adopt it into oneezy/skills or delete it by hand"],
+        [own, "not in the latest release; adopt it into oneezy/skills or delete it by hand"],
       ] as [string, string | undefined][]
     ).sort(byPath),
   );
@@ -386,7 +469,7 @@ test(".system is never listed or touched; a folder that is not the library's sta
   assert.equal(text.status, 0);
   assert.equal(
     lines(text).filter((l) => l.startsWith(". note") && l.includes("adopt it into oneezy/skills")).length,
-    4,
+    5,
   );
   assert.ok(lines(text).at(-1)?.startsWith("0 changed"), text.stdout);
 });
@@ -400,6 +483,16 @@ test("an old marketplace of the library's name registered from a local folder is
     ),
   );
   assert.deepEqual(marketplaces(m), [[MKT, "local", root]]);
+  // the fake answers as codex 0.162.1: another local source of the same name is refused until the old one goes
+  const refused = fakeCli(m, "codex", [
+    "plugin",
+    "marketplace",
+    "add",
+    path.join(m.base, "github", "oneezy", "skills"),
+    "--json",
+  ]);
+  assert.equal(refused.status, 1);
+  assert.ok(refused.stderr.includes("already added from a different source"), refused.stderr);
   const r = await cli(m, ["--json"]);
   assert.equal(r.status, 0, r.stderr);
   assert.deepEqual(
@@ -459,6 +552,28 @@ test("a plugin of the same name from another marketplace is left as it is and no
   );
 });
 
+test("when codex cannot list its marketplaces, the add is asked again and answers already added: a skip, nothing changes", async () => {
+  const m = machine();
+  const env = { FAKE_HARNESS_FAIL_MARKETPLACE_LIST: "codex" };
+  const first = await cli(m, [], env);
+  assert.equal(first.status, 0, first.stderr);
+  assert.deepEqual(installed(m), ALL_17);
+  const r = await cli(m, ["--json"], env);
+  assert.equal(r.status, 0, r.stderr);
+  assert.deepEqual(
+    r.calls.filter(mutating).map((c) => c.slice(1).join(" ")),
+    ["plugin marketplace add oneezy/skills --json"],
+  );
+  const a = actions(r).find((x) => x.path === `Codex: marketplace ${MKT}`);
+  assert.deepEqual([a?.kind, a?.note], ["skip", "from GitHub oneezy/skills (already registered)"]);
+  const text = await cli(m, [], env);
+  assert.equal(lines(text).at(-1), "0 changed, 6 already right, 0 left alone");
+  assert.deepEqual(installed(m), ALL_17);
+  // the fake answers as codex 0.162.1: the same source again is already added, exit 0
+  const again = fakeCli(m, "codex", ["plugin", "marketplace", "add", "oneezy/skills", "--json"]);
+  assert.deepEqual([again.status, again.json?.alreadyAdded], [0, true]);
+});
+
 test("--plan lists every action and changes nothing: no file, no link, no plugin command that writes", async () => {
   const m = machine();
   oldSkillsSync(m);
@@ -472,6 +587,8 @@ test("--plan lists every action and changes nothing: no file, no link, no plugin
     actions(r).map((a) => [a.kind, a.path]),
     [
       ["write", path.join(m.codexHome, "AGENTS.md")],
+      ["write", hooksFile(m, "codex")],
+      ["note", hooksFile(m, "codex")],
       ["install", `Codex: marketplace ${MKT}`],
       ["install", "Codex: plugin matt-pocock@oneezy-skills"],
       ["install", "Codex: plugin oneezy@oneezy-skills"],
@@ -486,7 +603,7 @@ test("--plan lists every action and changes nothing: no file, no link, no plugin
   assert.deepEqual(installed(m), []);
   assert.deepEqual(marketplaces(m), []);
   const text = await cli(m, ["--plan"]);
-  assert.equal(lines(text).at(-1), "plan: 7 would change, 0 already right, 0 left alone");
+  assert.equal(lines(text).at(-1), "plan: 8 would change, 0 already right, 0 left alone");
   assert.deepEqual(snapshot(m.home), before);
 });
 

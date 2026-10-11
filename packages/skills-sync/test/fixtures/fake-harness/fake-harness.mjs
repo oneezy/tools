@@ -12,6 +12,8 @@
 // moved and reinstalls every plugin from it; `plugin add` copies the plugin into <CODEX_HOME>/plugins/cache/<mkt>/<id>/
 // <version>; FAKE_HARNESS_FAIL_ADD=<ids> makes `plugin add` of those ids fail. The JSON shapes are the real CLI's.
 // FAKE_HARNESS_FAIL_LIST=<claude,codex> makes `plugin list` fail (a CLI that cannot list its plugins);
+// FAKE_HARNESS_FAIL_MARKETPLACE_LIST=<claude,codex> makes `plugin marketplace list` fail; FAKE_HARNESS_UPGRADE_ERRORS=<id,...>
+// makes Codex's `marketplace upgrade` leave those plugins as they are and report one error each (exit 0, as the CLI);
 // FAKE_HARNESS_FAIL_UNINSTALL=<id,...> makes `plugin uninstall <id>` (Codex: `plugin remove <id>`) fail for those ids.
 //
 // The third host is hermes (`hermes plugins ...`, hermes-agent v0.21.6 shapes). Its state is Hermes's own files under
@@ -133,6 +135,7 @@ if (args[0] === "plugin" && args.includes("--help")) {
 } else if (has(process.env.FAKE_HARNESS_OLD, host)) {
   fail(`unknown command ${args.join(" ")}`);
 } else if (cmd === "plugin marketplace list") {
+  if (has(process.env.FAKE_HARNESS_FAIL_MARKETPLACE_LIST, host)) fail("fixture marketplace list failed");
   const rows = Object.entries(state.marketplaces);
   out(
     host === "claude"
@@ -152,24 +155,29 @@ if (args[0] === "plugin" && args.includes("--help")) {
   }
   let root = path.resolve(words[3]);
   let source = { sourceType: "local", source: root };
+  let gh = null;
   if (host === "codex" && !fs.existsSync(root)) {
     // not a folder here: owner/repo (or a Git URL) on the pretend GitHub, snapshotted like the real CLI's git clone
-    const gh = githubClone(words[3]);
+    gh = githubClone(words[3]);
     if (!gh) fail(`Error: failed to clone https://github.com/${words[3].replace(/\.git$/, "")}.git`);
-    const name = catalog(gh.dir).name;
-    if (state.marketplaces[name]) {
-      out({ marketplaceName: name, installedRoot: state.marketplaces[name], alreadyAdded: true });
-      process.exit(0);
-    }
-    root = snapshotOf(name);
-    clone(gh.dir, root);
     // the revision is compared only by upgrade, so the first upgrade after an add re-clones (the real CLI does too)
     source = { sourceType: "git", source: `https://github.com/${gh.owner}/${gh.repo}.git`, revision: null };
   }
-  const name = catalog(root).name;
+  const name = catalog(gh ? gh.dir : root).name;
   if (host === "codex" && state.marketplaces[name]) {
-    out({ marketplaceName: name, installedRoot: state.marketplaces[name], alreadyAdded: true });
-    process.exit(0);
+    // as codex 0.162.1: the same source again is already added (exit 0, nothing changed); a Git source over a local
+    // registration replaces it in place; any other source of the name is refused until the old one is removed
+    const prev = sourceOf(name);
+    if (prev.sourceType === source.sourceType && prev.source === source.source) {
+      out({ marketplaceName: name, installedRoot: state.marketplaces[name], alreadyAdded: true });
+      process.exit(0);
+    }
+    if (!(prev.sourceType === "local" && source.sourceType === "git"))
+      fail(`Error: marketplace '${name}' is already added from a different source; remove it before adding this source`);
+  }
+  if (gh) {
+    root = snapshotOf(name);
+    clone(gh.dir, root);
   }
   state.marketplaces[name] = root;
   if (host === "codex") (state.sources ??= {})[name] = source;
@@ -192,6 +200,7 @@ if (args[0] === "plugin" && args.includes("--help")) {
   // snapshot and every plugin installed from it is reinstalled from the new snapshot
   const names = words[3] ? [words[3]] : Object.keys(state.marketplaces).filter((n) => sourceOf(n).sourceType === "git");
   const upgraded = [];
+  const errors = [];
   for (const name of names) {
     if (!state.marketplaces[name]) fail(`Error: marketplace \`${name}\` is not configured or installed`);
     const src = sourceOf(name);
@@ -206,13 +215,17 @@ if (args[0] === "plugin" && args.includes("--help")) {
     upgraded.push(state.marketplaces[name]);
     for (const [id, p] of Object.entries(state.plugins)) {
       if (!id.endsWith(`@${name}`)) continue;
+      if (has(process.env.FAKE_HARNESS_UPGRADE_ERRORS, id)) {
+        errors.push(`Error: failed to install plugin \`${id}\`: fixture upgrade denied`);
+        continue;
+      }
       const entry = catalog(state.marketplaces[name]).plugins.find((x) => x.name === id.slice(0, id.lastIndexOf("@")));
       if (!entry) continue; // no longer in the catalog: the cache stays as it was
       state.plugins[id] = codexInstall({ name: entry.name, mkt: name, dir: path.resolve(state.marketplaces[name], entry.source) }, p.enabled);
     }
   }
   save();
-  if (args.includes("--json")) out({ selectedMarketplaces: names, upgradedRoots: upgraded, errors: [] });
+  if (args.includes("--json")) out({ selectedMarketplaces: names, upgradedRoots: upgraded, errors });
   else for (const name of names) out(upgraded.includes(state.marketplaces[name]) ? `Upgraded marketplace \`${name}\`.` : `Marketplace \`${name}\` is already up to date.`);
 } else if (cmd === "plugin list") {
   if (has(process.env.FAKE_HARNESS_FAIL_LIST, host)) fail("fixture plugin list failed");

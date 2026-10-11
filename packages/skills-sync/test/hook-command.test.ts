@@ -38,8 +38,12 @@ afterEach(() => {
   gh.fixture.repos = {};
 });
 
+/**
+ * A machine with git checkouts, the fake claude on PATH and no codex: with a codex on PATH the sync inside `hook` would
+ * also install Codex's plugins from GitHub (test/codex-form.test.ts covers that form).
+ */
 function machine(options: Parameters<typeof pretendMachine>[0] = {}): PretendMachine {
-  const m = pretendMachine({ github: gh, git: true, ...options });
+  const m = pretendMachine({ github: gh, git: true, clis: ["claude"], ...options });
   machines.push(m);
   return m;
 }
