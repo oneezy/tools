@@ -38,9 +38,12 @@ try {
 
 const count = (n, what) => `${n} ${what}${n === 1 ? "" : "s"}`;
 const sum = (key) => report.repos.reduce((n, r) => n + r[key].length, 0);
-const [del, tag] = report.plan ? ["to delete", "to tag"] : ["deleted", "tagged"];
+// the verbs of the mode: a plan says what a run would do
+const deleteWord = report.plan ? "to delete" : "deleted";
+const tagWord = report.plan ? "to tag" : "tagged";
 const tally = (r) =>
-  `${r.deleted.length} ${del}, ${r.archived.length} ${tag}, ${r.left.length} left alone, ${r.kept.length} kept` +
+  `${r.deleted.length} ${deleteWord}, ${r.archived.length} ${tagWord}, ` +
+  `${r.left.length} left alone, ${r.kept.length} kept` +
   (r.problems.length ? `, ${count(r.problems.length, "problem")}` : "");
 const total = {
   deleted: sum("deleted"),
@@ -50,7 +53,7 @@ const total = {
   problems: sum("problems"),
 };
 const summaryLine =
-  `${report.plan ? "plan" : "branches"}: ${total.deleted} ${del}, ${total.archived} ${tag}, ` +
+  `${report.plan ? "plan" : "branches"}: ${total.deleted} ${deleteWord}, ${total.archived} ${tagWord}, ` +
   `${total.left} left alone, ${total.kept} kept${total.problems ? `, ${count(total.problems, "problem")}` : ""}`;
 
 // 1. The run log: what the command's text mode prints, so the log reads the same by hand and from the workflow.
@@ -73,7 +76,7 @@ summary(
   "",
   `**${summaryLine}**${meta ? ` (${meta})` : ""}`,
   "",
-  `| Repository | ${cap(del)} | ${cap(tag)} | Left alone | Kept | Problems | Note |`,
+  `| Repository | ${cap(deleteWord)} | ${cap(tagWord)} | Left alone | Kept | Problems | Note |`,
   "|---|---:|---:|---:|---:|---:|---|",
   ...rows,
   "",

@@ -21,7 +21,8 @@
 # (outside the token's reach, ADR-0013), and nothing run when nothing passes; then `branches --json` over the ones that
 # passed, with --plan when asked, and .github/scripts/branches-report.mjs turns the report into the run log and the step
 # summary (a table per repository and every line under it). The run fails on the command's exit 1 (a repository out of
-# reach, a tag in the way), with everything it could do still done, and on exit 2 (bad usage).
+# reach, a tag in the way) and when the token check skipped a repository, with everything it could do still done, and on
+# exit 2 (bad usage). A layerdbiz refusal is by design and not red.
 #
 # Secret: PROJECT_PAT (the classic PAT task-manager.yml and automerge.yml already use), given to gh and the tool as
 # GITHUB_TOKEN through the environment, never as an argument. github.token reaches only this repository and cannot list
@@ -87,6 +88,7 @@ jobs:
           TOOL_VERSION: ${{ steps.tool.outputs.version }}
           TOKEN_USER: ${{ steps.targets.outputs.login }}
           REPOS: ${{ steps.targets.outputs.repos }}
+          SKIPPED: ${{ steps.targets.outputs.skipped }}
         run: |
           # the published version must know the command: an unknown word would run the default, sync, on this runner
           if ! node "$CLI" --help | grep -E '^  branches( |$)' > /dev/null; then
@@ -103,5 +105,10 @@ jobs:
           code=$?
           set -e
           node .github/scripts/branches-report.mjs "$report"
+          # a repository the token cannot write was skipped and named by the token check; the run is red so it is seen
+          if [[ $code == 0 && ${SKIPPED:-0} != 0 ]]; then
+            echo "::error title=branches::$SKIPPED skipped: cannot write (see the token check); the rest was done" >&2
+            code=1
+          fi
           echo "exit $code"
           exit "$code"
