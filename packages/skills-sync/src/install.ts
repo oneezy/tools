@@ -357,21 +357,6 @@ export function listInstalled(h: Harness, run: Run): Installed[] | null {
   return DRIVERS[h.id]?.installed(run) ?? null;
 }
 
-/** The marketplaces the harness has registered (name, where from); null when it cannot list them. Read-only. */
-export function listMarketplaces(h: Harness, run: Run): Array<{ name: string; path: string }> | null {
-  return DRIVERS[h.id]?.marketplaces(run) ?? null;
-}
-
-/** Uninstall one plugin (<id>@<marketplace>) through the harness's own command; false when it refused (run.failure says why). */
-export function uninstallPlugin(h: Harness, run: Run, id: string): boolean {
-  return DRIVERS[h.id]?.uninstall(run, id) ?? false;
-}
-
-/** Remove a registered marketplace through the harness's own command; false when it refused (run.failure says why). */
-export function removeMarketplace(h: Harness, run: Run, name: string): boolean {
-  return DRIVERS[h.id]?.removeMarketplace(run, name) ?? false;
-}
-
 /**
  * Codex: the skills each enabled plugin loads, from the model-visible prompt input rendered locally (one line per
  * plugin skill, `- <plugin>:<skill>: ...`); null when Codex cannot render it. No session starts, no tokens are spent.
