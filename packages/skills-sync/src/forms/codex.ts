@@ -315,7 +315,10 @@ function missing(loaded: string[], p: ReleasePlugin): string[] {
  * releases/latest after every push until the release job finishes), "same", or "unversioned" when the release's plugin
  * has no version and its skill set alone decides.
  */
-function versionGap(have: CliPlugin, p: ReleasePlugin): "behind" | "ahead" | "same" | "unversioned" {
+export function versionGap(
+  have: Pick<CliPlugin, "version">,
+  p: ReleasePlugin,
+): "behind" | "ahead" | "same" | "unversioned" {
   if (p.version === null) return "unversioned";
   if (have.version === p.version) return "same";
   const a = have.version === null ? null : plainVersion(have.version);
@@ -375,7 +378,7 @@ function filesIn(dir: string): string[] | null {
  * points), inside a checkout of the release repo (a skills-sync.json naming it as the library at some ancestor), or
  * gone ("dangling": the tool's leftover). Null for anything else, which is never removed.
  */
-export function libraryCopy(target: string, repo: string): "library" | "dangling" | null {
+function libraryCopy(target: string, repo: string): "library" | "dangling" | null {
   if (!target) return null;
   if (!lexists(target)) return "dangling";
   const home = homeLibrary(os.homedir());

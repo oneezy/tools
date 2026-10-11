@@ -5,10 +5,12 @@
 // at claude.ai), a Claude Code that lists no account plugin at all (a sign-in), the Codex hook trust (its TUI, once per
 // machine), the duplicate Codex plugins from other marketplaces (ChatGPT's), what is left in Codex's skills folders to
 // adopt or delete, and, in the cloud, the environment's setup script line that still clones the old library and links
-// every skill a second time. The rules for "a library copy" and "the release's own files" are the Codex form's, so
-// status and sync agree on what sync removes and what it leaves for a person.
+// every skill a second time. The rules for "a library copy" and "the release's own files" are the forms' own
+// (library-copy.ts, the Codex form's sameFiles), so status and sync agree on what sync removes and what it leaves for a
+// person.
 import { formOf } from "../desired.js";
-import { libraryCopy, sameFiles } from "../forms/codex.js";
+import { sameFiles } from "../forms/codex.js";
+import { dangling, isLibraryCopy } from "../forms/library-copy.js";
 import { LIBRARY_MARKETPLACE, type HarnessState, type Machine } from "../machine.js";
 import type { Release } from "../release.js";
 
@@ -39,8 +41,9 @@ export function manualSteps(machine: Machine, release: Release | null): ManualSt
   for (const state of machine.harnesses) {
     if (!formOf(state.harness.id)) continue;
     if (state.harness.id === "claude-code") push(out, claudePlugins(state, release));
-    if (state.harness.id === "codex") push(out, codexTrust(state));
-    if (formOf(state.harness.id) === "github-plugins") {
+    // the other-marketplace plugins and the folder rules below are Codex's (Hermes's form has its own and prints them)
+    if (state.harness.id === "codex") {
+      push(out, codexTrust(state));
       push(out, otherPlugins(state, release));
       push(out, adoptOrDelete(state, release));
     }
@@ -155,7 +158,7 @@ function adoptOrDelete(state: HarnessState, release: Release | null): ManualStep
       items.push(`${l.path}: a link whose target cannot be read`);
       continue;
     }
-    const copy = libraryCopy(l.target, release.repo);
+    const copy = dangling(l.target) ? "dangling" : isLibraryCopy(l.target, release.repo) ? "library" : null;
     if (!copy) items.push(`${l.path}: links to ${l.target}, not a library copy`);
     else if (!carrier(l.name))
       items.push(

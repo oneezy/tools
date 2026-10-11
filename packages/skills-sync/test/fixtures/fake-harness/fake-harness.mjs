@@ -15,13 +15,24 @@
 // FAKE_HARNESS_FAIL_MARKETPLACE_LIST=<claude,codex> makes `plugin marketplace list` fail; FAKE_HARNESS_UPGRADE_ERRORS=<id,...>
 // makes Codex's `marketplace upgrade` leave those plugins as they are and report one error each (exit 0, as the CLI);
 // FAKE_HARNESS_FAIL_UNINSTALL=<id,...> makes `plugin uninstall <id>` (Codex: `plugin remove <id>`) fail for those ids.
+//
+// The third host is hermes (`hermes plugins ...`, hermes-agent v0.21.6 shapes). Its state is Hermes's own files under
+// HERMES_HOME, the ones the real CLI writes and the tool reads: plugins/<name>/ (copied from a pretend GitHub checkout
+// under FAKE_HERMES_GITHUB/<owner>/<repo>/<ref or HEAD>/<subdir>), plugins/.install-metadata.json ({ pinned, revision,
+// source: "<url>#<subdir>" } per name) and config.yaml (plugins.enabled, plugins.disabled). `install` refuses a name whose
+// plugins/<name> is a link, an existing name without --force, a --ref that is not a 40-hex sha; --force without --ref
+// over a pinned row keeps the prior pin, as the real one does; FAKE_HARNESS_FAIL_INSTALL=
+// <names> makes those installs fail; FAKE_HARNESS_CAUTION=<names> gives them a caution scan verdict, which without --force
+// and without a TTY aborts; FAKE_HARNESS_FAIL_ENABLE=<names> makes `enable` fail for those names and FAKE_HARNESS_FAIL_LIST
+// (with hermes in it) makes `list` fail. `list --json` prints the rows the real CLI prints, a bundled one unless --no-bundled.
 import fs from "node:fs";
 import path from "node:path";
 import {spawnSync} from "node:child_process";
+import YAML from "yaml";
 
 const [host, ...args] = process.argv.slice(2);
 const has = (v, h) => (v ?? "").split(",").includes(h);
-const home = host === "claude" ? process.env.CLAUDE_CONFIG_DIR : process.env.CODEX_HOME;
+const home = host === "claude" ? process.env.CLAUDE_CONFIG_DIR : host === "hermes" ? process.env.HERMES_HOME : process.env.CODEX_HOME;
 const file = path.join(home, "fake-harness.json");
 const state = fs.existsSync(file) ? JSON.parse(fs.readFileSync(file, "utf8")) : { marketplaces: {}, plugins: {} };
 const save = () => (fs.mkdirSync(home, { recursive: true }), fs.writeFileSync(file, JSON.stringify(state, null, 2)));
@@ -31,6 +42,13 @@ const fail = (m) => (process.stderr.write(m + "\n"), process.exit(1));
 const words = args.filter((a) => !a.startsWith("-"));
 // "plugin marketplace add", "plugin install": the command's words, without its argument
 const cmd = words.slice(0, words[1] === "marketplace" ? 3 : 2).join(" ");
+// the value of a `--flag value` option, when given
+const option = (flag) => (args.includes(flag) ? args[args.indexOf(flag) + 1] : undefined);
+
+if (host === "hermes") {
+  hermes();
+  process.exit(0);
+}
 
 const catalog = (root) =>
   JSON.parse(
@@ -320,3 +338,179 @@ if (args[0] === "plugin" && args.includes("--help")) {
     }
   out(JSON.stringify([{ type: "message", content: [{ text: `### Available skills\n${lines.join("\n")}` }] }]));
 } else fail(`fake ${host}: unhandled ${args.join(" ")}`);
+
+/** hermes plugins list|install|enable|disable|update|remove, on Hermes's real files under HERMES_HOME. */
+function hermes() {
+  const pluginsDir = path.join(home, "plugins");
+  const metaFile = path.join(pluginsDir, ".install-metadata.json");
+  const configFile = path.join(home, "config.yaml");
+  const readMeta = () => (fs.existsSync(metaFile) ? JSON.parse(fs.readFileSync(metaFile, "utf8")) : {});
+  // the real CLI writes sort_keys=True, indent 2
+  const writeMeta = (m) => {
+    fs.mkdirSync(pluginsDir, { recursive: true });
+    const sorted = Object.fromEntries(Object.entries(m).sort(([a], [b]) => (a < b ? -1 : 1)).map(([k, v]) => [k, Object.fromEntries(Object.entries(v).sort())]));
+    fs.writeFileSync(metaFile, JSON.stringify(sorted, null, 2) + "\n");
+  };
+  const readConfig = () => {
+    try {
+      return YAML.parse(fs.readFileSync(configFile, "utf8")) ?? {};
+    } catch {
+      return {};
+    }
+  };
+  const lists = () => {
+    const p = readConfig().plugins ?? {};
+    return { enabled: new Set(p.enabled ?? []), disabled: new Set(p.disabled ?? []) };
+  };
+  const setLists = (name, enable) => {
+    const c = readConfig();
+    c.plugins ??= {};
+    const en = new Set(c.plugins.enabled ?? []);
+    const dis = new Set(c.plugins.disabled ?? []);
+    if (enable === null) (en.delete(name), dis.delete(name));
+    else ((enable ? dis : en).delete(name), (enable ? en : dis).add(name));
+    c.plugins.enabled = [...en].sort();
+    c.plugins.disabled = [...dis].sort();
+    fs.mkdirSync(home, { recursive: true });
+    fs.writeFileSync(configFile, YAML.stringify(c));
+  };
+  const manifestOf = (dir) => {
+    try {
+      return JSON.parse(fs.readFileSync(path.join(dir, "plugin.json"), "utf8"));
+    } catch {
+      return null;
+    }
+  };
+  const isLink = (p) => {
+    try {
+      const st = fs.lstatSync(p);
+      if (st.isSymbolicLink()) return true;
+      if (process.platform === "win32" && st.isDirectory()) return (fs.readlinkSync(p), true);
+      return false;
+    } catch {
+      return false;
+    }
+  };
+  // every user plugin folder, as _discover_all_plugins lists them: (name, version, description, source, dir)
+  const discovered = () =>
+    fs.existsSync(pluginsDir)
+      ? fs
+          .readdirSync(pluginsDir)
+          .sort()
+          .filter((n) => !n.startsWith(".") && fs.statSync(path.join(pluginsDir, n)).isDirectory())
+          .map((n) => {
+            const dir = path.join(pluginsDir, n);
+            const m = manifestOf(dir) ?? {};
+            return { folder: n, dir, name: m.name ?? n, version: m.version, description: m.description ?? "" };
+          })
+      : [];
+  const find = (name) => discovered().find((p) => p.name === name || p.folder === name);
+  const status = (name) => {
+    const l = lists();
+    return l.disabled.has(name) ? "disabled" : l.enabled.has(name) ? "enabled" : "not enabled";
+  };
+  const github = process.env.FAKE_HERMES_GITHUB;
+
+  if (args[0] === "plugins" && args.includes("--help")) {
+    out("usage: hermes plugins [-h] {list,search,install,enable,disable,update,remove,show,capabilities} ...");
+  } else if (cmd === "plugins list") {
+    if (has(process.env.FAKE_HARNESS_FAIL_LIST, host)) fail("fixture plugin list failed");
+    const meta = readMeta();
+    const rows = discovered().map((p) => {
+      const pin = meta[p.name]?.pinned === true && typeof meta[p.name].revision === "string" ? meta[p.name].revision : null;
+      return {
+        name: p.name,
+        status: status(p.name),
+        // manifest.get("version", ""): an empty string for a manifest without one
+        version: p.version === undefined ? "" : String(p.version),
+        description: p.description,
+        source: pin ? `git pinned@${pin.slice(0, 8)}` : "user",
+        removed: null,
+      };
+    });
+    if (!args.includes("--no-bundled"))
+      rows.unshift({ name: "memory-wiki", status: "not enabled", version: "0.1.0", description: "Markdown wiki memory", source: "bundled", removed: null });
+    // the bundled rows are always there, so the "No plugins installed." text shows only without --no-bundled; the
+    // filtered-out list is an empty JSON list
+    if (!rows.length && !args.includes("--no-bundled")) {
+      out("No plugins installed.");
+      out("Install with: hermes plugins install owner/repo");
+    } else if (args.includes("--json")) out(JSON.stringify(rows, null, 2));
+    else if (args.includes("--plain")) for (const r of rows) out(`${r.status.padEnd(12)} ${r.source.padEnd(8)} ${r.version.padEnd(8)} ${r.name}`);
+    else {
+      out("\n Plugins ");
+      for (const r of rows) out(` ${r.name}  ${r.status}  ${r.version}  ${r.description}  ${r.source}`);
+      out("\nCompact view: hermes plugins list --plain --no-bundled");
+    }
+  } else if (cmd === "plugins install") {
+    const identifier = words[2];
+    if (!identifier) fail("usage: hermes plugins install <identifier>");
+    if (!github) fail("fake hermes: FAKE_HERMES_GITHUB is not set");
+    const ref = option("--ref");
+    if (args.includes("--ref") && !/^[0-9a-f]{40}$/i.test(ref ?? "")) fail("--ref must be a full 40-character commit SHA.");
+    // owner/repo[/subdir...] shorthand, as _resolve_git_url reads it
+    const parts = identifier.split("/").filter(Boolean);
+    if (parts.length < 2) fail(`Invalid plugin identifier: '${identifier}'. Use a Git URL or 'owner/repo' shorthand.`);
+    const gitUrl = `https://github.com/${parts[0]}/${parts[1]}.git`;
+    const subdir = parts.slice(2).join("/") || null;
+    const source = subdir ? `${gitUrl}#${subdir}` : gitUrl;
+    out(`Warning: custom (unreviewed) source — not from the Hermes catalog.`);
+    out(`Cloning ${gitUrl}${subdir ? ` (subdir: ${subdir})` : ""}...`);
+    const checkout = path.join(github, parts[0], parts[1], ref ?? "HEAD");
+    if (!fs.existsSync(checkout)) fail(`fatal: could not clone ${gitUrl}${ref ? ` at ${ref}` : ""}`);
+    const from = subdir ? path.join(checkout, ...subdir.split("/")) : checkout;
+    if (!fs.existsSync(from)) fail(`Plugin subdirectory '${subdir}' does not exist in the repository.`);
+    const manifest = manifestOf(from) ?? {};
+    const name = manifest.name ?? (subdir ? subdir.split("/").at(-1) : parts[1]);
+    if (has(process.env.FAKE_HARNESS_FAIL_INSTALL, name)) fail(`fixture install denied: ${name}`);
+    const target = path.join(pluginsDir, name);
+    if (isLink(target))
+      fail(`Plugin '${name}' is already installed outside the catalog: ${target} is a link to ${fs.realpathSync(target)}. Delete that link to install the catalog version.`);
+    const prior = readMeta()[name];
+    if (fs.existsSync(target) && !args.includes("--force"))
+      fail(`Plugin '${name}' already exists. Use force reinstall or run \`hermes plugins update ${name}\`.`);
+    // --force without --ref over a pinned row: the prior pin stays (the real CLI keeps the recorded revision)
+    const keep = !ref && prior?.pinned === true && typeof prior.revision === "string";
+    if (has(process.env.FAKE_HARNESS_CAUTION, name) && !args.includes("--force")) {
+      out("⚠ Security scan flagged this plugin:");
+      out("  caution: shell commands in documentation");
+      // no TTY: the y/N question reads EOF, which counts as no
+      fail("Aborted.");
+    }
+    fs.rmSync(target, { recursive: true, force: true });
+    fs.mkdirSync(pluginsDir, { recursive: true });
+    fs.cpSync(from, target, { recursive: true });
+    const meta = readMeta();
+    meta[name] = keep ? { pinned: true, revision: prior.revision, source } : { pinned: !!ref, revision: ref ?? "0".repeat(40), source };
+    writeMeta(meta);
+    out(`✓ Installed ${name}`);
+    if (args.includes("--enable")) {
+      setLists(name, true);
+      out(`✓ Plugin ${name} enabled.`);
+    } else if (prior && args.includes("--force")) out("Replacement installed; plugin selection was not changed.");
+    else if (args.includes("--no-enable")) out(`Plugin installed but not enabled. Run \`hermes plugins enable ${name}\` to activate.`);
+    else out(`Enable '${name}' now? [y/N]`); // EOF: no
+  } else if (cmd === "plugins enable" || cmd === "plugins disable") {
+    const p = find(words[2] ?? "");
+    if (!p) fail(`Plugin '${words[2]}' not found.`);
+    if (cmd === "plugins enable" && has(process.env.FAKE_HARNESS_FAIL_ENABLE, p.name)) fail(`fixture enable denied: ${p.name}`);
+    setLists(p.name, cmd === "plugins enable");
+    out(`✓ Plugin ${p.name} ${cmd === "plugins enable" ? "enabled" : "disabled"}.`);
+  } else if (cmd === "plugins update") {
+    const p = find(words[2] ?? "");
+    if (!p) fail(`Plugin '${words[2]}' not found.`);
+    const rec = readMeta()[p.name];
+    if (rec?.pinned === true)
+      fail(`Plugin '${p.name}' is pinned to ${rec.revision}. To move it, run \`hermes plugins install ${rec.source} --force --ref <sha>\`.`);
+    out(`✓ Plugin ${p.name} is already up to date.`);
+  } else if (cmd === "plugins remove") {
+    const p = find(words[2] ?? "");
+    if (!p) fail(`Plugin '${words[2]}' not found.`);
+    fs.rmSync(p.dir, { recursive: true, force: true });
+    const meta = readMeta();
+    delete meta[p.name];
+    writeMeta(meta);
+    setLists(p.name, null);
+    out(`✗ Plugin ${p.name} removed from ${pluginsDir}`);
+  } else fail(`fake hermes: unhandled ${args.join(" ")}`);
+}

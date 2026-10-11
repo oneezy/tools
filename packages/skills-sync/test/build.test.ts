@@ -87,6 +87,8 @@ const MIT =
 const CONFIG = () => ({
   version: 1,
   library: { version: "0.1.0", name: "skills", owner: "oneezy", homepage: "https://github.com/oneezy/skills" },
+  // the Hermes rendering is an opt-in (tools#153): this fixture library takes it, so every test below sees dist/hermes
+  renderings: { hermes: "dist/hermes" },
   sources: {
     up: {
       repo: up.dir,
@@ -246,6 +248,55 @@ test("build --plugins writes plugins/<id>/ for an own group and a refreshed sour
     "---\nname: a\ndescription: a skill\nmetadata:\n  internal: true\n---\ndo the thing\n",
   );
 
+  // the Hermes rendering beside each package (tools#153): the same files without the Claude and Codex manifests, each
+  // skill's SKILL.md without metadata.internal (Hermes's portable loader takes only string-valued metadata) and with
+  // name set to its folder; every other file byte for byte the package's, so the release's sha256 of NOTICE.md tells an
+  // installed Hermes copy is the release's package
+  assert.deepEqual(Object.keys(tree(path.join(root, "dist", "hermes", "oneezy"))), [
+    "NOTICE.md",
+    "plugin.json",
+    "skills/own-one/SKILL.md",
+    "skills/own-one/agents/openai.yaml",
+    "skills/own-two/SKILL.md",
+  ]);
+  assert.deepEqual(Object.keys(tree(path.join(root, "dist", "hermes", "up"))), [
+    "LICENSE",
+    "NOTICE.md",
+    "plugin.json",
+    "skills/a/SKILL.md",
+    "skills/b/SKILL.md",
+    "skills/up-tdd/SKILL.md",
+  ]);
+  assert.equal(
+    read("dist/hermes/oneezy/skills/own-one/SKILL.md"),
+    "---\nname: own-one\ndescription: mine\n---\nmine\n",
+  );
+  assert.equal(
+    read("dist/hermes/oneezy/skills/own-two/SKILL.md"),
+    "---\nname: own-two\ndescription: two\nmetadata:\n  author: justin\n---\ntwo\n",
+    "the string entries of metadata stay, internal goes",
+  );
+  assert.equal(
+    read("dist/hermes/up/skills/up-tdd/SKILL.md"),
+    "---\nname: up-tdd\ndescription: tdd skill\n---\nred, green\n",
+    "the rename holds in the Hermes copy too",
+  );
+  for (const [id, rel] of [
+    ["oneezy", "NOTICE.md"],
+    ["oneezy", "plugin.json"],
+    ["oneezy", "skills/own-one/agents/openai.yaml"],
+    ["up", "NOTICE.md"],
+    ["up", "plugin.json"],
+    ["up", "LICENSE"],
+  ])
+    assert.equal(read(`dist/hermes/${id}/${rel}`), read(`plugins/${id}/${rel}`), `${id}/${rel} is the package's`);
+  assert.ok(
+    read("plugins/oneezy/NOTICE.md").includes("`dist/hermes/oneezy/`") &&
+      read("plugins/oneezy/NOTICE.md").includes("hermes plugins install oneezy/skills/dist/hermes/oneezy") &&
+      read("plugins/oneezy/NOTICE.md").includes("agent-plugin-oneezy-80c7eb0f:<skill>"),
+    "the NOTICE says where the Hermes copy is, how it installs and what Hermes calls its skills",
+  );
+
   // the version of a new package: 0.1.0+<sha12> of the library's HEAD
   const version = "0.1.0";
 
@@ -384,12 +435,15 @@ test("build is idempotent and deterministic: a second build changes nothing byte
   assert.deepEqual(
     touched,
     [
+      "dist/hermes/oneezy/NOTICE.md",
+      "dist/hermes/oneezy/plugin.json",
+      "dist/hermes/oneezy/skills/own-one/SKILL.md",
       "plugins/oneezy/.codex-plugin/plugin.json",
       "plugins/oneezy/NOTICE.md",
       "plugins/oneezy/plugin.json",
       "plugins/oneezy/skills/own-one/SKILL.md",
     ],
-    "only the edited package, and only its files that changed",
+    "only the edited package and its Hermes rendering, and only their files that changed",
   );
   const version = "0.2.0";
   assert.equal(
@@ -408,16 +462,33 @@ test("build is idempotent and deterministic: a second build changes nothing byte
     read("plugins/oneezy/skills/own-one/SKILL.md"),
     "---\nname: own-one\ndescription: mine\nmetadata:\n  internal: true\n---\nmine, edited\n",
   );
+  assert.equal(
+    read("dist/hermes/oneezy/skills/own-one/SKILL.md"),
+    "---\nname: own-one\ndescription: mine\n---\nmine, edited\n",
+  );
+  assert.equal(read("dist/hermes/oneezy/NOTICE.md"), read("plugins/oneezy/NOTICE.md"));
   assert.deepEqual(changes(cli("build", "--json")), [], "settled");
 
   // a removed own skill leaves its package; a package for an id dropped from the config goes
   fs.rmSync(path.join(root, "skills", "oneezy", "own-two"), { recursive: true });
   write("plugins/old/plugin.json", "{}\n");
   write("plugins/old/skills/x/SKILL.md", "---\nname: x\n---\n");
+  write("dist/hermes/old/plugin.json", "{}\n");
   const pruned = cli("build", "--json");
   assert.equal(pruned.status, 0, pruned.stderr);
   assert.ok(!fs.existsSync(path.join(root, "plugins", "oneezy", "skills", "own-two")), "own-two's copy is gone");
+  assert.ok(!fs.existsSync(path.join(root, "dist", "hermes", "oneezy", "skills", "own-two")), "and its Hermes copy");
   assert.ok(!fs.existsSync(path.join(root, "plugins", "old")), "the stale package is gone");
+  assert.ok(!fs.existsSync(path.join(root, "dist", "hermes", "old")), "the stale Hermes rendering is gone");
+  assert.ok(
+    actions(pruned).some(
+      (a) =>
+        a.kind === "delete" &&
+        a.path.endsWith(path.join("hermes", "old")) &&
+        /no longer in skills-sync\.json/.test(a.note ?? ""),
+    ),
+    pruned.stdout,
+  );
   assert.ok(
     actions(pruned).some(
       (a) => a.kind === "delete" && a.path.endsWith("old") && /no longer in skills-sync\.json/.test(a.note ?? ""),
@@ -440,6 +511,7 @@ test("build --check computes every output in memory, prints each drifted path an
   write("skills/oneezy/own-one/SKILL.md", "---\nname: own-one\ndescription: mine\n---\nmine, edited after the build\n");
   fs.rmSync(path.join(root, ".agents", "plugins", "marketplace.json"));
   write("plugins/old/plugin.json", "{}\n");
+  write("dist/hermes/up/skills/b/SKILL.md", "---\nname: b\ndescription: b skill\n---\nhand edited Hermes copy\n");
   const before = tree(root);
   assert.equal(cli("build", "--plan").status, 0);
   assert.deepEqual(tree(root), before, "--plan wrote nothing");
@@ -451,6 +523,8 @@ test("build --check computes every output in memory, prints each drifted path an
   // content drift is independent of the declared semantic version
   assert.deepEqual(paths, [
     ".agents/plugins/marketplace.json",
+    "dist/hermes/oneezy/skills/own-one/SKILL.md",
+    "dist/hermes/up/skills/b/SKILL.md",
     "plugins/old",
     "plugins/oneezy/skills/own-one/SKILL.md",
     "plugins/up/skills/a/SKILL.md",
@@ -469,10 +543,70 @@ test("build --check computes every output in memory, prints each drifted path an
     "the hand edit was overwritten from the working set",
   );
   assert.ok(read("plugins/oneezy/skills/own-one/SKILL.md").includes("edited after the build"));
+  assert.ok(read("dist/hermes/oneezy/skills/own-one/SKILL.md").includes("edited after the build"));
+  assert.equal(read("dist/hermes/up/skills/b/SKILL.md"), "---\nname: b\ndescription: b skill\n---\ndo the thing\n");
   // --check --catalogs looks at the catalogs only
   write("plugins/up/skills/a/SKILL.md", "drifted again\n");
   assert.equal(cli("build", "--check", "--catalogs").status, 0, "catalogs are clean");
   assert.equal(cli("build", "--check", "--plugins").status, 1, "the package is not");
+});
+
+test("without renderings.hermes in skills-sync.json the build is what it was: no dist/hermes, no Hermes paragraph in NOTICE.md, build --check and check clean; opting in afterwards renders every package and rewrites every NOTICE, nothing else", () => {
+  const { renderings: _off, ...plain } = CONFIG();
+  config(plain);
+  const r = cli("build", "--json");
+  assert.equal(r.status, 0, r.stderr);
+  assert.ok(!fs.existsSync(path.join(root, "dist")), "no rendering was written");
+  for (const id of ["oneezy", "up"]) {
+    const notice = read(`plugins/${id}/NOTICE.md`);
+    assert.ok(!/Hermes|dist\/hermes/.test(notice), `${id}'s NOTICE says nothing of Hermes:\n${notice}`);
+    assert.ok(notice.includes("`INSTALL_INTERNAL_SKILLS=1` re-exposes them).\n"), notice);
+  }
+  assert.ok(!changes(r).some((a) => a.path.includes("dist")), JSON.stringify(changes(r)));
+  const check = cli("build", "--check");
+  assert.equal(check.status, 0, check.stdout + check.stderr);
+  const checked = cli("check");
+  assert.match(checked.stdout, /^check: clean, 3 own skills, 0 flows, 18 generated files as built$/m, checked.stdout);
+  // the opt-in: the renderings appear and every NOTICE gains its paragraph; the packages' other files stay
+  config();
+  const on = cli("build", "--json");
+  assert.equal(on.status, 0, on.stderr);
+  const touched = changes(on)
+    .map((a) => `${a.kind} ${path.relative(root, a.path).split(path.sep).join("/")}`)
+    .sort();
+  assert.ok(
+    touched.includes("write plugins/oneezy/NOTICE.md") && touched.includes("write plugins/up/NOTICE.md"),
+    touched.join("\n"),
+  );
+  assert.ok(
+    touched.filter((t) => !t.includes("dist/hermes/")).every((t) => t.endsWith("/NOTICE.md")),
+    `only NOTICE.md changed outside dist/hermes:\n${touched.join("\n")}`,
+  );
+  assert.deepEqual(fs.readdirSync(path.join(root, "dist", "hermes")).sort(), ["oneezy", "up"]);
+  assert.ok(read("plugins/oneezy/NOTICE.md").includes("`dist/hermes/oneezy/`"));
+  assert.equal(cli("build", "--check").status, 0);
+  // every library command this tool version runs accepts the key (an older tool refuses it as unknown, which is why the
+  // tool ships before the key lands in the library)
+  const frozen = cli("refresh", "--frozen", "--quiet");
+  assert.equal(frozen.status, 0, frozen.stderr);
+  // 18 package and catalog files, and the 11 of the two renderings (the up package has three skills)
+  assert.match(cli("check").stdout, /^check: clean, 3 own skills, 0 flows, 29 generated files as built$/m);
+  // a key the schema does not know is still refused by every one of them, a typo of this one included
+  config({ ...CONFIG(), rendering: { hermes: "dist/hermes" } });
+  for (const args of [["refresh", "--frozen", "--quiet"], ["build", "--check"], ["check"]]) {
+    const typo = cli(...args);
+    assert.equal(typo.status, 1, args.join(" "));
+    assert.match(typo.stdout + typo.stderr, /\$\.rendering: not allowed/, args.join(" "));
+  }
+  // the schema admits the key with a library-relative folder only
+  for (const bad of ["/dist/hermes", "dist/../hermes", "dist/hermes/", "", ".hidden"]) {
+    config({ ...CONFIG(), renderings: { hermes: bad } });
+    const refused = cli("build", "--check");
+    assert.equal(refused.status, 1, bad);
+    assert.match(refused.stderr, /renderings\.hermes/, bad);
+  }
+  config({ ...CONFIG(), renderings: { hermes: "dist/hermes", goose: "dist/goose" } });
+  assert.match(cli("build", "--check").stderr, /renderings\.goose: not allowed/);
 });
 
 test("generate.plugins: false builds nothing and --check ignores the plugin form; a build with no output named writes packages and catalogs and no archive; a library without git gets version 0.0.0+nogit, its archives too", () => {
@@ -580,6 +714,7 @@ test("the declared version repairs manifest tampering, while legacy commit metad
   // the NOTICE spells UTC as Z whatever git printed (git < 2.45 prints +00:00)
   const date = (c: string) => library.git("log", "-1", "--format=%cI", c).replace(/[+-]00:00$/, "Z");
   const manifests = [
+    "dist/hermes/oneezy/NOTICE.md",
     "plugins/oneezy/.codex-plugin/plugin.json",
     "plugins/oneezy/NOTICE.md",
     "plugins/oneezy/plugin.json",
@@ -604,7 +739,11 @@ test("the declared version repairs manifest tampering, while legacy commit metad
   tamper(`0.1.0+${short(c1)}`, c2, date(c2));
   r = cli("build", "--check", "--json");
   assert.equal(r.status, 1);
-  assert.deepEqual(drift(r), ["plugins/oneezy/.codex-plugin/plugin.json", "plugins/oneezy/plugin.json"]);
+  assert.deepEqual(drift(r), [
+    "dist/hermes/oneezy/NOTICE.md",
+    "plugins/oneezy/.codex-plugin/plugin.json",
+    "plugins/oneezy/plugin.json",
+  ]);
   // the right version and commit, the wrong date
   tamper(`0.1.0+${short(c1)}`, c1, "1999-01-01T00:00:00+00:00");
   r = cli("build", "--check", "--json");
@@ -736,6 +875,9 @@ test("a shallow clone is as built: at depth 1 (what actions/checkout fetches) it
   const drifted = cliIn(clone, "build", "--check", "--json");
   assert.equal(drifted.status, 1);
   assert.deepEqual(drift(drifted), [
+    "dist/hermes/oneezy/NOTICE.md",
+    "dist/hermes/oneezy/plugin.json",
+    "dist/hermes/oneezy/skills/own-two/SKILL.md",
     "plugins/oneezy/.codex-plugin/plugin.json",
     "plugins/oneezy/NOTICE.md",
     "plugins/oneezy/plugin.json",
@@ -1068,6 +1210,79 @@ test("commit dates are written one way whatever git printed: UTC as Z (git 2.45 
   assert.equal(isoDate("2026-10-01T03:04:36-05:00"), "2026-10-01T03:04:36-05:00");
   assert.equal(isoDate("2026-09-29T13:37:40+01:00"), "2026-09-29T13:37:40+01:00");
   assert.equal(isoDate(null), null);
+});
+
+test("the Hermes rendering keeps only the string entries of a skill's metadata (block or flow map), drops the map when nothing is left, sets name to the folder whatever the source says, and leaves every other line as written; a skill Hermes would still skip is written with one note; the package copy is not changed by any of it", () => {
+  write(
+    "skills/oneezy/own-three/SKILL.md",
+    [
+      "---",
+      "name: Own Three",
+      "description: three",
+      "metadata:",
+      "  author: justin",
+      "  version: 2",
+      "  internal: false",
+      "  tags:",
+      "    - a",
+      "  nested:",
+      "    k: v",
+      '  quoted: "yes"',
+      "  wrapped: >-",
+      "    a folded",
+      "    string",
+      "license: MIT",
+      "---",
+      "three",
+      "",
+    ].join("\n"),
+  );
+  write(
+    "skills/oneezy/own-four/SKILL.md",
+    `---\nname: own-four\ndescription: ${"x".repeat(1025)}\nmetadata: { author: justin, internal: true, n: 1 }\n---\nfour\n`,
+  );
+  library.commit("more skills");
+  const r = cli("build", "--json");
+  assert.equal(r.status, 0, r.stderr);
+  assert.equal(
+    read("dist/hermes/oneezy/skills/own-three/SKILL.md"),
+    [
+      "---",
+      "name: own-three",
+      "description: three",
+      "metadata:",
+      "  author: justin",
+      '  quoted: "yes"',
+      "  wrapped: >-",
+      "    a folded",
+      "    string",
+      "license: MIT",
+      "---",
+      "three",
+      "",
+    ].join("\n"),
+  );
+  assert.ok(
+    read("plugins/oneezy/skills/own-three/SKILL.md").includes("name: Own Three"),
+    "the package copy keeps its name",
+  );
+  assert.ok(read("plugins/oneezy/skills/own-three/SKILL.md").includes("  internal: true"), "and is marked internal");
+  assert.equal(
+    read("dist/hermes/oneezy/skills/own-four/SKILL.md"),
+    `---\nname: own-four\ndescription: ${"x".repeat(1025)}\nmetadata: { author: "justin" }\n---\nfour\n`,
+  );
+  const notes = actions(r).filter((a) => a.kind === "note" && /Hermes would skip/.test(a.note ?? ""));
+  assert.deepEqual(
+    notes.map((a) => [path.relative(root, a.path).split("\\").join("/"), a.note]),
+    [
+      [
+        "dist/hermes/oneezy/skills/own-four/SKILL.md",
+        "Hermes would skip this skill: description must be 1 to 1024 characters",
+      ],
+    ],
+  );
+  assert.equal(cli("build", "--check").status, 0, "the rendering is what --check expects");
+  assert.deepEqual(changes(cli("build", "--json")), [], "and a second build rewrites nothing");
 });
 
 test("the compatibility bump helper returns only the explicitly supplied version", async () => {

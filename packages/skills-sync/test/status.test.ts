@@ -66,6 +66,7 @@ interface StatusJson {
   cloud: boolean;
   harnesses: Record<string, HarnessJson>;
   lines: Line[];
+  manualSteps: Array<{ id: string }>;
   ok: boolean;
 }
 
@@ -303,16 +304,16 @@ test("account plugins from other marketplaces, tool-installed plugins and plugin
   );
 });
 
-test("Hermes keeps the loose form: nothing in its skills folder is red, links and folders there are counted and green", async () => {
-  const m = machine({ harnesses: ["hermes"], clis: [] });
+test("Hermes has the plugin form (plugins from GitHub): with nothing installed it is red, loose links and folders are counted, and hermes itself is never asked (its plugins are read from its files)", async () => {
+  const m = machine({ harnesses: ["hermes"], clis: ["hermes"] });
   const empty = await cli(m, ["status"]);
   assert.equal(empty.status, 1, empty.stderr);
   assert.equal(
     empty.stdout,
     [
       "latest: oneezy/skills release-17 (1717171)",
-      "Hermes  form: loose skills",
-      "! no skills (latest release-17)",
+      "Hermes  form: plugins from GitHub",
+      "! no plugins installed (latest release-17)",
       NO_CHECKOUT,
       "status: 1 red line",
       "",
@@ -321,9 +322,9 @@ test("Hermes keeps the loose form: nothing in its skills folder is red, links an
   const link = looseLink(m, "hermes", "grilling");
   const folder = skillFolder(m, "hermes", "oneezy-status");
   const r = await cli(m, ["status", "--json"]);
-  assert.equal(r.status, 0, r.stdout + r.stderr);
+  assert.equal(r.status, 1, r.stdout + r.stderr);
   const hermes = (r.json as unknown as StatusJson).harnesses.hermes;
-  assert.equal(hermes.form, "loose");
+  assert.equal(hermes.form, "github-plugins");
   assert.deepEqual(
     hermes.loose.map((l) => [l.name, l.target]),
     [["grilling", linkTarget(link)!]],
@@ -332,8 +333,13 @@ test("Hermes keeps the loose form: nothing in its skills folder is red, links an
   assert.deepEqual(hermes.duplicates, []);
   assert.deepEqual(
     hermes.lines.map((l) => [l.ok, l.text]),
-    [[true, "1 loose link, 1 skill folder"]],
+    [
+      [false, "no plugins installed (latest release-17)"],
+      [true, "1 loose link, 1 skill folder"],
+    ],
   );
+  // Codex's steps (other marketplaces, adopt or delete) are not Hermes's: its form prints its own notes in sync
+  assert.deepEqual((r.json as unknown as StatusJson).manualSteps, []);
   assert.deepEqual(r.calls, []);
 });
 

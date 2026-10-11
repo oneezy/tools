@@ -157,7 +157,7 @@ Options
                          session): the library's built plugins installed through the harness's own commands (never a
                          settings edit by this tool), verified (listed, and a skill resolving), and only then the loose
                          links of their skills removed. links: one loose link per skill, and the plugins this tool
-                         installed uninstalled. Goose, Hermes and projects always get links. Either flag is
+                         installed uninstalled. Goose and projects always get links. Either flag is
                          remembered in ${LOCAL_NAME}
   --projects <names|*>   repos under --dev to sync; "*" for all; --no-projects for none
   --dev <dir>            folder whose git repos are offered (default: here, or the parent when here is a repo)

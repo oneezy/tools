@@ -476,37 +476,40 @@ test("--library names the release repo as owner/repo: another repo is asked for,
   assertBlock(read(globalFile(m, "claude-code")));
 });
 
-test("--agents picks the harnesses; Hermes has no global instructions file in the table, so it gets a form line and no block", async () => {
+test("--agents picks the harnesses; Hermes has no global instructions file in the table, so it gets no block, and without hermes on PATH its plugin form is one note and nothing in its home", async () => {
   const m = machine({ harnesses: ["claude-code", "codex", "hermes"] });
   const before = snapshot(m.home);
   const r = await cli(m, ["--agents", "codex,hermes"]);
-  assert.equal(r.status, 0, r.stderr);
+  assert.equal(r.status, 0, r.stderr + r.stdout);
   assert.deepEqual(added(before, snapshot(m.home)), [".codex/AGENTS.md", ".codex/hooks.json"]);
   assert.ok(!r.stdout.includes("Claude Code"), r.stdout);
   assert.ok(
     r.stdout
       .split("\n")
-      .some((l) => l.startsWith(". note") && l.includes("Hermes") && l.includes("form: loose skills")),
+      .some((l) => l.startsWith(". note") && l.includes("Hermes: plugins") && l.includes("no hermes on PATH")),
     r.stdout,
   );
   assert.deepEqual(fs.readdirSync(m.hermesHome), []);
 });
 
 test("a PC with a library keeps the old library-based sync after the block, with the old instruction blocks off: one report, no brain block", async () => {
-  // the old run's default harnesses are Claude Code and Codex, whose forms the machine sync built (tools#149, tools#150):
-  // it would have nothing left to do; Hermes, named, keeps the old run's links until tools#153
-  const m = machine({ harnesses: ["claude-code", "codex", "hermes"] });
-  const agents = ["--agents", "claude-code,codex,hermes"];
+  // the old run's default harnesses are Claude Code and Codex, whose forms the machine sync built (tools#149, tools#150),
+  // and Hermes's is built too (tools#153): Goose, named, is the one harness that keeps the old run's links
+  const m = machine({ harnesses: ["claude-code", "codex", "hermes"], clis: ["claude"] });
+  const gooseHome = path.join(m.home, ".config", "goose");
+  fs.mkdirSync(gooseHome, { recursive: true });
+  const agents = ["--agents", "claude-code,codex,hermes,goose"];
   const library = linkTarget(oldLibraryLink(m))!;
   globalBlock(m, "claude-code", "brain", "## Brain\nold");
   const r = await cli(m, ["--no-wsl", ...agents]);
   assert.equal(r.status, 0, r.stderr);
   // the block first, then what the old run did: the user-folder links of the library's skills, as before, on every
-  // harness but Claude Code and Codex: no link, no plugin of the tool's there
+  // harness but Claude Code, Codex and Hermes: no link, no plugin of the tool's there
   for (const h of ["claude-code", "codex"] as const) assertBlock(read(globalFile(m, h)));
   assert.equal(lexists(path.join(m.claudeHome, "skills")), false);
   assert.equal(lexists(path.join(m.home, ".agents", "skills", "oneezy-status")), false);
-  assert.ok(isLink(path.join(m.hermesHome, "skills", "oneezy-status")), r.stdout);
+  assert.equal(lexists(path.join(m.hermesHome, "skills")), false);
+  assert.ok(isLink(path.join(gooseHome, "skills", "oneezy-status")), r.stdout);
   const lines = r.stdout.trimEnd().split("\n");
   const write = lines.findIndex((l) => l.startsWith("+ write") && l.includes("CLAUDE.md"));
   const linked = lines.findIndex((l) => l.startsWith("+ link") && l.includes("oneezy-status"));
