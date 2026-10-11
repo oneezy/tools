@@ -14,7 +14,8 @@ export FX="$work/fx"
 
 cat > "$work/bin/gh" <<'EOF'
 #!/usr/bin/env bash
-# Fake gh for status.test.sh. Reads come from $FX; a mutation or any other command is refused.
+# Fake gh for status.test.sh. Reads come from $FX; an issue with no fixture does not exist, as on GitHub (the
+# same answer a pull request number gets); a mutation or any other command is refused.
 set -eu
 number=""; query=""
 args=("$@")
@@ -28,7 +29,9 @@ case "${1:-} ${2:-}" in
     case "$query" in
       *mutation*) echo "fake gh: write refused: $query" >&2; exit 1 ;;
       *"projectsV2(first:10)"*) printf 'PVT_1\t7\tPVTSSF_1\tTodo=o1,Next Up=o2,In Progress=o3,Review=o4,Done=o5,Complete=o6\n' ;;
-      *"issue(number:"*) cat "$FX/issue-$number" 2>/dev/null || printf -- '-\t-\tOPEN\tI_%s\t-\t0\n' "$number" ;;
+      *"issue(number:"*)
+        [ -f "$FX/issue-$number" ] || { echo "gh: Could not resolve to an Issue with the number of $number." >&2; exit 1; }
+        cat "$FX/issue-$number" ;;
       *"pullRequest(number:"*) cat "$FX/pr-$number" ;;
       *"items(first:100"*) cat "$FX/items" 2>/dev/null || true ;;
       *) echo "fake gh: no fixture answers: $query" >&2; exit 1 ;;
@@ -55,13 +58,13 @@ item() { printf '%s\t%s\t%s\t%s\t%s\n' "$@" >> "$FX/items"; }
 reset() { rm -f "$FX"/*; }
 
 pass=0; fail=0
-# check <rule> <expected line> VAR=value...: runs status.sh in DRY_RUN with the event and looks for the line.
+# check <rule> <expected line> VAR=value...: runs status.sh in DRY_RUN with the event and looks for the line in
+# its output, which ends with "(exit <code>)" so a rule can expect the exit code too.
 check() {
   local rule=$1 want=$2; shift 2
-  local out
-  if ! out=$(env -i PATH="$work/bin:$PATH" HOME="${HOME:-}" FX="$FX" DRY_RUN=1 REPO=acme/widgets "$@" "$BASH" "$here/status.sh" 2>&1); then
-    out="$out"$'\n'"(exit $?)"
-  fi
+  local out rc=0
+  out=$(env -i PATH="$work/bin:$PATH" HOME="${HOME:-}" FX="$FX" DRY_RUN=1 REPO=acme/widgets "$@" "$BASH" "$here/status.sh" 2>&1) || rc=$?
+  out="$out"$'\n'"(exit $rc)"
   if printf '%s\n' "$out" | grep -qF -- "$want"; then
     pass=$((pass + 1)); printf 'ok   %s\n' "$rule"
   else
@@ -90,6 +93,28 @@ check "ready for review still moves the linked issue to Review" \
   "would move #3: In Progress -> Review" EVENT=pull_request ACTION=ready_for_review PR=9 PR_DRAFT=false
 check "a PR opened ready (not draft) moves the linked issue to Review" \
   "would move #3: In Progress -> Review" EVENT=pull_request ACTION=opened PR=9 PR_DRAFT=false
+
+# ---------------------------------------------------------------- a branch named after a number that is not an issue here (#170)
+# The fake gh fails any read of an issue with no fixture, as GitHub does, so "(exit 0)" proves nothing was tried for it.
+
+reset; pr 9 feat/153-hermes-rendering
+check "a PR whose branch names a number that is not an issue here skips it" \
+  "skipped #153: not an issue of acme/widgets (branch feat/153-hermes-rendering)" EVENT=pull_request ACTION=opened PR=9 PR_DRAFT=true
+check "and moves nothing for it, exiting 0" "(exit 0)" EVENT=pull_request ACTION=opened PR=9 PR_DRAFT=true
+check "ready for review skips it the same way" \
+  "skipped #153: not an issue of acme/widgets (branch feat/153-hermes-rendering)" EVENT=pull_request ACTION=ready_for_review PR=9 PR_DRAFT=false
+
+reset; pr 9 feat/153-hermes-rendering 3; issue 3 Todo
+check "a closing reference beside such a branch is still moved" "would move #3: Todo -> In Progress" EVENT=pull_request ACTION=opened PR=9 PR_DRAFT=true
+check "merging such a PR still closes the closing reference" "would close #3 (merged into dev by #9)" EVENT=pull_request ACTION=closed PR=9 PR_MERGED=true PR_BASE=dev
+check "and the run with both exits 0" "(exit 0)" EVENT=pull_request ACTION=closed PR=9 PR_MERGED=true PR_BASE=dev
+
+reset; pr 9 fix/9-self
+check "a branch named after a pull request number is skipped too" "skipped #9: not an issue of acme/widgets (branch fix/9-self)" EVENT=pull_request ACTION=opened PR=9 PR_DRAFT=true
+
+reset
+check "creating such a branch skips it" "skipped #153: not an issue of acme/widgets (branch feat/153-hermes-rendering)" EVENT=create REF_TYPE=branch REF=feat/153-hermes-rendering
+check "and exits 0" "(exit 0)" EVENT=create REF_TYPE=branch REF=feat/153-hermes-rendering
 
 # ---------------------------------------------------------------- the start event (#77 rule 4)
 
