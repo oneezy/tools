@@ -16,16 +16,24 @@ import type { FormFn } from "../desired.js";
 import { lexists, real, under } from "../fs.js";
 import { listMarketplaces, removeMarketplace, runner, uninstallPlugin, type Run } from "../install.js";
 import { homeLibrary } from "../library.js";
-import { LIBRARY_MARKETPLACE, type AccountPlugin, type HarnessState } from "../machine.js";
+import {
+  LIBRARY_MARKETPLACE,
+  type AccountPlugin,
+  type CliPlugin,
+  type HarnessState,
+  type LooseLink,
+  type SkillFolder,
+} from "../machine.js";
 import type { Action } from "../plan.js";
 
 /** What one delivered account plugin makes redundant on the machine. */
 interface Redundant {
   account: AccountPlugin;
   /** the same-named plugin the tool installed from the library's marketplace, when one is there */
-  plugin: HarnessState["installed"][number] | null;
-  links: HarnessState["loose"];
-  folders: HarnessState["folders"];
+  plugin: CliPlugin | null;
+  /** the loose links and real folders in the user skills folder named after one of its skills */
+  links: LooseLink[];
+  folders: SkillFolder[];
 }
 
 export const claudeCode: FormFn = (release, state, _machine, { plan }) => {
@@ -72,7 +80,7 @@ export const claudeCode: FormFn = (release, state, _machine, { plan }) => {
     const tag = `${w.account.id}@synced`;
     if (!w.plugin && !w.links.length && !w.folders.length) continue;
     if (!w.account.skills.length) {
-      // listed, but its folder holds no skill (a download still finishing): not verified, nothing of its goes
+      // listed, but its folder holds no skill (a download still finishing): not verified, nothing goes for it
       if (w.plugin || w.links.length)
         out.push({
           kind: "conflict",
@@ -84,16 +92,12 @@ export const claudeCode: FormFn = (release, state, _machine, { plan }) => {
     if (w.plugin) {
       const id = `${w.plugin.id}@${w.plugin.marketplace}`;
       const a: Action = { kind: "uninstall", path: where(`plugin ${id}`), note: `hides ${tag}` };
+      out.push(a);
       if (!plan && !uninstallPlugin(state.harness, run, id)) {
-        a.kind = "conflict";
-        a.failed = true;
-        a.note = `claude could not uninstall it; ${tag} stays hidden and its skills' links stay`;
-        a.diagnostic = run.failure;
-        out.push(a);
+        refused(a, run, `claude could not uninstall it; ${tag} stays hidden and its skills' links stay`);
         continue;
       }
       gone.add(id);
-      out.push(a);
     }
     for (const l of w.links) {
       if (libraryCopy(l.target, release.repo, home))
@@ -142,13 +146,17 @@ function marketplace(state: HarnessState, run: Run, plan: boolean): Action[] {
     return [{ kind: "note", path: p, note: "claude could not list its marketplaces; a registration stays" }];
   if (!markets.some((m) => m.name === LIBRARY_MARKETPLACE)) return [];
   const a: Action = { kind: "uninstall", path: p, note: "no plugin from it remains" };
-  if (!plan && !removeMarketplace(state.harness, run, LIBRARY_MARKETPLACE)) {
-    a.kind = "conflict";
-    a.failed = true;
-    a.note = "claude could not remove it";
-    a.diagnostic = run.failure;
-  }
+  if (!plan && !removeMarketplace(state.harness, run, LIBRARY_MARKETPLACE))
+    refused(a, run, "claude could not remove it");
   return [a];
+}
+
+/** The plugin command behind `a` was refused: the action becomes the failure, with claude's own words attached. */
+function refused(a: Action, run: Run, note: string): void {
+  a.kind = "conflict";
+  a.failed = true;
+  a.note = note;
+  a.diagnostic = run.failure;
 }
 
 /**
