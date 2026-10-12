@@ -63,7 +63,13 @@ interface StatusJson {
     {
       lines: Line[];
       duplicates: Array<{ skill: string }>;
-      hook: { file: string; present: boolean; current: boolean; trusted: boolean | null } | null;
+      hook: {
+        file: string;
+        present: boolean;
+        current: boolean;
+        trusted: boolean | null;
+        trust: "trusted" | "new" | "changed" | null;
+      } | null;
       block: { file: string; present: boolean; current: boolean; status: string; ids: string[] } | null;
       repoBlocks: Array<{ file: string; ids: string[] }>;
     }
@@ -138,7 +144,7 @@ const expectGreen = (m: PretendMachine, skills: string, tools: string) => [
   "= matt-pocock@oneezy-skills 1.3.1 (latest 1.3.1)",
   "= oneezy@oneezy-skills 0.43.1 (latest 0.43.1)",
   "= play@oneezy-skills 0.43.0 (latest 0.43.0)",
-  `= session hook in ${hooksFile(m, "codex")}`,
+  `= session hook in ${hooksFile(m, "codex")}, trusted in Codex`,
   `= global block in ${globalFile(m, "codex")} current`,
   "ChatGPT  account copies, read through Codex",
   ". not checked: Codex on this machine is not signed in with ChatGPT (codex login)",
@@ -167,12 +173,14 @@ test("a fully synced machine prints every line green and exits 0; --json carries
     present: true,
     current: true,
     trusted: null,
+    trust: null,
   });
   assert.deepEqual(j.harnesses.codex.hook, {
     file: hooksFile(m, "codex"),
     present: true,
     current: true,
     trusted: true,
+    trust: "trusted",
   });
   for (const h of ["claude-code", "codex"] as const)
     assert.deepEqual(j.harnesses[h].block, {
@@ -251,7 +259,13 @@ test("a missing session hook entry is one red line naming the file and exit 1; t
   );
   assert.equal(lines(r.stdout).at(-1), "status: 1 red line");
   const j = json(await cli(m, ["status", "--json"], {}, skills));
-  assert.deepEqual(j.harnesses["claude-code"].hook, { file, present: false, current: false, trusted: null });
+  assert.deepEqual(j.harnesses["claude-code"].hook, {
+    file,
+    present: false,
+    current: false,
+    trusted: null,
+    trust: null,
+  });
   // sync puts the entry back; the hand-made one beside it is the next red line until sync's next run removes it
   assert.equal((await cli(m, [], {}, skills)).status, 0);
   hookEntry(m, "claude-code", "bash ~/.claude/hooks/sync-dev.sh");
@@ -429,7 +443,7 @@ test("an untrusted Codex hook is a manual step with the trust steps, not a red l
   assert.equal(r.status, 0, r.stdout);
   const out = lines(r.stdout);
   assert.ok(
-    out.includes(`= session hook in ${hooksFile(m, "codex")}, not trusted in Codex yet (manual step below)`),
+    out.includes(`= session hook in ${hooksFile(m, "codex")}, new in Codex, not trusted yet (manual step below)`),
     r.stdout,
   );
   assert.ok(!out.some((l) => l.startsWith("! ")), r.stdout);
@@ -451,6 +465,7 @@ test("an untrusted Codex hook is a manual step with the trust steps, not a red l
     present: true,
     current: true,
     trusted: false,
+    trust: "new",
   });
   assert.deepEqual(
     j.manualSteps.map((s) => [s.id, s.steps.length]),

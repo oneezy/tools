@@ -288,20 +288,58 @@ export const hermes = {
         source: str(p.source),
       }));
   },
-  /** --no-enable: the enable is a step of its own, so a failed one is told apart; --force replaces this tool's own install */
-  install(run: Run, identifier: string, options: { ref?: string; force?: boolean } = {}): boolean {
-    return run([
+  /**
+   * --no-enable: the enable is a step of its own, so a failed one is told apart. --force replaces an install and answers
+   * a `caution` from Hermes's security scan (a `dangerous` one it never gets past); the form passes it for the library's
+   * own plugins only. `scan` is the verdict Hermes printed when it was not clean (it prints one only when the scan stops
+   * the install; a caution --force answers is silent), and `output` what Hermes printed (redacted as a failure's
+   * diagnostic is), the scan's findings with it.
+   */
+  install(
+    run: Run,
+    identifier: string,
+    options: { ref?: string; force?: boolean } = {},
+  ): { ok: boolean; scan: HermesScan | null; output: NonNullable<Action["diagnostic"]> } {
+    const args = [
       "plugins",
       "install",
       identifier,
       "--no-enable",
       ...(options.ref ? ["--ref", options.ref] : []),
       ...(options.force ? ["--force"] : []),
-    ]).ok;
+    ];
+    const r = run(args);
+    const output = run.failure ?? {
+      command: [hermes.bin, ...args],
+      exitCode: r.exitCode,
+      stdout: redact(r.out),
+      stderr: redact(r.err),
+    };
+    return { ok: r.ok, scan: scanVerdict(`${r.out}\n${r.err}`), output };
   },
   enable: (run: Run, name: string) => run(["plugins", "enable", name]).ok,
   remove: (run: Run, name: string) => run(["plugins", "remove", name]).ok,
 };
+
+/** A verdict of Hermes's install-time security scan that is not clean: `caution` asks to confirm, `dangerous` blocks. */
+export type HermesScan = "caution" | "dangerous";
+
+/**
+ * The verdict of Hermes's security scan in what `hermes plugins install` printed, when it was not clean; null for a
+ * clean scan or none. Hermes (hermes_cli/plugins_cmd_install.py, tools/plugin_guard.py, tools/skills_guard.py) prints
+ * it only when the scan stops the install: the report's head line `Scan: <name> (<identifier>/community)  Verdict:
+ * CAUTION` (or `DANGEROUS`), and the refusal `Blocked: Security scan blocked plugin install: Requires confirmation
+ * (caution verdict, <n> findings)` or `... Blocked (dangerous verdict, ...). --force does not override a dangerous
+ * verdict.`, all on stdout, exit 1. A caution that --force answers passes in silence (a log line, nothing printed), so
+ * a successful --force install reads null here. Rich wraps at 80 columns when stdout is not a terminal, so a line
+ * break may sit inside either phrase; colour codes (FORCE_COLOR) are taken out first. Hermes records no verdict in its
+ * files, so this output is the only place it shows.
+ */
+export function scanVerdict(text: string): HermesScan | null {
+  const plain = text.replace(/\x1b\[[0-9;]*[A-Za-z]/g, "");
+  const m = /\bVerdict:\s+(CAUTION|DANGEROUS)\b/i.exec(plain) ?? /\b(caution|dangerous)\s+verdict\b/i.exec(plain);
+  return m ? (m[1].toLowerCase() as HermesScan) : null;
+}
 
 /** The plugin CLI of a harness that has one: its name, and where PATH has it (null when it is not installed). */
 export function harnessCli(
@@ -676,8 +714,6 @@ export function runner(file: string, onFailure?: (diagnostic: NonNullable<Action
       err: (r.stderr ?? "") + (r.error ? r.error.message : ""),
       exitCode: r.status,
     };
-    const redact = (text: string) =>
-      text.replace(/(https?:\/\/)[^\s/@]+@/g, "$1[redacted]@").replace(/(Bearer\s+)\S+/gi, "$1[redacted]");
     run.failure = result.ok
       ? undefined
       : {
@@ -690,6 +726,11 @@ export function runner(file: string, onFailure?: (diagnostic: NonNullable<Action
     return result;
   };
   return run;
+}
+
+/** A CLI's output with the credentials a clone URL or an auth header can carry taken out. */
+function redact(text: string): string {
+  return text.replace(/(https?:\/\/)[^\s/@]+@/g, "$1[redacted]@").replace(/(Bearer\s+)\S+/gi, "$1[redacted]");
 }
 
 /** Does this harness's CLI have plugin commands? Asked through --help only, so an old CLI never starts a session. */

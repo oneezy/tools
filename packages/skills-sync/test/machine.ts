@@ -484,17 +484,66 @@ export function hookEntry(
 }
 
 /**
+ * Codex's key for a user hook (codex-rs/hooks/src/lib.rs hook_key): `<hooks.json>:session_start:<group>:<handler>`,
+ * the hooks.json path written from CODEX_HOME's canonical path, since the pretend machine sets CODEX_HOME
+ * (utils/home-dir canonicalizes it then).
+ */
+export function codexTrustKey(m: PretendMachine, group: number, handler = 0): string {
+  return `${path.join(fs.realpathSync.native(m.codexHome), "hooks.json")}:session_start:${group}:${handler}`;
+}
+
+/**
+ * Codex's trust hash of the SessionStart handler at `group`/`handler` in the pretend machine's hooks.json, worked out
+ * here on its own from Codex's rules (codex-rs/hooks/src/engine/discovery.rs, config/src/fingerprint.rs), not from the
+ * tool's code: sha256 over compact sorted-key JSON of `{ event_name, matcher, hooks: [handler] }`, the handler with
+ * timeout 600 and async false when unset, statusMessage kept, additionalContextLimit kept unless 2500, and Windows's
+ * commandWindows in place of command.
+ */
+export function codexTrustHash(m: PretendMachine, group: number, handler = 0): string {
+  const doc = JSON.parse(fs.readFileSync(hooksFile(m, "codex"), "utf8"));
+  const g = doc.hooks.SessionStart[group];
+  const h = g.hooks[handler];
+  const command = process.platform === "win32" ? (h.commandWindows ?? h.command) : h.command;
+  const normal: Record<string, unknown> = {
+    type: "command",
+    command,
+    timeout: Math.max(1, h.timeout ?? 600),
+    async: h.async ?? false,
+  };
+  if (h.statusMessage != null) normal.statusMessage = h.statusMessage;
+  if (h.additionalContextLimit != null && h.additionalContextLimit !== 2500)
+    normal.additionalContextLimit = h.additionalContextLimit;
+  const identity: Record<string, unknown> = { event_name: "session_start", hooks: [normal] };
+  if (g.matcher != null) identity.matcher = g.matcher;
+  const sorted = (v: unknown): unknown =>
+    Array.isArray(v)
+      ? v.map(sorted)
+      : v && typeof v === "object"
+        ? Object.fromEntries(
+            Object.keys(v)
+              .sort()
+              .map((k) => [k, sorted((v as Record<string, unknown>)[k])]),
+          )
+        : v;
+  return `sha256:${createHash("sha256")
+    .update(JSON.stringify(sorted(identity)))
+    .digest("hex")}`;
+}
+
+/**
  * Codex's record of a trusted user hook, as its TUI writes it into ~/.codex/config.toml:
- * `[hooks.state."<hooks.json>:session_start:<group>:<handler>"]` with a `trusted_hash`. The path is a TOML basic
+ * `[hooks.state."<hooks.json>:session_start:<group>:<handler>"]` with the `trusted_hash` of the entry it trusted (the
+ * entry now in hooks.json at that position unless `hash` names another, an older one). The path is a TOML basic
  * string, so a Windows path has its backslashes doubled. Appended to the file. Returns the file.
  */
-export function codexTrust(m: PretendMachine, group: number, handler = 0): string {
+export function codexTrust(m: PretendMachine, group: number, handler = 0, hash?: string): string {
   const file = path.join(m.codexHome, "config.toml");
-  const key = `${hooksFile(m, "codex").replace(/\\/g, "\\\\")}:session_start:${group}:${handler}`;
+  const key = codexTrustKey(m, group, handler).replace(/\\/g, "\\\\");
+  const trusted = hash ?? codexTrustHash(m, group, handler);
   const existing = fs.existsSync(file) ? fs.readFileSync(file, "utf8") : "";
   write(
     file,
-    `${existing}${existing && !existing.endsWith("\n") ? "\n" : ""}[hooks.state."${key}"]\ntrusted_hash = "sha256:${"ab".repeat(32)}"\n`,
+    `${existing}${existing && !existing.endsWith("\n") ? "\n" : ""}[hooks.state."${key}"]\ntrusted_hash = "${trusted}"\n`,
   );
   return file;
 }
