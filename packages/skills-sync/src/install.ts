@@ -289,14 +289,15 @@ export const hermes = {
   /**
    * --no-enable: the enable is a step of its own, so a failed one is told apart. --force replaces an install and answers
    * a `caution` from Hermes's security scan (a `dangerous` one it never gets past); the form passes it for the library's
-   * own plugins only. `scan` is the verdict Hermes printed when it was not clean, whether the install went ahead or not,
-   * and `output` what Hermes printed (redacted as a failure's diagnostic is), the scan's findings with it.
+   * own plugins only. `scan` is the verdict Hermes printed when it was not clean (it prints one only when the scan stops
+   * the install; a caution --force answers is silent), and `output` what Hermes printed (redacted as a failure's
+   * diagnostic is), the scan's findings with it.
    */
   install(
     run: Run,
     identifier: string,
     options: { ref?: string; force?: boolean } = {},
-  ): { ok: boolean; scan: string | null; output: NonNullable<Action["diagnostic"]> } {
+  ): { ok: boolean; scan: HermesScan | null; output: NonNullable<Action["diagnostic"]> } {
     const args = [
       "plugins",
       "install",
@@ -318,23 +319,24 @@ export const hermes = {
   remove: (run: Run, name: string) => run(["plugins", "remove", name]).ok,
 };
 
+/** A verdict of Hermes's install-time security scan that is not clean: `caution` asks to confirm, `dangerous` blocks. */
+export type HermesScan = "caution" | "dangerous";
+
 /**
- * The verdict of Hermes's security scan (tools/plugin_guard.py: safe, caution or dangerous) in what `hermes plugins
- * install` printed, when it was not clean; null for a clean scan or none. Read from the text after the first mention of
- * the scan, so the "custom (unreviewed) source" warning every GitHub install prints first is not taken for one. Hermes
- * records no verdict in its files, so this output is the only place it shows.
+ * The verdict of Hermes's security scan in what `hermes plugins install` printed, when it was not clean; null for a
+ * clean scan or none. Hermes (hermes_cli/plugins_cmd_install.py, tools/plugin_guard.py, tools/skills_guard.py) prints
+ * it only when the scan stops the install: the report's head line `Scan: <name> (<identifier>/community)  Verdict:
+ * CAUTION` (or `DANGEROUS`), and the refusal `Blocked: Security scan blocked plugin install: Requires confirmation
+ * (caution verdict, <n> findings)` or `... Blocked (dangerous verdict, ...). --force does not override a dangerous
+ * verdict.`, all on stdout, exit 1. A caution that --force answers passes in silence (a log line, nothing printed), so
+ * a successful --force install reads null here. Rich wraps at 80 columns when stdout is not a terminal, so a line
+ * break may sit inside either phrase; colour codes (FORCE_COLOR) are taken out first. Hermes records no verdict in its
+ * files, so this output is the only place it shows.
  */
-export function scanVerdict(text: string): string | null {
-  const at = text.search(/scan/i);
-  if (at < 0) return null;
-  const m = /\b(dangerous|caution|warning)\b/i.exec(
-    text
-      .slice(at)
-      .split(/\r?\n/)
-      .filter((l) => !/unreviewed/i.test(l))
-      .join("\n"),
-  );
-  return m ? m[1].toLowerCase() : null;
+export function scanVerdict(text: string): HermesScan | null {
+  const plain = text.replace(/\x1b\[[0-9;]*[A-Za-z]/g, "");
+  const m = /\bVerdict:\s+(CAUTION|DANGEROUS)\b/i.exec(plain) ?? /\b(caution|dangerous)\s+verdict\b/i.exec(plain);
+  return m ? (m[1].toLowerCase() as HermesScan) : null;
 }
 
 /** The plugin CLI of a harness that has one: its name, and where PATH has it (null when it is not installed). */

@@ -9,10 +9,11 @@ import fs from "node:fs";
 import path from "node:path";
 import YAML from "yaml";
 import { afterAll, afterEach, beforeAll, test } from "vite-plus/test";
-import { hermes as hermesForm } from "../src/forms/hermes.js";
+import { hermes as hermesForm, libraryPath } from "../src/forms/hermes.js";
 import { isLink, lexists } from "../src/fs.js";
 import { harnessTable, hermesHomeDir } from "../src/harnesses.js";
 import { hermesNamespace } from "../src/hermes.js";
+import { scanVerdict } from "../src/install.js";
 import { probe } from "../src/machine.js";
 import { parseRelease } from "../src/release.js";
 import {
@@ -394,9 +395,12 @@ test("a caution verdict from hermes's security scan does not stop a library plug
   const evidence = actions(json).find((a) => a.kind === "note" && a.note?.startsWith("Hermes scan"));
   assert.equal(evidence?.path, "Hermes: plugin play");
   assert.deepEqual(evidence?.diagnostic?.command.slice(1), installCall("play", r17.commit).slice(1));
+  const said = (evidence?.diagnostic as { stdout?: string } | undefined)?.stdout ?? "";
+  assert.match(said, /Scan: play \(oneezy\/skills\/dist\/hermes\/play\/community\) {2}Verdict: CAUTION/);
+  assert.match(said, /HIGH {5}injection/);
   assert.match(
-    (evidence?.diagnostic as { stdout?: string } | undefined)?.stdout ?? "",
-    /caution: shell commands in documentation/,
+    said,
+    /Blocked: Security scan blocked plugin install: Requires confirmation \(caution verdict, 1 findings\)/,
   );
   // --quiet keeps it: the run changed things, and the note is loud besides
   const quiet = machine();
@@ -420,6 +424,61 @@ test("a caution verdict from hermes's security scan does not stop a library plug
   assert.ok(!again.stdout.includes("Hermes scan"), again.stdout);
 });
 
+test("the scan verdict is read from what Hermes prints: the report's Verdict line and the refusal's '<verdict> verdict', wrapped at 80 columns or coloured; a clean install, the 'unreviewed source' warning and a --force install that said nothing are no verdict", () => {
+  const head = [
+    "Warning: custom (unreviewed) source — not from the Hermes catalog.",
+    "Cloning https://github.com/oneezy/skills.git (subdir: dist/hermes/pstack)...",
+  ];
+  // hermes_cli/plugins_cmd_install.py with no TTY: the flagged report, then the refusal, exit 1
+  const caution = [
+    ...head,
+    "",
+    "⚠ Security scan flagged this plugin:",
+    "Scan: pstack (oneezy/skills/dist/hermes/pstack/community)  Verdict: CAUTION",
+    '  HIGH     execution      skills/pstack/scripts/run.sh:3     "bash -c"',
+    "",
+    "Decision: BLOCKED — Blocked (community source + caution verdict, 9 findings). Use --force to override.",
+    "Blocked: Security scan blocked plugin install: Requires confirmation (caution verdict, 9 findings)",
+  ].join("\n");
+  assert.equal(scanVerdict(caution), "caution");
+  // Rich wraps at 80 columns off a terminal: a long name puts the verdict on the next line
+  assert.equal(
+    scanVerdict("Scan: diagram-design (oneezy/skills/dist/hermes/diagram-design/community)  Verdict:\nCAUTION"),
+    "caution",
+  );
+  assert.equal(
+    scanVerdict("Blocked: Security scan blocked plugin install: Requires confirmation (caution\nverdict, 1 findings)"),
+    "caution",
+  );
+  assert.equal(
+    scanVerdict(
+      "Blocked: Security scan blocked plugin install: Blocked (dangerous verdict, 1 critical of 3 findings (curl_pipe_shell)). --force does not override a dangerous verdict.\n\nScan: x (o/r/x/community)  Verdict: DANGEROUS",
+    ),
+    "dangerous",
+  );
+  assert.equal(scanVerdict("\x1b[31mBlocked:\x1b[0m Security scan ... Verdict: \x1b[1mDANGEROUS\x1b[0m"), "dangerous");
+  // a clean install, and a --force install whose caution passed in silence: nothing to read
+  assert.equal(scanVerdict([...head, "✓ Installed pstack", "Plugin installed but not enabled."].join("\n")), null);
+  assert.equal(scanVerdict("Scan: x (o/r/x/community)  Verdict: SAFE"), null);
+  assert.equal(scanVerdict("Warning: something else about a scan of the cache"), null);
+});
+
+test("the --force that answers a caution is passed only for the library's own rendering path: owner/repo/<folder>/<id>, plain names only", () => {
+  assert.equal(libraryPath("oneezy/skills/dist/hermes/pstack", "oneezy/skills"), true);
+  assert.equal(libraryPath("Oneezy/Skills/dist/hermes/diagram-design", "oneezy/skills"), true);
+  assert.equal(libraryPath("oneezy/skills/hermes/pstack", "oneezy/skills"), true);
+  assert.equal(libraryPath("oneezy/skills/pstack", "oneezy/skills"), false);
+  assert.equal(libraryPath("other/skills/dist/hermes/pstack", "oneezy/skills"), false);
+  assert.equal(libraryPath("oneezy/skills-fork/dist/hermes/pstack", "oneezy/skills"), false);
+  assert.equal(libraryPath("oneezy/skills/../evil/dist/x", "oneezy/skills"), false);
+  assert.equal(libraryPath("oneezy/skills/dist/hermes/.hidden", "oneezy/skills"), false);
+  assert.equal(libraryPath("oneezy/skills/dist/hermes/-x", "oneezy/skills"), false);
+  assert.equal(libraryPath('oneezy/skills/dist/hermes/a"b', "oneezy/skills"), false);
+  assert.equal(libraryPath("oneezy/skills/dist\\hermes/x", "oneezy/skills"), false);
+  assert.equal(libraryPath("oneezy/skills/dist//x", "oneezy/skills"), false);
+  assert.equal(libraryPath("oneezy/skills", "oneezy/skills"), false);
+});
+
 test("a dangerous verdict is one --force does not get past: that plugin is a red line naming the verdict, its links stay, the others are installed", async () => {
   const m = machine();
   const r17 = latest();
@@ -433,7 +492,13 @@ test("a dangerous verdict is one --force does not get past: that plugin is a red
     conflict?.note,
     "hermes could not install it; loose links kept. Hermes's security scan said dangerous, which this tool never overrides",
   );
-  assert.match(conflict?.diagnostic?.stderr ?? "", /blocked by the security scan/);
+  // Hermes prints the refusal on stdout (its Rich console), the report with it
+  const said = (conflict?.diagnostic as { stdout?: string } | undefined)?.stdout ?? "";
+  assert.match(
+    said,
+    /Blocked: Security scan blocked plugin install: Blocked \(dangerous verdict, .*\)\. --force does not override a dangerous verdict\./,
+  );
+  assert.match(said, /Verdict: DANGEROUS/);
   // never retried with --force
   assert.deepEqual(
     r.calls.filter((c) => c.includes(IDENTIFIER("play"))),
@@ -502,7 +567,8 @@ test("a plugin behind a newer release is re-installed at the new commit with --f
     });
     github.addRelease(r18);
     hermesSource(m, r18);
-    // play's scan now says caution: the re-install's --force already answers it, in the one call, and the note says so
+    // play's scan now says caution: the re-install's --force already answers it, in the one call; Hermes prints nothing
+    // of a caution --force answered, so there is no verdict to note (the fresh install's note was the one)
     const r = await cli(m, [], { FAKE_HARNESS_CAUTION: "play" });
     assert.equal(r.status, 0, r.stderr + r.stdout);
     assert.deepEqual(r.calls.filter(pluginWrite), [
@@ -511,7 +577,7 @@ test("a plugin behind a newer release is re-installed at the new commit with --f
     ]);
     assert.deepEqual(
       lines(r).filter((l) => l.includes("Hermes scan")),
-      [". note         Hermes: plugin play  (Hermes scan caution, installed with --force (library plugin))"],
+      [],
     );
     assert.equal(installs(m).oneezy.revision, r18.commit);
     assert.equal(installs(m).play.revision, r18.commit);

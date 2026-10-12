@@ -133,36 +133,39 @@ export const hermes: FormFn = async (release, state, _machine, { plan, github })
       // answered once with --force for this same identifier and commit (tools#193); `dangerous` never is, and Hermes
       // refuses it under --force anyway. Over this tool's own install (checked above) --force is how a pinned install
       // moves, so that one call carries it from the start. A same-named plugin from anywhere else never gets here.
-      let done = plan ? null : cli.install(run, identifier, { ref: release.commit, force: !!have });
+      const first = plan ? null : cli.install(run, identifier, { ref: release.commit, force: !!have });
+      let done = first;
       let forced = !!have;
-      /** what Hermes printed with the verdict it gave, kept as the evidence of what was accepted */
-      const evidence = done?.output;
-      if (done && !done.ok && done.scan === "caution" && !have) {
+      if (first && !first.ok && first.scan === "caution" && !have && libraryPath(identifier, release.repo)) {
         done = cli.install(run, identifier, { ref: release.commit, force: true });
         forced = true;
       }
+      // Hermes prints the verdict only when the scan stops an install: the plain call's, kept through the --force one
+      // (which says nothing of the caution it answered)
+      const scan = done?.scan ?? first?.scan ?? null;
       if (done && !done.ok) {
         fail(
           what,
           `${cli.bin} could not install it; loose links kept` +
-            (done.scan === "dangerous"
+            (scan === "dangerous"
               ? `. Hermes's security scan said dangerous, which this tool never overrides`
-              : done.scan && forced
-                ? `. Hermes's security scan said ${done.scan}`
+              : scan
+                ? `. Hermes's security scan said ${scan}`
                 : ""),
         );
         continue;
       }
       out.push(action);
       // the scan stays visible: one line naming the plugin, not a red one (it was installed); a caution is not a clean
-      // bill, so the line says what was overridden and the findings Hermes printed go with it (--json: diagnostic)
-      if (done?.scan)
+      // bill, so the line says what was overridden, and what Hermes printed with the verdict, its findings, goes with it
+      // (--json: diagnostic)
+      if (scan)
         out.push({
           kind: "note",
           path: where(what),
-          note: `Hermes scan ${done.scan}, installed${forced ? " with --force" : ""} (library plugin)`,
+          note: `Hermes scan ${scan}, installed${forced ? " with --force" : ""} (library plugin)`,
           loud: true,
-          ...(evidence ? { diagnostic: evidence } : {}),
+          ...(first ? { diagnostic: first.output } : {}),
         });
       installed.push(p.id);
     } else if (!n.ahead) out.push({ kind: "skip", path: where(what), note: `installed, ${p.version ?? "no version"}` });
@@ -372,6 +375,18 @@ function pinProblem(row: HermesListed, disk: HermesPlugin, commit: string): stri
   if (!disk.install?.pinned || disk.install.revision?.toLowerCase() !== commit.toLowerCase())
     return `installed at ${disk.install?.revision ?? "no recorded revision"}${disk.install?.pinned ? "" : " unpinned"}, not ${commit}`;
   return null;
+}
+
+/**
+ * Is this install identifier the library's own Hermes rendering, `<owner>/<repo>/<folder...>/<id>` with every segment
+ * a plain name (no `.` or `..`, no leading `-` or `.`, no space, quote or backslash)? The --force that answers a scan
+ * caution is passed only for one: the folder and id come from the release's own files, and this keeps them inside the
+ * repository.
+ */
+export function libraryPath(identifier: string, repo: string): boolean {
+  if (!identifier.toLowerCase().startsWith(`${repo.toLowerCase()}/`)) return false;
+  const rest = identifier.slice(repo.length + 1).split("/");
+  return rest.length >= 2 && rest.every((s) => /^[A-Za-z0-9_][A-Za-z0-9._-]*$/.test(s));
 }
 
 /** The first skill of the plugin Hermes would skip, with why; null when every one loads. */
