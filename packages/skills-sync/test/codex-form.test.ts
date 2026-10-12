@@ -511,7 +511,7 @@ test("each skill name is listed once afterwards: status shows no duplicate, no l
       "oneezy@oneezy-skills 0.43.1 (latest 0.43.1)",
       "play@oneezy-skills 0.43.0 (latest 0.43.0)",
       // the hook and the block the sync wrote (tools#155 lists them in status; the trust is a manual step, not a line)
-      `session hook in ${path.join(m.codexHome, "hooks.json")}, not trusted in Codex yet (manual step below)`,
+      `session hook in ${path.join(m.codexHome, "hooks.json")}, new in Codex, not trusted yet (manual step below)`,
       `global block in ${path.join(m.codexHome, "AGENTS.md")} current`,
     ],
   );

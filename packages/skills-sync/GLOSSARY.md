@@ -66,7 +66,7 @@ The run that moves a Source to its latest release, a Hold, or a version asked fo
 _Avoid_: refresh (the internal step), bump
 
 **Session hook**:
-The one `SessionStart` entry `sync` keeps in a Harness's user hooks file (`~/.claude/settings.json`, `~/.codex/hooks.json`) that runs `npx --yes @oneezy/skills-sync@latest hook` when a session starts or resumes (ADR-0010 in oneezy/skills). Known by its command, never by its position; every other entry is left alone. Codex runs it only once Justin has trusted it in the TUI, a manual step the report names.
+The one `SessionStart` entry `sync` keeps in a Harness's user hooks file (`~/.claude/settings.json`, `~/.codex/hooks.json`) that runs `npx --yes @oneezy/skills-sync@latest hook` when a session starts or resumes (ADR-0010 in oneezy/skills). Known by its command, never by its position; every other entry is left alone. Codex runs it only once Justin has trusted it in the TUI, and again after it changed from the form he trusted (Codex checks the recorded hash); the report names it trusted, new or changed, and the trust is a manual step the tool never writes.
 _Avoid_: startup hook, the old `sync-dev.sh`
 
 **Checkout**:

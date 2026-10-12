@@ -26,7 +26,7 @@ import { catalogOf, FORM_LABEL, formOf, notServed, sameCatalog, serves, type Mac
 import { versionGap } from "../forms/codex.js";
 import { github } from "../github.js";
 import { harnessTable } from "../harnesses.js";
-import type { HookState } from "../hooks.js";
+import type { CodexTrust, HookState } from "../hooks.js";
 import {
   oldStateNotes,
   probe,
@@ -83,6 +83,11 @@ export interface StatusHook {
   current: boolean;
   /** Codex: trusted in its TUI; null on Claude Code, and on Codex when the file cannot be read */
   trusted: boolean | null;
+  /**
+   * Codex: trusted, new (never trusted) or changed (trusted in another form, so Codex asks for review again); null as
+   * for `trusted`
+   */
+  trust: CodexTrust | null;
 }
 
 /** The managed block in the harness's global instructions file (ADR-0011). */
@@ -430,23 +435,26 @@ function plugin(
 
 /**
  * The session hook's line: red when the entry is missing, when the old sync-dev.sh entry is still there, or when the
- * file cannot be worked on; green when present. A present Codex entry the person has not trusted yet is green here and
- * a manual step below: the machine is right, the trust is the person's. Harnesses are told apart by their id, never by
- * `trusted`.
+ * file cannot be worked on; green when present, on Codex saying how Codex sees it. A present Codex entry the person has
+ * not trusted yet, or that changed since they did, is green here and a manual step below: the machine is right, the
+ * trust is the person's. Harnesses are told apart by their id, never by `trust`.
  */
 function hookLine(harnessId: string, h: HookState): StatusLine {
   // readHook's note is a file problem when the entry is not there, and the Codex trust step when it is
   if (!h.present && h.note) return red(`session hook in ${h.file}: ${h.note}`);
   if (!h.present) return red(`no session hook entry in ${h.file}; run sync`);
   if (h.old) return red(`old sync-dev.sh hook still in ${h.file}; run sync`);
-  if (harnessId === "codex" && h.trusted === false)
-    return green(`session hook in ${h.file}, not trusted in Codex yet (manual step below)`);
+  if (harnessId === "codex" && h.trust === "new")
+    return green(`session hook in ${h.file}, new in Codex, not trusted yet (manual step below)`);
+  if (harnessId === "codex" && h.trust === "changed")
+    return green(`session hook in ${h.file}, changed since Codex trusted it, review again (manual step below)`);
+  if (harnessId === "codex" && h.trust === "trusted") return green(`session hook in ${h.file}, trusted in Codex`);
   return green(`session hook in ${h.file}`);
 }
 
 /** The session hook's facts for --json: current is present with the old entry gone. */
 function hookFacts(h: HookState): StatusHook {
-  return { file: h.file, present: h.present, current: h.present && !h.old, trusted: h.trusted };
+  return { file: h.file, present: h.present, current: h.present && !h.old, trusted: h.trusted, trust: h.trust };
 }
 
 /**

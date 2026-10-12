@@ -94,7 +94,7 @@ function machine(options: Parameters<typeof pretendMachine>[0] = {}): PretendMac
 const red = (lines: Line[]) => lines.filter((l) => !l.ok).map((l) => l.text);
 /** The two green lines every done harness shows after its plugin and duplicate lines. */
 const done = (m: PretendMachine, h: "claude-code" | "codex") => [
-  `= session hook in ${hooksFile(m, h)}`,
+  `= session hook in ${hooksFile(m, h)}${h === "codex" ? ", trusted in Codex" : ""}`,
   `= global block in ${globalFile(m, h)} current`,
 ];
 const NO_CHECKOUT =
