@@ -8,7 +8,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { afterAll, beforeAll, beforeEach, test } from "vite-plus/test";
-import { adaptFiles, adaptProblems, compileAdapt, forbiddenIn, isAdapted } from "../src/adapt.js";
+import { adaptFiles, adaptProblems, compileAdapt, forbiddenIn, forbiddenInFiles, isAdapted } from "../src/adapt.js";
 import { shippedSchema, validate } from "../src/schema.js";
 
 let base: string;
@@ -335,4 +335,68 @@ test("the schema takes adapt on a source (rules of find, replace and flags; forb
   assert.deepEqual(forbiddenIn("one\nCursor and Cursor\nok: Cursor\n", c.compiled), [
     { line: 2, term: "Cursor", pattern: "Cursor" },
   ]);
+});
+
+test("a file named .md whose bytes are not UTF-8 is copied as it is and never looked at; a UTF-8 file keeps its BOM; y and other flags the schema refuses are refused here too; an allow matches anywhere in a line unless anchored", () => {
+  const c = compileAdapt({ rules: [{ find: "Cursor", replace: "the editor" }], forbid: ["Cursor"] });
+  assert.ok(c.ok);
+  const binary = Buffer.from([0x43, 0x75, 0x72, 0x73, 0x6f, 0x72, 0xff, 0xfe, 0x00, 0x0a]);
+  const bom = Buffer.from("﻿Open Cursor.\n", "utf8");
+  const out = adaptFiles(
+    new Map([
+      ["blob.md", binary],
+      ["bom.md", bom],
+    ]),
+    c.compiled,
+  );
+  assert.ok(out.files.get("blob.md")!.equals(binary), "the bytes are not turned into U+FFFD");
+  assert.ok(out.files.get("bom.md")!.equals(Buffer.from("﻿Open the editor.\n", "utf8")));
+  assert.deepEqual(out.counts, [1], "only the UTF-8 file counts");
+  assert.deepEqual(forbiddenInFiles(new Map([["blob.md", binary]]), c.compiled), []);
+
+  const sticky = compileAdapt({ rules: [{ find: "a", replace: "b", flags: "y" }] });
+  assert.ok(!sticky.ok);
+  assert.match(sticky.errors[0], /^adapt\.rules\[0\]\.flags: only g, i, m, s and u/);
+  const doubled = compileAdapt({ rules: [{ find: "a", replace: "b", flags: "gig" }] });
+  assert.ok(doubled.ok);
+  assert.equal(doubled.compiled.rules[0].re.flags, "gi");
+
+  const loose = compileAdapt({ forbid: ["Cursor"], allow: ["docs"] });
+  const exact = compileAdapt({ forbid: ["Cursor"], allow: ["^Cursor docs$"] });
+  assert.ok(loose.ok && exact.ok);
+  assert.deepEqual(forbiddenIn("Cursor docs\r\nsee Cursor docs\n", loose.compiled), []);
+  assert.deepEqual(forbiddenIn("Cursor docs\r\nsee Cursor docs\n", exact.compiled), [
+    { line: 2, term: "Cursor", pattern: "Cursor" },
+  ]);
+});
+
+test("update sees the text as build will: a rule matching a CRLF upstream file's lines or a renamed skill's name is not called stale; NOTICE.md counts the rules that matched", () => {
+  const rules = [
+    { find: "^plain$", replace: "plain text", flags: "m" },
+    { find: "^name: up-b$", replace: "name: up-b", flags: "m" },
+    { find: "Cursor rules engine", replace: "rules" },
+  ];
+  write(
+    "skills-sync.json",
+    JSON.stringify(
+      (() => {
+        const c = CONFIG({ rules });
+        (c.sources.up as Record<string, unknown>).rename = { b: "up-b" };
+        return c;
+      })(),
+      null,
+      2,
+    ) + "\n",
+  );
+  up.file("skills/b/SKILL.md", "---\r\nname: b\r\ndescription: b skill\r\n---\r\nplain\r\n");
+  up.commit("crlf");
+  const r = cli("update", "--quiet");
+  assert.equal(r.status, 0, r.stderr + r.stdout);
+  assert.doesNotMatch(r.stderr, /rules\[[01]\]/, r.stderr);
+  assert.match(r.stderr, /rules\[2\] \(find "Cursor rules engine"\) matches nothing upstream/);
+  const built = cli("build");
+  assert.equal(built.status, 0, built.stderr + built.stdout);
+  assert.match(read("plugins/up/skills/up-b/SKILL.md"), /^plain text$/m);
+  assert.doesNotMatch(built.stdout, /rules\[[01]\]/);
+  assert.match(read("plugins/up/NOTICE.md"), /^- Adapted: 2 find\/replace rules from/m);
 });

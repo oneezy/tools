@@ -10,6 +10,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { adaptFiles, compileAdapt, forbiddenInFiles, hasAdapt } from "./adapt.js";
+import { lf } from "./build.js";
 import { moved, type Moved } from "./changelog.js";
 import { isDir, isLink, isSkillDir } from "./fs.js";
 import { RESERVED } from "./harnesses.js";
@@ -343,7 +344,11 @@ export function refresh(lib: Library, opts: RefreshOptions): RefreshResult {
         if (fresh.length && c.ok) {
           const counts = c.compiled.rules.map(() => 0);
           for (const r of here) {
-            const a = adaptFiles(folderFiles(r.dir), c.compiled);
+            // the text as build will see it: the working-set copy (its rename applied) in a package's line endings
+            const files = new Map([...folderFiles(r.dir)].map(([rel, bytes]) => [rel, lf(bytes)]));
+            const md = files.get("SKILL.md");
+            if (md && r.name !== r.upstream) files.set("SKILL.md", Buffer.from(withName(md.toString("utf8"), r.name)));
+            const a = adaptFiles(files, c.compiled);
             a.counts.forEach((n, i) => (counts[i] += n));
             if (fresh.includes(r))
               for (const h of forbiddenInFiles(a.files, c.compiled))

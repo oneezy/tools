@@ -256,7 +256,7 @@
           "uniqueItems": true
         },
         "adapt": {
-          "description": "Plain find/replace rules for skills written for another harness. build applies the rules in order to every Markdown and text file (.md, .mdc, .markdown, .txt) of this source's skills as it copies them into plugins/<id>/ and every rendering made from it; scripts and other files, the snapshot under upstream/ and the working set stay as upstream wrote them. A forbid match left after the rules, on a line no allow pattern accepts, fails check and build --check with the file, line and term; a rule that matches nothing is reported; update warns when new upstream text holds a forbidden term.",
+          "description": "Plain find/replace rules for skills written for another harness. build applies the rules in order to every Markdown and text file (.md, .mdc, .markdown, .txt; one whose bytes are not UTF-8 is copied as it is) of this source's skills as it copies them into plugins/<id>/ and every rendering made from it; scripts and other files, the snapshot under upstream/ and the working set stay as upstream wrote them. A forbid match left after the rules, on a line no allow pattern accepts, fails check and build --check with the file, line and term; a rule that matches nothing is reported; update warns when new upstream text holds a forbidden term.",
           "type": "object",
           "additionalProperties": false,
           "properties": {
@@ -277,7 +277,7 @@
               "uniqueItems": true
             },
             "allow": {
-              "description": "JavaScript regular expressions for whole lines that may keep a forbidden term, such as a factual mention of the other harness.",
+              "description": "JavaScript regular expressions tested against each line of an adapted file, without its line ending: a line one of them matches (anywhere in it; anchor with ^ and $ for that exact line) may keep a forbidden term, such as a factual mention of the other harness.",
               "type": "array",
               "items": {
                 "type": "string",

@@ -52,7 +52,7 @@ One plain find/replace (a regular expression and its replacement) in a Source's 
 _Avoid_: rewrite, port, patch
 
 **Forbidden term**:
-A pattern in a Source's `adapt.forbid` that no adapted file may still match once the Adapt rules ran, unless an `adapt.allow` pattern accepts the whole line. One left fails `check`; one in new upstream text is a warning from `update`.
+A pattern in a Source's `adapt.forbid` that no adapted file may still match once the Adapt rules ran, unless an `adapt.allow` pattern matches that line. One left fails `check`; one in new upstream text is a warning from `update`.
 _Avoid_: banned word, blocklist
 
 ### Runs

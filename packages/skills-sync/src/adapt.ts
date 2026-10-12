@@ -18,7 +18,7 @@ export interface Adapt {
   rules?: AdaptRule[];
   /** patterns no adapted file may still match once the rules ran */
   forbid?: string[];
-  /** patterns for whole lines that may keep a forbidden term (a factual mention) */
+  /** patterns for lines that may keep a forbidden term (a factual mention), tested against each line as a whole */
   allow?: string[];
 }
 
@@ -61,6 +61,11 @@ export function compileAdapt(
   };
   const compiled: Compiled = { rules: [], forbid: [], allow: [] };
   (a.rules ?? []).forEach((r, i) => {
+    // the schema takes g, i, m, s and u; y (sticky) would stop a rule at its first gap, so it is refused here too
+    if (!/^[gimsu]*$/.test(r.flags ?? "")) {
+      errors.push(`${at}.rules[${i}].flags: only g, i, m, s and u (${JSON.stringify(r.flags)})`);
+      return;
+    }
     const flags = [...new Set(`g${r.flags ?? ""}`)].join("");
     const x = re(r.find, flags, `${at}.rules[${i}].find`);
     if (x) compiled.rules.push({ re: x, replace: r.replace });
@@ -87,6 +92,12 @@ export function adaptProblems(adapts: Record<string, Adapt | undefined>): string
   return out;
 }
 
+/** The file as text when its bytes are UTF-8 (a BOM kept as U+FEFF); null for anything else, which is never adapted. */
+function utf8(bytes: Buffer): string | null {
+  const text = bytes.toString("utf8");
+  return Buffer.from(text, "utf8").equals(bytes) ? text : null;
+}
+
 /** The text after every rule, in order, each rule seeing the one before it; `counts[i]` grows by rule i's matches. */
 export function applyRules(text: string, c: Compiled, counts: number[]): string {
   c.rules.forEach((r, i) => {
@@ -106,14 +117,22 @@ export function adaptFiles(files: Map<string, Buffer>, c: Compiled): { files: Ma
       out.set(rel, bytes);
       continue;
     }
-    const before = bytes.toString("utf8");
+    const before = utf8(bytes);
+    if (before === null) {
+      // not UTF-8 (a binary file named .md): decoding it would turn its bytes into U+FFFD, so it goes as it is
+      out.set(rel, bytes);
+      continue;
+    }
     const after = applyRules(before, c, counts);
     out.set(rel, after === before ? bytes : Buffer.from(after, "utf8"));
   }
   return { files: out, counts };
 }
 
-/** Each forbidden term in the text, once per line and term, on a line no allow pattern accepts; lines from 1. */
+/**
+ * Each forbidden term in the text, once per line and term, on a line no allow pattern matches (anywhere in the line,
+ * without its line ending: anchor an allow with ^ and $ to accept only that exact line); lines from 1.
+ */
 export function forbiddenIn(text: string, c: Compiled): Hit[] {
   const out: Hit[] = [];
   if (!c.forbid.length) return out;
@@ -134,8 +153,10 @@ export function forbiddenIn(text: string, c: Compiled): Hit[] {
 export function forbiddenInFiles(files: Map<string, Buffer>, c: Compiled): Array<Hit & { rel: string }> {
   const out: Array<Hit & { rel: string }> = [];
   if (!c.forbid.length) return out;
-  for (const rel of [...files.keys()].filter(isAdapted).sort((a, b) => (a < b ? -1 : a > b ? 1 : 0)))
-    for (const h of forbiddenIn(files.get(rel)!.toString("utf8"), c)) out.push({ ...h, rel });
+  for (const rel of [...files.keys()].filter(isAdapted).sort((a, b) => (a < b ? -1 : a > b ? 1 : 0))) {
+    const text = utf8(files.get(rel)!);
+    if (text !== null) for (const h of forbiddenIn(text, c)) out.push({ ...h, rel });
+  }
   return out;
 }
 

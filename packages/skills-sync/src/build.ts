@@ -163,7 +163,7 @@ type Origin =
       date: string;
       version: string | null;
       perSkill: Record<string, string>;
-      /** how many adapt rules rewrote the text files, 0 when the source has none */
+      /** how many adapt rules matched in the text files, 0 when the source has none or none matched */
       adapted: number;
     };
 
@@ -231,7 +231,9 @@ export function build(lib: Library, opts: BuildOptions): BuildResult {
         const source = pkg.origin.id;
         for (const { rel, ...h } of pkg.forbidden)
           result.forbidden.push({ source, path: `plugins/${id}/${rel}`, ...h });
-        result.unusedRules.push(...pkg.unused);
+        // two plugins packaging one source see the same skills: each unused rule is named once
+        for (const u of pkg.unused)
+          if (!result.unusedRules.some((x) => x.source === u.source && x.rule === u.rule)) result.unusedRules.push(u);
       }
       const disk = diskFiles(dir);
       if (disk.links.length) {
@@ -450,7 +452,7 @@ function resolvePackage(lib: Library, config: Config, id: string, report: Report
       date: meta.date,
       version,
       perSkill,
-      adapted: counts.length,
+      adapted: counts.filter((n) => n > 0).length,
     },
     forbidden,
     unused: (src.adapt?.rules ?? [])
@@ -1021,7 +1023,7 @@ function crlf(b: Buffer): Buffer {
  * (LF or mixed endings) is not a converted one; text is what git takes for it: no NUL, and at most one control
  * character in 128 bytes.
  */
-function lf(b: Buffer): Buffer {
+export function lf(b: Buffer): Buffer {
   if (!b.includes("\r\n") || b.includes(0)) return b;
   let control = 0;
   for (let i = 0; i < b.length; i++) {
