@@ -105,6 +105,10 @@ _Avoid_: mode (that is a project's link or copy), install mode
 The copy of a Plugin that Hermes loads, written by `build` at `dist/hermes/<id>/` beside `plugins/<id>/` once the Library opts in (`renderings.hermes` in its config, naming the folder): the package without the Claude and Codex manifests, each skill's `SKILL.md` with `name` set to its folder and `metadata` cut to string entries (Hermes's portable loader rejects the boolean `metadata.internal` the package carries), every other file byte for byte the package's. Installed with `hermes plugins install <owner>/<name>/dist/hermes/<id> --ref <commit>`; not recorded in the Release's `release.json`, whose `files` digests (the shared `NOTICE.md` among them) verify an installed copy.
 _Avoid_: Hermes package, Hermes plugin (that is the installed copy under Hermes's home)
 
+**User-only skill**:
+A skill only the user starts, marked `disable-model-invocation: true` in its `SKILL.md`; the Library gives it an `agents/openai.yaml` with `policy.allow_implicit_invocation: false` for Codex. Codex loads it and runs it when the user names it (`$name`), but keeps it out of the model's skill list, so `codex debug prompt-input` never shows it: the Codex form reads it from the copy Codex runs under `~/.codex/plugins/cache/` instead, and counts it as loaded.
+_Avoid_: hidden skill, manual skill
+
 **Account plugin**:
 A Plugin claude.ai syncs into Claude Code for the account, listed by `claude plugin list` as `<id>@synced` and kept under `~/.claude/plugins/synced/`. The tool never installs or removes one; `status` compares it with the Release, and `sync` removes what hides or duplicates one once `claude` lists it present and switched on.
 _Avoid_: synced plugin (the harness's word), cloud plugin

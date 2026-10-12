@@ -15,6 +15,7 @@ import { catalogOf, pluginsFor, type FormFn } from "../desired.js";
 import { lexists, toHash } from "../fs.js";
 import {
   addMarketplace,
+  codexLoadedSkills,
   codexPluginSkills,
   installPlugin,
   listInstalled,
@@ -285,8 +286,9 @@ export const codex: FormFn = (release, state, _machine, options) => {
 };
 
 /**
- * Codex's listing right now, as the probe shapes it, with the skills its prompt input shows each plugin loading (null
- * when it cannot render them); null when Codex cannot list.
+ * Codex's listing right now, as the probe shapes it, with the skills each plugin loads: those its prompt input shows,
+ * and an enabled plugin's user-only ones, which it never shows (null when it cannot render it); null when Codex cannot
+ * list.
  */
 function inventory(h: HarnessState["harness"], run: Run): CliPlugin[] | null {
   const listed = listInstalled(h, run);
@@ -297,7 +299,11 @@ function inventory(h: HarnessState["harness"], run: Run): CliPlugin[] | null {
     marketplace: i.marketplace,
     version: i.version,
     enabled: i.enabled,
-    skills: skills ? (skills.get(i.name) ?? []) : null,
+    skills: skills
+      ? i.enabled
+        ? codexLoadedSkills(h.configDir, i.marketplace, i.name, skills.get(i.name) ?? [])
+        : (skills.get(i.name) ?? [])
+      : null,
     path: i.folder,
   }));
 }
