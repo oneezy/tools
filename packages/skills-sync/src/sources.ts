@@ -3,6 +3,7 @@
 import { createHash } from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
+import type { Adapt } from "./adapt.js";
 import { isSkillDir } from "./fs.js";
 import { shippedSchema, validate } from "./schema.js";
 
@@ -54,6 +55,8 @@ export interface Source {
   pins?: Record<string, string>;
   /** upstream paths of the LICENSE and README files to carry */
   attribution?: string[];
+  /** find/replace rules build applies to the text files of this source's skills, and the terms none may keep (adapt.ts) */
+  adapt?: Adapt;
 }
 
 export interface Plugin {

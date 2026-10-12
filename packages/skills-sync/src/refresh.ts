@@ -9,6 +9,8 @@
 // by a list or a map is told each folder it leaves out (`unselected`), so a skill upstream adds is never skipped in silence.
 import fs from "node:fs";
 import path from "node:path";
+import { adaptFiles, compileAdapt, forbiddenInFiles, hasAdapt } from "./adapt.js";
+import { lf } from "./build.js";
 import { moved, type Moved } from "./changelog.js";
 import { isDir, isLink, isSkillDir } from "./fs.js";
 import { RESERVED } from "./harnesses.js";
@@ -79,6 +81,11 @@ export interface RefreshResult {
    *  "an own skill"), keyed the same */
   shadowed: string[];
   shadowedBy: Record<string, string>;
+  /** per source resolved upstream with adapt rules or forbid patterns: every forbidden term its rules leave in a skill
+   *  whose content is new to the lock, as source:skill/file:line: term (a warning: check fails on it after the build) */
+  forbidden: string[];
+  /** per such source, every adapt rule that matches nothing in its skills at the new commit */
+  unusedRules: Array<{ source: string; rule: number; find: string }>;
   /** selected skills the lock records no commit for, in frozen mode, as source:name */
   unlocked: string[];
   /** sources that could not be staged; their lock entries and snapshots are kept as they were */
@@ -134,6 +141,8 @@ export function refresh(lib: Library, opts: RefreshOptions): RefreshResult {
     unselected: [],
     shadowed: [],
     shadowedBy: {},
+    forbidden: [],
+    unusedRules: [],
     unlocked: [],
     problems: [],
     updated: [],
@@ -326,6 +335,29 @@ export function refresh(lib: Library, opts: RefreshOptions): RefreshResult {
       if (failed) {
         keep();
         continue;
+      }
+      // 2b. the source's adapt rules over what upstream has now, when any skill's content is new: a forbidden term they
+      //     leave there, or a rule that no longer matches, is named now rather than first seen as a failed check
+      if (!frozen && hasAdapt(src.adapt)) {
+        const fresh = here.filter((r) => prior?.skills?.[r.name]?.hash !== r.locked.hash);
+        const c = compileAdapt(src.adapt, `sources.${id}.adapt`);
+        if (fresh.length && c.ok) {
+          const counts = c.compiled.rules.map(() => 0);
+          for (const r of here) {
+            // the text as build will see it: the working-set copy (its rename applied) in a package's line endings
+            const files = new Map([...folderFiles(r.dir)].map(([rel, bytes]) => [rel, lf(bytes)]));
+            const md = files.get("SKILL.md");
+            if (md && r.name !== r.upstream) files.set("SKILL.md", Buffer.from(withName(md.toString("utf8"), r.name)));
+            const a = adaptFiles(files, c.compiled);
+            a.counts.forEach((n, i) => (counts[i] += n));
+            if (fresh.includes(r))
+              for (const h of forbiddenInFiles(a.files, c.compiled))
+                result.forbidden.push(`${id}:${r.name}/${h.rel}:${h.line}: ${h.term}`);
+          }
+          (src.adapt.rules ?? []).forEach((rule, i) => {
+            if (!counts[i]) result.unusedRules.push({ source: id, rule: i, find: rule.find });
+          });
+        }
       }
 
       // 3. attribution files and the version come from a checkout of the source's commit; the snapshot stands when it

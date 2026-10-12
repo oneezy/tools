@@ -47,6 +47,14 @@ One skill kept at its own commit while the rest of its Source moves.
 A Source's selected skill folders at the commit the Lock records, copied under `upstream/`. Never edited.
 _Avoid_: vendor copy, cache
 
+**Adapt rule**:
+One plain find/replace (a regular expression and its replacement) in a Source's `adapt` block, so skills written for one Harness read right in every other. Build applies the rules in order to the Markdown and text files it copies into a Plugin; scripts, the Snapshot and the Working set stay as upstream wrote them. No model takes part.
+_Avoid_: rewrite, port, patch
+
+**Forbidden term**:
+A pattern in a Source's `adapt.forbid` that no adapted file may still match once the Adapt rules ran, unless an `adapt.allow` pattern matches that line. One left fails `check`; one in new upstream text is a warning from `update`.
+_Avoid_: banned word, blocklist
+
 ### Runs
 
 **Sync**:

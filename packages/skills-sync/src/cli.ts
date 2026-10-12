@@ -10,8 +10,8 @@ import path from "node:path";
 import { addSource } from "./add.js";
 import { adoptBrain, rollbackBrain, brainLinks } from "./adoption.js";
 import { aliasLinks, migrateAliases, rollbackAliases } from "./aliases.js";
-import { build } from "./build.js";
-import { check } from "./check.js";
+import { build, type BuildResult } from "./build.js";
+import { check, unusedReason } from "./check.js";
 import { entrypoints } from "./entrypoints.js";
 import { readLocal, writeLocal, type LinkMode, type Local } from "./config.js";
 import { isDir, linkMode, real, samePath, setLinkMode } from "./fs.js";
@@ -111,7 +111,9 @@ Commands
                    skill folder under its root it leaves out (also with --json and --quiet, \`unselected\` in --json, a
                    ::warning:: under GitHub Actions; never an exit code). "skills": "*" takes every one instead, except
                    a new name another source or an own skill already has: left out and named the same way
-                   (\`shadowed\`). Under --json every conflict is printed on stderr too.
+                   (\`shadowed\`). Under --json every conflict is printed on stderr too. A source with adapt rules
+                   gets the same kind of warning for a forbid term the rules leave in new upstream text and for a
+                   rule that matches nothing upstream now (\`forbidden\`, \`unusedRules\` in --json).
                    Never writes skills-sync.json
   refresh          the same as update (kept for scripts and CI); refresh --frozen installs the lock as it is
   versions <source>
@@ -120,12 +122,17 @@ Commands
                    skills-sync.json, then update that one source (every other one stays at the lock)
   build            write the plugin form into the library when skills-sync.json has generate.plugins on: --plugins and
                    --catalogs pick the committed outputs (both when neither is named), --artifacts writes the upload
-                   archives; --check diffs instead of writing
+                   archives; --check diffs instead of writing. A source's adapt rules (find/replace, in order) are
+                   applied to the Markdown and text files of its skills as they are copied (never a script, the
+                   snapshot or the working set); a forbid term left after them is a "forbidden <path>:<line>" line and
+                   fails --check; a rule that matches nothing is a note
   check            is what is committed consistent? every own skill's frontmatter (name is its folder's name and a
                    valid id, description present), every skill under skills/play/ named play-<name>, every flow.yaml
                    beside one (schemas/flow.schema.json, unique step ids, after/parallel/join naming steps that exist),
                    and generated-file drift (what build --check computes, plus skills-sync.lock.json against the snapshots,
-                   and a version skills-sync.json holds a source at that the lock does not have).
+                   and a version skills-sync.json holds a source at that the lock does not have), and every forbid term
+                   a source's adapt rules leave in a package file (file, line, term; an allow pattern accepts a line);
+                   an adapt rule that matches nothing is a note.
                    One line per problem, path then reason; exit 1 on any, 0 when clean. Reads only: no network,
                    nothing written (CI, and before committing)
 
@@ -578,6 +585,8 @@ function runUpdate(lib: Library, args: Args, log: (m: string) => void, report: R
     gone: r.gone,
     unselected: r.unselected,
     shadowed: r.shadowed,
+    forbidden: r.forbidden,
+    unusedRules: r.unusedRules,
     unlocked: r.unlocked,
     problems: r.problems,
   });
@@ -646,6 +655,23 @@ function reportRefresh(
     warn(
       `skills-sync ${args.command}`,
       `${id}: not taken from upstream, the name is already another's: ${names.map((n) => `${n} (${r.shadowedBy[`${id}:${n}`]})`).join(", ")}; give each a "rename" to take it`,
+    );
+  for (const [id, hits] of bySource(r.forbidden))
+    warn(
+      `skills-sync ${args.command}`,
+      `${id}: forbidden term left after the adapt rules in new upstream text: ${hits
+        .map((h) => {
+          const m = /^(.*):(\d+): (.*)$/.exec(h);
+          return m ? `${m[1]}:${m[2]} ${JSON.stringify(m[3])}` : h;
+        })
+        .join(
+          ", ",
+        )}; add a rule, or an allow, under sources.${id}.adapt in ${path.basename(lib.configFile)}, or check fails after the build`,
+    );
+  for (const u of r.unusedRules)
+    warn(
+      `skills-sync ${args.command}`,
+      `${u.source}: adapt rule rules[${u.rule}] (find ${JSON.stringify(u.find)}) matches nothing upstream now; fix it or remove it from ${path.basename(lib.configFile)}`,
     );
   // text output prints every conflict with the file actions; --json would carry them only in its actions
   if (args.json) for (const a of r.report.conflicts()) warn(`skills-sync ${args.command}`, line(a).trim());
@@ -778,6 +804,8 @@ function runAdd(lib: Library, args: Args, log: (m: string) => void, report: Repo
     gone: res.gone,
     unselected: res.unselected,
     shadowed: res.shadowed,
+    forbidden: res.forbidden,
+    unusedRules: res.unusedRules,
     unlocked: res.unlocked,
     problems: res.problems,
   });
@@ -808,23 +836,43 @@ function runBuild(lib: Library, args: Args, log: (m: string) => void, report: Re
   if (r.off && !args.quiet)
     log(`generate.plugins is false in ${path.basename(lib.configFile)}: nothing built, nothing checked`);
   const conflicts = r.report.conflicts().length;
+  const adapt = { forbidden: r.forbidden, unusedRules: r.unusedRules };
   if (!args.check) {
-    printReport(report, args, { versions: r.versions });
+    printReport(report, args, { versions: r.versions, ...adapt });
+    if (!args.json) printAdapt(lib, r, args);
     if (conflicts) process.exitCode = 1;
     return;
   }
-  if (r.drift.length) process.exitCode = 1;
-  if (args.json) return printReport(report, args, { check: true, drift: r.drift, versions: r.versions });
+  if (r.drift.length || r.forbidden.length) process.exitCode = 1;
+  if (args.json) return printReport(report, args, { check: true, drift: r.drift, versions: r.versions, ...adapt });
   for (const a of report.actions) if (a.kind === "note" || a.kind === "conflict") process.stdout.write(line(a) + "\n");
   for (const d of r.drift) process.stdout.write(`drift        ${d}\n`);
+  printAdapt(lib, r, args);
   const fix = conflicts
     ? `${conflicts} conflict(s) above to fix first, then build --plugins --catalogs`
     : "run build --plugins --catalogs";
+  const forbidden = r.forbidden.length
+    ? `build --check: ${r.forbidden.length} forbidden term(s) left after the adapt rules; add a rule, or an allow, under sources.<id>.adapt in ${path.basename(lib.configFile)}\n`
+    : "";
   process.stdout.write(
     r.drift.length
-      ? `build --check: ${r.drift.length} path(s) differ from what build would write; ${fix}\n`
-      : `build --check: clean, ${report.skips()} files as built\n`,
+      ? `build --check: ${r.drift.length} path(s) differ from what build would write; ${fix}\n${forbidden}`
+      : forbidden || `build --check: clean, ${report.skips()} files as built\n`,
   );
+}
+
+/**
+ * The adapt lines of a build: every forbidden term left in a package file (whatever the flags: it fails check), and,
+ * unless --quiet, every rule that matched nothing in its source's skills.
+ */
+function printAdapt(lib: Library, r: BuildResult, args: Args): void {
+  for (const f of r.forbidden)
+    process.stdout.write(
+      `forbidden    ${f.path}:${f.line}: ${JSON.stringify(f.term)} (sources.${f.source}.adapt.forbid: ${f.pattern})\n`,
+    );
+  if (!args.quiet)
+    for (const u of r.unusedRules)
+      process.stdout.write(`note         ${path.basename(lib.configFile)}: ${unusedReason(u)}\n`);
 }
 
 /**
