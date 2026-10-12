@@ -294,6 +294,10 @@ test("the ignored line names every older flag once, in the order given, and a li
   ]);
   assert.equal(r.stderr, ignored("-y", "--agents", "--no-wsl", "--watch", "--ask", "--no-remember"));
   assert.ok(r.json, r.stdout);
+  // the Brain block's flags are retired the same way: accepted, a value skipped, named once
+  const brain = await cli(m, ["status", "--json", "--no-entrypoints", "--adoption-file", "links.json"]);
+  assert.equal(brain.stderr, ignored("--no-entrypoints", "--adoption-file"));
+  assert.ok(brain.json, brain.stdout);
   // --plan, --json, --quiet and --library are the machine commands' own
   const own = await cli(m, ["--plan", "--json", "--quiet", "--library", "oneezy/skills"]);
   assert.equal(own.stderr, "");

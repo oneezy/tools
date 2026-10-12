@@ -26,7 +26,7 @@ export const SHARED_FILE = "SHARED.md";
 
 /**
  * The built-in text, for a release without SHARED.md: how to call a skill per harness, never fetch a SKILL.md, and the
- * Brain routing the old `brain` block carried (the library's brain-routing.md), word for word.
+ * Brain routing the old `brain` block carried (the library's retired brain-routing.md), word for word.
  */
 export const BLOCK_BODY = `## Skills
 

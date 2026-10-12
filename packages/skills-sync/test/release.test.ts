@@ -1,5 +1,5 @@
 // The release: the version the package and the CLI banner carry, the commands and flags --help lists, and what the
-// package ships (the built CLI, the four schemas, the README). Nothing here touches a library or the network.
+// package ships (the built CLI, the three schemas, the README). Nothing here touches a library or the network.
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import fs from "node:fs";
@@ -44,8 +44,6 @@ test("--help lists the machine commands, the library commands and every flag; an
     "branches",
     "hook",
     "unlink",
-    "adopt-brain",
-    "rollback-brain",
     "migrate-aliases",
     "rollback-aliases",
     "update",
@@ -74,12 +72,10 @@ test("--help lists the machine commands, the library commands and every flag; an
       "--json",
       "--library <owner/repo>",
       "--repo <path>",
-      "--adoption-file <json>",
       "--alias-file <json>",
       "--receipt <path>",
       "--expect-revision <sha>",
       "--remote-ref <ref>",
-      "--no-entrypoints",
       "--symlinks",
       "--junctions",
       "-h, --help",
@@ -116,7 +112,16 @@ test("--help lists the machine commands, the library commands and every flag; an
   );
   assert.match(help, /status only reads, hook refuses it/);
   // the old flags are not documented as options any more
-  for (const gone of ["--agents <ids>", "--global / --no-global", "--no-pull", "--watch", "-y, --yes", "--ask"])
+  for (const gone of [
+    "--agents <ids>",
+    "--global / --no-global",
+    "--no-pull",
+    "--watch",
+    "-y, --yes",
+    "--ask",
+    "--adoption-file",
+    "--no-entrypoints",
+  ])
     assert.ok(!help.split("\n").some((l) => l.startsWith(`  ${gone}`)), `${gone} still listed`);
 
   const bad = cli("--nope");
@@ -145,14 +150,21 @@ test("--help lists the machine commands, the library commands and every flag; an
   assert.equal(retired.stdout, "");
   assert.equal(retired.stderr.trimEnd().split("\n").length, 1, retired.stderr);
   assert.match(retired.stderr, /^projects: retired; .*run sync\n$/);
+  // the Brain block's recovery commands are retired: SHARED.md is the global block, /oneezy-brain owns Brain routing
+  for (const command of ["adopt-brain", "rollback-brain"]) {
+    const r = cli(command, "--repo", PACKAGE, "--receipt", "receipt.json", "--adoption-file", "links.json");
+    assert.equal(r.status, 2, command);
+    assert.equal(r.stdout, "");
+    assert.equal(r.stderr.trimEnd().split("\n").length, 1, r.stderr);
+    assert.match(r.stderr, new RegExp(`^${command}: retired; .*SHARED\\.md.*/oneezy-brain.*\n$`));
+  }
 });
 
-test("the package ships the built CLI, the four schemas (the flow schema among them) and the README, and its bin is the built CLI", () => {
+test("the package ships the built CLI, the three schemas (the flow schema among them) and the README, and its bin is the built CLI", () => {
   assert.deepEqual(manifest.files, ["dist/src", "schemas", "scripts", "README.md"]);
   assert.deepEqual(manifest.bin, { "skills-sync": "dist/src/cli.js" });
   assert.deepEqual(fs.readdirSync(path.join(PACKAGE, "schemas")).sort(), [
     "flow.schema.json",
-    "skills-sync.entrypoints.schema.json",
     "skills-sync.local.schema.json",
     "skills-sync.schema.json",
   ]);
