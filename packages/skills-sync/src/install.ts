@@ -366,11 +366,19 @@ export function refused(a: Action, run: Run, note: string): void {
   a.diagnostic = run.failure;
 }
 
+/** One plugin skill line of Codex's prompt input: the skill and the SKILL.md it names (null when the line names none). */
+export interface PromptSkill {
+  skill: string;
+  file: string | null;
+}
+
 /**
- * Codex: the skills each enabled plugin loads, from the model-visible prompt input rendered locally (one line per
- * plugin skill, `- <plugin>:<skill>: ...`); null when Codex cannot render it. No session starts, no tokens are spent.
+ * Codex: the skills each enabled plugin loads, by plugin name, from the model-visible prompt input rendered locally
+ * (one line per plugin skill, `- <plugin>:<skill>: ... (file: <path>)`, the path possibly through a `` `rN` = `<root>` ``
+ * alias); null when Codex cannot render it. No session starts, no tokens are spent. Two copies of one plugin (the
+ * library's and the ChatGPT account's) print under the same name: promptedSkills tells them apart by their files.
  */
-export function codexPluginSkills(run: Run): Map<string, string[]> | null {
+export function codexPluginSkills(run: Run): Map<string, PromptSkill[]> | null {
   const r = run(["debug", "prompt-input"]);
   if (!r.ok) return null;
   const texts: string[] = [];
@@ -380,15 +388,45 @@ export function codexPluginSkills(run: Run): Map<string, string[]> | null {
     else if (value && typeof value === "object") Object.values(value).forEach(visit);
   };
   visit(json(r.out) ?? r.out);
-  const out = new Map<string, string[]>();
-  for (const line of texts.flatMap((t) => t.split(/\r?\n/))) {
+  const all = texts.flatMap((t) => t.split(/\r?\n/));
+  const aliases = new Map<string, string>();
+  for (const line of all) {
+    const a = /^\s*- `(r\d+)` = `([^`]+)`/.exec(line);
+    if (a) aliases.set(a[1], a[2]);
+  }
+  const out = new Map<string, PromptSkill[]>();
+  for (const line of all) {
     const m = /^\s*- ([^\s:`]+):([^\s:`]+):/.exec(line);
     if (!m) continue;
+    let file = /\(file: ([^)]+)\)\s*$/.exec(line)?.[1] ?? null;
+    const alias = file && /^(r\d+)[\\/]/.exec(file);
+    if (file && alias && aliases.has(alias[1])) file = aliases.get(alias[1]) + file.slice(alias[1].length);
     const list = out.get(m[1]) ?? [];
-    if (!list.includes(m[2])) list.push(m[2]);
-    out.set(m[1], list.sort());
+    if (!list.some((x) => x.skill === m[2] && x.file === file)) list.push({ skill: m[2], file });
+    out.set(m[1], list);
   }
   return out;
+}
+
+/**
+ * The prompted skills of the copy <id>@<marketplace>, `marketplaces` being every marketplace Codex lists a copy of
+ * <id> from. One copy takes every line of its name. Several take the lines whose file path has their marketplace as a
+ * folder name (Codex keeps a copy under plugins/cache/<marketplace>/<id>/); when no line's path names any of them,
+ * the lines cannot be told apart and each copy takes them all, as before.
+ */
+export function promptedSkills(
+  prompt: Map<string, PromptSkill[]>,
+  id: string,
+  marketplace: string,
+  marketplaces: string[],
+): string[] {
+  const lines = prompt.get(id) ?? [];
+  const segments = (f: string | null) => (f ? f.split(/[\\/]/) : []);
+  const own =
+    marketplaces.length > 1 && lines.some((l) => marketplaces.some((mk) => segments(l.file).includes(mk)))
+      ? lines.filter((l) => segments(l.file).includes(marketplace))
+      : lines;
+  return [...new Set(own.map((l) => l.skill))].sort();
 }
 
 /**

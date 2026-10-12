@@ -155,6 +155,12 @@ if (args[0] === "plugin" && args.includes("--help")) {
   else out(`Usage: ${host} plugin [command]\n\nCommands:\n  install  update  list  marketplace  uninstall\n${has(process.env.FAKE_HARNESS_NO_WRITE_JSON, host) ? "" : "Options:\n  --json  Print machine-readable result"}`);
 } else if (has(process.env.FAKE_HARNESS_OLD, host)) {
   fail(`unknown command ${args.join(" ")}`);
+} else if (host === "codex" && words[0] === "login" && words[1] === "status") {
+  // the real codex prints its sign-in to stderr: "Logged in using ChatGPT", "Logged in using an API key - …", or
+  // "Not logged in" with exit 1; the pretend one keeps it in its state as `login` (codexLogin in test/machine.ts)
+  if (state.login === "chatgpt") process.stderr.write("Logged in using ChatGPT\n");
+  else if (state.login === "api-key") process.stderr.write("Logged in using an API key - sk-****\n");
+  else fail("Not logged in");
 } else if (cmd === "plugin marketplace list") {
   if (has(process.env.FAKE_HARNESS_FAIL_MARKETPLACE_LIST, host)) fail("fixture marketplace list failed");
   const rows = Object.entries(state.marketplaces);

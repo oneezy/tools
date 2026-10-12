@@ -6,6 +6,7 @@
 // them); nothing here writes.
 import path from "node:path";
 import { cmp, isoDate } from "./sources.js";
+import type { ReleasePlugin } from "./release.js";
 import { discard, git, stage } from "./stage.js";
 
 export interface SourceVersion {
@@ -393,4 +394,23 @@ export function versionLabel(v: {
 /** How far past its version a commit is, as output says it after the version: ` (+4 commits)`, ` (+1 commit)`, or nothing at 0 or unknown. */
 export function commitsPast(ahead: number | null): string {
   return ahead ? ` (+${ahead} commit${ahead === 1 ? "" : "s"})` : "";
+}
+
+/**
+ * The installed plugin's version against the release's: "behind" (semver precedence when both parse; otherwise any
+ * difference, Codex installs exactly the manifest's), "ahead" (the marketplace snapshot is main, which runs ahead of
+ * releases/latest after every push until the release job finishes), "same", or "unversioned" when the release's plugin
+ * has no version and its skill set alone decides.
+ */
+export function versionGap(
+  have: { version: string | null },
+  p: ReleasePlugin,
+): "behind" | "ahead" | "same" | "unversioned" {
+  if (p.version === null) return "unversioned";
+  if (have.version === p.version) return "same";
+  const a = have.version === null ? null : plainVersion(have.version);
+  const b = plainVersion(p.version);
+  if (a === null || b === null) return "behind";
+  const c = compareVersions(a, b);
+  return c < 0 ? "behind" : c > 0 ? "ahead" : "same";
 }
