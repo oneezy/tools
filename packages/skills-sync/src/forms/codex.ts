@@ -6,9 +6,9 @@
 // a library copy (a checkout, ~/.skills-sync, or a target that is gone) in ~/.agents/skills and the deprecated
 // ~/.codex/skills, and a real folder there whose SKILL.md is byte for byte the release's. `.system` is Codex's and is
 // never listed; every other real folder, and every link to something that is not a library copy, is a line for Justin:
-// adopt it into the library or delete it by hand. A plugin of the same name from another marketplace (a ChatGPT account
-// plugin) lists every skill twice; it is never removed here, the line says how. The ChatGPT account's own copies
-// (created-by-me-remote, workspace-*) are the ChatGPT destination (chatgpt.ts): their line says they stay. Shapes: notes/skills-66.md and
+// adopt it into the library or delete it by hand. A plugin of the same name from another marketplace lists every skill
+// twice; it is never removed here, the line says how. The ChatGPT account's own copies (created-by-me-remote,
+// workspace-*) are the ChatGPT destination (chatgpt.ts): their line says they stay. Shapes: notes/skills-66.md and
 // docs/research/codex-hook-trust-and-account-plugins.md in oneezy/skills.
 import fs from "node:fs";
 import path from "node:path";
@@ -19,17 +19,19 @@ import {
   addMarketplace,
   codexLoadedSkills,
   codexPluginSkills,
+  promptedSkills,
   installPlugin,
   listInstalled,
   removeMarketplace,
   runner,
   upgradeMarketplace,
+  type PromptSkill,
   type Run,
 } from "../install.js";
 import { libraryCopy, type CliPlugin, type HarnessState } from "../machine.js";
 import type { Action } from "../plan.js";
 import type { ReleasePlugin } from "../release.js";
-import { compareVersions, plainVersion } from "../versions.js";
+import { versionGap } from "../versions.js";
 
 export const codex: FormFn = (release, state, _machine, options) => {
   const plan = options.plan;
@@ -297,7 +299,8 @@ export const codex: FormFn = (release, state, _machine, options) => {
 function inventory(h: HarnessState["harness"], run: Run): CliPlugin[] | null {
   const listed = listInstalled(h, run);
   if (!listed) return null;
-  const skills = listed.length ? codexPluginSkills(run) : new Map<string, string[]>();
+  const skills = listed.length ? codexPluginSkills(run) : new Map<string, PromptSkill[]>();
+  const copies = (id: string) => listed.filter((x) => x.name === id).map((x) => x.marketplace);
   return listed.map((i) => ({
     id: i.name,
     marketplace: i.marketplace,
@@ -305,8 +308,13 @@ function inventory(h: HarnessState["harness"], run: Run): CliPlugin[] | null {
     enabled: i.enabled,
     skills: skills
       ? i.enabled
-        ? codexLoadedSkills(h.configDir, i.marketplace, i.name, skills.get(i.name) ?? [])
-        : (skills.get(i.name) ?? [])
+        ? codexLoadedSkills(
+            h.configDir,
+            i.marketplace,
+            i.name,
+            promptedSkills(skills, i.name, i.marketplace, copies(i.name)),
+          )
+        : promptedSkills(skills, i.name, i.marketplace, copies(i.name))
       : null,
     path: i.folder,
   }));
@@ -315,25 +323,6 @@ function inventory(h: HarnessState["harness"], run: Run): CliPlugin[] | null {
 /** The release's skills the plugin does not load. */
 function missing(loaded: string[], p: ReleasePlugin): string[] {
   return p.skills.filter((s) => !loaded.includes(s));
-}
-
-/**
- * The installed plugin's version against the release's: "behind" (semver precedence when both parse; otherwise any
- * difference, Codex installs exactly the manifest's), "ahead" (the marketplace snapshot is main, which runs ahead of
- * releases/latest after every push until the release job finishes), "same", or "unversioned" when the release's plugin
- * has no version and its skill set alone decides.
- */
-export function versionGap(
-  have: Pick<CliPlugin, "version">,
-  p: ReleasePlugin,
-): "behind" | "ahead" | "same" | "unversioned" {
-  if (p.version === null) return "unversioned";
-  if (have.version === p.version) return "same";
-  const a = have.version === null ? null : plainVersion(have.version);
-  const b = plainVersion(p.version);
-  if (a === null || b === null) return "behind";
-  const c = compareVersions(a, b);
-  return c < 0 ? "behind" : c > 0 ? "ahead" : "same";
 }
 
 /**

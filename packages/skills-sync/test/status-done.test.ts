@@ -140,7 +140,7 @@ const expectGreen = (m: PretendMachine, skills: string, tools: string) => [
   "= play@oneezy-skills 0.43.0 (latest 0.43.0)",
   `= session hook in ${hooksFile(m, "codex")}`,
   `= global block in ${globalFile(m, "codex")} current`,
-  "ChatGPT  account plugins, read through Codex",
+  "ChatGPT  account copies, read through Codex",
   ". not checked: Codex on this machine is not signed in with ChatGPT (codex login)",
   "Checkouts",
   `= ${skills} on dev, clean`,

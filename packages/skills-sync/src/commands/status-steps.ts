@@ -7,7 +7,7 @@
 // adopt or delete, and, in the cloud, the old setup line that still cloned the old library and linked every skill a
 // second time. The rules for "a library copy" and "the release's own files" are the forms' own (machine.ts's libraryCopy,
 // the Codex form's sameFiles), so status and sync agree on what sync removes and what it leaves for a person.
-import { CHATGPT_LINE, chatgptState, isAccountMarketplace } from "../chatgpt.js";
+import { CHATGPT_BOOTSTRAP, CHATGPT_LINE, chatgptState, isAccountMarketplace, needsBootstrap } from "../chatgpt.js";
 import { catalogOf, formOf, pluginsFor, sameCatalog, serves } from "../desired.js";
 import { sameFiles } from "../forms/codex.js";
 import { lexists } from "../fs.js";
@@ -144,7 +144,12 @@ function chatgptUpdate(machine: Machine, release: Release | null): ManualStep | 
     title: `Bring the ChatGPT plugins up to ${release.tag}: ${open.map((p) => p.id).join(", ")}`,
     steps: [
       "Open ChatGPT (the website or the desktop app) and start a new chat.",
-      `Type: ${CHATGPT_LINE}`,
+      ...(needsBootstrap(state)
+        ? [
+            `The account's oneezy plugin predates the update procedure, so first type: ${CHATGPT_BOOTSTRAP}`,
+            `Start another new chat and type: ${CHATGPT_LINE}`,
+          ]
+        : [`Type: ${CHATGPT_LINE}`]),
       "Approve each plugin update ChatGPT asks about. It ends with every plugin updated, already current, or failed and why.",
       "Start codex once on this machine so it picks up the account's new copies, then run status again.",
     ],

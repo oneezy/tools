@@ -48,6 +48,8 @@ interface StatusJson {
 }
 
 const LINE = "@oneezy-skills update my ChatGPT plugins to the latest oneezy/skills release";
+const BOOTSTRAP =
+  "@Plugin Creator update (or create, if I have none) my personal oneezy plugin to the oneezy archive in the latest github.com/oneezy/skills release (its release.json lists the files and sha256s): use update_plugin with expected_release_id, delete only files the release dropped with paths relative to the plugin root, delete nothing if under half the paths match, then read it back and report";
 
 let gh: FakeGithub;
 let r17: FixtureRelease;
@@ -108,8 +110,8 @@ test("every release plugin on the ChatGPT account at the release: a green ChatGP
   for (const id of Object.keys(r17.plugins)) accountCopy(m, id);
   const r = await cli(m, ["status"], {}, cwd);
   assert.equal(r.status, 0, r.stdout + r.stderr);
-  assert.deepEqual(section(r.stdout, "ChatGPT  account plugins, read through Codex"), [
-    "ChatGPT  account plugins, read through Codex",
+  assert.deepEqual(section(r.stdout, "ChatGPT  account copies, read through Codex"), [
+    "ChatGPT  account copies, read through Codex",
     "= matt-pocock@created-by-me-remote 1.3.1 (latest 1.3.1)",
     "= oneezy@created-by-me-remote 0.43.1 (latest 0.43.1)",
     "= play@created-by-me-remote 0.43.0 (latest 0.43.0)",
@@ -145,8 +147,8 @@ test("a ChatGPT copy behind the release and one missing are notes and one manual
   accountCopy(m, "oneezy", "0.42.0");
   const r = await cli(m, ["status"], {}, cwd);
   assert.equal(r.status, 0, r.stdout + r.stderr);
-  assert.deepEqual(section(r.stdout, "ChatGPT  account plugins, read through Codex"), [
-    "ChatGPT  account plugins, read through Codex",
+  assert.deepEqual(section(r.stdout, "ChatGPT  account copies, read through Codex"), [
+    "ChatGPT  account copies, read through Codex",
     "= matt-pocock@created-by-me-remote 1.3.1 (latest 1.3.1)",
     ". oneezy@created-by-me-remote 0.42.0 (latest 0.43.1); manual step below",
     ". play not on the ChatGPT account (latest 0.43.0); manual step below",
@@ -168,13 +170,63 @@ test("a ChatGPT copy behind the release and one missing are notes and one manual
       title: "Bring the ChatGPT plugins up to release-17: oneezy, play",
       steps: [
         "Open ChatGPT (the website or the desktop app) and start a new chat.",
+        `The account's oneezy plugin predates the update procedure, so first type: ${BOOTSTRAP}`,
+        `Start another new chat and type: ${LINE}`,
+        "Approve each plugin update ChatGPT asks about. It ends with every plugin updated, already current, or failed and why.",
+        "Start codex once on this machine so it picks up the account's new copies, then run status again.",
+      ],
+    },
+  ]);
+  assert.ok(lines(r.stdout).includes(`   3. Start another new chat and type: ${LINE}`), r.stdout);
+});
+
+test("once the account's oneezy carries the update procedure (0.46.0 or later), the step is the one line", async () => {
+  const { m, cwd } = await synced();
+  codexLogin(m, "chatgpt");
+  accountCopy(m, "matt-pocock");
+  accountCopy(m, "oneezy", "0.46.0");
+  const j = json(await cli(m, ["status", "--json"], {}, cwd));
+  assert.deepEqual(j.manualSteps, [
+    {
+      id: "chatgpt-update",
+      title: "Bring the ChatGPT plugins up to release-17: play",
+      steps: [
+        "Open ChatGPT (the website or the desktop app) and start a new chat.",
         `Type: ${LINE}`,
         "Approve each plugin update ChatGPT asks about. It ends with every plugin updated, already current, or failed and why.",
         "Start codex once on this machine so it picks up the account's new copies, then run status again.",
       ],
     },
   ]);
-  assert.ok(lines(r.stdout).includes(`   2. Type: ${LINE}`), r.stdout);
+});
+
+test("each copy is judged by its own skills: an account copy still carrying a dropped skill leaves the library's Codex copy green, and is itself behind", async () => {
+  const { m, cwd } = await synced();
+  codexLogin(m, "chatgpt");
+  for (const id of ["matt-pocock", "play"]) accountCopy(m, id);
+  const stale = new Map(r17.plugins.oneezy.files);
+  stale.set(
+    "skills/old-dropped/SKILL.md",
+    Buffer.from("---\nname: old-dropped\ndescription: a skill the release dropped\n---\n"),
+  );
+  installedPlugin(m, "codex", "oneezy", { files: stale, version: "0.42.0", marketplace: "created-by-me-remote" });
+  const r = await cli(m, ["status"], {}, cwd);
+  assert.equal(r.status, 0, r.stdout + r.stderr);
+  assert.ok(!r.stdout.includes("skills differ"), r.stdout);
+  assert.ok(
+    lines(r.stdout).includes(". oneezy@created-by-me-remote 0.42.0 (latest 0.43.1); manual step below"),
+    r.stdout,
+  );
+  // the same at the release's version: the extra skill alone makes the account copy behind, and the reason says so
+  installedPlugin(m, "codex", "oneezy", { files: stale, version: "0.43.1", marketplace: "created-by-me-remote" });
+  const same = await cli(m, ["status"], {}, cwd);
+  assert.equal(same.status, 0, same.stdout + same.stderr);
+  assert.ok(
+    lines(same.stdout).includes(
+      ". oneezy@created-by-me-remote 0.43.1 (latest 0.43.1; skills differ: extra old-dropped); manual step below",
+    ),
+    same.stdout,
+  );
 });
 
 test("a workspace copy counts as the ChatGPT copy; OpenAI's curated plugins are not the account's own and keep their uninstall step", async () => {
@@ -207,8 +259,8 @@ test("a Codex not signed in with ChatGPT, or no Codex at all, cannot tell: a not
   const { m, cwd } = await synced();
   const out = await cli(m, ["status"], {}, cwd);
   assert.equal(out.status, 0, out.stdout + out.stderr);
-  assert.deepEqual(section(out.stdout, "ChatGPT  account plugins, read through Codex"), [
-    "ChatGPT  account plugins, read through Codex",
+  assert.deepEqual(section(out.stdout, "ChatGPT  account copies, read through Codex"), [
+    "ChatGPT  account copies, read through Codex",
     ". not checked: Codex on this machine is not signed in with ChatGPT (codex login)",
   ]);
   codexLogin(m, "api-key");

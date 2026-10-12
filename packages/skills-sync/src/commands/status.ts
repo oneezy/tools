@@ -24,7 +24,7 @@ import {
 } from "../block.js";
 import { chatgptState, isAccountMarketplace, type ChatgptState } from "../chatgpt.js";
 import { catalogOf, FORM_LABEL, formOf, notServed, sameCatalog, serves, type MachineForm } from "../desired.js";
-import { versionGap } from "../forms/codex.js";
+import { versionGap } from "../versions.js";
 import { github } from "../github.js";
 import { harnessTable } from "../harnesses.js";
 import type { HookState } from "../hooks.js";
@@ -184,7 +184,7 @@ export async function runStatus(options: StatusOptions): Promise<number> {
   const env = options.env ?? process.env;
   const cwd = options.cwd ?? process.cwd();
   const write = options.write ?? ((text: string) => void process.stdout.write(text));
-  const machine = probe(harnessTable(undefined, env), env, cwd);
+  const machine = probe(harnessTable(undefined, env), env, cwd, { login: true });
   let release: Release | null = null;
   let error: string | null = null;
   // in the cloud the release is read for the block alone: no plugin line, no step about one, nothing red without it
@@ -266,15 +266,17 @@ export function statusReport(
  */
 function chatgptReport(codex: HarnessState | undefined, release: Release | null): StatusChatgpt {
   const state = chatgptState(codex, release);
-  // a machine without Codex has no say about ChatGPT: --json gives the reason, the text stays quiet
-  if (!state.checked) return { ...state, lines: codex ? [note(`not checked: ${state.reason}`)] : [] };
+  // only a Codex that lists its plugins can read the account: the text says why not when the sign-in is all that is
+  // missing (Codex's own lines already say what else is), --json always gives the reason
+  if (!state.checked)
+    return { ...state, lines: codex?.cli && codex.listed ? [note(`not checked: ${state.reason}`)] : [] };
   const lines = state.plugins.map((p) => {
     const latest = `latest ${p.latest ?? "no version"}`;
     if (!p.marketplace) return note(`${p.id} not on the ChatGPT account (${latest}); manual step below`);
     const name = `${p.id}@${p.marketplace} ${p.version ?? "no version"}`;
     if (p.current) return green(`${name} (${latest})`);
     if (p.ahead) return note(`${name} (${latest}; ahead of the release)`);
-    return note(`${name} (${latest}); manual step below`);
+    return note(`${name} (${latest}${p.differ ? `; ${p.differ}` : ""}); manual step below`);
   });
   return { ...state, lines };
 }
@@ -446,10 +448,12 @@ function harnessReport(
 
   if (state.loose.length || state.folders.length)
     machineLine(note(`${count(state.loose.length, "loose link")}, ${count(state.folders.length, "skill folder")}`));
-  if (other.length)
+  // the ChatGPT account's copies have their own section; --json keeps them in plugins.other
+  const shown = other.filter((o) => o.scope !== "installed" || !isAccountMarketplace(o.marketplace ?? ""));
+  if (shown.length)
     machineLine(
       note(
-        `${count(other.length, "other plugin")} left alone: ${other
+        `${count(shown.length, "other plugin")} left alone: ${shown
           .map(
             (o) =>
               `${o.id}@${o.scope === "synced" ? "synced" : o.marketplace}${o.scope === "synced" && o.marketplace ? ` (${o.marketplace})` : ""}`,
@@ -622,7 +626,7 @@ export function statusText(report: StatusReport, quiet: boolean): string {
   if (report.chatgpt) {
     const lines = report.chatgpt.lines.filter(show);
     if (lines.length) {
-      out.push("ChatGPT  account plugins, read through Codex");
+      out.push("ChatGPT  account copies, read through Codex");
       for (const l of lines) out.push(`${l.mark} ${l.text}`);
     }
   }
