@@ -33,7 +33,7 @@ import { hermes as cli, hermesRunner, type HermesListed } from "../install.js";
 import { libraryCopy, type CliPlugin } from "../machine.js";
 import type { Action } from "../plan.js";
 import type { Release, ReleasePlugin } from "../release.js";
-import { versionGap } from "./codex.js";
+import { versionGap } from "../versions.js";
 
 export const hermes: FormFn = async (release, state, _machine, { plan, github }) => {
   const h = state.harness;
