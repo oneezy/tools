@@ -179,19 +179,19 @@ export function findLibrary(from: string, env = process.env): string | null {
   return null;
 }
 
-/** Verify a clean instruction source at the exact, currently advertised remote revision. */
+/** Verify a clean library checkout at the exact, currently advertised remote revision (migrate-aliases). */
 export function verifyLibraryRevision(root: string, expected?: string, ref = "refs/heads/main"): string | null {
   if (!expected || !/^[a-f0-9]{40}$/i.test(expected) || !/^refs\/(heads|tags)\/[\w./-]+$/.test(ref))
     return "revision verification requires a full commit SHA and an exact refs/heads or refs/tags remote ref";
   const head = spawnSync("git", ["-C", root, "rev-parse", "HEAD"], { encoding: "utf8" });
   if (head.status !== 0 || head.stdout.trim().toLowerCase() !== expected.toLowerCase())
-    return `library HEAD does not match expected revision ${expected}; instructions left alone`;
+    return `library HEAD does not match expected revision ${expected}; links left alone`;
   const dirty = spawnSync("git", ["-C", root, "status", "--porcelain", "--untracked-files=normal"], {
     encoding: "utf8",
   });
   const changed = dirty.stdout?.split(/\r?\n/).filter((line) => line && line !== "?? skills-sync.local.json") ?? [];
   if (dirty.status !== 0 || changed.length)
-    return "library source differs from the expected commit; instructions left alone";
+    return "library source differs from the expected commit; links left alone";
   const remote = spawnSync("git", ["-C", root, "ls-remote", "--exit-code", "origin", ref, `${ref}^{}`], {
     encoding: "utf8",
     timeout: 20_000,
@@ -203,7 +203,7 @@ export function verifyLibraryRevision(root: string, expected?: string, ref = "re
       .map((line) => line.split(/\s+/)) ?? [];
   const revision = (refs.find(([, name]) => name === `${ref}^{}`) ?? refs.find(([, name]) => name === ref))?.[0];
   if (remote.status !== 0 || revision?.toLowerCase() !== expected.toLowerCase())
-    return `origin ${ref} does not match expected revision ${expected}, or is unavailable; instructions left alone`;
+    return `origin ${ref} does not match expected revision ${expected}, or is unavailable; links left alone`;
   return null;
 }
 
