@@ -190,8 +190,7 @@ export function verifyLibraryRevision(root: string, expected?: string, ref = "re
     encoding: "utf8",
   });
   const changed = dirty.stdout?.split(/\r?\n/).filter((line) => line && line !== "?? skills-sync.local.json") ?? [];
-  if (dirty.status !== 0 || changed.length)
-    return "library source differs from the expected commit; links left alone";
+  if (dirty.status !== 0 || changed.length) return "library source differs from the expected commit; links left alone";
   const remote = spawnSync("git", ["-C", root, "ls-remote", "--exit-code", "origin", ref, `${ref}^{}`], {
     encoding: "utf8",
     timeout: 20_000,
