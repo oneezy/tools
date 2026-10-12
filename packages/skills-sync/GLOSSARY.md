@@ -122,16 +122,16 @@ A checkout or clone of the Library on a Host (a `skills-sync.json` naming the Li
 _Avoid_: leftover, stale link
 
 **Machine command**:
-A run that acts on this Host against the latest Release on GitHub and keeps nothing of its own on the Host (ADR-0012): no Library clone, no answers file, nothing remembered between runs; settings come from the Release's `skills-sync.json`, Host facts (the Harnesses, their plugins and links, the WSL distros) are detected on every run. `sync`, `status`, `hook`, `branches` and `unlink`. It takes `--plan`, `--json`, `--quiet` and `--library` (`hook` only `--library`); an older flag is accepted, does nothing and is named once on stderr. The opposite is a library command (`update`, `refresh`, `versions`, `add`, `build`, `check`, the brain and alias migrations), which runs inside a checkout named by `--repo` or found above the current folder and keeps every flag it had.
+A run that acts on this Host against the latest Release on GitHub and keeps nothing of its own on the Host (ADR-0012): no Library clone, no answers file, nothing remembered between runs; settings come from the Release's `skills-sync.json`, Host facts (the Harnesses, their plugins and links, the WSL distros) are detected on every run. `sync`, `status`, `hook`, `branches` and `unlink`. It takes `--plan`, `--json`, `--quiet` and `--library` (`hook` only `--library`); an older flag is accepted, does nothing and is named once on stderr. The opposite is a library command (`update`, `refresh`, `versions`, `add`, `build`, `check`, the alias migrations), which runs inside a checkout named by `--repo` or found above the current folder and keeps every flag it had.
 _Avoid_: remote command, online command
 
 **Global block**:
 The one managed block `sync` writes into a Harness's global instructions file (`~/.claude/CLAUDE.md`, `~/.codex/AGENTS.md`), between `skills-sync` markers (ADR-0011 in oneezy/skills): the Shared text of the latest Release, verbatim, its start marker carrying a Stamp. Never written into a repository; a block an older version left there is reported, not edited. In a cloud session it is the whole sync. `status` calls it current, stale (another text than the latest Release's, or an older block) or hand-edited (its text no longer matches its Stamp).
-_Avoid_: entrypoint (the older per-library manifest), instructions block, brain block (its old id)
+_Avoid_: entrypoint (the per-library manifest, retired in 0.15.0), instructions block, brain block (its old id)
 
 **Shared text**:
 `SHARED.md` at the root of the Library, the one canonical text of Justin's global instructions, read at the commit of the latest Release (the commit its Plugins come from) and written as the Global block. A Release without one gets the tool's built-in text instead. When it cannot be read, a Global block already there stays as it is, a file without one gets the built-in text (Stamp `built-in`), and one line says so.
-_Avoid_: brain routing (its Brain section replaced `brain-routing.md`), shared instructions file
+_Avoid_: brain routing (its Brain section replaced the retired `brain-routing.md`), shared instructions file
 
 **Stamp**:
 What the Global block's start marker carries after its id: the Release its text was read at and the sha256 of that text (`<!-- skills-sync:skills:start release-26 sha256:<hex> -->`), or `built-in` for the built-in text written while the Shared text could not be read. The text decides: a Release with the same Shared text changes no block; a text that no longer hashes to its Stamp was edited by hand.

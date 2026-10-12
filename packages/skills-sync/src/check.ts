@@ -8,7 +8,6 @@ import { adaptProblems, type Adapt } from "./adapt.js";
 import { asBuilt, build, type Forbidden, type UnusedRule } from "./build.js";
 import { firstLine, flowProblems } from "./flow.js";
 import { Library } from "./library.js";
-import { ENTRYPOINTS_NAME, entrypointProblems } from "./entrypoints.js";
 import { hasOldLock, LOCK_NAME, lockedSource, lockText, readLockFile, type LockedSource } from "./lock.js";
 import { snapshotLock } from "./refresh.js";
 import { shippedSchema, validate } from "./schema.js";
@@ -43,7 +42,6 @@ const PLAY = "play";
 export function check(lib: Library): CheckResult {
   const result: CheckResult = { problems: [], notes: [], skills: 0, flows: 0, generated: 0, fixes: [] };
   const problem = (file: string, reason: string) => result.problems.push({ path: rel(lib, file), reason });
-  for (const reason of entrypointProblems(lib)) problem(path.join(lib.root, ENTRYPOINTS_NAME), reason);
   const scan = lib.scanOwn();
   for (const s of scan.skills) {
     const md = path.join(s.dir, "SKILL.md");
