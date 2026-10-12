@@ -22,8 +22,10 @@
 // source: "<url>#<subdir>" } per name) and config.yaml (plugins.enabled, plugins.disabled). `install` refuses a name whose
 // plugins/<name> is a link, an existing name without --force, a --ref that is not a 40-hex sha; --force without --ref
 // over a pinned row keeps the prior pin, as the real one does; FAKE_HARNESS_FAIL_INSTALL=
-// <names> makes those installs fail; FAKE_HARNESS_CAUTION=<names> gives them a caution scan verdict, which without --force
-// and without a TTY aborts; FAKE_HARNESS_FAIL_ENABLE=<names> makes `enable` fail for those names and FAKE_HARNESS_FAIL_LIST
+// <names> makes those installs fail; FAKE_HARNESS_CAUTION=<names> gives them a caution scan verdict (printed, as the real
+// one prints it), which without --force and without a TTY aborts and with --force installs; FAKE_HARNESS_DANGEROUS=<names>
+// a dangerous one, which no flag gets past; FAKE_HARNESS_WRONG_PIN=<names> records those installs at ffff... instead of
+// the --ref; FAKE_HARNESS_FAIL_ENABLE=<names> makes `enable` fail for those names and FAKE_HARNESS_FAIL_LIST
 // (with hermes in it) makes `list` fail. `list --json` prints the rows the real CLI prints, a bundled one unless --no-bundled.
 import fs from "node:fs";
 import path from "node:path";
@@ -473,17 +475,24 @@ function hermes() {
       fail(`Plugin '${name}' already exists. Use force reinstall or run \`hermes plugins update ${name}\`.`);
     // --force without --ref over a pinned row: the prior pin stays (the real CLI keeps the recorded revision)
     const keep = !ref && prior?.pinned === true && typeof prior.revision === "string";
-    if (has(process.env.FAKE_HARNESS_CAUTION, name) && !args.includes("--force")) {
+    // plugin_guard: dangerous is always blocked; caution asks y/N (no TTY: EOF counts as no) unless --force answers it
+    if (has(process.env.FAKE_HARNESS_DANGEROUS, name)) {
+      out("⚠ Security scan flagged this plugin:");
+      out("  dangerous: downloads and runs a remote script");
+      fail(`Plugin '${name}' blocked by the security scan (dangerous).`);
+    }
+    if (has(process.env.FAKE_HARNESS_CAUTION, name)) {
       out("⚠ Security scan flagged this plugin:");
       out("  caution: shell commands in documentation");
-      // no TTY: the y/N question reads EOF, which counts as no
-      fail("Aborted.");
+      if (!args.includes("--force")) fail("Aborted.");
     }
     fs.rmSync(target, { recursive: true, force: true });
     fs.mkdirSync(pluginsDir, { recursive: true });
     fs.cpSync(from, target, { recursive: true });
     const meta = readMeta();
     meta[name] = keep ? { pinned: true, revision: prior.revision, source } : { pinned: !!ref, revision: ref ?? "0".repeat(40), source };
+    // a checkout that landed on another commit than the --ref asked for
+    if (has(process.env.FAKE_HARNESS_WRONG_PIN, name)) meta[name].revision = "f".repeat(40);
     writeMeta(meta);
     out(`✓ Installed ${name}`);
     if (args.includes("--enable")) {

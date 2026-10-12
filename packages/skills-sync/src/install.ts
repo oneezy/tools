@@ -286,20 +286,56 @@ export const hermes = {
         source: str(p.source),
       }));
   },
-  /** --no-enable: the enable is a step of its own, so a failed one is told apart; --force replaces this tool's own install */
-  install(run: Run, identifier: string, options: { ref?: string; force?: boolean } = {}): boolean {
-    return run([
+  /**
+   * --no-enable: the enable is a step of its own, so a failed one is told apart. --force replaces an install and answers
+   * a `caution` from Hermes's security scan (a `dangerous` one it never gets past); the form passes it for the library's
+   * own plugins only. `scan` is the verdict Hermes printed when it was not clean, whether the install went ahead or not,
+   * and `output` what Hermes printed (redacted as a failure's diagnostic is), the scan's findings with it.
+   */
+  install(
+    run: Run,
+    identifier: string,
+    options: { ref?: string; force?: boolean } = {},
+  ): { ok: boolean; scan: string | null; output: NonNullable<Action["diagnostic"]> } {
+    const args = [
       "plugins",
       "install",
       identifier,
       "--no-enable",
       ...(options.ref ? ["--ref", options.ref] : []),
       ...(options.force ? ["--force"] : []),
-    ]).ok;
+    ];
+    const r = run(args);
+    const output = run.failure ?? {
+      command: [hermes.bin, ...args],
+      exitCode: r.exitCode,
+      stdout: redact(r.out),
+      stderr: redact(r.err),
+    };
+    return { ok: r.ok, scan: scanVerdict(`${r.out}\n${r.err}`), output };
   },
   enable: (run: Run, name: string) => run(["plugins", "enable", name]).ok,
   remove: (run: Run, name: string) => run(["plugins", "remove", name]).ok,
 };
+
+/**
+ * The verdict of Hermes's security scan (tools/plugin_guard.py: safe, caution or dangerous) in what `hermes plugins
+ * install` printed, when it was not clean; null for a clean scan or none. Read from the text after the first mention of
+ * the scan, so the "custom (unreviewed) source" warning every GitHub install prints first is not taken for one. Hermes
+ * records no verdict in its files, so this output is the only place it shows.
+ */
+export function scanVerdict(text: string): string | null {
+  const at = text.search(/scan/i);
+  if (at < 0) return null;
+  const m = /\b(dangerous|caution|warning)\b/i.exec(
+    text
+      .slice(at)
+      .split(/\r?\n/)
+      .filter((l) => !/unreviewed/i.test(l))
+      .join("\n"),
+  );
+  return m ? m[1].toLowerCase() : null;
+}
 
 /** The plugin CLI of a harness that has one: its name, and where PATH has it (null when it is not installed). */
 export function harnessCli(
@@ -579,8 +615,6 @@ export function runner(file: string, onFailure?: (diagnostic: NonNullable<Action
       err: (r.stderr ?? "") + (r.error ? r.error.message : ""),
       exitCode: r.status,
     };
-    const redact = (text: string) =>
-      text.replace(/(https?:\/\/)[^\s/@]+@/g, "$1[redacted]@").replace(/(Bearer\s+)\S+/gi, "$1[redacted]");
     run.failure = result.ok
       ? undefined
       : {
@@ -593,6 +627,11 @@ export function runner(file: string, onFailure?: (diagnostic: NonNullable<Action
     return result;
   };
   return run;
+}
+
+/** A CLI's output with the credentials a clone URL or an auth header can carry taken out. */
+function redact(text: string): string {
+  return text.replace(/(https?:\/\/)[^\s/@]+@/g, "$1[redacted]@").replace(/(Bearer\s+)\S+/gi, "$1[redacted]");
 }
 
 /** Does this harness's CLI have plugin commands? Asked through --help only, so an old CLI never starts a session. */
