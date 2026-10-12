@@ -6,8 +6,11 @@
 // for byte the package's), and every skill passes Hermes's portable rules. Only then do the loose links in <home>/skills
 // whose names the plugin carries, and whose targets are a library copy or gone, come out; a real folder or a foreign
 // link of that name is reported and left, and so is every link or folder no plugin of the release carries (one line
-// each, adopt or delete by hand). A plugin behind the release is re-installed at the new commit with --force (that is
-// how a pinned install moves; `update` refuses one); one ahead of it (installed by hand from main) is a note and stays.
+// each, adopt or delete by hand). A fresh install runs plain, so Hermes's security scan has its say; a `caution` verdict
+// on the library's own plugin is answered once with --force for the same identifier and commit, and one note per plugin
+// keeps it in sight; `dangerous` is a red line (tools#193). A plugin behind the release is re-installed at the new commit
+// with --force (that is how a pinned install moves; `update` refuses one); one ahead of it (installed by hand from main)
+// is a note and stays. After the installs, hermes's own listing must show each one enabled and pinned to the commit.
 // The plugin list is pluginsFor() (the release's skills-sync.json narrows it), the rendering folder the config's
 // renderings.hermes (dist/hermes when it names none), and a link is the tool's by machine.ts's libraryCopy, as on Codex.
 // Before the first install of a run, GitHub is asked once whether the release commit carries the rendering at all: until
@@ -23,7 +26,7 @@ import { pluginsFor, type FormFn } from "../desired.js";
 import { isDir, isLink, isSkillDir, lexists, toHash } from "../fs.js";
 import { GitHubError, type GitHub } from "../github.js";
 import { githubRepo, hermesNamespace, hermesPlugins, type HermesPlugin } from "../hermes.js";
-import { hermes as cli, runner } from "../install.js";
+import { hermes as cli, runner, type HermesListed } from "../install.js";
 import { libraryCopy, type CliPlugin } from "../machine.js";
 import type { Action } from "../plan.js";
 import type { Release, ReleasePlugin } from "../release.js";
@@ -69,7 +72,8 @@ export const hermes: FormFn = async (release, state, _machine, { plan, github })
       fail(what, `${folder} is a link, not a plugin hermes installed; left alone, loose links kept`);
       continue;
     }
-    if (have && !have.install) {
+    // a folder hermes does not list as a portable plugin (no plugin.json) is not this tool's either: --force would replace it
+    if ((have && !have.install) || (!have && lexists(folder))) {
       fail(what, `${folder} was not installed through hermes plugins; left alone, loose links kept`);
       continue;
     }
@@ -123,17 +127,46 @@ export const hermes: FormFn = async (release, state, _machine, { plan, github })
           ? `${have.version ?? "no version"} -> ${p.version ?? "no version"} at ${commit}; ${n.install}`
           : `${p.version ?? "no version"} at ${commit}`,
       };
-      // --force only over this tool's own install (checked above): it is how a pinned install moves to a new commit
-      if (!plan && !cli.install(run, identifier, { ref: release.commit, force: !!have })) {
+      // The library's own plugin, from its Hermes rendering at the release commit (the identifier and ref are built
+      // here, never read from the machine): a fresh install runs plain, so Hermes's security scan has its say. A
+      // `caution` there (the library's plugins that ship scripts get one; with no terminal its y/N reads no) is
+      // answered once with --force for this same identifier and commit (tools#193); `dangerous` never is, and Hermes
+      // refuses it under --force anyway. Over this tool's own install (checked above) --force is how a pinned install
+      // moves, so that one call carries it from the start. A same-named plugin from anywhere else never gets here.
+      const first = plan ? null : cli.install(run, identifier, { ref: release.commit, force: !!have });
+      let done = first;
+      let forced = !!have;
+      if (first && !first.ok && first.scan === "caution" && !have && libraryPath(identifier, release.repo)) {
+        done = cli.install(run, identifier, { ref: release.commit, force: true });
+        forced = true;
+      }
+      // Hermes prints the verdict only when the scan stops an install: the plain call's, kept through the --force one
+      // (which says nothing of the caution it answered)
+      const scan = done?.scan ?? first?.scan ?? null;
+      if (done && !done.ok) {
         fail(
           what,
-          `${cli.bin} could not install it; loose links kept. If ${cli.bin} asked to confirm its security scan ` +
-            `(a caution verdict), run once by hand: ${cli.bin} plugins install ${identifier} --no-enable ` +
-            `--ref ${release.commit} --force`,
+          `${cli.bin} could not install it; loose links kept` +
+            (scan === "dangerous"
+              ? `. Hermes's security scan said dangerous, which this tool never overrides`
+              : scan
+                ? `. Hermes's security scan said ${scan}`
+                : ""),
         );
         continue;
       }
       out.push(action);
+      // the scan stays visible: one line naming the plugin, not a red one (it was installed); a caution is not a clean
+      // bill, so the line says what was overridden, and what Hermes printed with the verdict, its findings, goes with it
+      // (--json: diagnostic)
+      if (scan)
+        out.push({
+          kind: "note",
+          path: where(what),
+          note: `Hermes scan ${scan}, installed${forced ? " with --force" : ""} (library plugin)`,
+          loud: true,
+          ...(first ? { diagnostic: first.output } : {}),
+        });
       installed.push(p.id);
     } else if (!n.ahead) out.push({ kind: "skip", path: where(what), note: `installed, ${p.version ?? "no version"}` });
     // a fresh install is "not enabled" (--no-enable); a re-install keeps the list entry it had
@@ -186,9 +219,11 @@ export const hermes: FormFn = async (release, state, _machine, { plan, github })
           ? `${cli.bin} lists it ${row.status}`
           : !disk
             ? `no plugin.json under ${path.join(home, "plugins", p.id)}`
-            : ahead
-              ? null // a newer package than the release's: its own files, not the release's, are what it holds
-              : (behind(disk, p, release, rendering) ?? skillsProblem(disk, p));
+            : installed.includes(p.id) && pinProblem(row, disk, release.commit)
+              ? pinProblem(row, disk, release.commit)
+              : ahead
+                ? null // a newer package than the release's: its own files, not the release's, are what it holds
+                : (behind(disk, p, release, rendering) ?? skillsProblem(disk, p));
       if (reason) {
         fail(what, `installed but not verified (${reason}); loose links kept`, undefined);
         continue;
@@ -326,6 +361,32 @@ function sameNotice(file: string, sha: string): boolean {
   if (toHash(bytes) === sha) return true;
   if (!bytes.includes(0x0d)) return false;
   return toHash(Buffer.from(bytes.toString("latin1").replace(/\r\n/g, "\n"), "latin1")) === sha;
+}
+
+/**
+ * Why a plugin installed this run is not pinned to the release commit, or null when it is: hermes's own listing
+ * (`git pinned@<sha8>`) and its install row (`pinned`, `revision`) must both name the commit the run asked for. A plugin
+ * found current is not asked: an unchanged plugin keeps the commit it was installed at, its files are what count.
+ */
+function pinProblem(row: HermesListed, disk: HermesPlugin, commit: string): string | null {
+  const pin = /pinned@([0-9a-f]+)/i.exec(row.source ?? "")?.[1];
+  if (row.source !== null && !(pin && commit.toLowerCase().startsWith(pin.toLowerCase())))
+    return `${cli.bin} lists it ${row.source}, not pinned@${commit.slice(0, 8)}`;
+  if (!disk.install?.pinned || disk.install.revision?.toLowerCase() !== commit.toLowerCase())
+    return `installed at ${disk.install?.revision ?? "no recorded revision"}${disk.install?.pinned ? "" : " unpinned"}, not ${commit}`;
+  return null;
+}
+
+/**
+ * Is this install identifier the library's own Hermes rendering, `<owner>/<repo>/<folder...>/<id>` with every segment
+ * a plain name (no `.` or `..`, no leading `-` or `.`, no space, quote or backslash)? The --force that answers a scan
+ * caution is passed only for one: the folder and id come from the release's own files, and this keeps them inside the
+ * repository.
+ */
+export function libraryPath(identifier: string, repo: string): boolean {
+  if (!identifier.toLowerCase().startsWith(`${repo.toLowerCase()}/`)) return false;
+  const rest = identifier.slice(repo.length + 1).split("/");
+  return rest.length >= 2 && rest.every((s) => /^[A-Za-z0-9_][A-Za-z0-9._-]*$/.test(s));
 }
 
 /** The first skill of the plugin Hermes would skip, with why; null when every one loads. */

