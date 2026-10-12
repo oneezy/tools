@@ -109,18 +109,23 @@ function claudePlugins(state: HarnessState, release: Release | null): ManualStep
 
 /**
  * Codex runs a user hook only after the person trusted it in its TUI, once per machine or WSL distro (ADR-0010,
- * oneezy/skills#66). The same words hooks.ts's CODEX_TRUST_STEP prints as sync's note, as steps.
+ * oneezy/skills#66), and again after the entry changed from the form they trusted (Codex lists it as modified). The
+ * same words hooks.ts's CODEX_TRUST_STEP and CODEX_RETRUST_STEP print as sync's note, as steps. The trust stays the
+ * person's tap: the tool never writes it.
  */
 function codexTrust(state: HarnessState): ManualStep | null {
   const hook = state.hook;
-  if (!hook?.present || hook.trusted !== false) return null;
+  if (!hook?.present || (hook.trust !== "new" && hook.trust !== "changed")) return null;
+  const changed = hook.trust === "changed";
   return {
     id: "codex-trust",
-    title: `Trust the Skills Sync hook in ${state.harness.name}, once on this machine (${hook.file})`,
+    title: changed
+      ? `Review the changed Skills Sync hook in ${state.harness.name} again, once on this machine (${hook.file})`
+      : `Trust the Skills Sync hook in ${state.harness.name}, once on this machine (${hook.file})`,
     steps: [
       "Run codex in a terminal on this machine.",
       'On the "Hooks need review" screen choose "1. Review hooks" (or type /hooks).',
-      'Select SessionStart, then the row "[!] Skills Sync · new", and press t.',
+      `Select SessionStart, then the row "[!] Skills Sync · ${changed ? "modified" : "new"}", and press t.`,
       "Press Esc twice. The hook runs from the next codex start, and status no longer lists this step.",
     ],
   };

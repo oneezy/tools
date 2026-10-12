@@ -21,6 +21,11 @@ export interface Harness {
   projectInstructions?: string[];
   /** the harness's user-level hooks file, where the session hook lives (ADR-0010); unset for a harness without hooks */
   userHooks?: string;
+  /**
+   * Codex: configDir came from CODEX_HOME, which Codex canonicalizes, so the hooks.json path in its hook trust keys is
+   * configDir's canonical path; unset, it is configDir as written (codex-rs utils/home-dir)
+   */
+  canonicalConfigDir?: boolean;
   note?: string;
 }
 
@@ -55,6 +60,7 @@ export function harnessTable(home = os.homedir(), env = process.env, platform = 
       userInstructions: ["AGENTS.md", "AGENTS.override.md"],
       projectInstructions: ["AGENTS.md", "AGENTS.override.md"],
       userHooks: path.join(codexHome, "hooks.json"),
+      canonicalConfigDir: !!env.CODEX_HOME?.trim(),
     },
     {
       id: "goose",
