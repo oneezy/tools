@@ -11,7 +11,9 @@
 // for the same identifier and commit, and one note per plugin keeps it in sight; `dangerous` is a red line (tools#193). A
 // plugin behind the release is re-installed at the new commit the same way: when the scan passes, Hermes refuses the
 // plain call with "already exists", and the --force retry moves the pin (`update` refuses a pinned install) with no
-// note; one ahead of it (installed by hand from main) is a note and stays. After the installs, hermes's own listing must show each one enabled and pinned to the commit.
+// note; a plain call refused for any other reason is a red line, never retried. One ahead of the release (installed by
+// hand from main) is a note and stays. After the installs, hermes's own listing must show each one enabled and pinned
+// to the commit.
 // The plugin list is pluginsFor() (the release's skills-sync.json narrows it), the rendering folder the config's
 // renderings.hermes (dist/hermes when it names none), and a link is the tool's by machine.ts's libraryCopy, as on Codex.
 // Before the first install of a run, GitHub is asked once whether the release commit carries the rendering at all: until

@@ -28,8 +28,9 @@
 // FAKE_HARNESS_CAUTION=<names> gives them a caution scan verdict, which without --force and without a TTY blocks (the
 // report and refusal printed as the real one prints them) and with --force installs saying nothing of it;
 // FAKE_HARNESS_DANGEROUS=<names> a dangerous one, which no flag gets past; FAKE_HARNESS_WRONG_PIN=<names> records those
-// installs at ffff... instead of the --ref. What the install prints through Rich wraps at COLUMNS (80 without it); FAKE_HARNESS_FAIL_ENABLE=<names> makes `enable` fail for those names and FAKE_HARNESS_FAIL_LIST
-// (with hermes in it) makes `list` fail. `list --json` prints the rows the real CLI prints, a bundled one unless --no-bundled.
+// installs at ffff... instead of the --ref. What the install prints through Rich wraps at COLUMNS (80 without it);
+// FAKE_HARNESS_FAIL_ENABLE=<names> makes `enable` fail for those names and FAKE_HARNESS_FAIL_LIST (with hermes in it)
+// makes `list` fail. `list --json` prints the rows the real CLI prints, a bundled one unless --no-bundled.
 import fs from "node:fs";
 import path from "node:path";
 import {spawnSync} from "node:child_process";

@@ -668,6 +668,69 @@ test("a re-install whose scan says dangerous is a red line naming the verdict, n
   }
 });
 
+test("a re-install whose plain call fails for any other reason (a refusal, a clone that fails) is a red line with Hermes's own words, never retried with --force: the plugin stays at the commit it had, enabled", async () => {
+  const github = await startFakeGithub();
+  try {
+    const m = machine({}, github);
+    const r17 = latest(github);
+    hermesSource(m, r17);
+    const first = await cli(m, []);
+    assert.equal(first.status, 0, first.stderr);
+    const r18 = release18();
+    github.addRelease(r18);
+    // Hermes refuses oneezy for a reason of its own; play moves as usual
+    hermesSource(m, r18);
+    const refused = await cli(m, ["--json"], { FAKE_HARNESS_FAIL_INSTALL: "oneezy" });
+    assert.equal(refused.status, 1, refused.stderr + refused.stdout);
+    assert.deepEqual(refused.calls.filter(pluginWrite), [
+      installCall("oneezy", r18.commit),
+      installCall("play", r18.commit),
+      installCall("play", r18.commit, true),
+    ]);
+    const conflicts = actions(refused).filter((a) => a.kind === "conflict");
+    assert.deepEqual(conflicts.map(brief), [
+      ["conflict", "Hermes: plugin oneezy", "hermes could not install it; loose links kept"],
+    ]);
+    assert.match(conflicts[0].diagnostic?.stderr ?? "", /fixture install denied: oneezy/);
+    assert.deepEqual(conflicts[0].diagnostic?.command.slice(1), installCall("oneezy", r18.commit).slice(1));
+    assert.equal(installs(m).oneezy.revision, r17.commit);
+    assert.equal(installs(m).play.revision, r18.commit);
+
+    // release-19's commit cannot be cloned (a network failure looks the same): one plain call, and the red line
+    const r19 = fixtureRelease({
+      number: 19,
+      previous: "release-18",
+      commit: sha("19"),
+      toolVersion: "0.8.0",
+      plugins: {
+        oneezy: { version: "0.43.3", skills: ["oneezy-merge", "oneezy-status"] },
+        "matt-pocock": { version: "1.3.1", skills: ["grilling", "tdd"] },
+        play: { version: "0.43.0", skills: ["play-unslop"] },
+      },
+    });
+    github.addRelease(r19);
+    // GitHub's contents API says the rendering is there; the clone hermes makes of it fails
+    fs.rmSync(hermesSource(m, r19), { recursive: true, force: true });
+    const offline = await cli(m, ["--json"]);
+    assert.equal(offline.status, 1, offline.stderr + offline.stdout);
+    assert.deepEqual(offline.calls.filter(pluginWrite), [
+      installCall("oneezy", r19.commit),
+      installCall("play", r19.commit),
+    ]);
+    const red = actions(offline).filter((a) => a.kind === "conflict");
+    assert.deepEqual(
+      red.map((a) => a.path),
+      ["Hermes: plugin oneezy", "Hermes: plugin play"],
+    );
+    for (const a of red) assert.match(a.diagnostic?.stderr ?? "", /fatal: could not clone/);
+    assert.equal(installs(m).oneezy.revision, r17.commit);
+    assert.equal(installs(m).play.revision, r18.commit);
+    assert.deepEqual(config(m).enabled, ["matt-pocock", "oneezy", "play"]);
+  } finally {
+    await github.close();
+  }
+});
+
 test("Hermes's 'already exists' refusal is read as hermes_cli/plugins_cmd_install.py prints it, wrapped at 80 columns or coloured; the link refusal and other errors are not it", () => {
   const said =
     "Warning: custom (unreviewed) source — not from the Hermes catalog.\n" +
