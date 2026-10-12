@@ -734,6 +734,15 @@ export function fakeCli(
   return { status: r.status, stdout: r.stdout, stderr: r.stderr, json };
 }
 
+/** Sign the fake codex in (with ChatGPT or an API key) or out, as `codex login` would; `codex login status` reports it. */
+export function codexLogin(m: PretendMachine, login: "chatgpt" | "api-key" | null): void {
+  const file = path.join(m.codexHome, "fake-harness.json");
+  const state = fs.existsSync(file) ? JSON.parse(fs.readFileSync(file, "utf8")) : { marketplaces: {}, plugins: {} };
+  if (login) state.login = login;
+  else delete state.login;
+  write(file, JSON.stringify(state, null, 2));
+}
+
 /** Switch a plugin the fake codex has installed on or off, as the user would through Codex. */
 export function codexPluginEnabled(m: PretendMachine, id: string, enabled: boolean): void {
   const file = path.join(m.codexHome, "fake-harness.json");

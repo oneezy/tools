@@ -22,6 +22,7 @@ import {
   type SourceResult,
   type Stamp,
 } from "../block.js";
+import { chatgptState, isAccountMarketplace, type ChatgptState } from "../chatgpt.js";
 import { catalogOf, FORM_LABEL, formOf, notServed, sameCatalog, serves, type MachineForm } from "../desired.js";
 import { versionGap } from "../forms/codex.js";
 import { github } from "../github.js";
@@ -139,6 +140,11 @@ export interface StatusCheckout {
   error?: string;
 }
 
+/** The ChatGPT account's copies of the release plugins, read through a Codex signed in with ChatGPT (tools#196). */
+export interface StatusChatgpt extends ChatgptState {
+  lines: StatusLine[];
+}
+
 export interface StatusReport {
   /** the latest release read; `tool` is the skills-sync version it was built with, when the release says */
   release: { repo: string; tag: string; number: number; commit: string; tool: string | null } | null;
@@ -150,6 +156,8 @@ export interface StatusReport {
   /** the old tool's answers file beside that clone, when it is there; nothing reads it */
   oldLocalFile: string | null;
   harnesses: Record<string, StatusHarness>;
+  /** null in the cloud, where no Codex runs; never red: bringing ChatGPT up is a manual step */
+  chatgpt: StatusChatgpt | null;
   /** lines about the machine as a whole: the release line, the leftovers, a harness the release does not serve */
   lines: StatusLine[];
   /** empty in the cloud, and when no checkout is in reach */
@@ -226,6 +234,12 @@ export function statusReport(
     }
     harnesses[state.harness.id] = harnessReport(state, form, release, machine.cloud, text);
   }
+  const chatgpt = machine.cloud
+    ? null
+    : chatgptReport(
+        machine.harnesses.find((h) => h.harness.id === "codex"),
+        release,
+      );
   const all = [...lines, ...Object.values(harnesses).flatMap((h) => h.lines)];
   const redCount = all.filter((l) => !l.ok).length + checkouts.filter((c) => !c.ok).length;
   return {
@@ -237,12 +251,48 @@ export function statusReport(
     oldLibrary: machine.oldLibrary,
     oldLocalFile: machine.oldLocalFile,
     harnesses,
+    chatgpt,
     lines,
     checkouts,
     manualSteps: manualSteps(machine, release),
     red: redCount,
     ok: redCount === 0,
   };
+}
+
+/**
+ * The ChatGPT section: a line per release plugin, green at the release, a note pointing at the manual step when behind
+ * or missing (Justin's account, not the machine, so never red); one note when this machine's Codex cannot read it.
+ */
+function chatgptReport(codex: HarnessState | undefined, release: Release | null): StatusChatgpt {
+  const state = chatgptState(codex, release);
+  // a machine without Codex has no say about ChatGPT: --json gives the reason, the text stays quiet
+  if (!state.checked) return { ...state, lines: codex ? [note(`not checked: ${state.reason}`)] : [] };
+  const lines = state.plugins.map((p) => {
+    const latest = `latest ${p.latest ?? "no version"}`;
+    if (!p.marketplace) return note(`${p.id} not on the ChatGPT account (${latest}); manual step below`);
+    const name = `${p.id}@${p.marketplace} ${p.version ?? "no version"}`;
+    if (p.current) return green(`${name} (${latest})`);
+    if (p.ahead) return note(`${name} (${latest}; ahead of the release)`);
+    return note(`${name} (${latest}); manual step below`);
+  });
+  return { ...state, lines };
+}
+
+/**
+ * A skill doubled only by the ChatGPT account's copy of the same library plugin (`oneezy@oneezy-skills` beside
+ * `oneezy@created-by-me-remote`): Codex loads both, which is what keeping ChatGPT in sync costs; not a red line.
+ */
+function accountDouble(where: string[], catalog: string): boolean {
+  const parsed = where.map((w) => /^([^@\s]+)@(\S+)$/.exec(w));
+  if (parsed.some((x) => !x)) return false;
+  const ids = new Set(parsed.map((x) => x![1]));
+  const mkts = parsed.map((x) => x![2]);
+  return (
+    ids.size === 1 &&
+    mkts.some((m) => sameCatalog(m, catalog)) &&
+    mkts.every((m) => sameCatalog(m, catalog) || isAccountMarketplace(m))
+  );
 }
 
 function sameSet(a: string[], b: string[]): boolean {
@@ -374,8 +424,16 @@ function harnessReport(
   const duplicates = [...places]
     .filter(([, where]) => where.length > 1)
     .map(([skill, where]) => ({ skill, in: where }));
-  for (const d of duplicates)
-    machineLine(red(`${d.skill} listed ${d.in.length === 2 ? "twice" : `${d.in.length} times`}: ${d.in.join(", ")}`));
+  for (const d of duplicates) {
+    const text = `${d.skill} listed ${d.in.length === 2 ? "twice" : `${d.in.length} times`}: ${d.in.join(", ")}`;
+    machineLine(
+      accountDouble(d.in, catalogOf(release))
+        ? note(
+            `${text} (${d.in.length === 2 ? "one is the ChatGPT account copy; Codex loads both" : "the others are ChatGPT account copies; Codex loads each"})`,
+          )
+        : red(text),
+    );
+  }
 
   if (state.hook) machineLine(hookLine(state.harness.id, state.hook));
   if (state.block) lines.push(blockLine(state.block, source, text.ok ? null : text.reason));
@@ -560,6 +618,13 @@ export function statusText(report: StatusReport, quiet: boolean): string {
     if (!lines.length) continue;
     out.push(`${h.name}  form: ${FORM_LABEL[h.form]}`);
     for (const l of lines) out.push(`${l.mark} ${l.text}`);
+  }
+  if (report.chatgpt) {
+    const lines = report.chatgpt.lines.filter(show);
+    if (lines.length) {
+      out.push("ChatGPT  account plugins, read through Codex");
+      for (const l of lines) out.push(`${l.mark} ${l.text}`);
+    }
   }
   if (!report.cloud) {
     const lines = report.checkouts.map(checkoutLine).filter(show);

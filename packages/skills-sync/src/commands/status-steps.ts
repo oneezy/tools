@@ -7,6 +7,7 @@
 // adopt or delete, and, in the cloud, the old setup line that still cloned the old library and linked every skill a
 // second time. The rules for "a library copy" and "the release's own files" are the forms' own (machine.ts's libraryCopy,
 // the Codex form's sameFiles), so status and sync agree on what sync removes and what it leaves for a person.
+import { CHATGPT_LINE, chatgptState, isAccountMarketplace } from "../chatgpt.js";
 import { catalogOf, formOf, pluginsFor, sameCatalog, serves } from "../desired.js";
 import { sameFiles } from "../forms/codex.js";
 import { lexists } from "../fs.js";
@@ -14,7 +15,7 @@ import { libraryCopy, type HarnessState, type Machine } from "../machine.js";
 import type { Release } from "../release.js";
 
 export interface ManualStep {
-  /** stable: claude-plugins, claude-account, codex-trust, codex-other-plugins, adopt-or-delete, cloud-setup */
+  /** stable: claude-plugins, claude-account, codex-trust, codex-other-plugins, adopt-or-delete, chatgpt-update, cloud-setup */
   id: string;
   title: string;
   /** numbered when printed, in order */
@@ -51,6 +52,7 @@ export function manualSteps(machine: Machine, release: Release | null): ManualSt
       push(out, adoptOrDelete(state, release));
     }
   }
+  push(out, chatgptUpdate(machine, release));
   return out;
 }
 
@@ -127,14 +129,44 @@ function codexTrust(state: HarnessState): ManualStep | null {
 }
 
 /**
- * A plugin of a library plugin's name installed from another marketplace (a ChatGPT account plugin) lists every skill
- * of it a second time beside the library's; the tool never removes it (tools#150), so the person does, by hand.
+ * The ChatGPT account's copies of the release plugins, read through a signed-in Codex (chatgpt.ts), behind or missing:
+ * only Justin can update them, by typing one line in ChatGPT. Nothing when the account could not be read.
+ */
+function chatgptUpdate(machine: Machine, release: Release | null): ManualStep | null {
+  const state = chatgptState(
+    machine.harnesses.find((s) => s.harness.id === "codex"),
+    release,
+  );
+  const open = state.plugins.filter((p) => !p.current && !p.ahead);
+  if (!state.checked || !release || !open.length) return null;
+  return {
+    id: "chatgpt-update",
+    title: `Bring the ChatGPT plugins up to ${release.tag}: ${open.map((p) => p.id).join(", ")}`,
+    steps: [
+      "Open ChatGPT (the website or the desktop app) and start a new chat.",
+      `Type: ${CHATGPT_LINE}`,
+      "Approve each plugin update ChatGPT asks about. It ends with every plugin updated, already current, or failed and why.",
+      "Start codex once on this machine so it picks up the account's new copies, then run status again.",
+    ],
+  };
+}
+
+/**
+ * A plugin of a library plugin's name installed from another marketplace lists every skill of it a second time beside
+ * the library's; the tool never removes it (tools#150), so the person does, by hand. The ChatGPT account's own copies
+ * (chatgpt.ts's isAccountMarketplace) are not such a plugin: they are the ChatGPT destination, kept at the release.
  */
 function otherPlugins(state: HarnessState, release: Release | null): ManualStep | null {
   if (!release) return null;
   const others = state.installed
     // a plugin switched off loads nothing, so it doubles nothing
-    .filter((p) => p.enabled && !sameCatalog(p.marketplace, catalogOf(release)) && ids(release, state).includes(p.id))
+    .filter(
+      (p) =>
+        p.enabled &&
+        !sameCatalog(p.marketplace, catalogOf(release)) &&
+        !isAccountMarketplace(p.marketplace) &&
+        ids(release, state).includes(p.id),
+    )
     .sort((a, b) => a.id.localeCompare(b.id));
   if (!others.length) return null;
   const name = state.harness.name;

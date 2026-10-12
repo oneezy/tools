@@ -625,7 +625,7 @@ test("an old marketplace of the library's name registered from a local folder is
   assert.deepEqual(again.calls.filter(mutating), []);
 });
 
-test("a plugin of the same name from another marketplace is left as it is and noted with how to uninstall it by hand", async () => {
+test("the ChatGPT account's copy of a library plugin is left as it is and noted as the ChatGPT destination, never to uninstall", async () => {
   const m = machine();
   installedPlugin(m, "codex", "oneezy", {
     marketplace: "created-by-me-remote",
@@ -639,20 +639,21 @@ test("a plugin of the same name from another marketplace is left as it is and no
   assert.equal(note?.kind, "note");
   assert.equal(
     note?.note,
-    "lists every skill of oneezy a second time beside oneezy@oneezy-skills; uninstall it by hand: ChatGPT > Plugins > Installed > Uninstall plugin, or codex plugin remove oneezy@created-by-me-remote",
+    "the ChatGPT account's copy of oneezy: Codex lists its skills a second time beside oneezy@oneezy-skills; it stays, and ChatGPT keeps it at the release when Justin types there: @oneezy-skills update my ChatGPT plugins to the latest oneezy/skills release",
   );
   assert.deepEqual(installed(m), [
     ALL_17[0],
     ["oneezy@created-by-me-remote", "0.43.1", true, "local"],
     ...ALL_17.slice(1),
   ]);
-  // until Justin removes it, status says the skills are listed twice
+  // status still lists the skills twice, as a note: Codex loads both copies, the price of ChatGPT in sync
   const s = await cli(m, ["status", "--json"]);
-  assert.equal(s.status, 1);
+  const codex = (s.json as unknown as StatusJson).harnesses.codex;
   assert.deepEqual(
-    (s.json as unknown as StatusJson).harnesses.codex.duplicates.map((d) => d.skill),
+    codex.duplicates.map((d) => d.skill),
     ["oneezy-merge", "oneezy-status"],
   );
+  assert.ok(!codex.lines.some((l) => !l.ok && l.text.includes("listed twice")), JSON.stringify(codex.lines));
 });
 
 test("when codex cannot list its marketplaces, the add is asked again and answers already added: a skip, nothing changes", async () => {

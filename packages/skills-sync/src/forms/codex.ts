@@ -7,10 +7,12 @@
 // ~/.codex/skills, and a real folder there whose SKILL.md is byte for byte the release's. `.system` is Codex's and is
 // never listed; every other real folder, and every link to something that is not a library copy, is a line for Justin:
 // adopt it into the library or delete it by hand. A plugin of the same name from another marketplace (a ChatGPT account
-// plugin) lists every skill twice; it is never removed here, the line says how. Shapes: notes/skills-66.md and
+// plugin) lists every skill twice; it is never removed here, the line says how. The ChatGPT account's own copies
+// (created-by-me-remote, workspace-*) are the ChatGPT destination (chatgpt.ts): their line says they stay. Shapes: notes/skills-66.md and
 // docs/research/codex-hook-trust-and-account-plugins.md in oneezy/skills.
 import fs from "node:fs";
 import path from "node:path";
+import { CHATGPT_LINE, isAccountMarketplace } from "../chatgpt.js";
 import { catalogOf, pluginsFor, type FormFn } from "../desired.js";
 import { lexists, toHash } from "../fs.js";
 import {
@@ -124,7 +126,9 @@ export const codex: FormFn = (release, state, _machine, options) => {
       out.push({
         kind: "note",
         path: where(`plugin ${p.id}@${other.marketplace}`),
-        note: `lists every skill of ${p.id} a second time beside ${id}; uninstall it by hand: ChatGPT > Plugins > Installed > Uninstall plugin, or codex plugin remove ${p.id}@${other.marketplace}`,
+        note: isAccountMarketplace(other.marketplace)
+          ? `the ChatGPT account's copy of ${p.id}: Codex lists its skills a second time beside ${id}; it stays, and ChatGPT keeps it at the release when Justin types there: ${CHATGPT_LINE}`
+          : `lists every skill of ${p.id} a second time beside ${id}; uninstall it by hand: ChatGPT > Plugins > Installed > Uninstall plugin, or codex plugin remove ${p.id}@${other.marketplace}`,
       });
     const current = mine(have, p);
     if (!current) {

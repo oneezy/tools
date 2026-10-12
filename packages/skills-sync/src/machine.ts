@@ -24,6 +24,7 @@ import {
   runner,
   supportsPlugins,
   type Marketplace,
+  type Run,
 } from "./install.js";
 import { homeLibrary, looksLikeLibrary } from "./library.js";
 import type { Action } from "./plan.js";
@@ -99,6 +100,8 @@ export interface HarnessState {
   repoBlocks: RepoBlock[];
   /** the session hook entry in the harness's user hooks file (ADR-0010); null when its table row names no such file */
   hook: HookState | null;
+  /** Codex: how its CLI is signed in (`codex login status`), which decides whether it lists the ChatGPT account's plugins; null elsewhere or unread */
+  login?: "chatgpt" | "other" | "none" | null;
 }
 
 /** The old tool's ~/.skills-sync: a link to its library clone, or the clone itself. Detected; never read, never removed. */
@@ -232,6 +235,8 @@ function probeHarness(h: Harness, env: NodeJS.ProcessEnv, roots: string[], globa
       else {
         state.listed = true;
         state.marketplaces = listMarketplaces(h, run) ?? [];
+        // a Codex signed in with ChatGPT lists the account's plugins among its own: the ChatGPT destination (chatgpt.ts)
+        if (h.id === "codex") state.login = codexLogin(run);
         // Codex names no folder for a plugin; its loaded skills come from the prompt input it renders locally
         let codexSkills: Map<string, string[]> | null = null;
         if (h.id === "codex" && listed.length) {
@@ -289,6 +294,16 @@ function probeHarness(h: Harness, env: NodeJS.ProcessEnv, roots: string[], globa
     }
   }
   return state;
+}
+
+/** `codex login status`: the real CLI prints the sign-in to stderr, and "Not logged in" with exit 1. */
+function codexLogin(run: Run): "chatgpt" | "other" | "none" | null {
+  const r = run(["login", "status"]);
+  const text = `${r.out}\n${r.err}`;
+  if (/Logged in using ChatGPT/i.test(text)) return "chatgpt";
+  if (/Not logged in/i.test(text)) return "none";
+  if (/Logged in/i.test(text)) return "other";
+  return null;
 }
 
 function readJson(file: string): Record<string, unknown> | null {
