@@ -399,16 +399,20 @@ function trustedHashes(toml: string): Map<string, string> {
     hooks: [dotted(String.raw`state\s*\.\s*`), inline(String.raw`state\s*\.\s*`)],
     "hooks.state": [dotted(""), inline("")],
   };
-  const text = (m: RegExpExecArray, at: number) =>
-    m[at] !== undefined ? m[at].replace(/\\(["\\])/g, "$1") : m[at + 1];
-  let table = "";
+  const text = (m: RegExpExecArray, at: number) => (m[at] !== undefined ? unescapeBasic(m[at]) : m[at + 1]);
+  // Codex trims each hooks.state key before it looks one up (hooks/src/config_rules.rs hook_states_from_stack)
+  const set = (key: string, hash: string) => {
+    if (key.trim()) out.set(key.trim(), hash);
+  };
+  // the table the lines below belong to; null in a hooks.state."<key>" table, where no other form applies
+  let table: string | null = "";
   let pending: string | null = null;
   for (const line of toml.split(/\r?\n/)) {
     if (/^\s*#/.test(line)) continue;
     let m = header.exec(line);
     if (m) {
       pending = text(m, 1);
-      table = "";
+      table = null;
       continue;
     }
     const any = /^\s*\[\s*([^\]]+?)\s*\]/.exec(line);
@@ -417,8 +421,34 @@ function trustedHashes(toml: string): Map<string, string> {
       pending = null;
       continue;
     }
-    if (pending !== null && (m = value.exec(line))) out.set(pending, text(m, 1));
-    for (const form of forms[table] ?? []) if ((m = form.exec(line))) out.set(text(m, 1), text(m, 3));
+    if (pending !== null && (m = value.exec(line))) set(pending, text(m, 1));
+    for (const form of table === null ? [] : (forms[table] ?? []))
+      if ((m = form.exec(line))) set(text(m, 1), text(m, 3));
   }
   return out;
+}
+
+/**
+ * The text of a TOML basic string's body: its escapes undone (\b \t \n \f \r \e \" \\ \xHH \uHHHH \UHHHHHHHH), as a
+ * TOML writer may escape a key's control or non-ASCII characters.
+ */
+function unescapeBasic(body: string): string {
+  const named: Record<string, string> = {
+    b: "\b",
+    t: "\t",
+    n: "\n",
+    f: "\f",
+    r: "\r",
+    e: "\x1b",
+    '"': '"',
+    "\\": "\\",
+  };
+  return body.replace(/\\(?:x([0-9A-Fa-f]{2})|u([0-9A-Fa-f]{4})|U([0-9A-Fa-f]{8})|(.))/g, (all, x, u, U, c) => {
+    const hex = x ?? u ?? U;
+    if (hex !== undefined) {
+      const code = parseInt(hex, 16);
+      return code <= 0x10ffff ? String.fromCodePoint(code) : all;
+    }
+    return named[c] ?? all;
+  });
 }

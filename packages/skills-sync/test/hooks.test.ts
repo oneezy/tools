@@ -239,6 +239,11 @@ test("Codex: an untrusted entry is a note with the manual step; trust recorded i
     `[hooks]\nstate."${key(g)}" = { trusted_hash = ${hash} }\n`,
     `hooks.state."${key(g)}".trusted_hash = ${hash}\n`,
     `[hooks.state."${key(g)}"]\ntrusted_hash = '${hash.slice(1, -1)}'\n`,
+    // a literal string, as Codex's TOML writer spells a key with backslashes (a Windows path)
+    `[hooks.state.'${codexTrustKey(m, g)}']\ntrusted_hash = ${hash}\n`,
+    // a basic string with an escape, and a key with spaces around it, which Codex trims
+    `[hooks.state."\\u${key(g).charCodeAt(0).toString(16).padStart(4, "0")}${key(g).slice(1)}"]\ntrusted_hash = ${hash}\n`,
+    `[hooks.state." ${key(g)} "]\ntrusted_hash = ${hash}\n`,
   ];
   for (const [g, want] of [
     [1, [["skip", "session hook current, trusted in Codex"]]],
@@ -255,6 +260,12 @@ test("Codex: an untrusted entry is a note with the manual step; trust recorded i
       const again = await cli(m, ["--json"]);
       assert.deepEqual(actions(again.json, codex), want, form);
     }
+  // a line under another key's hooks.state."<key>" table is that table's, not a record of its own
+  write(config, `[hooks.state."elsewhere"]\nhooks.state."${key(1)}".trusted_hash = ${hash}\n`);
+  assert.deepEqual(actions((await cli(m, ["--json"])).json, codex), [
+    ["skip", "session hook current"],
+    ["note", CODEX_TRUST_STEP],
+  ]);
 });
 
 test("Codex: trust recorded for an older form of the entry is a changed hook, reviewed again by hand; the tool never writes the new hash", async () => {
