@@ -15,6 +15,8 @@
 // FAKE_HARNESS_FAIL_MARKETPLACE_LIST=<claude,codex> makes `plugin marketplace list` fail; FAKE_HARNESS_UPGRADE_ERRORS=<id,...>
 // makes Codex's `marketplace upgrade` leave those plugins as they are and report one error each (exit 0, as the CLI);
 // FAKE_HARNESS_FAIL_UNINSTALL=<id,...> makes `plugin uninstall <id>` (Codex: `plugin remove <id>`) fail for those ids.
+// Codex's `debug prompt-input` lists each enabled plugin's skills except those whose agents/openai.yaml sets
+// policy.allow_implicit_invocation: false, which the real one loads but keeps out of the model's skill list.
 //
 // The third host is hermes (`hermes plugins ...`, hermes-agent v0.21.6 shapes). Its state is Hermes's own files under
 // HERMES_HOME, the ones the real CLI writes and the tool reads: plugins/<name>/ (copied from a pretend GitHub checkout
@@ -60,6 +62,14 @@ const catalog = (root) =>
 const skillsOf = (dir) => {
   const d = path.join(dir, "skills");
   return fs.existsSync(d) ? fs.readdirSync(d).filter((n) => fs.existsSync(path.join(d, n, "SKILL.md"))).sort() : [];
+};
+/** Codex: does the skill's agents/openai.yaml set policy.allow_implicit_invocation to false. */
+const explicitOnly = (skillDir) => {
+  try {
+    return YAML.parse(fs.readFileSync(path.join(skillDir, "agents", "openai.yaml"), "utf8"))?.policy?.allow_implicit_invocation === false;
+  } catch {
+    return false;
+  }
 };
 const resolve = (id) => {
   const at = id.lastIndexOf("@");
@@ -336,7 +346,9 @@ if (args[0] === "plugin" && args.includes("--help")) {
       if (!p.enabled) continue;
       const alias = `r${rootIndex++}`;
       if (process.env.FAKE_HARNESS_ALIASES) lines.push(`- \`${alias}\` = \`${path.join(p.dir, "skills")}\``);
-      for (const s of skillsOf(p.dir)) lines.push(`- ${id.slice(0, id.lastIndexOf("@"))}:${s}: ${s} skill (file: ${process.env.FAKE_HARNESS_ALIASES ? alias + "/" + s + "/SKILL.md" : path.join(p.dir, "skills", s, "SKILL.md")})`);
+      // as the real one, a skill whose agents/openai.yaml sets policy.allow_implicit_invocation: false is loaded but kept
+      // out of the model's skill list (codex-rs ext/skills/src/provider/host.rs: hidden_from_prompt)
+      for (const s of skillsOf(p.dir).filter((s) => !explicitOnly(path.join(p.dir, "skills", s)))) lines.push(`- ${id.slice(0, id.lastIndexOf("@"))}:${s}: ${s} skill (file: ${process.env.FAKE_HARNESS_ALIASES ? alias + "/" + s + "/SKILL.md" : path.join(p.dir, "skills", s, "SKILL.md")})`);
     }
   out(JSON.stringify([{ type: "message", content: [{ text: `### Available skills\n${lines.join("\n")}` }] }]));
 } else fail(`fake ${host}: unhandled ${args.join(" ")}`);

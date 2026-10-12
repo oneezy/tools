@@ -221,6 +221,57 @@ const newer = fixtureRelease({
   },
 });
 
+/**
+ * A release whose oneezy-merge is user-only: its agents/openai.yaml (the form the library gives every skill marked
+ * disable-model-invocation) sets policy.allow_implicit_invocation: false.
+ */
+const userOnly = fixtureRelease({
+  number: 17,
+  commit: "1919191919191919191919191919191919191919",
+  plugins: {
+    oneezy: {
+      version: "0.43.1",
+      skills: ["oneezy-merge", "oneezy-status"],
+      files: {
+        "skills/oneezy-merge/agents/openai.yaml":
+          'interface:\n  display_name: "Oneezy Merge"\npolicy:\n  allow_implicit_invocation: false\n',
+      },
+    },
+  },
+});
+
+test("a user-only skill (policy.allow_implicit_invocation: false) is loaded though Codex's prompt input leaves it out: the plugin verifies, its old copy goes, status is green", async () => {
+  const own = await startFakeGithub({ repo: "oneezy/skills", releases: [userOnly], contents: {} });
+  try {
+    const m = machine({ github: own }, userOnly);
+    const copy = releaseCopy(m, "codex", "oneezy-merge", userOnly, codexLegacySkills(m));
+    const r = await cli(m, ["--json"]);
+    assert.equal(r.status, 0, r.stdout + r.stderr);
+    assert.deepEqual(
+      actions(r).filter((a) => a.kind === "conflict" || a.path.includes("marketplace")),
+      [{ kind: "install", path: `Codex: marketplace ${MKT}`, note: "from GitHub oneezy/skills" }],
+    );
+    // Codex keeps it out of the model's skill list, as the real one does; it still runs it as $oneezy-merge
+    const prompt = JSON.stringify(fakeCli(m, "codex", ["debug", "prompt-input"]).json);
+    assert.ok(prompt.includes("oneezy:oneezy-status") && !prompt.includes("oneezy:oneezy-merge"), prompt);
+    assert.ok(!lexists(copy), "the old copy goes once its plugin verified");
+    const s = await cli(m, ["status"]);
+    assert.equal(s.status, 0, s.stdout);
+    assert.ok(s.stdout.includes("\n= oneezy@oneezy-skills 0.43.1 (latest 0.43.1)\n"), s.stdout);
+    const again = await cli(m, []);
+    assert.equal(again.status, 0, again.stderr);
+    assert.deepEqual(again.calls.filter(mutating), []);
+    // the skill gone from the copy Codex runs is missing all the same: the policy alone verifies nothing
+    const cache = path.join(m.codexHome, "plugins", "cache", MKT, "oneezy", "0.43.1");
+    fs.rmSync(path.join(cache, "skills", "oneezy-merge"), { recursive: true });
+    const gone = await cli(m, ["status"]);
+    assert.equal(gone.status, 1, gone.stdout);
+    assert.ok(gone.stdout.includes("skills differ: missing oneezy-merge"), gone.stdout);
+  } finally {
+    await own.close();
+  }
+});
+
 test("a newer release triggers one marketplace upgrade for the harness: a plugin behind by version, and an unversioned one behind by its skill set, both follow it", async () => {
   const own = await startFakeGithub({ repo: "oneezy/skills", releases: [older], contents: {} });
   try {
