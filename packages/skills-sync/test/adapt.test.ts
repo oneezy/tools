@@ -20,9 +20,15 @@ let library: Repo;
 const CLI = path.resolve(import.meta.dirname, "..", "dist", "src", "cli.js");
 const HARNESS_ENV = ["CLAUDE_CONFIG_DIR", "CODEX_HOME", "XDG_CONFIG_HOME", "HERMES_HOME"] as const;
 const GIT = ["-c", "user.name=t", "-c", "user.email=t@example.com", "-c", "commit.gpgsign=false"];
+/**
+ * Every git this file starts, its own and the CLI's, reads no global or system config: a core.autocrlf there (input, or
+ * true as Git for Windows' installer sets it) would rewrite the CRLF upstream file the tests commit. Git for Windows
+ * opens /dev/null as nul.
+ */
+const GIT_ENV = { GIT_CONFIG_GLOBAL: "/dev/null", GIT_CONFIG_NOSYSTEM: "1" };
 
 function cli(...args: string[]): { status: number | null; stdout: string; stderr: string } {
-  const env: NodeJS.ProcessEnv = { ...process.env, HOME: homeDir, USERPROFILE: homeDir };
+  const env: NodeJS.ProcessEnv = { ...process.env, ...GIT_ENV, HOME: homeDir, USERPROFILE: homeDir };
   for (const k of HARNESS_ENV) delete env[k];
   delete env.GITHUB_ACTIONS;
   return spawnSync(process.execPath, [CLI, ...args, "--repo", root], { encoding: "utf8", cwd: root, env });
@@ -34,7 +40,10 @@ class Repo {
     this.git("init", "-q", "-b", "main");
   }
   git(...args: string[]): string {
-    const r = spawnSync("git", [...GIT, "-C", this.dir, ...args], { encoding: "utf8" });
+    const r = spawnSync("git", [...GIT, "-C", this.dir, ...args], {
+      encoding: "utf8",
+      env: { ...process.env, ...GIT_ENV },
+    });
     assert.equal(r.status, 0, `git ${args.join(" ")}: ${r.stderr}`);
     return r.stdout.trim();
   }
