@@ -367,15 +367,17 @@ export function codexLoadedSkills(codexHome: string, marketplace: string, id: st
  * agents/openai.yaml sets policy.allow_implicit_invocation to false (the library's form of disable-model-invocation,
  * which Codex itself does not read). Codex loads such a skill and runs it when the user names it ($name, or the $ and
  * /skills pickers), but keeps it out of the model's skill list, so the prompt input never shows it. The version folder
- * is the one Codex picks: `local` when present, else the highest. [] when the plugin has no copy there.
+ * is the one Codex picks: `local` when present, else the highest. [] when the plugin has no copy there, or when the
+ * marketplace or id is not one folder name (an empty marketplace would make path.join read another plugin's folder).
  */
 export function codexUserOnlySkills(codexHome: string, marketplace: string, id: string): string[] {
+  if (!codexSegment(marketplace) || !codexSegment(id)) return [];
   const base = path.join(codexHome, "plugins", "cache", marketplace, id);
   let versions: string[];
   try {
     versions = fs
       .readdirSync(base, { withFileTypes: true })
-      .filter((e) => e.isDirectory() && /^[A-Za-z0-9._+-]+$/.test(e.name))
+      .filter((e) => e.isDirectory() && codexSegment(e.name))
       .map((e) => e.name);
   } catch {
     return [];
@@ -388,6 +390,11 @@ export function codexUserOnlySkills(codexHome: string, marketplace: string, id: 
     .readdirSync(skills)
     .filter((s) => fs.existsSync(path.join(skills, s, "SKILL.md")) && userOnly(path.join(skills, s)))
     .sort();
+}
+
+/** One folder name as Codex accepts a plugin version (and so a cache segment): ASCII letters, digits, `.+_-`, not `.`/`..`. */
+function codexSegment(s: string): boolean {
+  return /^[A-Za-z0-9._+-]+$/.test(s) && s !== "." && s !== "..";
 }
 
 /** Does the skill's agents/openai.yaml set policy.allow_implicit_invocation to false. */
