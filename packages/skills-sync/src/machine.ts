@@ -16,6 +16,7 @@ import { detected, RESERVED, type Harness } from "./harnesses.js";
 import { githubRepo, hermesPlugins, type HermesActivation, type HermesInstall } from "./hermes.js";
 import { readHook, type HookState } from "./hooks.js";
 import {
+  codexLoadedSkills,
   codexPluginSkills,
   harnessCli,
   listInstalled,
@@ -247,8 +248,15 @@ function probeHarness(h: Harness, env: NodeJS.ProcessEnv, roots: string[], globa
               version: p.version,
               enabled: p.enabled,
               path: p.folder,
-              // no folder and no prompt input: the skills are unknown, not none
-              skills: p.folder ? skillsIn(p.folder) : codexSkills ? (codexSkills.get(p.name) ?? []) : null,
+              // no folder and no prompt input: the skills are unknown, not none; an enabled Codex plugin also loads
+              // its user-only skills, which the prompt input never shows
+              skills: p.folder
+                ? skillsIn(p.folder)
+                : codexSkills
+                  ? p.enabled
+                    ? codexLoadedSkills(h.configDir, p.marketplace, p.name, codexSkills.get(p.name) ?? [])
+                    : (codexSkills.get(p.name) ?? [])
+                  : null,
             });
         }
       }

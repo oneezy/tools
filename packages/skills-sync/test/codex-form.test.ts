@@ -7,9 +7,11 @@
 // codex's calls and its own `plugin list --json` afterwards, files and links, printed lines, --json, exit codes.
 import assert from "node:assert/strict";
 import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
 import { afterAll, afterEach, beforeAll, test } from "vite-plus/test";
 import { isLink, lexists } from "../src/fs.js";
+import { codexLoadedSkills, codexUserOnlySkills } from "../src/install.js";
 import {
   fixtureRelease,
   startFakeGithub,
@@ -219,6 +221,104 @@ const newer = fixtureRelease({
     oneezy: { version: "0.43.2", skills: ["oneezy-merge", "oneezy-status"] },
     design: { version: null, skills: ["frontend-design", "slop-check"] },
   },
+});
+
+/**
+ * A release whose oneezy-merge is user-only: its agents/openai.yaml (the form the library gives every skill marked
+ * disable-model-invocation) sets policy.allow_implicit_invocation: false.
+ */
+const userOnly = fixtureRelease({
+  number: 17,
+  commit: "1919191919191919191919191919191919191919",
+  plugins: {
+    oneezy: {
+      version: "0.43.1",
+      skills: ["oneezy-merge", "oneezy-status"],
+      files: {
+        "skills/oneezy-merge/agents/openai.yaml":
+          'interface:\n  display_name: "Oneezy Merge"\npolicy:\n  allow_implicit_invocation: false\n',
+      },
+    },
+  },
+});
+
+test("a user-only skill (policy.allow_implicit_invocation: false) is loaded though Codex's prompt input leaves it out: the plugin verifies, its old copy goes, status is green", async () => {
+  const own = await startFakeGithub({ repo: "oneezy/skills", releases: [userOnly], contents: {} });
+  try {
+    const m = machine({ github: own }, userOnly);
+    const copy = releaseCopy(m, "codex", "oneezy-merge", userOnly, codexLegacySkills(m));
+    const r = await cli(m, ["--json"]);
+    assert.equal(r.status, 0, r.stdout + r.stderr);
+    assert.deepEqual(
+      actions(r).filter((a) => a.kind === "conflict" || a.path.includes("marketplace")),
+      [{ kind: "install", path: `Codex: marketplace ${MKT}`, note: "from GitHub oneezy/skills" }],
+    );
+    // Codex keeps it out of the model's skill list, as the real one does; it still runs it as $oneezy-merge
+    const prompt = JSON.stringify(fakeCli(m, "codex", ["debug", "prompt-input"]).json);
+    assert.ok(prompt.includes("oneezy:oneezy-status") && !prompt.includes("oneezy:oneezy-merge"), prompt);
+    assert.ok(!lexists(copy), "the old copy goes once its plugin verified");
+    const s = await cli(m, ["status"]);
+    assert.equal(s.status, 0, s.stdout);
+    assert.ok(s.stdout.includes("\n= oneezy@oneezy-skills 0.43.1 (latest 0.43.1)\n"), s.stdout);
+    const again = await cli(m, []);
+    assert.equal(again.status, 0, again.stderr);
+    assert.deepEqual(again.calls.filter(mutating), []);
+    // the skill gone from the copy Codex runs is missing all the same: the policy alone verifies nothing
+    const cache = path.join(m.codexHome, "plugins", "cache", MKT, "oneezy", "0.43.1");
+    fs.rmSync(path.join(cache, "skills", "oneezy-merge"), { recursive: true });
+    const gone = await cli(m, ["status"]);
+    assert.equal(gone.status, 1, gone.stdout);
+    assert.ok(gone.stdout.includes("skills differ: missing oneezy-merge"), gone.stdout);
+  } finally {
+    await own.close();
+  }
+});
+
+test("the user-only skills come from the version folder Codex runs, and only from an openai.yaml Codex reads as false", () => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), "codex-user-only-"));
+  try {
+    const base = path.join(home, "plugins", "cache", MKT, "oneezy");
+    const skill = (version: string, name: string, yaml: string | null, skillMd = true): void => {
+      const dir = path.join(base, version, "skills", name);
+      fs.mkdirSync(path.join(dir, "agents"), { recursive: true });
+      if (skillMd) fs.writeFileSync(path.join(dir, "SKILL.md"), `---\nname: ${name}\ndescription: x\n---\n`);
+      if (yaml !== null) fs.writeFileSync(path.join(dir, "agents", "openai.yaml"), yaml);
+    };
+    const off = "policy:\n  allow_implicit_invocation: false\n";
+    // semver, not text order: 0.10.0 is above 0.9.0; a name Codex refuses ("no version") and a file are no versions
+    skill("0.9.0", "old-only", off);
+    skill("0.10.0", "merge", off);
+    skill("no version", "bogus", off);
+    fs.writeFileSync(path.join(base, "9.9.9"), "");
+    assert.deepEqual(codexUserOnlySkills(home, MKT, "oneezy"), ["merge"]);
+    // what Codex reads as false and what it does not (a string, a nested or misplaced key, no SKILL.md, no file)
+    skill("0.10.0", "crlf", "# user-only\r\npolicy:\r\n  allow_implicit_invocation: False # FALSE too\r\n");
+    skill("0.10.0", "quoted", 'policy:\n  allow_implicit_invocation: "false"\n');
+    skill("0.10.0", "visible", "policy:\n  allow_implicit_invocation: true\n");
+    skill("0.10.0", "nested", "interface:\n  policy:\n    allow_implicit_invocation: false\n");
+    skill("0.10.0", "top-level", "allow_implicit_invocation: false\n");
+    skill("0.10.0", "no-skill-md", off, false);
+    skill("0.10.0", "no-yaml", null);
+    skill("0.10.0", "broken", "policy: [\n");
+    assert.deepEqual(codexUserOnlySkills(home, MKT, "oneezy"), ["crlf", "merge"]);
+    // `local` wins over every version, as in Codex
+    skill("local", "dev", off);
+    assert.deepEqual(codexUserOnlySkills(home, MKT, "oneezy"), ["dev"]);
+    // the prompt input's skills and the user-only ones, once each
+    assert.deepEqual(codexLoadedSkills(home, MKT, "oneezy", ["status", "dev"]), ["dev", "status"]);
+    // no copy, or a marketplace or id that is not one folder name, reads nothing (an empty marketplace would make
+    // path.join read cache/oneezy as if it were a plugin)
+    assert.deepEqual(codexUserOnlySkills(home, MKT, "trident"), []);
+    const other = path.join(home, "plugins", "cache", "oneezy", "local", "skills", "x");
+    fs.mkdirSync(path.join(other, "agents"), { recursive: true });
+    fs.writeFileSync(path.join(other, "SKILL.md"), "---\nname: x\ndescription: x\n---\n");
+    fs.writeFileSync(path.join(other, "agents", "openai.yaml"), off);
+    assert.deepEqual(codexUserOnlySkills(home, "", "oneezy"), []);
+    assert.deepEqual(codexUserOnlySkills(home, "..", MKT), []);
+    assert.deepEqual(codexUserOnlySkills(home, MKT, "../oneezy"), []);
+  } finally {
+    fs.rmSync(home, { recursive: true, force: true });
+  }
 });
 
 test("a newer release triggers one marketplace upgrade for the harness: a plugin behind by version, and an unversioned one behind by its skill set, both follow it", async () => {

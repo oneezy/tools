@@ -7,11 +7,13 @@ import { spawnSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import YAML from "yaml";
 import { isDir, isLink, linkTarget, samePath, under, real, hasLinkedParent } from "./fs.js";
 import { withInternal } from "./build.js";
 import type { Harness } from "./harnesses.js";
 import type { Library } from "./library.js";
 import type { Action } from "./plan.js";
+import { compareVersions } from "./versions.js";
 
 /** One built plugin as a harness's catalog lists it. */
 export interface Built {
@@ -387,6 +389,63 @@ export function codexPluginSkills(run: Run): Map<string, string[]> | null {
     out.set(m[1], list.sort());
   }
   return out;
+}
+
+/**
+ * Codex: the skills an enabled plugin <id>@<marketplace> loads, from the prompt input (`prompted`, what
+ * codexPluginSkills read for it) and the copy Codex runs: a user-only skill is loaded but never in the prompt input.
+ */
+export function codexLoadedSkills(codexHome: string, marketplace: string, id: string, prompted: string[]): string[] {
+  return [...new Set([...prompted, ...codexUserOnlySkills(codexHome, marketplace, id)])].sort();
+}
+
+/**
+ * Codex: the user-only skills of the plugin <id>@<marketplace>, read from the copy Codex runs,
+ * <codexHome>/plugins/cache/<marketplace>/<id>/<version>/skills/: each skill folder with a SKILL.md whose
+ * agents/openai.yaml sets policy.allow_implicit_invocation to false (the library's form of disable-model-invocation,
+ * which Codex itself does not read). Codex loads such a skill and runs it when the user names it ($name, or the $ and
+ * /skills pickers), but keeps it out of the model's skill list, so the prompt input never shows it. The version folder
+ * is the one Codex picks: `local` when present, else the highest. [] when the plugin has no copy there, or when the
+ * marketplace or id is not one folder name (an empty marketplace would make path.join read another plugin's folder).
+ */
+export function codexUserOnlySkills(codexHome: string, marketplace: string, id: string): string[] {
+  if (!codexSegment(marketplace) || !codexSegment(id)) return [];
+  const base = path.join(codexHome, "plugins", "cache", marketplace, id);
+  let versions: string[];
+  try {
+    versions = fs
+      .readdirSync(base, { withFileTypes: true })
+      .filter((e) => e.isDirectory() && codexSegment(e.name))
+      .map((e) => e.name);
+  } catch {
+    return [];
+  }
+  if (!versions.length) return [];
+  const version = versions.includes("local") ? "local" : versions.sort(compareVersions)[versions.length - 1];
+  const skills = path.join(base, version, "skills");
+  if (!isDir(skills)) return [];
+  return fs
+    .readdirSync(skills)
+    .filter((s) => fs.existsSync(path.join(skills, s, "SKILL.md")) && userOnly(path.join(skills, s)))
+    .sort();
+}
+
+/** One folder name as Codex accepts a plugin version (and so a cache segment): ASCII letters, digits, `.+_-`, not `.`/`..`. */
+function codexSegment(s: string): boolean {
+  return /^[A-Za-z0-9._+-]+$/.test(s) && s !== "." && s !== "..";
+}
+
+/** Does the skill's agents/openai.yaml set policy.allow_implicit_invocation to false. */
+function userOnly(dir: string): boolean {
+  try {
+    const v: unknown = YAML.parse(fs.readFileSync(path.join(dir, "agents", "openai.yaml"), "utf8"));
+    const policy = v && typeof v === "object" ? (v as { policy?: unknown }).policy : null;
+    return (
+      !!policy && typeof policy === "object" && (policy as Record<string, unknown>).allow_implicit_invocation === false
+    );
+  } catch {
+    return false;
+  }
 }
 
 /**
