@@ -262,8 +262,9 @@ export interface HermesListed {
 /**
  * Hermes's plugin commands (`hermes plugins ...`), through the same runner. Hermes has no marketplace: a plugin is
  * installed straight from a GitHub repository path (`owner/repo/sub/dir`), pinned to a commit with --ref (a full sha),
- * switched on with `enable` (plugins.enabled in config.yaml), moved with `install --force --ref` (`hermes plugins update`
- * refuses a pinned install, so there is no update here) and dropped with `remove` (for `unlink`, tools#154).
+ * switched on with `enable` (plugins.enabled in config.yaml), moved with `install --ref` and, once Hermes's scan has
+ * passed and it says the plugin already exists, `install --force --ref` (`hermes plugins update` refuses a pinned
+ * install, so there is no update here) and dropped with `remove` (for `unlink`, tools#154). Run through hermesRunner.
  * `list --json --no-bundled` is the harness's own view of its user plugins. Nothing here is a Driver: the old
  * library-based plugin step never serves Hermes.
  */
@@ -293,13 +294,14 @@ export const hermes = {
    * a `caution` from Hermes's security scan (a `dangerous` one it never gets past); the form passes it for the library's
    * own plugins only. `scan` is the verdict Hermes printed when it was not clean (it prints one only when the scan stops
    * the install; a caution --force answers is silent), and `output` what Hermes printed (redacted as a failure's
-   * diagnostic is), the scan's findings with it.
+   * diagnostic is), the scan's findings with it. `exists` is Hermes's refusal of a plain install over a plugin already
+   * there, which it says only after a scan that did not stop the install.
    */
   install(
     run: Run,
     identifier: string,
     options: { ref?: string; force?: boolean } = {},
-  ): { ok: boolean; scan: HermesScan | null; output: NonNullable<Action["diagnostic"]> } {
+  ): { ok: boolean; scan: HermesScan | null; exists: boolean; output: NonNullable<Action["diagnostic"]> } {
     const args = [
       "plugins",
       "install",
@@ -315,11 +317,24 @@ export const hermes = {
       stdout: redact(r.out),
       stderr: redact(r.err),
     };
-    return { ok: r.ok, scan: scanVerdict(`${r.out}\n${r.err}`), output };
+    const said = `${r.out}\n${r.err}`;
+    return { ok: r.ok, scan: scanVerdict(said), exists: !r.ok && alreadyExists(said), output };
   },
   enable: (run: Run, name: string) => run(["plugins", "enable", name]).ok,
   remove: (run: Run, name: string) => run(["plugins", "remove", name]).ok,
 };
+
+/**
+ * The environment every `hermes` command skills-sync runs gets, over its own: COLUMNS for Rich, which wraps at 80
+ * columns when stdout is not a terminal, so a scan verdict, a finding or a refusal comes back on one line (the readers
+ * below still take a wrapped one).
+ */
+export const HERMES_ENV: NodeJS.ProcessEnv = { COLUMNS: "1000" };
+
+/** A runner for the hermes CLI at `file`: install.ts's runner, with HERMES_ENV. */
+export function hermesRunner(file: string, onFailure?: (diagnostic: NonNullable<Action["diagnostic"]>) => void): Run {
+  return runner(file, onFailure, HERMES_ENV);
+}
 
 /** A verdict of Hermes's install-time security scan that is not clean: `caution` asks to confirm, `dangerous` blocks. */
 export type HermesScan = "caution" | "dangerous";
@@ -331,14 +346,28 @@ export type HermesScan = "caution" | "dangerous";
  * CAUTION` (or `DANGEROUS`), and the refusal `Blocked: Security scan blocked plugin install: Requires confirmation
  * (caution verdict, <n> findings)` or `... Blocked (dangerous verdict, ...). --force does not override a dangerous
  * verdict.`, all on stdout, exit 1. A caution that --force answers passes in silence (a log line, nothing printed), so
- * a successful --force install reads null here. Rich wraps at 80 columns when stdout is not a terminal, so a line
- * break may sit inside either phrase; colour codes (FORCE_COLOR) are taken out first. Hermes records no verdict in its
+ * a successful --force install reads null here. Rich wraps at 80 columns when stdout is not a terminal (hermesRunner
+ * sets COLUMNS against that, but a COLUMNS Hermes ignores must not cost the verdict), so a line break may sit inside
+ * either phrase; colour codes (FORCE_COLOR) are taken out first. Hermes records no verdict in its
  * files, so this output is the only place it shows.
  */
 export function scanVerdict(text: string): HermesScan | null {
   const plain = text.replace(/\x1b\[[0-9;]*[A-Za-z]/g, "");
   const m = /\bVerdict:\s+(CAUTION|DANGEROUS)\b/i.exec(plain) ?? /\b(caution|dangerous)\s+verdict\b/i.exec(plain);
   return m ? (m[1].toLowerCase() as HermesScan) : null;
+}
+
+/**
+ * Is this Hermes's refusal of a plain install over a plugin it already has? hermes_cli/plugins_cmd_install.py
+ * (_install_plugin_core) raises `Plugin '<name>' already exists. Use force reinstall or run \`hermes plugins update
+ * <name>\`.` and cmd_install prints it as `Error: ...` on stdout, exit 1. The security scan runs before that check, so
+ * the refusal means the scan did not stop the install. A line break may sit between any two words (Rich wraps); colour
+ * codes are taken out first. The other refusal of an occupied slot, "is already installed outside the catalog" (a
+ * link), is not this one.
+ */
+export function alreadyExists(text: string): boolean {
+  const plain = text.replace(/\x1b\[[0-9;]*[A-Za-z]/g, "");
+  return /\bPlugin\s+'[^'\n]+'\s+already\s+exists\.\s+Use\s+force\s+reinstall\b/.test(plain);
 }
 
 /** The plugin CLI of a harness that has one: its name, and where PATH has it (null when it is not installed). */
@@ -694,7 +723,11 @@ export function which(bin: string, env: NodeJS.ProcessEnv = process.env): string
  * gets one command line, quoted here for cmd.exe, never an args array: Node warns on stderr (DEP0190) for that pair, and
  * a sync must print nothing it did not mean to.
  */
-export function runner(file: string, onFailure?: (diagnostic: NonNullable<Action["diagnostic"]>) => void): Run {
+export function runner(
+  file: string,
+  onFailure?: (diagnostic: NonNullable<Action["diagnostic"]>) => void,
+  env?: NodeJS.ProcessEnv,
+): Run {
   const shell = process.platform === "win32" && /\.(cmd|bat)$/i.test(file);
   const quote = (s: string) => (/[\s&|<>^()%!"]/.test(s) ? `"${s.replace(/"/g, "")}"` : s);
   const run: Run = (args) => {
@@ -706,8 +739,16 @@ export function runner(file: string, onFailure?: (diagnostic: NonNullable<Action
           input: "",
           timeout: 180_000,
           windowsHide: true,
+          ...(env ? { env: { ...process.env, ...env } } : {}),
         })
-      : spawnSync(file, args, { encoding: "utf8", cwd: os.homedir(), input: "", timeout: 180_000, windowsHide: true });
+      : spawnSync(file, args, {
+          encoding: "utf8",
+          cwd: os.homedir(),
+          input: "",
+          timeout: 180_000,
+          windowsHide: true,
+          ...(env ? { env: { ...process.env, ...env } } : {}),
+        });
     const result = {
       ok: r.status === 0,
       out: r.stdout ?? "",

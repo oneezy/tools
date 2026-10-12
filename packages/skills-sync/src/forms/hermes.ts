@@ -6,11 +6,14 @@
 // for byte the package's), and every skill passes Hermes's portable rules. Only then do the loose links in <home>/skills
 // whose names the plugin carries, and whose targets are a library copy or gone, come out; a real folder or a foreign
 // link of that name is reported and left, and so is every link or folder no plugin of the release carries (one line
-// each, adopt or delete by hand). A fresh install runs plain, so Hermes's security scan has its say; a `caution` verdict
-// on the library's own plugin is answered once with --force for the same identifier and commit, and one note per plugin
-// keeps it in sight; `dangerous` is a red line (tools#193). A plugin behind the release is re-installed at the new commit
-// with --force (that is how a pinned install moves; `update` refuses one); one ahead of it (installed by hand from main)
-// is a note and stays. After the installs, hermes's own listing must show each one enabled and pinned to the commit.
+// each, adopt or delete by hand). Every install runs plain first, so Hermes's security scan has its say (it scans before
+// it checks whether the plugin is there); a `caution` verdict on the library's own plugin is answered once with --force
+// for the same identifier and commit, and one note per plugin keeps it in sight; `dangerous` is a red line (tools#193). A
+// plugin behind the release is re-installed at the new commit the same way: when the scan passes, Hermes refuses the
+// plain call with "already exists", and the --force retry moves the pin (`update` refuses a pinned install) with no
+// note; a plain call refused for any other reason is a red line, never retried. One ahead of the release (installed by
+// hand from main) is a note and stays. After the installs, hermes's own listing must show each one enabled and pinned
+// to the commit.
 // The plugin list is pluginsFor() (the release's skills-sync.json narrows it), the rendering folder the config's
 // renderings.hermes (dist/hermes when it names none), and a link is the tool's by machine.ts's libraryCopy, as on Codex.
 // Before the first install of a run, GitHub is asked once whether the release commit carries the rendering at all: until
@@ -26,7 +29,7 @@ import { pluginsFor, type FormFn } from "../desired.js";
 import { isDir, isLink, isSkillDir, lexists, toHash } from "../fs.js";
 import { GitHubError, type GitHub } from "../github.js";
 import { githubRepo, hermesNamespace, hermesPlugins, type HermesPlugin } from "../hermes.js";
-import { hermes as cli, runner, type HermesListed } from "../install.js";
+import { hermes as cli, hermesRunner, type HermesListed } from "../install.js";
 import { libraryCopy, type CliPlugin } from "../machine.js";
 import type { Action } from "../plan.js";
 import type { Release, ReleasePlugin } from "../release.js";
@@ -43,7 +46,7 @@ export const hermes: FormFn = async (release, state, _machine, { plan, github })
     return [
       { kind: "note", path: where("plugins"), note: `no ${cli.bin} on PATH; nothing installed, loose links kept` },
     ];
-  const run = runner(state.cli);
+  const run = hermesRunner(state.cli);
   if (!cli.supports(run))
     return [
       {
@@ -128,15 +131,23 @@ export const hermes: FormFn = async (release, state, _machine, { plan, github })
           : `${p.version ?? "no version"} at ${commit}`,
       };
       // The library's own plugin, from its Hermes rendering at the release commit (the identifier and ref are built
-      // here, never read from the machine): a fresh install runs plain, so Hermes's security scan has its say. A
-      // `caution` there (the library's plugins that ship scripts get one; with no terminal its y/N reads no) is
-      // answered once with --force for this same identifier and commit (tools#193); `dangerous` never is, and Hermes
-      // refuses it under --force anyway. Over this tool's own install (checked above) --force is how a pinned install
-      // moves, so that one call carries it from the start. A same-named plugin from anywhere else never gets here.
-      const first = plan ? null : cli.install(run, identifier, { ref: release.commit, force: !!have });
+      // here, never read from the machine). Every install runs plain first, so Hermes's security scan has its say: it
+      // scans the clone before it checks whether the plugin is already there (hermes_cli/plugins_cmd_install.py,
+      // _install_plugin_core). The plain call is retried once with --force, for this same identifier and commit and the
+      // library's own rendering path only (tools#193), when Hermes's scan said `caution` (the library's plugins that
+      // ship scripts get one; with no terminal its y/N reads no), fresh install or re-install alike, or, over this
+      // tool's own install (checked above), when Hermes said the plugin already exists: the scan passed, and --force is
+      // how a pinned install moves. `dangerous` is never retried; Hermes refuses it under --force anyway. A same-named
+      // plugin from anywhere else never gets here.
+      const first = plan ? null : cli.install(run, identifier, { ref: release.commit });
       let done = first;
-      let forced = !!have;
-      if (first && !first.ok && first.scan === "caution" && !have && libraryPath(identifier, release.repo)) {
+      let forced = false;
+      if (
+        first &&
+        !first.ok &&
+        libraryPath(identifier, release.repo) &&
+        (first.scan === "caution" || (!!have && first.scan === null && first.exists))
+      ) {
         done = cli.install(run, identifier, { ref: release.commit, force: true });
         forced = true;
       }
