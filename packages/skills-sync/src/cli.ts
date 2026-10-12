@@ -3,18 +3,16 @@
 // status, branches, unlink) act on this machine against the latest release of the library on GitHub and keep nothing of
 // their own here: no library clone, no answers file, nothing remembered between runs (ADR-0012; settings come from the
 // release's skills-sync.json, machine facts are detected on every run). The library commands (update, refresh, versions,
-// add, build, check, the brain and alias migrations) run inside a checkout of the library, named by --repo or found
+// add, build, check, the alias migrations) run inside a checkout of the library, named by --repo or found
 // above the current folder, and keep every flag they had.
 import fs from "node:fs";
 import path from "node:path";
 import { addSource } from "./add.js";
-import { adoptBrain, rollbackBrain, brainLinks } from "./adoption.js";
 import { aliasLinks, migrateAliases, rollbackAliases } from "./aliases.js";
 import { build, type BuildResult } from "./build.js";
 import { check, unusedReason } from "./check.js";
-import { entrypoints } from "./entrypoints.js";
 import { readLocal, writeLocal, type LinkMode, type Local } from "./config.js";
-import { isDir, linkMode, real, samePath, setLinkMode } from "./fs.js";
+import { isDir, linkMode, real, setLinkMode } from "./fs.js";
 import { runBranches } from "./commands/branches.js";
 import { runHook } from "./commands/hook.js";
 import { runStatus } from "./commands/status.js";
@@ -22,7 +20,7 @@ import { runSync, syncFacts } from "./commands/sync.js";
 import { runUnlink } from "./commands/unlink.js";
 import { harnessTable } from "./harnesses.js";
 import { findLibrary, Library, looksLikeLibrary, verifyLibraryRevision } from "./library.js";
-import { apply, line, Report } from "./plan.js";
+import { line, Report } from "./plan.js";
 import { byDirection, type Moved, type Position } from "./changelog.js";
 import { refresh, type RefreshResult } from "./refresh.js";
 import { DEFAULT_REPO, isRepoName } from "./release.js";
@@ -96,8 +94,6 @@ Commands
                    other marketplaces, real folders, other links, other hook entries, Codex's trust record and
                    repository files are never touched. Offline; exit 1 on a conflict. This machine only: on Windows
                    run it inside each WSL distro too (the sync there put a block and a hook entry)
-  adopt-brain      explicitly adopt only this host's two historical Brain links; propagate verified instructions only
-  rollback-brain   restore the exact preserved links in --receipt; refuse later destination edits
   migrate-aliases  back up only explicit historical Skills/Status aliases after verifying installed native replacements
   rollback-aliases restore unchanged aliases from --receipt; keep the installed plugins
   update [<source>...]
@@ -175,21 +171,20 @@ Options
   --library <owner/repo> machine commands: the release repo to read (default ${DEFAULT_REPO})
   --repo <path>          library commands: the skills library checkout (default: $SKILLS_REPO, else a library folder
                          above here). Never cloned: a machine command needs no library
-  --adoption-file <json> version 1 manifest of exact historical Brain paths and expectedTarget values
   --alias-file <json>    version 1 manifest of exact historical Skills/Status alias paths and expectedTarget values
-  --receipt <path>       durable adoption/rollback receipt (required for scoped Brain commands)
-  --expect-revision <sha> verify library HEAD and origin's --remote-ref before any instruction rollout
+  --receipt <path>       durable migration/rollback receipt (required for the alias commands)
+  --expect-revision <sha> verify library HEAD and origin's --remote-ref before migrate-aliases moves a link
   --remote-ref <ref>     exact remote branch/tag for that verification (default refs/heads/main)
-  --no-entrypoints       adopt-brain: skip the library's managed instruction blocks
   --symlinks             library commands: make directory symlinks only (default: a symlink, or a junction when Windows
                          refuses one)
   --junctions            library commands, Windows: make junctions only
   -h, --help
 
 Older flags (-y, --agents, --global, --no-projects, --no-wsl, --links, --plugins, --no-pull, --no-remember, --watch,
---ask, ...) are accepted on a machine command (hook excepted: it takes no flags but --library), do nothing there, and
-are named in one line on stderr. The projects command is retired: nothing links skills into projects any more
-(ADR-0007).
+--ask, --no-entrypoints, --adoption-file, ...) are accepted on a machine command (hook excepted: it takes no flags but
+--library), do nothing there, and are named in one line on stderr. The projects command is retired: nothing links
+skills into projects any more (ADR-0007). adopt-brain and rollback-brain are retired: the global block is the
+library's SHARED.md, and the /oneezy-brain skill owns Brain routing.
 `;
 
 /** The machine commands: against GitHub, nothing of their own on the machine (hook is what the session hook entry runs). */
@@ -202,8 +197,6 @@ const LIBRARY_COMMANDS = new Set([
   "add",
   "build",
   "check",
-  "adopt-brain",
-  "rollback-brain",
   "migrate-aliases",
   "rollback-aliases",
 ]);
@@ -211,6 +204,10 @@ const LIBRARY_COMMANDS = new Set([
 const RETIRED: Record<string, string> = {
   projects:
     "projects: retired; nothing links skills into projects any more (ADR-0007), every harness reads its own plugins or user folder: run sync",
+  "adopt-brain":
+    "adopt-brain: retired; the global block is the library's SHARED.md and the /oneezy-brain skill owns Brain routing: run sync",
+  "rollback-brain":
+    "rollback-brain: retired; the global block is the library's SHARED.md and the /oneezy-brain skill owns Brain routing: run sync",
 };
 
 interface Args {
@@ -236,7 +233,6 @@ interface Args {
   check: boolean;
   repo?: string;
   library?: string;
-  adoptionFile?: string;
   aliasFile?: string;
   receipt?: string;
   expectRevision?: string;
@@ -244,15 +240,13 @@ interface Args {
   /** --symlinks or --junctions, for the links a library command makes in the checkout */
   links?: LinkMode;
   retry: boolean;
-  /** adopt-brain: the library's managed instruction blocks too (--no-entrypoints skips them) */
-  entrypoints: boolean;
   plan: boolean;
   quiet: boolean;
   json: boolean;
 }
 
 /** Older flags that take a value: accepted and skipped with it. */
-const OLD_VALUED = new Set(["--agents", "--projects", "--dev", "--wsl"]);
+const OLD_VALUED = new Set(["--agents", "--projects", "--dev", "--wsl", "--adoption-file"]);
 /** Older flags without a value: accepted and ignored. */
 const OLD_BARE = new Set([
   "--links",
@@ -271,6 +265,7 @@ const OLD_BARE = new Set([
   "-y",
   "--yes",
   "--ask",
+  "--no-entrypoints",
 ]);
 
 function parseArgs(argv: string[]): Args {
@@ -285,7 +280,6 @@ function parseArgs(argv: string[]): Args {
     artifacts: false,
     check: false,
     retry: false,
-    entrypoints: true,
     plan: false,
     quiet: false,
     json: false,
@@ -329,7 +323,6 @@ function parseArgs(argv: string[]): Args {
     else if (x === "--artifacts") a.artifacts = true;
     else if (x === "--check") a.check = true;
     else if (x === "--repo") a.repo = next();
-    else if (x === "--adoption-file") a.adoptionFile = next();
     else if (x === "--alias-file") a.aliasFile = next();
     else if (x === "--receipt") a.receipt = next();
     else if (x === "--expect-revision") a.expectRevision = next();
@@ -337,7 +330,6 @@ function parseArgs(argv: string[]): Args {
     else if (x === "--symlinks") a.links = "symlink";
     else if (x === "--junctions") a.links = "junction";
     else if (x === "--retry") a.retry = true;
-    else if (x === "--no-entrypoints") a.entrypoints = false;
     else if (OLD_VALUED.has(x)) next();
     else if (OLD_BARE.has(x)) {
       /* accepted; nothing to set */
@@ -456,14 +448,11 @@ async function libraryCommand(args: Args): Promise<void> {
   const log = (m: string) => (args.json ? undefined : process.stderr.write(m + "\n"));
   const setup = new Report();
 
-  const scopedBrain = args.command === "adopt-brain" || args.command === "rollback-brain";
   const scopedAliases = args.command === "migrate-aliases" || args.command === "rollback-aliases";
-  if (scopedBrain || scopedAliases) {
-    const label = scopedBrain ? "Brain" : "alias";
-    if (!args.receipt) bail(`Scoped ${label} commands require --receipt`);
+  if (scopedAliases) {
+    if (!args.receipt) bail("Scoped alias commands require --receipt");
     if (!args.repo || !looksLikeLibrary(path.resolve(args.repo)))
-      bail(`Scoped ${label} commands require --repo pointing to an existing reviewed library`);
-    if (args.command === "adopt-brain" && !args.adoptionFile) bail("adopt-brain requires --adoption-file");
+      bail("Scoped alias commands require --repo pointing to an existing reviewed library");
     if (args.command === "migrate-aliases" && !args.aliasFile) bail("migrate-aliases requires --alias-file");
   }
 
@@ -497,47 +486,6 @@ async function libraryCommand(args: Args): Promise<void> {
     }
     if (report.conflicts().length) process.exitCode = 1;
     return printReport(report, args, { receipt: path.resolve(args.receipt!) });
-  }
-  // Scoped recovery never enters broad sync, pulls, remembers a library or saves machine answers.
-  if (scopedBrain) {
-    const report = new Report();
-    if (!args.receipt) bail("Scoped Brain commands require --receipt");
-    if (args.command === "rollback-brain") {
-      rollbackBrain(path.resolve(args.receipt), brainLinks(process.platform), report, args.plan);
-      if (report.conflicts().length) process.exitCode = 1;
-      return printReport(report, args);
-    }
-    if (!args.adoptionFile) bail("adopt-brain requires --adoption-file");
-    const reason = verifyLibraryRevision(lib.root, args.expectRevision, args.remoteRef);
-    if (reason) {
-      report.add({ kind: "conflict", path: lib.root, note: reason });
-      process.exitCode = 1;
-      return printReport(report, args, { entrypoints: [] });
-    }
-    const manifest = JSON.parse(fs.readFileSync(path.resolve(args.adoptionFile), "utf8"));
-    adoptBrain(lib, manifest, brainLinks(process.platform), path.resolve(args.receipt), report, args.plan);
-    const selected = new Set<string>(manifest.links.map((item: { path: string }) => path.resolve(item.path)));
-    const hosts = harnessTable().filter(
-      (h) =>
-        selected.has(path.resolve(path.join(h.userSkills, "oneezy-brain"))) &&
-        !report.conflicts().some((a) => samePath(a.path, path.join(h.userSkills, "oneezy-brain"))),
-    );
-    const instructions = new Report();
-    if (args.entrypoints) {
-      const changedRevision = verifyLibraryRevision(lib.root, args.expectRevision, args.remoteRef);
-      if (changedRevision) report.add({ kind: "conflict", path: lib.root, note: changedRevision });
-      else {
-        entrypoints(lib, hosts, true, [], instructions, true, args.plan ? report : undefined, false, "oneezy-brain");
-        apply(instructions, args.plan);
-        report.merge(instructions);
-      }
-    }
-    const verified = args.entrypoints
-      ? entrypoints(lib, hosts, true, [], new Report(), true, args.plan ? report : undefined, false, "oneezy-brain")
-      : [];
-    if (report.conflicts().length || (!args.plan && verified.some((item) => item.state !== "current")))
-      process.exitCode = 1;
-    return printReport(report, args, { entrypoints: verified, receipt: path.resolve(args.receipt) });
   }
 
   // how the working set's links are made in this checkout: the flag, else what the checkout's local file says

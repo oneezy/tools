@@ -6,10 +6,10 @@ import path from "node:path";
 import { test } from "vite-plus/test";
 import { verifyLibraryRevision } from "../src/library.js";
 
-// verifyLibraryRevision guards adopt-brain and migrate-aliases (library commands, --expect-revision): the checkout's
-// HEAD, its cleanliness and origin's advertised revision, before any instruction write.
+// verifyLibraryRevision guards migrate-aliases (a library command, --expect-revision): the checkout's HEAD, its
+// cleanliness and origin's advertised revision, before any link moves.
 for (const scenario of ["current", "wrong-head", "moved-remote", "dirty-source", "dirty-template"])
-  test(`pinned rollout ${scenario}: the checkout is verified against the expected revision before any instruction write`, () => {
+  test(`pinned rollout ${scenario}: the checkout is verified against the expected revision before any link moves`, () => {
     const base = fs.mkdtempSync(path.join(os.tmpdir(), "skills-sync-revision-"));
     const origin = path.join(base, "origin"),
       root = path.join(base, "library");
@@ -46,14 +46,7 @@ for (const scenario of ["current", "wrong-head", "moved-remote", "dirty-source",
         path.join(origin, "skills", "oneezy", "oneezy-brain", "SKILL.md"),
         "---\nname: oneezy-brain\ndescription: Brain\n---\nCurrent Brain\n",
       );
-      write(path.join(origin, "routing.md"), "Load the current Drive Brain.");
-      write(
-        path.join(origin, "skills-sync.entrypoints.json"),
-        JSON.stringify({
-          version: 1,
-          blocks: { brain: { source: "routing.md", skill: "oneezy-brain", agents: ["codex"] } },
-        }),
-      );
+      write(path.join(origin, "SHARED.md"), "Load the current Drive Brain.");
       git(origin, "add", ".");
       git(origin, "commit", "-q", "-m", "fixture");
       git(base, "clone", "-q", origin, root);
@@ -67,7 +60,7 @@ for (const scenario of ["current", "wrong-head", "moved-remote", "dirty-source",
       }
       if (scenario === "dirty-source")
         write(path.join(root, "skills", "oneezy", "oneezy-brain", "SKILL.md"), "Unreviewed local edit");
-      if (scenario === "dirty-template") write(path.join(root, "routing.md"), "Unreviewed template edit");
+      if (scenario === "dirty-template") write(path.join(root, "SHARED.md"), "Unreviewed template edit");
       assert.equal(verifyLibraryRevision(root, expected) === null, scenario === "current");
     } finally {
       fs.rmSync(base, { recursive: true, force: true });
