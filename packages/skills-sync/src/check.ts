@@ -4,7 +4,8 @@
 import fs from "node:fs";
 import path from "node:path";
 import YAML from "yaml";
-import { asBuilt, build } from "./build.js";
+import { adaptProblems, type Adapt } from "./adapt.js";
+import { asBuilt, build, type Forbidden, type UnusedRule } from "./build.js";
 import { firstLine, flowProblems } from "./flow.js";
 import { Library } from "./library.js";
 import { ENTRYPOINTS_NAME, entrypointProblems } from "./entrypoints.js";
@@ -86,6 +87,14 @@ function validConfig(lib: Library, problem: AddProblem): boolean {
     return false;
   }
   const errors = validate(shippedSchema("skills-sync"), parsed);
+  // a pattern the schema takes as a string but JavaScript does not compile: build could not apply or check it
+  if (!errors.length) {
+    const sources = ((parsed as { sources?: Record<string, { adapt?: Adapt }> }).sources ?? {}) as Record<
+      string,
+      { adapt?: Adapt }
+    >;
+    errors.push(...adaptProblems(Object.fromEntries(Object.entries(sources).map(([id, s]) => [id, s.adapt]))));
+  }
   for (const reason of errors) problem(lib.configFile, reason);
   return !errors.length;
 }
@@ -114,6 +123,22 @@ function pluginDrift(lib: Library, result: CheckResult, problem: AddProblem): vo
   }
   result.generated += r.report.skips();
   if (result.problems.length > before) result.fixes.push("build --plugins --catalogs writes the plugin form");
+  for (const f of r.forbidden) problem(path.join(lib.root, ...f.path.split("/")), forbiddenReason(f));
+  if (r.forbidden.length)
+    result.fixes.push(
+      `a rule or an allow under sources.<id>.adapt in ${path.basename(lib.configFile)} clears a forbidden term`,
+    );
+  for (const u of r.unusedRules) result.notes.push({ path: rel(lib, lib.configFile), reason: unusedReason(u) });
+}
+
+/** Why a forbidden term left in a package file is a problem, after `line N:`. */
+export function forbiddenReason(f: Forbidden): string {
+  return `line ${f.line}: forbidden term ${JSON.stringify(f.term)} (sources.${f.source}.adapt.forbid: ${f.pattern}) is left after the adapt rules; add a rule for it, or an allow for the line`;
+}
+
+/** The note for an adapt rule that matched nothing. */
+export function unusedReason(u: UnusedRule): string {
+  return `sources.${u.source}.adapt.rules[${u.rule}] (find ${JSON.stringify(u.find)}) matches nothing in ${u.source}'s skills; fix it or remove it`;
 }
 
 /**
