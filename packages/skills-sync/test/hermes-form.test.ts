@@ -9,10 +9,11 @@ import fs from "node:fs";
 import path from "node:path";
 import YAML from "yaml";
 import { afterAll, afterEach, beforeAll, test } from "vite-plus/test";
-import { hermes as hermesForm } from "../src/forms/hermes.js";
+import { hermes as hermesForm, libraryPath } from "../src/forms/hermes.js";
 import { isLink, lexists } from "../src/fs.js";
 import { harnessTable, hermesHomeDir } from "../src/harnesses.js";
 import { hermesNamespace } from "../src/hermes.js";
+import { alreadyExists, scanVerdict } from "../src/install.js";
 import { probe } from "../src/machine.js";
 import { parseRelease } from "../src/release.js";
 import {
@@ -102,6 +103,11 @@ const brief = (a: ActionJson) => [a.kind, a.path, a.note];
 const byPath = (a: (string | undefined)[], b: (string | undefined)[]) => (a[0] ?? "").localeCompare(b[0] ?? "");
 /** A hermes call that changes something: install, enable, disable, update, remove (the --help probe and list are not). */
 const pluginWrite = (c: string[]) => c.some((w) => ["install", "enable", "disable", "update", "remove"].includes(w));
+/**
+ * An install sync runs: plain first, fresh install or re-install, so Hermes's security scan has its say; then, once, with
+ * --force for a library plugin whose scan said caution (tools#193), or over this tool's own install when Hermes said it
+ * already exists (how a pinned install moves).
+ */
 const installCall = (id: string, commit: string, force = false) => [
   "hermes",
   "plugins",
@@ -326,13 +332,7 @@ test("a failed install is a conflict with hermes's stderr and that plugin's loos
   const conflict = actions(r).find((a) => a.kind === "conflict");
   assert.ok(conflict, JSON.stringify(actions(r)));
   assert.equal(conflict.path, "Hermes: plugin oneezy");
-  assert.ok(conflict.note?.startsWith("hermes could not install it; loose links kept."), conflict.note);
-  assert.ok(
-    conflict.note?.endsWith(
-      `run once by hand: hermes plugins install ${IDENTIFIER("oneezy")} --no-enable --ref ${r17.commit} --force`,
-    ),
-    conflict.note,
-  );
+  assert.equal(conflict.note, "hermes could not install it; loose links kept");
   // the diagnostic names the command as run: the fake's path, then the arguments
   assert.deepEqual(conflict.diagnostic?.command.slice(1), installCall("oneezy", r17.commit).slice(1));
   assert.match(conflict.diagnostic?.stderr ?? "", /fixture install denied: oneezy/);
@@ -356,23 +356,215 @@ test("a failed install is a conflict with hermes's stderr and that plugin's loos
   assert.equal(lexists(links["oneezy-merge"]), false);
 });
 
-test("a caution verdict from hermes's security scan (no TTY to confirm it) is the same conflict, with the command to run once by hand", async () => {
+test("a caution verdict from hermes's security scan does not stop a library plugin: the plain install is retried once with --force for the same identifier and commit, the plugin is installed, enabled and verified, its links go, and one note per plugin keeps the verdict and Hermes's findings in sight (tools#193)", async () => {
   const m = machine();
   const r17 = latest();
   hermesSource(m, r17);
-  const r = await cli(m, ["--json"], { FAKE_HARNESS_CAUTION: "play" });
+  const links = migrating(m);
+  const r = await cli(m, [], { FAKE_HARNESS_CAUTION: "oneezy,play" });
+  assert.equal(r.status, 0, r.stderr + r.stdout);
+  assert.deepEqual(config(m), { enabled: ["matt-pocock", "oneezy", "play"], disabled: [] });
+  assert.equal(installs(m).play.revision, r17.commit);
+  for (const link of Object.values(links)) assert.equal(lexists(link), false, link);
+  // matt-pocock's scan is clean: one plain install; oneezy and play: the plain one Hermes aborts, then --force once
+  assert.deepEqual(r.calls.filter(pluginWrite), [
+    installCall("matt-pocock", r17.commit),
+    enableCall("matt-pocock"),
+    installCall("oneezy", r17.commit),
+    installCall("oneezy", r17.commit, true),
+    enableCall("oneezy"),
+    installCall("play", r17.commit),
+    installCall("play", r17.commit, true),
+    enableCall("play"),
+  ]);
+  // one line per plugin whose scan was not clean, a note, not a red line; none for matt-pocock, whose scan was
+  const out = lines(r);
+  assert.deepEqual(
+    out.filter((l) => l.includes("Hermes scan")),
+    [
+      ". note         Hermes: plugin oneezy  (Hermes scan caution, installed with --force (library plugin))",
+      ". note         Hermes: plugin play  (Hermes scan caution, installed with --force (library plugin))",
+    ],
+  );
+  assert.ok(!out.some((l) => l.startsWith("!")), r.stdout);
+  // --json: the note carries what Hermes printed for the plain install, its findings with it
+  const json = await (async () => {
+    const j = machine();
+    hermesSource(j, r17);
+    // COLUMNS=80 in the user's environment: every hermes command still gets COLUMNS=1000, so Rich does not wrap
+    return cli(j, ["--json"], { FAKE_HARNESS_CAUTION: "play", COLUMNS: "80" });
+  })();
+  const evidence = actions(json).find((a) => a.kind === "note" && a.note?.startsWith("Hermes scan"));
+  assert.equal(evidence?.path, "Hermes: plugin play");
+  assert.deepEqual(evidence?.diagnostic?.command.slice(1), installCall("play", r17.commit).slice(1));
+  const said = (evidence?.diagnostic as { stdout?: string } | undefined)?.stdout ?? "";
+  assert.match(said, /Scan: play \(oneezy\/skills\/dist\/hermes\/play\/community\) {2}Verdict: CAUTION/);
+  assert.match(said, /HIGH {5}injection/);
+  // one line, though longer than 80 columns: Hermes ran with COLUMNS=1000
+  assert.ok(
+    said
+      .split("\n")
+      .includes("Blocked: Security scan blocked plugin install: Requires confirmation (caution verdict, 1 findings)"),
+    said,
+  );
+  // --quiet keeps it: the run changed things, and the note is loud besides
+  const quiet = machine();
+  hermesSource(quiet, r17);
+  const q = await cli(quiet, ["--quiet"], { FAKE_HARNESS_CAUTION: "play" });
+  assert.equal(q.status, 0, q.stderr + q.stdout);
+  assert.ok(
+    lines(q).includes(
+      ". note         Hermes: plugin play  (Hermes scan caution, installed with --force (library plugin))",
+    ),
+    q.stdout,
+  );
+  // status reads Hermes's own files, which record no scan verdict: it says nothing of the scan, and is green
+  const status = await cli(m, ["status", "--json"]);
+  assert.equal(status.status, 0, status.stderr + status.stdout);
+  assert.ok(!status.stdout.includes("scan"), status.stdout);
+  // the next sync has nothing to install, so hermes scans nothing and nothing is said
+  const again = await cli(m, [], { FAKE_HARNESS_CAUTION: "oneezy,play" });
+  assert.equal(again.status, 0, again.stderr + again.stdout);
+  assert.equal(again.calls.filter(pluginWrite).length, 0, JSON.stringify(again.calls));
+  assert.ok(!again.stdout.includes("Hermes scan"), again.stdout);
+});
+
+test("the scan verdict is read from what Hermes prints: the report's Verdict line and the refusal's '<verdict> verdict', wrapped at 80 columns or coloured; a clean install, the 'unreviewed source' warning and a --force install that said nothing are no verdict", () => {
+  const head = [
+    "Warning: custom (unreviewed) source — not from the Hermes catalog.",
+    "Cloning https://github.com/oneezy/skills.git (subdir: dist/hermes/pstack)...",
+  ];
+  // hermes_cli/plugins_cmd_install.py with no TTY: the flagged report, then the refusal, exit 1
+  const caution = [
+    ...head,
+    "",
+    "⚠ Security scan flagged this plugin:",
+    "Scan: pstack (oneezy/skills/dist/hermes/pstack/community)  Verdict: CAUTION",
+    '  HIGH     execution      skills/pstack/scripts/run.sh:3     "bash -c"',
+    "",
+    "Decision: BLOCKED — Blocked (community source + caution verdict, 9 findings). Use --force to override.",
+    "Blocked: Security scan blocked plugin install: Requires confirmation (caution verdict, 9 findings)",
+  ].join("\n");
+  assert.equal(scanVerdict(caution), "caution");
+  // Rich wraps at 80 columns off a terminal: a long name puts the verdict on the next line
+  assert.equal(
+    scanVerdict("Scan: diagram-design (oneezy/skills/dist/hermes/diagram-design/community)  Verdict:\nCAUTION"),
+    "caution",
+  );
+  assert.equal(
+    scanVerdict("Blocked: Security scan blocked plugin install: Requires confirmation (caution\nverdict, 1 findings)"),
+    "caution",
+  );
+  assert.equal(
+    scanVerdict(
+      "Blocked: Security scan blocked plugin install: Blocked (dangerous verdict, 1 critical of 3 findings (curl_pipe_shell)). --force does not override a dangerous verdict.\n\nScan: x (o/r/x/community)  Verdict: DANGEROUS",
+    ),
+    "dangerous",
+  );
+  assert.equal(scanVerdict("\x1b[31mBlocked:\x1b[0m Security scan ... Verdict: \x1b[1mDANGEROUS\x1b[0m"), "dangerous");
+  // a clean install, and a --force install whose caution passed in silence: nothing to read
+  assert.equal(scanVerdict([...head, "✓ Installed pstack", "Plugin installed but not enabled."].join("\n")), null);
+  assert.equal(scanVerdict("Scan: x (o/r/x/community)  Verdict: SAFE"), null);
+  assert.equal(scanVerdict("Warning: something else about a scan of the cache"), null);
+});
+
+test("the --force that answers a caution is passed only for the library's own rendering path: owner/repo/<folder>/<id>, plain names only", () => {
+  assert.equal(libraryPath("oneezy/skills/dist/hermes/pstack", "oneezy/skills"), true);
+  assert.equal(libraryPath("Oneezy/Skills/dist/hermes/diagram-design", "oneezy/skills"), true);
+  assert.equal(libraryPath("oneezy/skills/hermes/pstack", "oneezy/skills"), true);
+  assert.equal(libraryPath("oneezy/skills/pstack", "oneezy/skills"), false);
+  assert.equal(libraryPath("other/skills/dist/hermes/pstack", "oneezy/skills"), false);
+  assert.equal(libraryPath("oneezy/skills-fork/dist/hermes/pstack", "oneezy/skills"), false);
+  assert.equal(libraryPath("oneezy/skills/../evil/dist/x", "oneezy/skills"), false);
+  assert.equal(libraryPath("oneezy/skills/dist/hermes/.hidden", "oneezy/skills"), false);
+  assert.equal(libraryPath("oneezy/skills/dist/hermes/-x", "oneezy/skills"), false);
+  assert.equal(libraryPath('oneezy/skills/dist/hermes/a"b', "oneezy/skills"), false);
+  assert.equal(libraryPath("oneezy/skills/dist\\hermes/x", "oneezy/skills"), false);
+  assert.equal(libraryPath("oneezy/skills/dist//x", "oneezy/skills"), false);
+  assert.equal(libraryPath("oneezy/skills", "oneezy/skills"), false);
+});
+
+test("a dangerous verdict is one --force does not get past: that plugin is a red line naming the verdict, its links stay, the others are installed", async () => {
+  const m = machine();
+  const r17 = latest();
+  hermesSource(m, r17);
+  const links = migrating(m);
+  const r = await cli(m, ["--json"], { FAKE_HARNESS_DANGEROUS: "play" });
   assert.equal(r.status, 1, r.stderr);
   const conflict = actions(r).find((a) => a.kind === "conflict");
   assert.equal(conflict?.path, "Hermes: plugin play");
-  assert.ok(
-    conflict?.note?.includes(`hermes plugins install ${IDENTIFIER("play")} --no-enable --ref ${r17.commit} --force`),
+  assert.equal(
     conflict?.note,
+    "hermes could not install it; loose links kept. Hermes's security scan said dangerous, which this tool never overrides",
   );
-  assert.match(conflict?.diagnostic?.stderr ?? "", /Aborted/);
+  // Hermes prints the refusal on stdout (its Rich console), the report with it
+  const said = (conflict?.diagnostic as { stdout?: string } | undefined)?.stdout ?? "";
+  assert.match(
+    said,
+    /Blocked: Security scan blocked plugin install: Blocked \(dangerous verdict, .*\)\. --force does not override a dangerous verdict\./,
+  );
+  assert.match(said, /Verdict: DANGEROUS/);
+  // never retried with --force
+  assert.deepEqual(
+    r.calls.filter((c) => c.includes(IDENTIFIER("play"))),
+    [installCall("play", r17.commit)],
+  );
   assert.equal(lexists(pluginDir(m, "play")), false);
+  assert.ok(isLink(links["play-unslop"]), "play's link stays");
+  assert.deepEqual(config(m).enabled, ["matt-pocock", "oneezy"]);
 });
 
-test("a plugin behind a newer release is re-installed at the new commit with --force (a pinned install moves that way), as is one whose NOTICE.md is not the release's though its version is; the current ones are skips", async () => {
+test("the read-back after install is red when hermes did not pin the plugin to the release commit: hermes lists it pinned@<other sha>, its links stay; the next sync, with hermes pinning right, finishes and then changes nothing", async () => {
+  const m = machine();
+  const r17 = latest();
+  hermesSource(m, r17);
+  const links = migrating(m);
+  const r = await cli(m, ["--json"], { FAKE_HARNESS_WRONG_PIN: "play", FAKE_HARNESS_CAUTION: "play" });
+  assert.equal(r.status, 1, r.stderr);
+  assert.deepEqual(
+    actions(r)
+      .filter((a) => a.kind === "conflict")
+      .map(brief),
+    [
+      [
+        "conflict",
+        "Hermes: plugin play",
+        `installed but not verified (hermes lists it git pinned@ffffffff, not pinned@${r17.commit.slice(0, 8)}); loose links kept`,
+      ],
+    ],
+  );
+  assert.ok(isLink(links["play-unslop"]), "play's link stays");
+  assert.equal(lexists(links["oneezy-status"]), false);
+  // the plugin is current by its files, so the next sync installs nothing: the pin is checked on the run that installs
+  const again = await cli(m, []);
+  assert.equal(again.status, 0, again.stderr + again.stdout);
+  assert.equal(again.calls.filter(pluginWrite).length, 0, JSON.stringify(again.calls));
+  assert.equal(lexists(links["play-unslop"]), false, "verified by its files and enabled state, its link goes");
+  const settled = await cli(m, []);
+  assert.equal(lines(settled).at(-1), "0 changed, 3 already right, 0 left alone");
+  assert.equal(settled.calls.filter(pluginWrite).length, 0);
+});
+
+/** release-18: oneezy at 0.43.2, play's upstream snapshot moved without a version change (its NOTICE says so) */
+function release18() {
+  return fixtureRelease({
+    number: 18,
+    previous: "release-17",
+    commit: sha("18"),
+    toolVersion: "0.8.0",
+    plugins: {
+      oneezy: { version: "0.43.2", skills: ["oneezy-merge", "oneezy-status"] },
+      "matt-pocock": { version: "1.3.1", skills: ["grilling", "tdd"] },
+      play: {
+        version: "0.43.0",
+        skills: ["play-unslop"],
+        files: { "NOTICE.md": "# play\n\nBuilt by skills-sync from oneezy/skills.\n\n- Commit: 18\n" },
+      },
+    },
+  });
+}
+
+test("a plugin behind a newer release is re-installed at the new commit, as is one whose NOTICE.md is not the release's though its version is, plain first so Hermes's scan has its say: a clean scan ends in Hermes's 'already exists' and one --force retry moves the pin with no note; a caution gets the same retry and the note a fresh install gets; the current ones are skips", async () => {
   const github = await startFakeGithub();
   try {
     const m = machine({}, github);
@@ -381,30 +573,27 @@ test("a plugin behind a newer release is re-installed at the new commit with --f
     migrating(m);
     const first = await cli(m, []);
     assert.equal(first.status, 0, first.stderr);
-    // release-18: oneezy at 0.43.2, play's upstream snapshot moved without a version change (its NOTICE says so)
-    const r18 = fixtureRelease({
-      number: 18,
-      previous: "release-17",
-      commit: sha("18"),
-      toolVersion: "0.8.0",
-      plugins: {
-        oneezy: { version: "0.43.2", skills: ["oneezy-merge", "oneezy-status"] },
-        "matt-pocock": { version: "1.3.1", skills: ["grilling", "tdd"] },
-        play: {
-          version: "0.43.0",
-          skills: ["play-unslop"],
-          files: { "NOTICE.md": "# play\n\nBuilt by skills-sync from oneezy/skills.\n\n- Commit: 18\n" },
-        },
-      },
-    });
+    const r18 = release18();
     github.addRelease(r18);
     hermesSource(m, r18);
-    const r = await cli(m, []);
+    // play's scan now says caution (release-18 brought it): the plain re-install is where Hermes says so, so it is
+    // answered and noted as on a fresh install; oneezy's scan is clean, so Hermes refuses the plain call only because
+    // the plugin is there, and the --force retry says nothing
+    const r = await cli(m, ["--json"], { FAKE_HARNESS_CAUTION: "play", COLUMNS: "80" });
     assert.equal(r.status, 0, r.stderr + r.stdout);
     assert.deepEqual(r.calls.filter(pluginWrite), [
+      installCall("oneezy", r18.commit),
       installCall("oneezy", r18.commit, true),
+      installCall("play", r18.commit),
       installCall("play", r18.commit, true),
     ]);
+    const notes = actions(r).filter((a) => a.note?.startsWith("Hermes scan"));
+    assert.deepEqual(notes.map(brief), [
+      ["note", "Hermes: plugin play", "Hermes scan caution, installed with --force (library plugin)"],
+    ]);
+    const said = (notes[0].diagnostic as { stdout?: string } | undefined)?.stdout ?? "";
+    assert.match(said, /Scan: play \(oneezy\/skills\/dist\/hermes\/play\/community\) {2}Verdict: CAUTION/);
+    assert.ok(!actions(r).some((a) => a.kind === "conflict"), JSON.stringify(actions(r)));
     assert.equal(installs(m).oneezy.revision, r18.commit);
     assert.equal(installs(m).play.revision, r18.commit);
     assert.equal(installs(m)["matt-pocock"].revision, r17.commit);
@@ -417,31 +606,164 @@ test("a plugin behind a newer release is re-installed at the new commit with --f
       JSON.parse(fs.readFileSync(path.join(pluginDir(m, "oneezy"), "plugin.json"), "utf8")).version,
       "0.43.2",
     );
-    const out = lines(r);
-    assert.ok(
-      out.some(
-        (l) =>
-          l.startsWith("+ install") &&
-          l.includes(`Hermes: plugin oneezy -> ${IDENTIFIER("oneezy")}`) &&
-          l.includes(`(0.43.1 -> 0.43.2 at ${r18.commit.slice(0, 7)}; version 0.43.1, the release has 0.43.2)`),
-      ),
-      r.stdout,
+    const reinstalls = actions(r).filter((a) => a.kind === "install" && a.target);
+    assert.deepEqual(
+      reinstalls.map((a) => [a.path, a.target, a.note]),
+      [
+        [
+          "Hermes: plugin oneezy",
+          IDENTIFIER("oneezy"),
+          `0.43.1 -> 0.43.2 at ${r18.commit.slice(0, 7)}; version 0.43.1, the release has 0.43.2`,
+        ],
+        [
+          "Hermes: plugin play",
+          IDENTIFIER("play"),
+          `0.43.0 -> 0.43.0 at ${r18.commit.slice(0, 7)}; NOTICE.md is not release-18's`,
+        ],
+      ],
     );
-    assert.ok(
-      out.some(
-        (l) =>
-          l.startsWith("+ install") &&
-          l.includes("Hermes: plugin play ->") &&
-          l.includes("NOTICE.md is not release-18's"),
-      ),
-      r.stdout,
-    );
-    assert.equal(out.at(-1), "2 changed, 1 already right, 0 left alone");
     const settled = await cli(m, []);
     assert.equal(lines(settled).at(-1), "0 changed, 3 already right, 0 left alone");
   } finally {
     await github.close();
   }
+});
+
+test("a re-install whose scan says dangerous is a red line naming the verdict, never retried with --force: the plugin stays at the commit it had, enabled, and the next release's other plugins still move", async () => {
+  const github = await startFakeGithub();
+  try {
+    const m = machine({}, github);
+    const r17 = latest(github);
+    hermesSource(m, r17);
+    const first = await cli(m, []);
+    assert.equal(first.status, 0, first.stderr);
+    const r18 = release18();
+    github.addRelease(r18);
+    hermesSource(m, r18);
+    const r = await cli(m, ["--json"], { FAKE_HARNESS_DANGEROUS: "play" });
+    assert.equal(r.status, 1, r.stderr + r.stdout);
+    assert.deepEqual(r.calls.filter(pluginWrite), [
+      installCall("oneezy", r18.commit),
+      installCall("oneezy", r18.commit, true),
+      installCall("play", r18.commit),
+    ]);
+    const conflicts = actions(r).filter((a) => a.kind === "conflict");
+    assert.deepEqual(conflicts.map(brief), [
+      [
+        "conflict",
+        "Hermes: plugin play",
+        "hermes could not install it; loose links kept. Hermes's security scan said dangerous, which this tool never overrides",
+      ],
+    ]);
+    assert.match(
+      (conflicts[0].diagnostic as { stdout?: string } | undefined)?.stdout ?? "",
+      /Blocked: Security scan blocked plugin install: Blocked \(dangerous verdict, .*\)\. --force does not override a dangerous verdict\./,
+    );
+    assert.equal(installs(m).play.revision, r17.commit);
+    assert.equal(installs(m).oneezy.revision, r18.commit);
+    assert.deepEqual(config(m).enabled, ["matt-pocock", "oneezy", "play"]);
+    assert.ok(!actions(r).some((a) => a.note?.startsWith("Hermes scan")), JSON.stringify(actions(r)));
+  } finally {
+    await github.close();
+  }
+});
+
+test("a re-install whose plain call fails for any other reason (a refusal, a clone that fails) is a red line with Hermes's own words, never retried with --force: the plugin stays at the commit it had, enabled", async () => {
+  const github = await startFakeGithub();
+  try {
+    const m = machine({}, github);
+    const r17 = latest(github);
+    hermesSource(m, r17);
+    const first = await cli(m, []);
+    assert.equal(first.status, 0, first.stderr);
+    const r18 = release18();
+    github.addRelease(r18);
+    // Hermes refuses oneezy for a reason of its own; play moves as usual
+    hermesSource(m, r18);
+    const refused = await cli(m, ["--json"], { FAKE_HARNESS_FAIL_INSTALL: "oneezy" });
+    assert.equal(refused.status, 1, refused.stderr + refused.stdout);
+    assert.deepEqual(refused.calls.filter(pluginWrite), [
+      installCall("oneezy", r18.commit),
+      installCall("play", r18.commit),
+      installCall("play", r18.commit, true),
+    ]);
+    const conflicts = actions(refused).filter((a) => a.kind === "conflict");
+    assert.deepEqual(conflicts.map(brief), [
+      ["conflict", "Hermes: plugin oneezy", "hermes could not install it; loose links kept"],
+    ]);
+    assert.match(conflicts[0].diagnostic?.stderr ?? "", /fixture install denied: oneezy/);
+    assert.deepEqual(conflicts[0].diagnostic?.command.slice(1), installCall("oneezy", r18.commit).slice(1));
+    assert.equal(installs(m).oneezy.revision, r17.commit);
+    assert.equal(installs(m).play.revision, r18.commit);
+
+    // release-19's commit cannot be cloned (a network failure looks the same): one plain call, and the red line
+    const r19 = fixtureRelease({
+      number: 19,
+      previous: "release-18",
+      commit: sha("19"),
+      toolVersion: "0.8.0",
+      plugins: {
+        oneezy: { version: "0.43.3", skills: ["oneezy-merge", "oneezy-status"] },
+        "matt-pocock": { version: "1.3.1", skills: ["grilling", "tdd"] },
+        play: { version: "0.43.0", skills: ["play-unslop"] },
+      },
+    });
+    github.addRelease(r19);
+    // GitHub's contents API says the rendering is there; the clone hermes makes of it fails
+    fs.rmSync(hermesSource(m, r19), { recursive: true, force: true });
+    const offline = await cli(m, ["--json"]);
+    assert.equal(offline.status, 1, offline.stderr + offline.stdout);
+    assert.deepEqual(offline.calls.filter(pluginWrite), [
+      installCall("oneezy", r19.commit),
+      installCall("play", r19.commit),
+    ]);
+    const red = actions(offline).filter((a) => a.kind === "conflict");
+    assert.deepEqual(
+      red.map((a) => a.path),
+      ["Hermes: plugin oneezy", "Hermes: plugin play"],
+    );
+    for (const a of red) assert.match(a.diagnostic?.stderr ?? "", /fatal: could not clone/);
+    assert.equal(installs(m).oneezy.revision, r17.commit);
+    assert.equal(installs(m).play.revision, r18.commit);
+    assert.deepEqual(config(m).enabled, ["matt-pocock", "oneezy", "play"]);
+  } finally {
+    await github.close();
+  }
+});
+
+test("Hermes's 'already exists' refusal is read as hermes_cli/plugins_cmd_install.py prints it, wrapped at 80 columns or coloured; the link refusal and other errors are not it", () => {
+  const said =
+    "Warning: custom (unreviewed) source — not from the Hermes catalog.\n" +
+    "Cloning https://github.com/oneezy/skills.git (subdir: dist/hermes/oneezy)...\n" +
+    "Error: Plugin 'oneezy' already exists. Use force reinstall or run `hermes plugins update oneezy`.";
+  assert.equal(alreadyExists(said), true);
+  assert.equal(
+    alreadyExists(
+      "Error: Plugin 'diagram-design' already exists. Use force reinstall or run `hermes\nplugins update diagram-design`.",
+    ),
+    true,
+  );
+  assert.equal(
+    alreadyExists(
+      "Error: Plugin 'diagram-design' already\nexists. Use force reinstall or run `hermes plugins update`.",
+    ),
+    true,
+  );
+  assert.equal(
+    alreadyExists("\x1b[31mError:\x1b[0m Plugin 'x' already exists. Use force reinstall or run `hermes`."),
+    true,
+  );
+  assert.equal(
+    alreadyExists(
+      "Error: Plugin 'x' is already installed outside the catalog: /h/plugins/x is a link to /y. Delete that link to install the catalog version.",
+    ),
+    false,
+  );
+  assert.equal(
+    alreadyExists("Error: Plugin 'x' is pinned. Reinstall it with an explicit --ref <40-character commit SHA>."),
+    false,
+  );
+  assert.equal(alreadyExists("Blocked: Security scan blocked plugin install: Requires confirmation"), false);
 });
 
 test("--plan records every install, enable and removal and runs no hermes command that changes anything: nothing on disk changes, hermes's files included", async () => {
@@ -596,6 +918,26 @@ test("a plugin folder hermes did not install for this library is left alone with
     installCall("play", r17.commit),
     enableCall("play"),
   ]);
+  // plugins/<id> as a folder without a plugin.json (a plugin.yaml package, a copy of something else): the install's
+  // --force would replace it, so the tool never runs one there
+  const m3 = machine();
+  hermesSource(m3, r17);
+  fs.mkdirSync(pluginDir(m3, "oneezy"), { recursive: true });
+  fs.writeFileSync(path.join(pluginDir(m3, "oneezy"), "plugin.yaml"), "name: oneezy\n");
+  const before3 = snapshot(pluginDir(m3, "oneezy"));
+  const r3 = await cli(m3, ["--json"]);
+  assert.equal(r3.status, 1);
+  assert.deepEqual(snapshot(pluginDir(m3, "oneezy")), before3);
+  assert.ok(
+    actions(r3).some(
+      (a) =>
+        a.kind === "conflict" &&
+        a.path === "Hermes: plugin oneezy" &&
+        a.note === `${pluginDir(m3, "oneezy")} was not installed through hermes plugins; left alone, loose links kept`,
+    ),
+    JSON.stringify(actions(r3)),
+  );
+  assert.ok(!r3.calls.some((c) => c.includes(IDENTIFIER("oneezy"))), JSON.stringify(r3.calls));
 });
 
 test("verification happens through hermes itself: when it lists the plugin as not enabled after the install, the plugin stays and its links stay, with one red line; when its listing fails, the same", async () => {
@@ -768,6 +1110,7 @@ test("a release whose config names another rendering folder (renderings.hermes: 
     assert.deepEqual(r.calls.filter(pluginWrite), [
       install("matt-pocock"),
       enableCall("matt-pocock"),
+      install("oneezy"),
       install("oneezy", true),
       install("play"),
       enableCall("play"),

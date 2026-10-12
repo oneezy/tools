@@ -7,11 +7,13 @@ import { spawnSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import YAML from "yaml";
 import { isDir, isLink, linkTarget, samePath, under, real, hasLinkedParent } from "./fs.js";
 import { withInternal } from "./build.js";
 import type { Harness } from "./harnesses.js";
 import type { Library } from "./library.js";
 import type { Action } from "./plan.js";
+import { compareVersions } from "./versions.js";
 
 /** One built plugin as a harness's catalog lists it. */
 export interface Built {
@@ -260,8 +262,9 @@ export interface HermesListed {
 /**
  * Hermes's plugin commands (`hermes plugins ...`), through the same runner. Hermes has no marketplace: a plugin is
  * installed straight from a GitHub repository path (`owner/repo/sub/dir`), pinned to a commit with --ref (a full sha),
- * switched on with `enable` (plugins.enabled in config.yaml), moved with `install --force --ref` (`hermes plugins update`
- * refuses a pinned install, so there is no update here) and dropped with `remove` (for `unlink`, tools#154).
+ * switched on with `enable` (plugins.enabled in config.yaml), moved with `install --ref` and, once Hermes's scan has
+ * passed and it says the plugin already exists, `install --force --ref` (`hermes plugins update` refuses a pinned
+ * install, so there is no update here) and dropped with `remove` (for `unlink`, tools#154). Run through hermesRunner.
  * `list --json --no-bundled` is the harness's own view of its user plugins. Nothing here is a Driver: the old
  * library-based plugin step never serves Hermes.
  */
@@ -286,20 +289,86 @@ export const hermes = {
         source: str(p.source),
       }));
   },
-  /** --no-enable: the enable is a step of its own, so a failed one is told apart; --force replaces this tool's own install */
-  install(run: Run, identifier: string, options: { ref?: string; force?: boolean } = {}): boolean {
-    return run([
+  /**
+   * --no-enable: the enable is a step of its own, so a failed one is told apart. --force replaces an install and answers
+   * a `caution` from Hermes's security scan (a `dangerous` one it never gets past); the form passes it for the library's
+   * own plugins only. `scan` is the verdict Hermes printed when it was not clean (it prints one only when the scan stops
+   * the install; a caution --force answers is silent), and `output` what Hermes printed (redacted as a failure's
+   * diagnostic is), the scan's findings with it. `exists` is Hermes's refusal of a plain install over a plugin already
+   * there, which it says only after a scan that did not stop the install.
+   */
+  install(
+    run: Run,
+    identifier: string,
+    options: { ref?: string; force?: boolean } = {},
+  ): { ok: boolean; scan: HermesScan | null; exists: boolean; output: NonNullable<Action["diagnostic"]> } {
+    const args = [
       "plugins",
       "install",
       identifier,
       "--no-enable",
       ...(options.ref ? ["--ref", options.ref] : []),
       ...(options.force ? ["--force"] : []),
-    ]).ok;
+    ];
+    const r = run(args);
+    const output = run.failure ?? {
+      command: [hermes.bin, ...args],
+      exitCode: r.exitCode,
+      stdout: redact(r.out),
+      stderr: redact(r.err),
+    };
+    const said = `${r.out}\n${r.err}`;
+    return { ok: r.ok, scan: scanVerdict(said), exists: !r.ok && alreadyExists(said), output };
   },
   enable: (run: Run, name: string) => run(["plugins", "enable", name]).ok,
   remove: (run: Run, name: string) => run(["plugins", "remove", name]).ok,
 };
+
+/**
+ * The environment every `hermes` command skills-sync runs gets, over its own: COLUMNS for Rich, which wraps at 80
+ * columns when stdout is not a terminal, so a scan verdict, a finding or a refusal comes back on one line (the readers
+ * below still take a wrapped one).
+ */
+export const HERMES_ENV: NodeJS.ProcessEnv = { COLUMNS: "1000" };
+
+/** A runner for the hermes CLI at `file`: install.ts's runner, with HERMES_ENV. */
+export function hermesRunner(file: string, onFailure?: (diagnostic: NonNullable<Action["diagnostic"]>) => void): Run {
+  return runner(file, onFailure, HERMES_ENV);
+}
+
+/** A verdict of Hermes's install-time security scan that is not clean: `caution` asks to confirm, `dangerous` blocks. */
+export type HermesScan = "caution" | "dangerous";
+
+/**
+ * The verdict of Hermes's security scan in what `hermes plugins install` printed, when it was not clean; null for a
+ * clean scan or none. Hermes (hermes_cli/plugins_cmd_install.py, tools/plugin_guard.py, tools/skills_guard.py) prints
+ * it only when the scan stops the install: the report's head line `Scan: <name> (<identifier>/community)  Verdict:
+ * CAUTION` (or `DANGEROUS`), and the refusal `Blocked: Security scan blocked plugin install: Requires confirmation
+ * (caution verdict, <n> findings)` or `... Blocked (dangerous verdict, ...). --force does not override a dangerous
+ * verdict.`, all on stdout, exit 1. A caution that --force answers passes in silence (a log line, nothing printed), so
+ * a successful --force install reads null here. Rich wraps at 80 columns when stdout is not a terminal (hermesRunner
+ * sets COLUMNS against that, but a COLUMNS Hermes ignores must not cost the verdict), so a line break may sit inside
+ * either phrase; colour codes (FORCE_COLOR) are taken out first. Hermes records no verdict in its
+ * files, so this output is the only place it shows.
+ */
+export function scanVerdict(text: string): HermesScan | null {
+  const plain = text.replace(/\x1b\[[0-9;]*[A-Za-z]/g, "");
+  const m = /\bVerdict:\s+(CAUTION|DANGEROUS)\b/i.exec(plain) ?? /\b(caution|dangerous)\s+verdict\b/i.exec(plain);
+  return m ? (m[1].toLowerCase() as HermesScan) : null;
+}
+
+/**
+ * Is this Hermes's refusal of a plain install over a plugin it already has? hermes_cli/plugins_cmd_install.py
+ * (_install_plugin_core) raises `Plugin '<name>' already exists. Use force reinstall or run \`hermes plugins update
+ * <name>\`.` and cmd_install prints it as `Error: ...` on stdout, exit 1. The security scan runs before that check, so
+ * the refusal means the scan did not stop the install. A line break may sit between any two words (Rich wraps); colour
+ * codes are taken out first. The other refusal of an occupied slot, "is already installed outside the catalog" (a
+ * link), is not this one.
+ */
+export function alreadyExists(text: string): boolean {
+  const plain = text.replace(/\x1b\[[0-9;]*[A-Za-z]/g, "");
+  return /\bPlugin\s+'[^'\n]+'\s+already\s+exists\.\s+Use\s+force\s+reinstall\b/.test(plain);
+}
 
 /** The plugin CLI of a harness that has one: its name, and where PATH has it (null when it is not installed). */
 export function harnessCli(
@@ -326,11 +395,19 @@ export function refused(a: Action, run: Run, note: string): void {
   a.diagnostic = run.failure;
 }
 
+/** One plugin skill line of Codex's prompt input: the skill and the SKILL.md it names (null when the line names none). */
+export interface PromptSkill {
+  skill: string;
+  file: string | null;
+}
+
 /**
- * Codex: the skills each enabled plugin loads, from the model-visible prompt input rendered locally (one line per
- * plugin skill, `- <plugin>:<skill>: ...`); null when Codex cannot render it. No session starts, no tokens are spent.
+ * Codex: the skills each enabled plugin loads, by plugin name, from the model-visible prompt input rendered locally
+ * (one line per plugin skill, `- <plugin>:<skill>: ... (file: <path>)`, the path possibly through a `` `rN` = `<root>` ``
+ * alias); null when Codex cannot render it. No session starts, no tokens are spent. Two copies of one plugin (the
+ * library's and the ChatGPT account's) print under the same name: promptedSkills tells them apart by their files.
  */
-export function codexPluginSkills(run: Run): Map<string, string[]> | null {
+export function codexPluginSkills(run: Run): Map<string, PromptSkill[]> | null {
   const r = run(["debug", "prompt-input"]);
   if (!r.ok) return null;
   const texts: string[] = [];
@@ -340,15 +417,102 @@ export function codexPluginSkills(run: Run): Map<string, string[]> | null {
     else if (value && typeof value === "object") Object.values(value).forEach(visit);
   };
   visit(json(r.out) ?? r.out);
-  const out = new Map<string, string[]>();
-  for (const line of texts.flatMap((t) => t.split(/\r?\n/))) {
+  const all = texts.flatMap((t) => t.split(/\r?\n/));
+  const aliases = new Map<string, string>();
+  for (const line of all) {
+    const a = /^\s*- `(r\d+)` = `([^`]+)`/.exec(line);
+    if (a) aliases.set(a[1], a[2]);
+  }
+  const out = new Map<string, PromptSkill[]>();
+  for (const line of all) {
     const m = /^\s*- ([^\s:`]+):([^\s:`]+):/.exec(line);
     if (!m) continue;
+    let file = /\(file: ([^)]+)\)\s*$/.exec(line)?.[1] ?? null;
+    const alias = file && /^(r\d+)[\\/]/.exec(file);
+    if (file && alias && aliases.has(alias[1])) file = aliases.get(alias[1]) + file.slice(alias[1].length);
     const list = out.get(m[1]) ?? [];
-    if (!list.includes(m[2])) list.push(m[2]);
-    out.set(m[1], list.sort());
+    if (!list.some((x) => x.skill === m[2] && x.file === file)) list.push({ skill: m[2], file });
+    out.set(m[1], list);
   }
   return out;
+}
+
+/**
+ * The prompted skills of the copy <id>@<marketplace>, `marketplaces` being every marketplace Codex lists a copy of
+ * <id> from. One copy takes every line of its name. Several take the lines whose file path has their marketplace as a
+ * folder name (Codex keeps a copy under plugins/cache/<marketplace>/<id>/); when no line's path names any of them,
+ * the lines cannot be told apart and each copy takes them all, as before.
+ */
+export function promptedSkills(
+  prompt: Map<string, PromptSkill[]>,
+  id: string,
+  marketplace: string,
+  marketplaces: string[],
+): string[] {
+  const lines = prompt.get(id) ?? [];
+  const segments = (f: string | null) => (f ? f.split(/[\\/]/) : []);
+  const own =
+    marketplaces.length > 1 && lines.some((l) => marketplaces.some((mk) => segments(l.file).includes(mk)))
+      ? lines.filter((l) => segments(l.file).includes(marketplace))
+      : lines;
+  return [...new Set(own.map((l) => l.skill))].sort();
+}
+
+/**
+ * Codex: the skills an enabled plugin <id>@<marketplace> loads, from the prompt input (`prompted`, what
+ * codexPluginSkills read for it) and the copy Codex runs: a user-only skill is loaded but never in the prompt input.
+ */
+export function codexLoadedSkills(codexHome: string, marketplace: string, id: string, prompted: string[]): string[] {
+  return [...new Set([...prompted, ...codexUserOnlySkills(codexHome, marketplace, id)])].sort();
+}
+
+/**
+ * Codex: the user-only skills of the plugin <id>@<marketplace>, read from the copy Codex runs,
+ * <codexHome>/plugins/cache/<marketplace>/<id>/<version>/skills/: each skill folder with a SKILL.md whose
+ * agents/openai.yaml sets policy.allow_implicit_invocation to false (the library's form of disable-model-invocation,
+ * which Codex itself does not read). Codex loads such a skill and runs it when the user names it ($name, or the $ and
+ * /skills pickers), but keeps it out of the model's skill list, so the prompt input never shows it. The version folder
+ * is the one Codex picks: `local` when present, else the highest. [] when the plugin has no copy there, or when the
+ * marketplace or id is not one folder name (an empty marketplace would make path.join read another plugin's folder).
+ */
+export function codexUserOnlySkills(codexHome: string, marketplace: string, id: string): string[] {
+  if (!codexSegment(marketplace) || !codexSegment(id)) return [];
+  const base = path.join(codexHome, "plugins", "cache", marketplace, id);
+  let versions: string[];
+  try {
+    versions = fs
+      .readdirSync(base, { withFileTypes: true })
+      .filter((e) => e.isDirectory() && codexSegment(e.name))
+      .map((e) => e.name);
+  } catch {
+    return [];
+  }
+  if (!versions.length) return [];
+  const version = versions.includes("local") ? "local" : versions.sort(compareVersions)[versions.length - 1];
+  const skills = path.join(base, version, "skills");
+  if (!isDir(skills)) return [];
+  return fs
+    .readdirSync(skills)
+    .filter((s) => fs.existsSync(path.join(skills, s, "SKILL.md")) && userOnly(path.join(skills, s)))
+    .sort();
+}
+
+/** One folder name as Codex accepts a plugin version (and so a cache segment): ASCII letters, digits, `.+_-`, not `.`/`..`. */
+function codexSegment(s: string): boolean {
+  return /^[A-Za-z0-9._+-]+$/.test(s) && s !== "." && s !== "..";
+}
+
+/** Does the skill's agents/openai.yaml set policy.allow_implicit_invocation to false. */
+function userOnly(dir: string): boolean {
+  try {
+    const v: unknown = YAML.parse(fs.readFileSync(path.join(dir, "agents", "openai.yaml"), "utf8"));
+    const policy = v && typeof v === "object" ? (v as { policy?: unknown }).policy : null;
+    return (
+      !!policy && typeof policy === "object" && (policy as Record<string, unknown>).allow_implicit_invocation === false
+    );
+  } catch {
+    return false;
+  }
 }
 
 /**
@@ -559,7 +723,11 @@ export function which(bin: string, env: NodeJS.ProcessEnv = process.env): string
  * gets one command line, quoted here for cmd.exe, never an args array: Node warns on stderr (DEP0190) for that pair, and
  * a sync must print nothing it did not mean to.
  */
-export function runner(file: string, onFailure?: (diagnostic: NonNullable<Action["diagnostic"]>) => void): Run {
+export function runner(
+  file: string,
+  onFailure?: (diagnostic: NonNullable<Action["diagnostic"]>) => void,
+  env?: NodeJS.ProcessEnv,
+): Run {
   const shell = process.platform === "win32" && /\.(cmd|bat)$/i.test(file);
   const quote = (s: string) => (/[\s&|<>^()%!"]/.test(s) ? `"${s.replace(/"/g, "")}"` : s);
   const run: Run = (args) => {
@@ -571,16 +739,22 @@ export function runner(file: string, onFailure?: (diagnostic: NonNullable<Action
           input: "",
           timeout: 180_000,
           windowsHide: true,
+          ...(env ? { env: { ...process.env, ...env } } : {}),
         })
-      : spawnSync(file, args, { encoding: "utf8", cwd: os.homedir(), input: "", timeout: 180_000, windowsHide: true });
+      : spawnSync(file, args, {
+          encoding: "utf8",
+          cwd: os.homedir(),
+          input: "",
+          timeout: 180_000,
+          windowsHide: true,
+          ...(env ? { env: { ...process.env, ...env } } : {}),
+        });
     const result = {
       ok: r.status === 0,
       out: r.stdout ?? "",
       err: (r.stderr ?? "") + (r.error ? r.error.message : ""),
       exitCode: r.status,
     };
-    const redact = (text: string) =>
-      text.replace(/(https?:\/\/)[^\s/@]+@/g, "$1[redacted]@").replace(/(Bearer\s+)\S+/gi, "$1[redacted]");
     run.failure = result.ok
       ? undefined
       : {
@@ -593,6 +767,11 @@ export function runner(file: string, onFailure?: (diagnostic: NonNullable<Action
     return result;
   };
   return run;
+}
+
+/** A CLI's output with the credentials a clone URL or an auth header can carry taken out. */
+function redact(text: string): string {
+  return text.replace(/(https?:\/\/)[^\s/@]+@/g, "$1[redacted]@").replace(/(Bearer\s+)\S+/gi, "$1[redacted]");
 }
 
 /** Does this harness's CLI have plugin commands? Asked through --help only, so an old CLI never starts a session. */

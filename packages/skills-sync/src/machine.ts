@@ -16,13 +16,16 @@ import { detected, RESERVED, type Harness } from "./harnesses.js";
 import { githubRepo, hermesPlugins, type HermesActivation, type HermesInstall } from "./hermes.js";
 import { readHook, type HookState } from "./hooks.js";
 import {
+  codexLoadedSkills,
   codexPluginSkills,
+  promptedSkills,
   harnessCli,
   listInstalled,
   listMarketplaces,
   runner,
   supportsPlugins,
   type Marketplace,
+  type Run,
 } from "./install.js";
 import { homeLibrary, looksLikeLibrary } from "./library.js";
 import type { Action } from "./plan.js";
@@ -98,6 +101,8 @@ export interface HarnessState {
   repoBlocks: RepoBlock[];
   /** the session hook entry in the harness's user hooks file (ADR-0010); null when its table row names no such file */
   hook: HookState | null;
+  /** Codex: how its CLI is signed in (`codex login status`), which decides whether it lists the ChatGPT account's plugins; null elsewhere or unread */
+  login?: "chatgpt" | "other" | "none" | null;
 }
 
 /** The old tool's ~/.skills-sync: a link to its library clone, or the clone itself. Detected; never read, never removed. */
@@ -123,7 +128,12 @@ export interface Machine {
  * the old local file remembered are not: that file is a leftover now, reported and never read (ADR-0012); a block in
  * another repository is found by running there, where its harness would read it.
  */
-export function probe(table: Harness[], env: NodeJS.ProcessEnv = process.env, cwd = process.cwd()): Machine {
+export function probe(
+  table: Harness[],
+  env: NodeJS.ProcessEnv = process.env,
+  cwd = process.cwd(),
+  options: { login?: boolean } = {},
+): Machine {
   const found = detected(table);
   const roots = [path.resolve(cwd)];
   const globals = found.map(globalFile).filter((f): f is string => !!f);
@@ -131,7 +141,7 @@ export function probe(table: Harness[], env: NodeJS.ProcessEnv = process.env, cw
   const local = path.join(hl, LOCAL_NAME);
   return {
     cloud: isCloud(env),
-    harnesses: found.map((h) => probeHarness(h, env, roots, globals)),
+    harnesses: found.map((h) => probeHarness(h, env, roots, globals, !!options.login)),
     oldLibrary: oldLibrary(hl),
     oldLocalFile: lexists(local) ? local : null,
   };
@@ -200,7 +210,13 @@ export function libraryCopy(target: string, repo: string, home = os.homedir()): 
   }
 }
 
-function probeHarness(h: Harness, env: NodeJS.ProcessEnv, roots: string[], globals: string[]): HarnessState {
+function probeHarness(
+  h: Harness,
+  env: NodeJS.ProcessEnv,
+  roots: string[],
+  globals: string[],
+  login: boolean,
+): HarnessState {
   const file = globalFile(h);
   const state: HarnessState = {
     harness: h,
@@ -231,12 +247,16 @@ function probeHarness(h: Harness, env: NodeJS.ProcessEnv, roots: string[], globa
       else {
         state.listed = true;
         state.marketplaces = listMarketplaces(h, run) ?? [];
+        // a Codex signed in with ChatGPT lists the account's plugins among its own: the ChatGPT destination (chatgpt.ts);
+        // only status asks, so sync and the session hook spend no extra process on it
+        if (h.id === "codex" && login) state.login = codexLogin(run);
         // Codex names no folder for a plugin; its loaded skills come from the prompt input it renders locally
-        let codexSkills: Map<string, string[]> | null = null;
+        let codexSkills: ReturnType<typeof codexPluginSkills> = null;
         if (h.id === "codex" && listed.length) {
           codexSkills = codexPluginSkills(run);
           if (!codexSkills) state.note = `${cli.bin} cannot list its plugin skills`;
         }
+        const copies = (id: string) => listed.filter((x) => x.name === id).map((x) => x.marketplace);
         for (const p of listed) {
           if (p.scope === "synced" || p.marketplace === "synced") {
             if (p.folder) state.synced.push(accountPlugin(p.name, p.folder, p.version, p.enabled));
@@ -247,8 +267,20 @@ function probeHarness(h: Harness, env: NodeJS.ProcessEnv, roots: string[], globa
               version: p.version,
               enabled: p.enabled,
               path: p.folder,
-              // no folder and no prompt input: the skills are unknown, not none
-              skills: p.folder ? skillsIn(p.folder) : codexSkills ? (codexSkills.get(p.name) ?? []) : null,
+              // no folder and no prompt input: the skills are unknown, not none; an enabled Codex plugin also loads
+              // its user-only skills, which the prompt input never shows
+              skills: p.folder
+                ? skillsIn(p.folder)
+                : codexSkills
+                  ? p.enabled
+                    ? codexLoadedSkills(
+                        h.configDir,
+                        p.marketplace,
+                        p.name,
+                        promptedSkills(codexSkills, p.name, p.marketplace, copies(p.name)),
+                      )
+                    : promptedSkills(codexSkills, p.name, p.marketplace, copies(p.name))
+                  : null,
             });
         }
       }
@@ -281,6 +313,16 @@ function probeHarness(h: Harness, env: NodeJS.ProcessEnv, roots: string[], globa
     }
   }
   return state;
+}
+
+/** `codex login status`: the real CLI prints the sign-in to stderr, and "Not logged in" with exit 1. */
+function codexLogin(run: Run): "chatgpt" | "other" | "none" | null {
+  const r = run(["login", "status"]);
+  const text = `${r.out}\n${r.err}`;
+  if (/Logged in using ChatGPT/i.test(text)) return "chatgpt";
+  if (/Not logged in/i.test(text)) return "none";
+  if (/Logged in/i.test(text)) return "other";
+  return null;
 }
 
 function readJson(file: string): Record<string, unknown> | null {

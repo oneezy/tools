@@ -22,11 +22,12 @@ import {
   type SourceResult,
   type Stamp,
 } from "../block.js";
+import { chatgptState, isAccountMarketplace, type ChatgptState } from "../chatgpt.js";
 import { catalogOf, FORM_LABEL, formOf, notServed, sameCatalog, serves, type MachineForm } from "../desired.js";
-import { versionGap } from "../forms/codex.js";
+import { versionGap } from "../versions.js";
 import { github } from "../github.js";
 import { harnessTable } from "../harnesses.js";
-import type { HookState } from "../hooks.js";
+import type { CodexTrust, HookState } from "../hooks.js";
 import {
   oldStateNotes,
   probe,
@@ -83,6 +84,11 @@ export interface StatusHook {
   current: boolean;
   /** Codex: trusted in its TUI; null on Claude Code, and on Codex when the file cannot be read */
   trusted: boolean | null;
+  /**
+   * Codex: trusted, new (never trusted) or changed (trusted in another form, so Codex asks for review again); null as
+   * for `trusted`
+   */
+  trust: CodexTrust | null;
 }
 
 /** The managed block in the harness's global instructions file (ADR-0011). */
@@ -139,6 +145,11 @@ export interface StatusCheckout {
   error?: string;
 }
 
+/** The ChatGPT account's copies of the release plugins, read through a Codex signed in with ChatGPT (tools#196). */
+export interface StatusChatgpt extends ChatgptState {
+  lines: StatusLine[];
+}
+
 export interface StatusReport {
   /** the latest release read; `tool` is the skills-sync version it was built with, when the release says */
   release: { repo: string; tag: string; number: number; commit: string; tool: string | null } | null;
@@ -150,6 +161,8 @@ export interface StatusReport {
   /** the old tool's answers file beside that clone, when it is there; nothing reads it */
   oldLocalFile: string | null;
   harnesses: Record<string, StatusHarness>;
+  /** null in the cloud, where no Codex runs; never red: bringing ChatGPT up is a manual step */
+  chatgpt: StatusChatgpt | null;
   /** lines about the machine as a whole: the release line, the leftovers, a harness the release does not serve */
   lines: StatusLine[];
   /** empty in the cloud, and when no checkout is in reach */
@@ -176,7 +189,7 @@ export async function runStatus(options: StatusOptions): Promise<number> {
   const env = options.env ?? process.env;
   const cwd = options.cwd ?? process.cwd();
   const write = options.write ?? ((text: string) => void process.stdout.write(text));
-  const machine = probe(harnessTable(undefined, env), env, cwd);
+  const machine = probe(harnessTable(undefined, env), env, cwd, { login: true });
   let release: Release | null = null;
   let error: string | null = null;
   // in the cloud the release is read for the block alone: no plugin line, no step about one, nothing red without it
@@ -226,6 +239,12 @@ export function statusReport(
     }
     harnesses[state.harness.id] = harnessReport(state, form, release, machine.cloud, text);
   }
+  const chatgpt = machine.cloud
+    ? null
+    : chatgptReport(
+        machine.harnesses.find((h) => h.harness.id === "codex"),
+        release,
+      );
   const all = [...lines, ...Object.values(harnesses).flatMap((h) => h.lines)];
   const redCount = all.filter((l) => !l.ok).length + checkouts.filter((c) => !c.ok).length;
   return {
@@ -237,12 +256,50 @@ export function statusReport(
     oldLibrary: machine.oldLibrary,
     oldLocalFile: machine.oldLocalFile,
     harnesses,
+    chatgpt,
     lines,
     checkouts,
     manualSteps: manualSteps(machine, release),
     red: redCount,
     ok: redCount === 0,
   };
+}
+
+/**
+ * The ChatGPT section: a line per release plugin, green at the release, a note pointing at the manual step when behind
+ * or missing (Justin's account, not the machine, so never red); one note when this machine's Codex cannot read it.
+ */
+function chatgptReport(codex: HarnessState | undefined, release: Release | null): StatusChatgpt {
+  const state = chatgptState(codex, release);
+  // only a Codex that lists its plugins can read the account: the text says why not when the sign-in is all that is
+  // missing (Codex's own lines already say what else is), --json always gives the reason
+  if (!state.checked)
+    return { ...state, lines: codex?.cli && codex.listed ? [note(`not checked: ${state.reason}`)] : [] };
+  const lines = state.plugins.map((p) => {
+    const latest = `latest ${p.latest ?? "no version"}`;
+    if (!p.marketplace) return note(`${p.id} not on the ChatGPT account (${latest}); manual step below`);
+    const name = `${p.id}@${p.marketplace} ${p.version ?? "no version"}`;
+    if (p.current) return green(`${name} (${latest})`);
+    if (p.ahead) return note(`${name} (${latest}; ahead of the release)`);
+    return note(`${name} (${latest}${p.differ ? `; ${p.differ}` : ""}); manual step below`);
+  });
+  return { ...state, lines };
+}
+
+/**
+ * A skill doubled only by the ChatGPT account's copy of the same library plugin (`oneezy@oneezy-skills` beside
+ * `oneezy@created-by-me-remote`): Codex loads both, which is what keeping ChatGPT in sync costs; not a red line.
+ */
+function accountDouble(where: string[], catalog: string): boolean {
+  const parsed = where.map((w) => /^([^@\s]+)@(\S+)$/.exec(w));
+  if (parsed.some((x) => !x)) return false;
+  const ids = new Set(parsed.map((x) => x![1]));
+  const mkts = parsed.map((x) => x![2]);
+  return (
+    ids.size === 1 &&
+    mkts.some((m) => sameCatalog(m, catalog)) &&
+    mkts.every((m) => sameCatalog(m, catalog) || isAccountMarketplace(m))
+  );
 }
 
 function sameSet(a: string[], b: string[]): boolean {
@@ -374,8 +431,16 @@ function harnessReport(
   const duplicates = [...places]
     .filter(([, where]) => where.length > 1)
     .map(([skill, where]) => ({ skill, in: where }));
-  for (const d of duplicates)
-    machineLine(red(`${d.skill} listed ${d.in.length === 2 ? "twice" : `${d.in.length} times`}: ${d.in.join(", ")}`));
+  for (const d of duplicates) {
+    const text = `${d.skill} listed ${d.in.length === 2 ? "twice" : `${d.in.length} times`}: ${d.in.join(", ")}`;
+    machineLine(
+      accountDouble(d.in, catalogOf(release))
+        ? note(
+            `${text} (${d.in.length === 2 ? "one is the ChatGPT account copy; Codex loads both" : "the others are ChatGPT account copies; Codex loads each"})`,
+          )
+        : red(text),
+    );
+  }
 
   if (state.hook) machineLine(hookLine(state.harness.id, state.hook));
   if (state.block) lines.push(blockLine(state.block, source, text.ok ? null : text.reason));
@@ -388,10 +453,12 @@ function harnessReport(
 
   if (state.loose.length || state.folders.length)
     machineLine(note(`${count(state.loose.length, "loose link")}, ${count(state.folders.length, "skill folder")}`));
-  if (other.length)
+  // the ChatGPT account's copies have their own section; --json keeps them in plugins.other
+  const shown = other.filter((o) => o.scope !== "installed" || !isAccountMarketplace(o.marketplace ?? ""));
+  if (shown.length)
     machineLine(
       note(
-        `${count(other.length, "other plugin")} left alone: ${other
+        `${count(shown.length, "other plugin")} left alone: ${shown
           .map(
             (o) =>
               `${o.id}@${o.scope === "synced" ? "synced" : o.marketplace}${o.scope === "synced" && o.marketplace ? ` (${o.marketplace})` : ""}`,
@@ -430,23 +497,26 @@ function plugin(
 
 /**
  * The session hook's line: red when the entry is missing, when the old sync-dev.sh entry is still there, or when the
- * file cannot be worked on; green when present. A present Codex entry the person has not trusted yet is green here and
- * a manual step below: the machine is right, the trust is the person's. Harnesses are told apart by their id, never by
- * `trusted`.
+ * file cannot be worked on; green when present, on Codex saying how Codex sees it. A present Codex entry the person has
+ * not trusted yet, or that changed since they did, is green here and a manual step below: the machine is right, the
+ * trust is the person's. Harnesses are told apart by their id, never by `trust`.
  */
 function hookLine(harnessId: string, h: HookState): StatusLine {
   // readHook's note is a file problem when the entry is not there, and the Codex trust step when it is
   if (!h.present && h.note) return red(`session hook in ${h.file}: ${h.note}`);
   if (!h.present) return red(`no session hook entry in ${h.file}; run sync`);
   if (h.old) return red(`old sync-dev.sh hook still in ${h.file}; run sync`);
-  if (harnessId === "codex" && h.trusted === false)
-    return green(`session hook in ${h.file}, not trusted in Codex yet (manual step below)`);
+  if (harnessId === "codex" && h.trust === "new")
+    return green(`session hook in ${h.file}, new in Codex, not trusted yet (manual step below)`);
+  if (harnessId === "codex" && h.trust === "changed")
+    return green(`session hook in ${h.file}, changed since Codex trusted it, review again (manual step below)`);
+  if (harnessId === "codex" && h.trust === "trusted") return green(`session hook in ${h.file}, trusted in Codex`);
   return green(`session hook in ${h.file}`);
 }
 
 /** The session hook's facts for --json: current is present with the old entry gone. */
 function hookFacts(h: HookState): StatusHook {
-  return { file: h.file, present: h.present, current: h.present && !h.old, trusted: h.trusted };
+  return { file: h.file, present: h.present, current: h.present && !h.old, trusted: h.trusted, trust: h.trust };
 }
 
 /**
@@ -560,6 +630,13 @@ export function statusText(report: StatusReport, quiet: boolean): string {
     if (!lines.length) continue;
     out.push(`${h.name}  form: ${FORM_LABEL[h.form]}`);
     for (const l of lines) out.push(`${l.mark} ${l.text}`);
+  }
+  if (report.chatgpt) {
+    const lines = report.chatgpt.lines.filter(show);
+    if (lines.length) {
+      out.push("ChatGPT  account copies, read through Codex");
+      for (const l of lines) out.push(`${l.mark} ${l.text}`);
+    }
   }
   if (!report.cloud) {
     const lines = report.checkouts.map(checkoutLine).filter(show);

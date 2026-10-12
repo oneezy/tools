@@ -66,7 +66,7 @@ The run that moves a Source to its latest release, a Hold, or a version asked fo
 _Avoid_: refresh (the internal step), bump
 
 **Session hook**:
-The one `SessionStart` entry `sync` keeps in a Harness's user hooks file (`~/.claude/settings.json`, `~/.codex/hooks.json`) that runs `npx --yes @oneezy/skills-sync@latest hook` when a session starts or resumes (ADR-0010 in oneezy/skills). Known by its command, never by its position; every other entry is left alone. Codex runs it only once Justin has trusted it in the TUI, a manual step the report names.
+The one `SessionStart` entry `sync` keeps in a Harness's user hooks file (`~/.claude/settings.json`, `~/.codex/hooks.json`) that runs `npx --yes @oneezy/skills-sync@latest hook` when a session starts or resumes (ADR-0010 in oneezy/skills). Known by its command, never by its position; every other entry is left alone. Codex runs it only once Justin has trusted it in the TUI, and again after it changed from the form he trusted (Codex checks the recorded hash); the report names it trusted, new or changed, and the trust is a manual step the tool never writes.
 _Avoid_: startup hook, the old `sync-dev.sh`
 
 **Checkout**:
@@ -78,7 +78,7 @@ A `status` line marked `!`: something the machine has wrong that `sync` or a cle
 _Avoid_: error, failure (a failed action is a conflict)
 
 **Manual step**:
-Something only Justin can do, which `status` lists after the red lines as a numbered block of steps and counts in its summary: switch an Account plugin on at claude.ai, trust the Session hook in Codex, uninstall a ChatGPT plugin that doubles a Library one, adopt or delete what is left in Codex's skills folders, make the cloud run the new setup line when the old one ran in the session. Never a red line and never the exit code, and never hiding one.
+Something only Justin can do, which `status` lists after the red lines as a numbered block of steps and counts in its summary: switch an Account plugin on at claude.ai, trust the Session hook in Codex, uninstall a plugin from another marketplace that doubles a Library one, bring the ChatGPT Account copies up to the Release by typing one line in ChatGPT, adopt or delete what is left in Codex's skills folders, make the cloud run the new setup line when the old one ran in the session. Never a red line and never the exit code, and never hiding one.
 _Avoid_: todo, action item, warning
 
 **Working set**:
@@ -104,6 +104,14 @@ _Avoid_: mode (that is a project's link or copy), install mode
 **Hermes rendering**:
 The copy of a Plugin that Hermes loads, written by `build` at `dist/hermes/<id>/` beside `plugins/<id>/` once the Library opts in (`renderings.hermes` in its config, naming the folder): the package without the Claude and Codex manifests, each skill's `SKILL.md` with `name` set to its folder and `metadata` cut to string entries (Hermes's portable loader rejects the boolean `metadata.internal` the package carries), every other file byte for byte the package's. Installed with `hermes plugins install <owner>/<name>/dist/hermes/<id> --ref <commit>`; not recorded in the Release's `release.json`, whose `files` digests (the shared `NOTICE.md` among them) verify an installed copy.
 _Avoid_: Hermes package, Hermes plugin (that is the installed copy under Hermes's home)
+
+**User-only skill**:
+A skill only the user starts, marked `disable-model-invocation: true` in its `SKILL.md`; the Library gives it an `agents/openai.yaml` with `policy.allow_implicit_invocation: false` for Codex. Codex loads it and runs it when the user names it (`$name`), but keeps it out of the model's skill list, so `codex debug prompt-input` never shows it: the Codex form reads it from the copy Codex runs under `~/.codex/plugins/cache/` instead, and counts it as loaded.
+_Avoid_: hidden skill, manual skill
+
+**Account copy**:
+A Library Plugin on Justin's ChatGPT account, personal or workspace (ADR-0015 in oneezy/skills). Only Plugin Creator inside a ChatGPT chat changes it, when he types `@oneezy-skills update my ChatGPT plugins to the latest oneezy/skills release`; a Codex signed in with ChatGPT lists it as `<id>@created-by-me-remote` or `<id>@workspace-*`, which is how `status` checks it against the Release. Never a duplicate to uninstall.
+_Avoid_: ChatGPT release, upload record
 
 **Account plugin**:
 A Plugin claude.ai syncs into Claude Code for the account, listed by `claude plugin list` as `<id>@synced` and kept under `~/.claude/plugins/synced/`. The tool never installs or removes one; `status` compares it with the Release, and `sync` removes what hides or duplicates one once `claude` lists it present and switched on.

@@ -7,11 +7,13 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
 import { afterAll, afterEach, beforeAll, test } from "vite-plus/test";
-import { CODEX_TRUST_STEP, HOOK_COMMAND } from "../src/hooks.js";
+import { CODEX_RETRUST_STEP, CODEX_TRUST_STEP, HOOK_COMMAND } from "../src/hooks.js";
 import { startFakeGithub, type FakeGithub } from "./fixtures/fake-github/fake-github.mjs";
 import {
   cli,
   codexTrust,
+  codexTrustHash,
+  codexTrustKey,
   destroy,
   hookEntry,
   hooksFile,
@@ -201,7 +203,7 @@ test("a hooks file that is not valid JSON, or whose SessionStart is not a list, 
   assert.deepEqual(actions(k.json, codex), [["conflict", "hooks.SessionStart is not a list; left alone"]]);
 });
 
-test("Codex: an untrusted entry is a note with the manual step; trust recorded in config.toml for its position silences it, trust for another position does not; config.toml is never written", async () => {
+test("Codex: an untrusted entry is a note with the manual step; trust recorded in config.toml for its key and its hash silences it, trust for another position does not; config.toml is never written", async () => {
   const m = machine();
   const codex = hooksFile(m, "codex");
   const config = path.join(m.codexHome, "config.toml");
@@ -224,21 +226,27 @@ test("Codex: an untrusted entry is a note with the manual step; trust recorded i
   const toml = read(config);
   const trusted = await cli(m, ["--json"]);
   assert.equal(trusted.status, 0, trusted.stderr);
-  assert.deepEqual(actions(trusted.json, codex), [["skip", "session hook current"]]);
+  assert.deepEqual(actions(trusted.json, codex), [["skip", "session hook current, trusted in Codex"]]);
   assert.equal(read(config), toml);
   assert.ok(!trusted.stdout.includes("needs trust"), trusted.stdout);
   // the other shapes Codex could write the same record in are read too; a record for another position is not
-  const key = (group: number) => `${codex.replace(/\\/g, "\\\\")}:session_start:${group}:0`;
-  const hash = `"sha256:${"cd".repeat(32)}"`;
+  const key = (group: number) => codexTrustKey(m, group).replace(/\\/g, "\\\\");
+  const hash = `"${codexTrustHash(m, 1)}"`;
   const forms = (g: number) => [
     `[hooks.state]\n"${key(g)}".trusted_hash = ${hash}\n`,
-    `[hooks.state]\n"${key(g)}" = { trusted_hash = ${hash} }\n`,
+    `[hooks.state]\n"${key(g)}" = { enabled = true, trusted_hash = ${hash} }\n`,
     `[hooks]\nstate."${key(g)}".trusted_hash = ${hash}\n`,
     `[hooks]\nstate."${key(g)}" = { trusted_hash = ${hash} }\n`,
     `hooks.state."${key(g)}".trusted_hash = ${hash}\n`,
+    `[hooks.state."${key(g)}"]\ntrusted_hash = '${hash.slice(1, -1)}'\n`,
+    // a literal string, as Codex's TOML writer spells a key with backslashes (a Windows path)
+    `[hooks.state.'${codexTrustKey(m, g)}']\ntrusted_hash = ${hash}\n`,
+    // a basic string with an escape, and a key with spaces around it, which Codex trims
+    `[hooks.state."\\u${key(g).charCodeAt(0).toString(16).padStart(4, "0")}${key(g).slice(1)}"]\ntrusted_hash = ${hash}\n`,
+    `[hooks.state." ${key(g)} "]\ntrusted_hash = ${hash}\n`,
   ];
   for (const [g, want] of [
-    [1, [["skip", "session hook current"]]],
+    [1, [["skip", "session hook current, trusted in Codex"]]],
     [
       0,
       [
@@ -252,6 +260,97 @@ test("Codex: an untrusted entry is a note with the manual step; trust recorded i
       const again = await cli(m, ["--json"]);
       assert.deepEqual(actions(again.json, codex), want, form);
     }
+  // a line under another key's hooks.state."<key>" table is that table's, not a record of its own
+  write(config, `[hooks.state."elsewhere"]\nhooks.state."${key(1)}".trusted_hash = ${hash}\n`);
+  assert.deepEqual(actions((await cli(m, ["--json"])).json, codex), [
+    ["skip", "session hook current"],
+    ["note", CODEX_TRUST_STEP],
+  ]);
+});
+
+test("Codex: trust recorded for an older form of the entry is a changed hook, reviewed again by hand; the tool never writes the new hash", async () => {
+  const m = machine();
+  const codex = hooksFile(m, "codex");
+  const config = path.join(m.codexHome, "config.toml");
+  assert.equal((await cli(m, [])).status, 0);
+  // what Codex recorded when the person trusted the entry with another timeout: the key is right, the hash is stale
+  codexTrust(m, 0, 0, `sha256:${"ab".repeat(32)}`);
+  const toml = read(config);
+  const r = await cli(m, ["--json"]);
+  assert.equal(r.status, 0, r.stderr);
+  assert.deepEqual(actions(r.json, codex), [
+    ["skip", "session hook current"],
+    ["note", CODEX_RETRUST_STEP],
+  ]);
+  assert.ok(CODEX_RETRUST_STEP.includes("changed") && CODEX_RETRUST_STEP.includes("Skills Sync · modified"));
+  const printed = await cli(m, []);
+  const note = lines(printed.stdout).filter((l) => l.startsWith(". note") && l.includes("hooks.json"));
+  assert.equal(note.length, 1, printed.stdout);
+  assert.ok(note[0].includes("review again"), note[0]);
+  assert.equal(read(config), toml);
+  // status: a green line saying so and the manual step for the modified row
+  const s = await cli(m, ["status", "--json"]);
+  const hook = (s.json as { harnesses: Record<string, { hook: Record<string, unknown> }> }).harnesses.codex.hook;
+  assert.deepEqual(hook, { file: codex, present: true, current: true, trusted: false, trust: "changed" });
+  const st = await cli(m, ["status"]);
+  const out = lines(st.stdout);
+  assert.ok(
+    out.includes(`= session hook in ${codex}, changed since Codex trusted it, review again (manual step below)`),
+    st.stdout,
+  );
+  assert.ok(
+    out.some((l) =>
+      l.endsWith(`. Review the changed Skills Sync hook in Codex again, once on this machine (${codex})`),
+    ),
+    st.stdout,
+  );
+  assert.ok(
+    out.includes('   3. Select SessionStart, then the row "[!] Skills Sync · modified", and press t.'),
+    st.stdout,
+  );
+  assert.equal(read(config), toml);
+  // the record for the entry as it is now: trusted
+  write(config, "");
+  codexTrust(m, 0);
+  const ok = await cli(m, ["--json"]);
+  assert.deepEqual(actions(ok.json, codex), [["skip", "session hook current, trusted in Codex"]]);
+  const green = await cli(m, ["status"]);
+  assert.ok(lines(green.stdout).includes(`= session hook in ${codex}, trusted in Codex`), green.stdout);
+});
+
+test("Codex: the key is matched exactly, with hooks.json under CODEX_HOME's canonical path; a path spelled another way is not the record", async () => {
+  const m = machine();
+  const codex = hooksFile(m, "codex");
+  const config = path.join(m.codexHome, "config.toml");
+  assert.equal((await cli(m, [])).status, 0);
+  const hash = codexTrustHash(m, 0);
+  const record = (file: string) =>
+    write(config, `[hooks.state."${`${file}:session_start:0:0`.replace(/\\/g, "\\\\")}"]\ntrusted_hash = "${hash}"\n`);
+  // CODEX_HOME as a relative path: Codex keys the hook by the folder's canonical path, not by the path as written
+  const relative = { CODEX_HOME: path.relative(m.home, m.codexHome) };
+  record(path.join(relative.CODEX_HOME, "hooks.json"));
+  const asWritten = await cli(m, ["--json"], relative);
+  assert.deepEqual(actions(asWritten.json, path.join(relative.CODEX_HOME, "hooks.json")), [
+    ["skip", "session hook current"],
+    ["note", CODEX_TRUST_STEP],
+  ]);
+  record(path.join(fs.realpathSync.native(m.codexHome), "hooks.json"));
+  const canonical = await cli(m, ["--json"], relative);
+  assert.deepEqual(actions(canonical.json, path.join(relative.CODEX_HOME, "hooks.json")), [
+    ["skip", "session hook current, trusted in Codex"],
+  ]);
+  // a separator or a dot segment more is another key to Codex
+  for (const spelled of [
+    `${m.codexHome}${path.sep}.${path.sep}hooks.json`,
+    `${m.codexHome}${path.sep}${path.sep}hooks.json`,
+  ]) {
+    record(spelled);
+    const r = await cli(m, ["--json"]);
+    assert.deepEqual(actions(r.json, codex), [
+      ["skip", "session hook current"],
+      ["note", CODEX_TRUST_STEP],
+    ]);
+  }
 });
 
 test("--plan lists both hook writes and writes nothing; a cloud session writes no hook at all", async () => {

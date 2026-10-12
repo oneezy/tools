@@ -22,6 +22,7 @@ import { githubRepo } from "../hermes.js";
 import { hookRemoval } from "../hooks.js";
 import {
   hermes,
+  hermesRunner,
   listMarketplaces,
   refused,
   removeMarketplace,
@@ -154,7 +155,7 @@ function hermesPlugins(state: HarnessState, repo: string, plan: boolean): Action
     });
     return out;
   }
-  const run = runner(state.cli);
+  const run = hermesRunner(state.cli);
   if (!hermes.supports(run)) {
     out.push({
       kind: "conflict",
