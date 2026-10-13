@@ -96,11 +96,18 @@ async function synced(): Promise<{ m: PretendMachine; cwd: string }> {
 const V17: Record<string, string> = { "matt-pocock": "1.3.1", oneezy: "0.43.1", play: "0.43.0" };
 
 /** The ChatGPT account's copy of a release plugin, as a signed-in Codex lists it. */
-function accountCopy(m: PretendMachine, id: string, version?: string, marketplace = "created-by-me-remote"): void {
+function accountCopy(
+  m: PretendMachine,
+  id: string,
+  version?: string,
+  marketplace = "created-by-me-remote",
+  installed = true,
+): void {
   installedPlugin(m, "codex", id, {
     files: r17.plugins[id].files,
     version: version ?? V17[id],
     marketplace,
+    installed,
   });
 }
 
@@ -227,6 +234,39 @@ test("each copy is judged by its own skills: an account copy still carrying a dr
     ),
     same.stdout,
   );
+});
+
+test("account copies Codex lists but has not installed here still count: they are on the ChatGPT account, and Codex loads none of them", async () => {
+  const { m, cwd } = await synced();
+  codexLogin(m, "chatgpt");
+  for (const id of Object.keys(r17.plugins)) accountCopy(m, id, undefined, "created-by-me-remote", false);
+  const r = await cli(m, ["status"], {}, cwd);
+  assert.equal(r.status, 0, r.stdout + r.stderr);
+  assert.deepEqual(section(r.stdout, "ChatGPT  account copies, read through Codex"), [
+    "ChatGPT  account copies, read through Codex",
+    "= matt-pocock@created-by-me-remote 1.3.1 (latest 1.3.1)",
+    "= oneezy@created-by-me-remote 0.43.1 (latest 0.43.1)",
+    "= play@created-by-me-remote 0.43.0 (latest 0.43.0)",
+  ]);
+  // not installed in Codex: no doubled skill, nothing in Codex's own lines
+  assert.ok(!r.stdout.includes("listed twice"), r.stdout);
+  const j = json(await cli(m, ["status", "--json"], {}, cwd));
+  assert.equal(j.chatgpt?.current, true);
+  assert.deepEqual(j.manualSteps, []);
+});
+
+test("signed in with ChatGPT but Codex lists no account plugin at all: not checked, never 'not on the account'", async () => {
+  const { m, cwd } = await synced();
+  codexLogin(m, "chatgpt");
+  const r = await cli(m, ["status"], {}, cwd);
+  assert.equal(r.status, 0, r.stdout + r.stderr);
+  assert.deepEqual(section(r.stdout, "ChatGPT  account copies, read through Codex"), [
+    "ChatGPT  account copies, read through Codex",
+    ". not checked: Codex lists no ChatGPT account plugin yet (it reads the account when codex starts: start codex once, then run status again)",
+  ]);
+  const j = json(await cli(m, ["status", "--json"], {}, cwd));
+  assert.equal(j.chatgpt?.checked, false);
+  assert.ok(!j.manualSteps.some((s) => s.id === "chatgpt-update"));
 });
 
 test("a workspace copy counts as the ChatGPT copy; OpenAI's curated plugins are not the account's own and keep their uninstall step", async () => {

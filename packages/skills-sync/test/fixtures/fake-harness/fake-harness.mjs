@@ -298,8 +298,8 @@ if (args[0] === "plugin" && args.includes("--help")) {
               name,
               marketplaceName: mkt,
               version: p.version ?? null,
-              installed: true,
-              enabled: p.enabled,
+              installed: p.installed !== false,
+              enabled: p.installed !== false && p.enabled,
               source: { source: "local", path: p.source ?? p.dir },
               marketplaceSource: { sourceType, source: source ?? null },
               installPolicy: "AVAILABLE",
@@ -382,7 +382,7 @@ if (args[0] === "plugin" && args.includes("--help")) {
   let rootIndex = 0;
   if (!has(process.env.FAKE_HARNESS_BROKEN, host))
     for (const [id, p] of Object.entries(state.plugins)) {
-      if (!p.enabled) continue;
+      if (!p.enabled || p.installed === false) continue;
       const alias = `r${rootIndex++}`;
       if (process.env.FAKE_HARNESS_ALIASES) lines.push(`- \`${alias}\` = \`${path.join(p.dir, "skills")}\``);
       // as the real one, a skill whose agents/openai.yaml sets policy.allow_implicit_invocation: false is loaded but kept
