@@ -122,7 +122,7 @@ A checkout or clone of the Library on a Host (a `skills-sync.json` naming the Li
 _Avoid_: leftover, stale link
 
 **Machine command**:
-A run that acts on this Host against the latest Release on GitHub and keeps nothing of its own on the Host (ADR-0012): no Library clone, no answers file, nothing remembered between runs; settings come from the Release's `skills-sync.json`, Host facts (the Harnesses, their plugins and links, the WSL distros) are detected on every run. `sync`, `status`, `hook`, `branches` and `unlink`. It takes `--plan`, `--json`, `--quiet` and `--library` (`hook` only `--library`); an older flag is accepted, does nothing and is named once on stderr. The opposite is a library command (`update`, `refresh`, `versions`, `add`, `build`, `check`, the alias migrations), which runs inside a checkout named by `--repo` or found above the current folder and keeps every flag it had.
+A run that acts on this Host against the latest Release on GitHub and keeps nothing of its own on the Host (ADR-0012): no Library clone, no answers file, nothing remembered between runs; settings come from the Release's `skills-sync.json`, Host facts (the Harnesses, their plugins and links, the WSL distros) are detected on every run. `sync`, `status`, `hook`, `branches` and `unlink`. It takes `--plan`, `--json`, `--quiet` and `--library` (`hook` only `--library`); an older flag is accepted, does nothing and is named once on stderr. The opposite is a library command (`update`, `refresh`, `versions`, `add`, `remove`, `build`, `check`, the alias migrations), which runs inside a checkout named by `--repo` or found above the current folder and keeps every flag it had.
 _Avoid_: remote command, online command
 
 **Global block**:

@@ -50,6 +50,7 @@ test("--help lists the machine commands, the library commands and every flag; an
     "refresh",
     "versions",
     "add",
+    "remove",
     "build",
     "check",
   ]);
