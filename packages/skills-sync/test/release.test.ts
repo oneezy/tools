@@ -50,6 +50,7 @@ test("--help lists the machine commands, the library commands and every flag; an
     "refresh",
     "versions",
     "add",
+    "remove",
     "build",
     "check",
   ]);
@@ -150,13 +151,13 @@ test("--help lists the machine commands, the library commands and every flag; an
   assert.equal(retired.stdout, "");
   assert.equal(retired.stderr.trimEnd().split("\n").length, 1, retired.stderr);
   assert.match(retired.stderr, /^projects: retired; .*run sync\n$/);
-  // the Brain block's recovery commands are retired: SHARED.md is the global block, /oneezy-brain owns Brain routing
+  // the Brain block's recovery commands are retired: the global block points at /oneezy-agents, /oneezy-brain owns Brain routing
   for (const command of ["adopt-brain", "rollback-brain"]) {
     const r = cli(command, "--repo", PACKAGE, "--receipt", "receipt.json", "--adoption-file", "links.json");
     assert.equal(r.status, 2, command);
     assert.equal(r.stdout, "");
     assert.equal(r.stderr.trimEnd().split("\n").length, 1, r.stderr);
-    assert.match(r.stderr, new RegExp(`^${command}: retired; .*SHARED\\.md.*/oneezy-brain.*\n$`));
+    assert.match(r.stderr, new RegExp(`^${command}: retired; .*/oneezy-agents.*/oneezy-brain.*\n$`));
   }
 });
 

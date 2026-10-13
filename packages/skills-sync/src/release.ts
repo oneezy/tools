@@ -3,8 +3,8 @@
 // version and the sha256 of every file it carries; the skills are the files matching skills/<name>/SKILL.md. The
 // library's committed skills-sync.json at the release's commit is read beside it (ADR-0012): the settings a machine
 // takes from the release, which harnesses to serve and which plugins each gets, and the catalog name the library's
-// build gives its marketplaces; and the library's SHARED.md at the same commit, the global block's text. Read once per
-// run, passed down, never written to disk: there is no library on a machine.
+// build gives its marketplaces. Read once per run, passed down, never written to disk: there is no library on a
+// machine.
 import { GitHubError, type GitHub } from "./github.js";
 
 export const DEFAULT_REPO = "oneezy/skills";
@@ -46,13 +46,6 @@ export interface Release {
   plugins: Record<string, ReleasePlugin>;
   /** the library's skills-sync.json at `commit`; null when the commit has none (or the commit is unknown) */
   config: ReleaseConfig | null;
-  /**
-   * the library's SHARED.md at `commit`, the text of the global block (block.ts); null when the commit has none (an
-   * older release) or the commit is unknown
-   */
-  shared: string | null;
-  /** why SHARED.md could not be read, when GitHub failed on it (the release itself was read) */
-  sharedError: string | null;
 }
 
 interface GitHubRelease {
@@ -93,12 +86,6 @@ export async function latestRelease(gh: GitHub, repo = DEFAULT_REPO): Promise<Re
     bytes,
   );
   release.config = await releaseConfig(gh, repo, release.commit);
-  // the block's text: a failure here is the block's alone (it stays as it is); the plugins still have their release
-  try {
-    release.shared = await releaseFile(gh, repo, release.commit, "SHARED.md");
-  } catch (error) {
-    release.sharedError = `SHARED.md not read: ${error instanceof Error ? error.message : String(error)}`;
-  }
   return release;
 }
 
@@ -135,7 +122,7 @@ export function parseRelease(repo: string, tag: string, fallbackCommit: string, 
     };
   }
   const tool = typeof json.tool?.version === "string" && json.tool.version ? json.tool.version : null;
-  return { repo, tag: release, number, commit, tool, plugins, config: null, shared: null, sharedError: null };
+  return { repo, tag: release, number, commit, tool, plugins, config: null };
 }
 
 /**

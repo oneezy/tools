@@ -74,9 +74,16 @@ export function chatgptState(codex: HarnessState | undefined, release: Release |
     return not("codex did not say how it is signed in (codex login status)");
   if (codex.login !== "chatgpt") return not("Codex on this machine is not signed in with ChatGPT (codex login)");
   if (!release) return not("the latest release was not read");
+  // the account's copies, whether or not this Codex has them installed: Codex lists them either way once it has read
+  // the account; listing none at all means it has not read it yet, not that the account is empty
+  const account = [...codex.installed, ...(codex.listedOnly ?? [])].filter((x) => isAccountMarketplace(x.marketplace));
+  if (!account.length)
+    return not(
+      "Codex lists no ChatGPT account plugin yet (it reads the account when codex starts: start codex once, then run status again)",
+    );
   const plugins = pluginsFor(release, "chatgpt").map((p): ChatgptPlugin => {
-    const copies = codex.installed
-      .filter((x) => x.id === p.id && isAccountMarketplace(x.marketplace))
+    const copies = account
+      .filter((x) => x.id === p.id)
       .map((x) => {
         const gap = versionGap(x, p);
         const skills = x.skills ?? p.skills;

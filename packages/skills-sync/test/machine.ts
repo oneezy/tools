@@ -13,7 +13,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import YAML from "yaml";
-import { blockSource, withBlock } from "../src/block.js";
+import { BLOCK_SOURCE, withBlock } from "../src/block.js";
 import { HERMES_PATH, renderHermes } from "../src/build.js";
 import { isLink, lexists, linkTarget, makeLink, samePath } from "../src/fs.js";
 import type { HermesActivation } from "../src/hermes.js";
@@ -372,7 +372,7 @@ export function installedPlugin(
   m: PretendMachine,
   harness: "claude-code" | "codex",
   id: string,
-  p: PluginFiles & { marketplace?: string; enabled?: boolean } = {},
+  p: PluginFiles & { marketplace?: string; enabled?: boolean; installed?: boolean } = {},
 ): string {
   const marketplace = p.marketplace ?? "oneezy-skills";
   const root = path.join(m.base, "marketplaces", harness, marketplace);
@@ -384,7 +384,14 @@ export function installedPlugin(
   const skills = fs.existsSync(path.join(dir, "skills"))
     ? fs.readdirSync(path.join(dir, "skills")).filter((n) => fs.existsSync(path.join(dir, "skills", n, "SKILL.md")))
     : [];
-  state.plugins[`${id}@${marketplace}`] = { version: p.version ?? "unknown", enabled: p.enabled ?? true, dir, skills };
+  state.plugins[`${id}@${marketplace}`] = {
+    version: p.version ?? "unknown",
+    enabled: p.enabled ?? true,
+    dir,
+    skills,
+    // false: listed (a ChatGPT account plugin Codex knows of) but not installed in this Codex
+    ...(p.installed === false ? { installed: false } : {}),
+  };
   write(file, JSON.stringify(state, null, 2));
   return dir;
 }
@@ -803,17 +810,11 @@ export function codexPluginEnabled(m: PretendMachine, id: string, enabled: boole
 
 /**
  * The skills block as sync writes it, in the harness's global instructions file (appended to what is there): the state
- * status calls current. The text is `shared` of `release`; by default the fixture library's latest release, which has
- * no SHARED.md, so the tool's built-in text. Returns the file.
+ * status calls current, the tool's pointer to /oneezy-agents. Returns the file.
  */
-export function currentBlock(
-  m: PretendMachine,
-  harness: "claude-code" | "codex",
-  release = "release-17",
-  shared: string | null = null,
-): string {
+export function currentBlock(m: PretendMachine, harness: "claude-code" | "codex"): string {
   const file = globalFile(m, harness);
-  write(file, withBlock(fs.existsSync(file) ? fs.readFileSync(file, "utf8") : "", blockSource(release, shared)));
+  write(file, withBlock(fs.existsSync(file) ? fs.readFileSync(file, "utf8") : "", BLOCK_SOURCE));
   return file;
 }
 

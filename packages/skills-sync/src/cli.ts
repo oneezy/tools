@@ -3,7 +3,7 @@
 // status, branches, unlink) act on this machine against the latest release of the library on GitHub and keep nothing of
 // their own here: no library clone, no answers file, nothing remembered between runs (ADR-0012; settings come from the
 // release's skills-sync.json, machine facts are detected on every run). The library commands (update, refresh, versions,
-// add, build, check, the alias migrations) run inside a checkout of the library, named by --repo or found
+// add, remove, build, check, the alias migrations) run inside a checkout of the library, named by --repo or found
 // above the current folder, and keep every flag they had.
 import fs from "node:fs";
 import path from "node:path";
@@ -20,12 +20,13 @@ import { runSync, syncFacts } from "./commands/sync.js";
 import { runUnlink } from "./commands/unlink.js";
 import { harnessTable } from "./harnesses.js";
 import { findLibrary, Library, looksLikeLibrary, verifyLibraryRevision } from "./library.js";
-import { line, Report } from "./plan.js";
+import { apply, line, Report } from "./plan.js";
 import { byDirection, type Moved, type Position } from "./changelog.js";
 import { refresh, type RefreshResult } from "./refresh.js";
+import { removeSource } from "./remove.js";
 import { DEFAULT_REPO, isRepoName } from "./release.js";
 import { lockedSource, readLock } from "./lock.js";
-import { cloneUrl, cmp, configText, readConfig, renamesOf } from "./sources.js";
+import { cloneUrl, cmp, configOf, configText, readConfig, renamesOf } from "./sources.js";
 import { discard } from "./stage.js";
 import { VERSION } from "./version.js";
 import { commitsPast, releasesOf, versionLabel } from "./versions.js";
@@ -45,13 +46,11 @@ Usage: skills-sync [command] [options]
 Commands
   sync (default)   bring every detected harness to its one form (ADR-0007): Claude Code the account plugins claude.ai
                    delivers, Codex the library's plugins from GitHub, Hermes its plugins; and the skills block in each
-                   harness's global instructions file (~/.claude/CLAUDE.md, ~/.codex/AGENTS.md): the library's
-                   SHARED.md at the release's commit, verbatim, its start marker stamped with the release and the
-                   text's sha256 (a release without SHARED.md: the tool's built-in text). Before a file's content
+                   harness's global instructions file (~/.claude/CLAUDE.md, ~/.codex/AGENTS.md): the tool's pointer
+                   to the /oneezy-agents skill, which loads Justin's rules, plus the skill invocation table, its start
+                   marker stamped with the text's sha256; written with or without GitHub. Before a file's content
                    changes it is copied beside itself (CLAUDE-backup-<UTC yyyymmdd-HHMMSS>.md, AGENTS-backup-...),
-                   never over an earlier backup. GitHub or SHARED.md out of reach keeps a block already there as it
-                   is and gives a missing one the built-in text: one line, not a conflict. HTTPS_PROXY and NO_PROXY
-                   are honoured. Never a repository file; a block an older version left in one is reported,
+                   never over an earlier backup. HTTPS_PROXY and NO_PROXY are honoured. Never a repository file; a block an older version left in one is reported,
                    as is the clone an older version kept at ~/.skills-sync. Outside the cloud
                    also one session-start hook entry per harness (~/.claude/settings.json, ~/.codex/hooks.json) running
                    \`npx --yes @oneezy/skills-sync@latest hook\`; other entries are never touched, the old sync-dev.sh
@@ -60,7 +59,7 @@ Commands
                    distro (through npx there; a distro without Node is one note, not a failure)
   status           is this machine done: against the latest release of ${DEFAULT_REPO} on GitHub (no library needed),
                    per harness its form, each plugin's version against the release, every skill name listed twice, the
-                   session hook entry and the global block (current, stale: another text than the release's SHARED.md,
+                   session hook entry and the global block (current, stale: another text than this tool's pointer,
                    or hand-edited: its text no longer matches its stamp); then the checkouts of oneezy/skills and
                    oneezy/tools among the repositories the hook tends (on dev and clean, or not); then the manual
                    steps only you can take, step by step (a plugin to switch on at claude.ai, the Codex hook trust,
@@ -116,6 +115,13 @@ Commands
                    the versions a source has released, newest first, the one the lock is at marked (--json)
   add <source>     declare a source (owner/repo[#ref], a git URL or a path) and the plugin that packages it in
                    skills-sync.json, then update that one source (every other one stays at the lock)
+  remove <source>  add in reverse: take a source (its id, or the owner/repo or GitHub URL of exactly one source) and
+                   the plugins that package it out of skills-sync.json, its entry out of skills-sync.lock.json, its
+                   snapshot under upstream/ and its working-set copies, then build: its packages, their Hermes
+                   renderings and its catalog entries go, so check is clean and the next release drops it from every
+                   harness. An authored group or a plugin without a source is never taken; a source a machine's plugin
+                   list or a ChatGPT upload record still names is refused (exit 1, saying where); an unknown or
+                   ambiguous one is exit 2. Nothing written on a refusal; offline
   build            write the plugin form into the library when skills-sync.json has generate.plugins on: --plugins and
                    --catalogs pick the committed outputs (both when neither is named), --artifacts writes the upload
                    archives; --check diffs instead of writing. A source's adapt rules (find/replace, in order) are
@@ -183,8 +189,8 @@ Options
 Older flags (-y, --agents, --global, --no-projects, --no-wsl, --links, --plugins, --no-pull, --no-remember, --watch,
 --ask, --no-entrypoints, --adoption-file, ...) are accepted on a machine command (hook excepted: it takes no flags but
 --library), do nothing there, and are named in one line on stderr. The projects command is retired: nothing links
-skills into projects any more (ADR-0007). adopt-brain and rollback-brain are retired: the global block is the
-library's SHARED.md, and the /oneezy-brain skill owns Brain routing.
+skills into projects any more (ADR-0007). adopt-brain and rollback-brain are retired: the global block points at
+/oneezy-agents, and the /oneezy-brain skill owns Brain routing.
 `;
 
 /** The machine commands: against GitHub, nothing of their own on the machine (hook is what the session hook entry runs). */
@@ -195,6 +201,7 @@ const LIBRARY_COMMANDS = new Set([
   "refresh",
   "versions",
   "add",
+  "remove",
   "build",
   "check",
   "migrate-aliases",
@@ -205,9 +212,9 @@ const RETIRED: Record<string, string> = {
   projects:
     "projects: retired; nothing links skills into projects any more (ADR-0007), every harness reads its own plugins or user folder: run sync",
   "adopt-brain":
-    "adopt-brain: retired; the global block is the library's SHARED.md and the /oneezy-brain skill owns Brain routing: run sync",
+    "adopt-brain: retired; the global block points at /oneezy-agents and the /oneezy-brain skill owns Brain routing: run sync",
   "rollback-brain":
-    "rollback-brain: retired; the global block is the library's SHARED.md and the /oneezy-brain skill owns Brain routing: run sync",
+    "rollback-brain: retired; the global block points at /oneezy-agents and the /oneezy-brain skill owns Brain routing: run sync",
 };
 
 interface Args {
@@ -494,6 +501,7 @@ async function libraryCommand(args: Args): Promise<void> {
   if (args.command === "update" || args.command === "refresh") return runUpdate(lib, args, log, setup);
   if (args.command === "versions") return runVersions(lib, args, log);
   if (args.command === "add") return runAdd(lib, args, log, setup);
+  if (args.command === "remove") return runRemove(lib, args, log, setup);
   return runBuild(lib, args, log, setup);
 }
 /**
@@ -759,6 +767,48 @@ function runAdd(lib: Library, args: Args, log: (m: string) => void, report: Repo
   });
   if (!args.json) printUpdated(res.updated);
   if (res.problems.length) process.exitCode = 1;
+}
+
+/**
+ * remove: add in reverse. The source and the plugins that package it leave the config; its lock entry, snapshot and
+ * working-set copies go; then the build drops its packages, their Hermes renderings and its catalog entries from the
+ * config as written, so check is clean after. --plan builds from the config as it would be and writes nothing.
+ */
+function runRemove(lib: Library, args: Args, log: (m: string) => void, report: Report): void {
+  if (!lib.hasConfig()) bail(`no ${path.basename(lib.configFile)} in ${lib.root}; add <source> writes one`);
+  if (args.positional.length !== 1) {
+    process.stderr.write("remove: which source? its id in skills-sync.json, or owner/repo\n");
+    process.exit(2);
+  }
+  const r = removeSource(lib, args.positional[0]);
+  if (!r.ok) {
+    process.stderr.write(r.error + "\n");
+    process.exit(r.code);
+  }
+  apply(r.report, args.plan);
+  report.merge(r.report);
+  // the config write failed: the packages stay with it
+  if (!r.report.actions.some((a) => a.failed)) {
+    const b = build(lib, {
+      plugins: true,
+      catalogs: true,
+      artifacts: false,
+      check: false,
+      plan: args.plan,
+      log,
+      config: configOf(r.config),
+    });
+    report.merge(b.report);
+  }
+  const { repo, ref } = r.entry;
+  printReport(report, args, { removed: { source: r.id, repo, ref, plugins: r.plugins, skills: r.skills } });
+  if (args.json) return;
+  const what = `${repo}@${ref}${r.plugins.length ? `, plugin ${r.plugins.join(", ")}` : ", no plugin"}, ${r.skills.length} skill${r.skills.length === 1 ? "" : "s"}${r.skills.length ? ` (${r.skills.join(", ")})` : ""}`;
+  process.stdout.write(
+    args.plan
+      ? `plan: would remove ${r.id}: ${what}\n`
+      : `removed ${r.id}: ${what}; the next release drops it from every harness\n`,
+  );
 }
 
 /**

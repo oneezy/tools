@@ -44,6 +44,8 @@ export interface BuildOptions {
   check: boolean;
   plan: boolean;
   log: (s: string) => void;
+  /** the config to build from instead of the file's: remove --plan builds from the config as it would write it */
+  config?: Config;
 }
 
 export interface BuildResult {
@@ -183,7 +185,7 @@ interface Package {
 }
 
 export function build(lib: Library, opts: BuildOptions): BuildResult {
-  const config = readConfig(lib.configFile);
+  const config = opts.config ?? readConfig(lib.configFile);
   const report = new Report();
   const head = libraryHead(lib.root);
   const result: BuildResult = {
