@@ -504,8 +504,8 @@ test("when GitHub cannot be reached, or the latest release has no release.json, 
       "Claude Code  form: account plugins",
       ". oneezy@synced 0.43.1 (latest unknown)",
       `= session hook in ${hooksFile(m, "claude-code")}`,
-      // without the release there is no latest text to compare the block with: a note, the release line says why
-      `. global block in ${globalFile(m, "claude-code")}: release-17 text, not compared (latest release not read: ${s.error})`,
+      // the block's text is the tool's own: judged without the release
+      `= global block in ${globalFile(m, "claude-code")} current`,
       NO_CHECKOUT,
       "status: 1 red line",
       "",
@@ -580,7 +580,6 @@ test("--library names another release repo; a token from the environment is sent
         "/repos/someone/library/releases/assets/3001",
         "/_download/3001",
         "/repos/someone/library/contents/skills-sync.json?ref=0303030303030303030303030303030303030303",
-        "/repos/someone/library/contents/SHARED.md?ref=0303030303030303030303030303030303030303",
       ],
     );
     const viaGh = await cli(m, ["status", "--json", "--library", "someone/library"], { GH_TOKEN: "fixture-token" });

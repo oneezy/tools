@@ -3,13 +3,12 @@
 // GitHub, Hermes the library's plugins straight from GitHub (hermes plugins install owner/repo/path, oneezy/skills#68
 // said go). Goose is dropped. desired() turns the release and the probe into the plan sync applies: a note for what an
 // older version left on the machine, then per harness the managed block in its global instructions file (ADR-0011;
-// its text is the release's SHARED.md; when that cannot be read, one line says so, a block already there stays as it
-// is and a file without one gets the built-in text), a cleanup line for every block an older skills-sync left in a
+// its text is the tool's pointer to /oneezy-agents, written with or without the release), a cleanup line for every block an older skills-sync left in a
 // repository, and, outside the cloud, the session hook entry in its user hooks file (ADR-0010) and whatever the
 // harness's form module in src/forms/ asks for. The release's
 // skills-sync.json (ADR-0012) says which harnesses are served and which plugins each gets; pluginsFor() is the one place
 // a form reads its plugin list. --plan and apply share this one code path; only apply() differs.
-import { blockAction, leftoverTemps, releaseSource, SHARED_FILE } from "./block.js";
+import { blockAction, leftoverTemps } from "./block.js";
 import type { GitHub } from "./github.js";
 import { hookActions } from "./hooks.js";
 import { LIBRARY_MARKETPLACE, oldStateNotes, type HarnessState, type Machine } from "./machine.js";
@@ -114,8 +113,6 @@ export interface DesiredOptions {
   plan?: boolean;
   /** the GitHub client the release was read with, handed to the forms */
   github?: GitHub | null;
-  /** why the release could not be read, when it could not: the one line about the global blocks says it */
-  releaseError?: string | null;
 }
 
 /**
@@ -130,17 +127,6 @@ export async function desired(
 ): Promise<Report> {
   const report = new Report();
   for (const old of oldStateNotes(machine)) report.add(old.action);
-  // the block's text: the release's SHARED.md (or the built-in text); without it one line, a block already there kept
-  // and a missing one given the built-in text (blockAction)
-  const text = releaseSource(release, options.releaseError ?? null);
-  const source = text.ok ? text.source : null;
-  if (!text.ok && machine.harnesses.some((s) => s.block))
-    report.add({
-      kind: "note",
-      path: SHARED_FILE,
-      note: `not read: ${text.reason}; blocks already there kept as they are, a missing one gets the built-in text`,
-      loud: true,
-    });
   for (const state of machine.harnesses) {
     const id = state.harness.id;
     if (!formOf(id)) continue;
@@ -152,7 +138,7 @@ export async function desired(
       });
       continue;
     }
-    const block = state.block ? blockAction(state.block.file, source) : null;
+    const block = state.block ? blockAction(state.block.file) : null;
     if (block) report.add(block);
     if (state.block) for (const a of leftoverTemps(state.block.file)) report.add(a);
     for (const old of state.repoBlocks)

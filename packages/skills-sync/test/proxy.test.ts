@@ -12,11 +12,11 @@ import net from "node:net";
 import path from "node:path";
 import { afterEach, test } from "vite-plus/test";
 import { noProxy, proxyFetch, proxyFor } from "../src/proxy.js";
+import { BLOCK_BODY } from "../src/block.js";
 import { fixtureLibrary, startFakeGithub, type FakeGithub } from "./fixtures/fake-github/fake-github.mjs";
 import { cli, destroy, globalFile, pretendMachine, type PretendMachine } from "./machine.js";
 
 const TLS = path.resolve(import.meta.dirname, "fixtures", "tls");
-const SHARED = "# How Justin works\n\nThrough a proxy.\n";
 
 const closers: Array<() => Promise<void>> = [];
 const machines: PretendMachine[] = [];
@@ -43,10 +43,9 @@ async function listen(server: http.Server | net.Server): Promise<number> {
   return (server.address() as net.AddressInfo).port;
 }
 
-/** The fake GitHub with SHARED.md at its latest release, and an HTTPS front that forwards every request to it. */
+/** The fake GitHub, and an HTTPS front that forwards every request to it. */
 async function httpsGithub(): Promise<{ gh: FakeGithub; url: string }> {
   const fixture = fixtureLibrary();
-  fixture.contents![fixture.releases[1].commit]["SHARED.md"] = SHARED;
   const gh = await startFakeGithub(fixture);
   closers.push(() => gh.close());
   const back = new URL(gh.url);
@@ -101,7 +100,7 @@ async function connectProxy(
   return { url: `http://127.0.0.1:${port}`, tunnels, auth };
 }
 
-test("behind HTTPS_PROXY, without NODE_USE_ENV_PROXY, a cloud sync reads the release through the proxy and writes SHARED.md", async () => {
+test("behind HTTPS_PROXY, without NODE_USE_ENV_PROXY, a cloud sync reads the release through the proxy and writes the block", async () => {
   const { url } = await httpsGithub();
   const proxy = await connectProxy();
   const m = pretendMachine({ clis: [] });
@@ -115,7 +114,7 @@ test("behind HTTPS_PROXY, without NODE_USE_ENV_PROXY, a cloud sync reads the rel
   };
   const r = await cli(m, ["--quiet"], env);
   assert.equal(r.status, 0, r.stdout + r.stderr);
-  assert.ok(fs.readFileSync(globalFile(m, "claude-code"), "utf8").includes(SHARED), r.stdout);
+  assert.ok(fs.readFileSync(globalFile(m, "claude-code"), "utf8").includes(BLOCK_BODY), r.stdout);
   // every request went through the tunnel, the redirected asset download too
   const host = new URL(url).host;
   assert.ok(proxy.tunnels.length >= 4 && proxy.tunnels.every((t) => t === host), proxy.tunnels.join(", "));
@@ -241,7 +240,7 @@ test("through a tunnel, the proxy URL's credentials reach the proxy and the sync
     CLAUDE_CODE_REMOTE: "true",
   });
   assert.equal(r.status, 0, r.stdout + r.stderr);
-  assert.ok(fs.readFileSync(globalFile(m, "claude-code"), "utf8").includes(SHARED), r.stdout);
+  assert.ok(fs.readFileSync(globalFile(m, "claude-code"), "utf8").includes(BLOCK_BODY), r.stdout);
   assert.ok(proxy.auth.length >= 4, proxy.auth.join(", "));
   assert.ok(proxy.auth.every((a) => a === `Basic ${Buffer.from("justin:s3cret").toString("base64")}`));
 });

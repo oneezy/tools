@@ -45,13 +45,11 @@ Usage: skills-sync [command] [options]
 Commands
   sync (default)   bring every detected harness to its one form (ADR-0007): Claude Code the account plugins claude.ai
                    delivers, Codex the library's plugins from GitHub, Hermes its plugins; and the skills block in each
-                   harness's global instructions file (~/.claude/CLAUDE.md, ~/.codex/AGENTS.md): the library's
-                   SHARED.md at the release's commit, verbatim, its start marker stamped with the release and the
-                   text's sha256 (a release without SHARED.md: the tool's built-in text). Before a file's content
+                   harness's global instructions file (~/.claude/CLAUDE.md, ~/.codex/AGENTS.md): the tool's pointer
+                   to the /oneezy-agents skill, which loads Justin's rules, plus the skill invocation table, its start
+                   marker stamped with the text's sha256; written with or without GitHub. Before a file's content
                    changes it is copied beside itself (CLAUDE-backup-<UTC yyyymmdd-HHMMSS>.md, AGENTS-backup-...),
-                   never over an earlier backup. GitHub or SHARED.md out of reach keeps a block already there as it
-                   is and gives a missing one the built-in text: one line, not a conflict. HTTPS_PROXY and NO_PROXY
-                   are honoured. Never a repository file; a block an older version left in one is reported,
+                   never over an earlier backup. HTTPS_PROXY and NO_PROXY are honoured. Never a repository file; a block an older version left in one is reported,
                    as is the clone an older version kept at ~/.skills-sync. Outside the cloud
                    also one session-start hook entry per harness (~/.claude/settings.json, ~/.codex/hooks.json) running
                    \`npx --yes @oneezy/skills-sync@latest hook\`; other entries are never touched, the old sync-dev.sh
@@ -60,7 +58,7 @@ Commands
                    distro (through npx there; a distro without Node is one note, not a failure)
   status           is this machine done: against the latest release of ${DEFAULT_REPO} on GitHub (no library needed),
                    per harness its form, each plugin's version against the release, every skill name listed twice, the
-                   session hook entry and the global block (current, stale: another text than the release's SHARED.md,
+                   session hook entry and the global block (current, stale: another text than this tool's pointer,
                    or hand-edited: its text no longer matches its stamp); then the checkouts of oneezy/skills and
                    oneezy/tools among the repositories the hook tends (on dev and clean, or not); then the manual
                    steps only you can take, step by step (a plugin to switch on at claude.ai, the Codex hook trust,
@@ -183,8 +181,8 @@ Options
 Older flags (-y, --agents, --global, --no-projects, --no-wsl, --links, --plugins, --no-pull, --no-remember, --watch,
 --ask, --no-entrypoints, --adoption-file, ...) are accepted on a machine command (hook excepted: it takes no flags but
 --library), do nothing there, and are named in one line on stderr. The projects command is retired: nothing links
-skills into projects any more (ADR-0007). adopt-brain and rollback-brain are retired: the global block is the
-library's SHARED.md, and the /oneezy-brain skill owns Brain routing.
+skills into projects any more (ADR-0007). adopt-brain and rollback-brain are retired: the global block points at
+/oneezy-agents, and the /oneezy-brain skill owns Brain routing.
 `;
 
 /** The machine commands: against GitHub, nothing of their own on the machine (hook is what the session hook entry runs). */
@@ -205,9 +203,9 @@ const RETIRED: Record<string, string> = {
   projects:
     "projects: retired; nothing links skills into projects any more (ADR-0007), every harness reads its own plugins or user folder: run sync",
   "adopt-brain":
-    "adopt-brain: retired; the global block is the library's SHARED.md and the /oneezy-brain skill owns Brain routing: run sync",
+    "adopt-brain: retired; the global block points at /oneezy-agents and the /oneezy-brain skill owns Brain routing: run sync",
   "rollback-brain":
-    "rollback-brain: retired; the global block is the library's SHARED.md and the /oneezy-brain skill owns Brain routing: run sync",
+    "rollback-brain: retired; the global block points at /oneezy-agents and the /oneezy-brain skill owns Brain routing: run sync",
 };
 
 interface Args {

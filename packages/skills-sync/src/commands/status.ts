@@ -9,19 +9,11 @@
 // there is one. A manual step is the person's, not the machine's: it never hides a red line (red lines print first)
 // and alone leaves the exit code 0. Nothing is written, no library is looked for, every git call is read-only; what an older version
 // left on the machine (the clone at ~/.skills-sync, its answers file) is one note each. The release's skills-sync.json
-// names the catalog the library's plugins come from and which harnesses are served (ADR-0012); its SHARED.md is the text
-// the global block is judged against (current, stale, hand-edited). In a cloud session the account plugins arrive on
-// their own and no hook or checkout exists, so status shows the block lines and the manual steps only, and reads the
-// release for the block alone: a session there must not go red over a GitHub it cannot reach (the block is a note then).
-import {
-  blockStatus,
-  releaseSource,
-  type BlockSource,
-  type BlockState,
-  stampLabel,
-  type SourceResult,
-  type Stamp,
-} from "../block.js";
+// names the catalog the library's plugins come from and which harnesses are served (ADR-0012). The global block is
+// judged against the tool's own pointer text (current, stale, hand-edited). In a cloud session the account plugins
+// arrive on their own and no hook or checkout exists, so status shows the block lines and the manual steps only: a
+// session there must not go red over a GitHub it cannot reach.
+import { BLOCK_SOURCE, blockStatus, type BlockState, SOURCE_LABEL, stampLabel, type Stamp } from "../block.js";
 import { chatgptState, isAccountMarketplace, type ChatgptState } from "../chatgpt.js";
 import { catalogOf, FORM_LABEL, formOf, notServed, sameCatalog, serves, type MachineForm } from "../desired.js";
 import { versionGap } from "../versions.js";
@@ -96,20 +88,19 @@ export interface StatusBlock {
   file: string;
   /** a managed block of any id is in the file */
   present: boolean;
-  /** the block carries the latest release's text, as its stamp says and its text confirms */
+  /** the block carries this tool's text, as its stamp says and its text confirms */
   current: boolean;
   /**
    * outdated (the line says stale; the value is kept from before, the keys are stable): an older block, or another text
-   * than the latest release's; hand-edited: its text no longer hashes to its stamp; unknown: the latest text could not
-   * be read, so it is not compared
+   * than this tool's; hand-edited: its text no longer hashes to its stamp; unknown: kept for readers, no longer given
    */
   status: "current" | "missing" | "outdated" | "hand-edited" | "unknown" | "conflict";
   /** the ids of the managed blocks the file holds (the old tool wrote `brain`) */
   ids: string[];
   /** what the start marker's stamp says: the release the text came from, the text's sha256; null for none */
   stamp: Stamp | null;
-  /** the latest release's text (its SHARED.md, or the built-in text): its release and sha256; null when not read */
-  latest: Stamp | null;
+  /** the text this tool writes: its stamp (`built-in`) and sha256 */
+  latest: Stamp;
 }
 
 export interface StatusHarness {
@@ -228,8 +219,6 @@ export function statusReport(
     for (const old of oldStateNotes(machine)) lines.push(note(old.text));
   }
   const harnesses: Record<string, StatusHarness> = {};
-  // the global block's text: the release's SHARED.md (or the built-in text), or why it could not be read
-  const text = releaseSource(release, error);
   for (const state of machine.harnesses) {
     const form = formOf(state.harness.id);
     if (!form) continue;
@@ -237,7 +226,7 @@ export function statusReport(
       lines.push(note(`${state.harness.name}: not served; ${notServed(release)}`));
       continue;
     }
-    harnesses[state.harness.id] = harnessReport(state, form, release, machine.cloud, text);
+    harnesses[state.harness.id] = harnessReport(state, form, release, machine.cloud);
   }
   const chatgpt = machine.cloud
     ? null
@@ -354,14 +343,7 @@ function against(p: StatusPlugin, latest: ReleasePlugin | undefined, release: Re
   return `(${parts.join("; ")})`;
 }
 
-function harnessReport(
-  state: HarnessState,
-  form: MachineForm,
-  release: Release | null,
-  cloud: boolean,
-  text: SourceResult,
-): StatusHarness {
-  const source = text.ok ? text.source : null;
+function harnessReport(state: HarnessState, form: MachineForm, release: Release | null, cloud: boolean): StatusHarness {
   const lines: StatusLine[] = [];
   const synced: StatusPlugin[] = [];
   const installed: StatusInstalled[] = [];
@@ -443,7 +425,7 @@ function harnessReport(
   }
 
   if (state.hook) machineLine(hookLine(state.harness.id, state.hook));
-  if (state.block) lines.push(blockLine(state.block, source, text.ok ? null : text.reason));
+  if (state.block) lines.push(blockLine(state.block));
   for (const old of state.repoBlocks)
     lines.push(
       red(
@@ -477,7 +459,7 @@ function harnessReport(
     folders: state.folders,
     duplicates,
     hook: state.hook ? hookFacts(state.hook) : null,
-    block: state.block ? blockFacts(state.block, source) : null,
+    block: state.block ? blockFacts(state.block) : null,
     repoBlocks: state.repoBlocks.map((b) => ({ file: b.file, ids: b.ids })),
     lines,
   };
@@ -520,13 +502,12 @@ function hookFacts(h: HookState): StatusHook {
 }
 
 /**
- * The global block's line: green when current; red when missing, stale (an older block, or another text than the
- * latest release's), hand-edited (its text no longer matches its stamp: sync restores it after a backup) or unwritable;
- * a note when the latest text could not be read, so the block is not compared (the release's own line says why).
+ * The global block's line: green when current; red when missing, stale (an older block, or another text than this
+ * tool's), hand-edited (its text no longer matches its stamp: sync restores it after a backup) or unwritable.
  */
-function blockLine(b: BlockState, source: BlockSource | null, unread: string | null): StatusLine {
+function blockLine(b: BlockState): StatusLine {
   const at = `global block in ${b.file}`;
-  switch (blockStatus(b, source)) {
+  switch (blockStatus(b)) {
     case "current":
       return green(`${at} current`);
     case "missing":
@@ -536,24 +517,17 @@ function blockLine(b: BlockState, source: BlockSource | null, unread: string | n
         `${at} is hand-edited (its text no longer matches its ${b.stamp?.release ?? "?"} stamp); run sync to restore it, a backup is made first`,
       );
     case "outdated": {
-      if (!b.stamp || !source) return red(`${at} is stale (an older block: ${b.ids.join(", ")}); run sync`);
-      const latest = source.fallback
-        ? `${source.release} has no SHARED.md, its built-in text differs`
-        : `${source.release} has another SHARED.md`;
-      return red(`${at} is stale (${stampLabel(b.stamp)}; ${latest}); run sync`);
+      if (!b.stamp) return red(`${at} is stale (an older block: ${b.ids.join(", ")}); run sync`);
+      return red(`${at} is stale (${stampLabel(b.stamp)}; this tool writes ${SOURCE_LABEL}); run sync`);
     }
-    case "unknown":
-      return note(
-        `${at}: ${b.stamp ? stampLabel(b.stamp) : "its text"}, not compared (${unread ?? "the latest text was not read"})`,
-      );
     default:
       return red(`${at}: ${b.reason ?? "cannot be written"}`);
   }
 }
 
 /** The global block's facts for --json: present is a managed block of any id in the file. */
-function blockFacts(b: BlockState, source: BlockSource | null): StatusBlock {
-  const status = blockStatus(b, source);
+function blockFacts(b: BlockState): StatusBlock {
+  const status = blockStatus(b);
   return {
     file: b.file,
     present: b.present,
@@ -561,7 +535,7 @@ function blockFacts(b: BlockState, source: BlockSource | null): StatusBlock {
     status,
     ids: b.ids,
     stamp: b.stamp,
-    latest: source ? { release: source.release, sha256: source.sha256 } : null,
+    latest: { release: BLOCK_SOURCE.release, sha256: BLOCK_SOURCE.sha256 },
   };
 }
 

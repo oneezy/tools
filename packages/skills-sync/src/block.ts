@@ -1,52 +1,47 @@
 // The one managed block skills-sync writes into each harness's global instructions file (ADR-0011): ~/.claude/CLAUDE.md
-// and ~/.codex/AGENTS.md, never a repository's AGENTS.md, CLAUDE.md or settings. Its text is the library's SHARED.md at
-// the commit of the latest release (the commit the plugins come from), written verbatim; a release without SHARED.md
-// (an older one) gets BLOCK_BODY, the tool's built-in text. The start marker is stamped with the release and the sha256
-// of the text (`<!-- skills-sync:skills:start release-26 sha256:<hex> -->`), so status can tell a current block from a
-// stale one (another text than the latest release's) and a hand-edited one (its text no longer hashes to its stamp). A
-// release that carries the same text is no change: nothing is rewritten for the stamp alone. Only the bytes between the
-// markers change; everything around them stays as the user wrote it, line endings included. A file whose content
-// changes is copied beside itself first (CLAUDE-backup-<UTC yyyymmdd-HHMMSS>.md), never over an earlier backup. When
-// the text cannot be read (GitHub or SHARED.md out of reach), a block already there stays as it is and a file without
-// one gets BLOCK_BODY stamped `built-in`, so a session never starts without one. Only the `skills` and `brain` ids are
-// the tool's: a marker with another id is the user's text. Blocks an older skills-sync left in repositories are found
-// and reported here, never edited.
+// and ~/.codex/AGENTS.md, never a repository's AGENTS.md, CLAUDE.md or settings. Its text is the tool's own pointer,
+// BLOCK_BODY: load /oneezy-agents at session start and follow what it loads (Justin's rules, `skills/oneezy/agents.md`
+// in the library, oneezy/tools#205), plus the invocation table. The text no longer comes from a release (0.12.0 to
+// 0.15.0 copied the library's SHARED.md), so a run writes the same block with or without GitHub. The start marker is
+// stamped `built-in` with the sha256 of the text (`<!-- skills-sync:skills:start built-in sha256:<hex> -->`), so status
+// can tell a current block from a stale one (an older tool's text, or a release's SHARED.md) and a hand-edited one (its
+// text no longer hashes to its stamp). Only the bytes between the markers change; everything around them stays as the
+// user wrote it, line endings included. A file whose content changes is copied beside itself first
+// (CLAUDE-backup-<UTC yyyymmdd-HHMMSS>.md), never over an earlier backup. Only the `skills` and `brain` ids are the
+// tool's: a marker with another id is the user's text. Blocks an older skills-sync left in repositories are found and
+// reported here, never edited.
 import fs from "node:fs";
 import path from "node:path";
 import { hasLinkedParent, lexists, samePath, toHash } from "./fs.js";
 import type { Harness } from "./harnesses.js";
 import type { Action } from "./plan.js";
-import { DEFAULT_REPO, type Release } from "./release.js";
+import { DEFAULT_REPO } from "./release.js";
 
 /** The block's id in its markers: <!-- skills-sync:skills:start ... --> ... <!-- skills-sync:skills:end -->. */
 export const BLOCK_ID = "skills";
 
-/** The library file whose text the block carries, at the release's commit. */
-export const SHARED_FILE = "SHARED.md";
-
 /**
- * The built-in text, for a release without SHARED.md: how to call a skill per harness, never fetch a SKILL.md, and the
- * Brain routing the old `brain` block carried (the library's retired brain-routing.md), word for word.
+ * The block's text: load /oneezy-agents, which carries Justin's rules for every harness, plus how to call a skill per
+ * harness and never fetch a SKILL.md. The table stays here so a session whose plugin is missing can still say how a
+ * skill resolves.
  */
-export const BLOCK_BODY = `## Skills
+export const BLOCK_BODY = `## How Justin works
 
-This block is written by skills-sync; edits here are overwritten. Skills come from the library ${DEFAULT_REPO}, installed into each harness in one form. Call one the way the harness you are in resolves it:
+This block is written by skills-sync; edits here are overwritten. At the start of every session, load the \`/oneezy-agents\` skill and follow what it loads: Justin's rules for every repo and harness. If it does not load, say so, show the table below and run \`/oneezy-skills\`.
+
+## Skills
+
+Skills come from the library ${DEFAULT_REPO}, installed into each harness in one form. Call one the way the harness you are in resolves it:
 
 | Harness | How to call a skill |
 | --- | --- |
-| Claude Code | \`/<plugin>:<skill>\`, e.g. \`/oneezy:oneezy-status\` |
+| Claude Code | \`/<plugin>:<skill>\`, e.g. \`/oneezy:oneezy-agents\` |
 | Codex | \`$<skill>\` in the prompt (a plugin's skill: \`$<plugin>:<skill>\`), the \`/skills\` picker, or \`@<skill>\` on ChatGPT web |
 | Hermes | \`/<skill>\` for a loose skill; a plugin's skill: \`/agent-plugin-<id>-<hash>:<skill>\` |
 
-Never fetch a \`SKILL.md\` from GitHub, or run one from any folder this harness does not read: that bypasses the harness's own resolution and \`disable-model-invocation\`. When a typed skill does not resolve, show this table instead of improvising.
+Never fetch a \`SKILL.md\` from GitHub, or run one from any folder this harness does not read: that bypasses the harness's own resolution and \`disable-model-invocation\`. When a typed skill does not resolve, show this table instead of improvising.`;
 
-## Brain
-
-For Brain capture, lookup, agenda, triage, task status or durable context, load \`/oneezy-brain\` and follow its current registry. The skill resolves the canonical Google Drive Brain and owns locations, schema, account selection and verification.
-
-This delegation supersedes earlier Brain destinations in these instructions and their imports. Retain pinned sources, GitHub and Spaces as historical evidence. If the installed skill or its supported Drive route is unavailable, report that exact blocker and stop dependent Brain operations.`;
-
-/** The release a block written without one is stamped with: the built-in text, written while GitHub was out of reach. */
+/** What every block is stamped with: the tool's own text (0.15.0 and older also stamped a release's tag here). */
 export const BUILT_IN = "built-in";
 
 /**
@@ -110,60 +105,31 @@ function parseStamp(attrs: string): Stamp | null {
   return sha && release ? { release, sha256: sha.slice("sha256:".length) } : null;
 }
 
-/** The text the block carries, from one release: what sync writes between the markers. */
+/** The text the block carries: what sync writes between the markers. */
 export interface BlockSource {
-  /** the release the text was read at: release-26 */
+  /** what the stamp names: BUILT_IN */
   release: string;
   /** the text between the markers: LF line endings, ending in one line break */
   body: string;
   /** sha256 (hex) of `body`, as the stamp carries it */
   sha256: string;
-  /** the release has no SHARED.md: `body` is BLOCK_BODY */
-  fallback: boolean;
 }
 
-/** What a run has to write: the release's text, or why there is none. */
-export type SourceResult = { ok: true; source: BlockSource } | { ok: false; reason: string };
-
-/**
- * The block's text for `release`, verbatim (a BOM dropped, line endings read as LF, a missing final line break added):
- * its SHARED.md, or BLOCK_BODY when it has none. Throws when the text cannot go between markers: empty, not UTF-8 text,
- * or holding a marker line of its own.
- */
-export function blockSource(release: string, shared: string | null): BlockSource {
-  if (shared === null) return { ...sourceOf(release, BLOCK_BODY), fallback: true };
-  if (shared.includes("�") || shared.includes("\0")) throw new Error(`${SHARED_FILE} is not UTF-8 text`);
-  if (!shared.trim()) throw new Error(`${SHARED_FILE} is empty`);
-  if (blockIds(shared).length) throw new Error(`${SHARED_FILE} holds a skills-sync marker line`);
-  return { ...sourceOf(release, shared), fallback: false };
-}
-
-function sourceOf(release: string, text: string): Omit<BlockSource, "fallback"> {
-  const lf = text.replace(/^﻿/, "").replace(/\r\n/g, "\n");
+function sourceOf(release: string, text: string): BlockSource {
+  const lf = text.replace(/\r\n/g, "\n");
   const body = lf.endsWith("\n") ? lf : `${lf}\n`;
   return { release, body, sha256: toHash(Buffer.from(body)) };
 }
 
-/** The text for this run: the release's SHARED.md (or the built-in text), or why it cannot be had. */
-export function releaseSource(release: Release | null, error: string | null): SourceResult {
-  if (!release) return { ok: false, reason: `latest release not read: ${error ?? "unknown error"}` };
-  if (release.sharedError) return { ok: false, reason: `${release.tag}: ${release.sharedError}` };
-  try {
-    return { ok: true, source: blockSource(release.tag, release.shared) };
-  } catch (e) {
-    return { ok: false, reason: `${release.tag}: ${e instanceof Error ? e.message : String(e)}` };
-  }
-}
+/** The block every run writes. */
+export const BLOCK_SOURCE: BlockSource = sourceOf(BUILT_IN, BLOCK_BODY);
 
-/** "release-26 SHARED.md", or for the built-in text why it stands in. */
-export function sourceLabel(s: BlockSource): string {
-  if (s.release === BUILT_IN) return `built-in text; ${SHARED_FILE} not read`;
-  return s.fallback ? `built-in text; ${s.release} has no ${SHARED_FILE}` : `${s.release} ${SHARED_FILE}`;
-}
+/** How a line names the block's text. */
+export const SOURCE_LABEL = "the pointer to /oneezy-agents";
 
-/** What a stamp's release names, for a line: "release-25 text", or "built-in text". */
+/** What a stamp names, for a line: "release-25 SHARED.md text" (0.15.0 and older), or "built-in text". */
 export function stampLabel(s: Stamp): string {
-  return s.release === BUILT_IN ? "built-in text" : `${s.release} text`;
+  return s.release === BUILT_IN ? "built-in text" : `${s.release} SHARED.md text`;
 }
 
 /**
@@ -187,8 +153,8 @@ export function withBlock(text: string, source: BlockSource): string {
 }
 
 /**
- * current; outdated (an older block, or another text than the latest release's: "stale" in the lines a user reads, the
- * --json value kept from before); hand-edited; or unknown (the latest text could not be read).
+ * current; outdated (an older block, or another text than this tool's: "stale" in the lines a user reads, the --json
+ * value kept from before); hand-edited; or conflict. `unknown` is kept for --json readers; the text is always known now.
  */
 export type BlockStatus = "current" | "missing" | "outdated" | "hand-edited" | "unknown" | "conflict";
 
@@ -208,13 +174,12 @@ export interface BlockState {
   reason?: string;
 }
 
-/** The block against the latest text (null when it could not be read). */
-export function blockStatus(b: BlockState, source: BlockSource | null): BlockStatus {
+/** The block against the text this tool writes. */
+export function blockStatus(b: BlockState, source: BlockSource = BLOCK_SOURCE): BlockStatus {
   if (b.reason) return "conflict";
   if (!b.present) return "missing";
   if (b.handEdited) return "hand-edited";
   if (!b.stamp || b.ids[0] !== BLOCK_ID) return "outdated";
-  if (!source) return "unknown";
   return b.stamp.sha256 === source.sha256 ? "current" : "outdated";
 }
 
@@ -315,17 +280,14 @@ export function backupName(file: string, now: Date = new Date()): string {
 /**
  * The action that makes `file` carry `source`'s block: a write (checked against the file's hash at apply time, as
  * plan.ts does for every instruction write; an existing file is copied to `backup` first), a skip when it is current,
- * a conflict when it cannot be written. Without a source (the text was not read) a block already there stays as it is
- * (null: the run says why once), and a file without one gets the built-in text, stamped `built-in`.
+ * a conflict when it cannot be written.
  */
-export function blockAction(file: string, given: BlockSource | null, now: Date = new Date()): Action | null {
+export function blockAction(file: string, source: BlockSource = BLOCK_SOURCE, now: Date = new Date()): Action {
   const { state, bytes, text } = inspect(file);
-  const status = blockStatus(state, given);
+  const status = blockStatus(state, source);
   if (status === "conflict") return { kind: "conflict", path: file, note: state.reason };
-  if (!given && status !== "missing") return null;
-  const source = given ?? blockSource(BUILT_IN, null);
   if (status === "current") return { kind: "skip", path: file, note: "skills block current" };
-  const label = sourceLabel(source);
+  const label = SOURCE_LABEL;
   const why =
     status === "missing"
       ? `skills block (${label})`
