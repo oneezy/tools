@@ -189,9 +189,9 @@ test("a fully synced machine prints every line green and exits 0; --json carries
       current: true,
       status: "current",
       ids: ["skills"],
-      // the fixture library's release-17 has no SHARED.md: the built-in text, stamped with that release
-      stamp: { release: "release-17", sha256: BUILT_IN },
-      latest: { release: "release-17", sha256: BUILT_IN },
+      // the tool's pointer, stamped built-in
+      stamp: { release: "built-in", sha256: BUILT_IN },
+      latest: { release: "built-in", sha256: BUILT_IN },
     });
   assert.deepEqual(j.harnesses.codex.repoBlocks, []);
   assert.deepEqual(j.checkouts, [
@@ -298,7 +298,7 @@ test("a stale global block (an older block's text) is one red line and exit 1; a
     status: "outdated",
     ids: ["brain"],
     stamp: null,
-    latest: { release: "release-17", sha256: BUILT_IN },
+    latest: { release: "built-in", sha256: BUILT_IN },
   });
   fs.rmSync(file);
   const missing = await cli(m, ["status", "--json"], {}, skills);

@@ -40,10 +40,10 @@ interface SyncJson {
   cloud: boolean;
 }
 
-/** The start marker of the built-in text written when the release cannot be read. */
+/** The start marker of the tool's pointer text. */
 const BUILT_IN_START = `<!-- skills-sync:skills:start built-in sha256:${createHash("sha256").update(`${BLOCK_BODY}\n`).digest("hex")} -->`;
-/** The start marker sync writes here: the fixture library's latest release has no SHARED.md, so the built-in text. */
-const START = `<!-- skills-sync:skills:start release-17 sha256:${createHash("sha256").update(`${BLOCK_BODY}\n`).digest("hex")} -->`;
+/** The start marker sync writes: the tool's pointer, stamped built-in, release or not. */
+const START = BUILT_IN_START;
 const END = "<!-- skills-sync:skills:end -->";
 const CLOUD = { CLAUDE_CODE_REMOTE: "true" };
 /** The setup-script line cloud environments run today, and the plain one the spec reduces it to. */
@@ -96,8 +96,12 @@ function assertBlock(text: string): void {
   assert.equal(count(text, END), 1, text);
   const block = text.slice(text.indexOf(START), text.indexOf(END) + END.length);
   assert.ok(block.startsWith(START), block);
-  assert.match(block.slice(START.length), /^\r?\n## Skills\r?\n/);
-  assert.ok(block.includes("| Claude Code | `/<plugin>:<skill>`, e.g. `/oneezy:oneezy-status` |"), block);
+  assert.match(block.slice(START.length), /^\r?\n## How Justin works\r?\n/);
+  assert.ok(
+    block.includes("At the start of every session, load the `/oneezy-agents` skill and follow what it loads"),
+    block,
+  );
+  assert.ok(block.includes("| Claude Code | `/<plugin>:<skill>`, e.g. `/oneezy:oneezy-agents` |"), block);
   assert.ok(
     block.includes(
       "| Codex | `$<skill>` in the prompt (a plugin's skill: `$<plugin>:<skill>`), the `/skills` picker, or `@<skill>` on ChatGPT web |",
@@ -113,13 +117,8 @@ function assertBlock(text: string): void {
     block,
   );
   assert.ok(block.includes("When a typed skill does not resolve, show this table instead of improvising."), block);
-  // the Brain routing the old brain block carried stays, word for word
-  assert.ok(
-    block.includes("## Brain") &&
-      block.includes("load `/oneezy-brain` and follow its current registry") &&
-      block.includes("report that exact blocker and stop dependent Brain operations."),
-    block,
-  );
+  // Brain routing moved into /oneezy-agents' rules with everything else
+  assert.ok(!block.includes("## Brain"), block);
   assert.ok(!block.includes("skills-sync:brain"), block);
 }
 
@@ -147,7 +146,7 @@ test("sync on a machine with no library writes the skills block into both global
       (l) =>
         l.startsWith("+ write") &&
         l.includes("CLAUDE.md") &&
-        l.includes("(skills block (built-in text; release-17 has no SHARED.md))"),
+        l.includes("(skills block (the pointer to /oneezy-agents))"),
     ),
     r.stdout,
   );
@@ -156,7 +155,7 @@ test("sync on a machine with no library writes the skills block into both global
       (l) =>
         l.startsWith("+ write") &&
         l.includes("AGENTS.md") &&
-        l.includes("(skills block (built-in text; release-17 has no SHARED.md))"),
+        l.includes("(skills block (the pointer to /oneezy-agents))"),
     ),
     r.stdout,
   );
@@ -239,10 +238,7 @@ test("text around the markers stays byte for byte: the old brain block is replac
   assert.ok(c.startsWith(`# Mine\n\nAbove the block.\n\n${START}\n`), c);
   assert.ok(c.endsWith(`\n${END}\n\nBelow the block.\n`), c);
   assertBlock(c);
-  assert.ok(
-    r.stdout.includes("(skills block replaces brain (built-in text; release-17 has no SHARED.md); backup "),
-    r.stdout,
-  );
+  assert.ok(r.stdout.includes("(skills block replaces brain (the pointer to /oneezy-agents); backup "), r.stdout);
   const x = read(codex);
   assert.ok(x.startsWith(`top\r\n${START}\r\n`), x);
   assert.ok(x.endsWith(`\r\n${END}\r\nbottom\r\n`), x);
@@ -402,7 +398,7 @@ for (const [name, line] of [
     assert.equal(again.stderr, warning);
   });
 
-test("in the cloud with no GitHub reachable the plain line still exits 0 and prints nothing red: both blocks get the built-in text, one line says why", async () => {
+test("in the cloud with no GitHub reachable the plain line still exits 0 and prints nothing red: both blocks get the pointer, one line says the release was not read", async () => {
   const m = machine({ github: null });
   const r = await cli(m, PLAIN_LINE, CLOUD);
   assert.equal(r.status, 0, r.stderr);
@@ -412,8 +408,8 @@ test("in the cloud with no GitHub reachable the plain line still exits 0 and pri
   assert.equal(lines.filter((l) => l.startsWith("+ write")).length, 2, r.stdout);
   assert.ok(!lines.some((l) => l.startsWith("!")), r.stdout);
   assert.match(
-    lines.find((l) => l.includes("SHARED.md")) ?? "",
-    /^\. note\s+SHARED\.md {2}\(not read: latest release not read: .*; blocks already there kept as they are, a missing one gets the built-in text\)$/,
+    lines.find((l) => l.includes("latest release not read")) ?? "",
+    /^\. note\s+oneezy\/skills {2}\(latest release not read: .*; the global block needs none\)$/,
   );
   for (const h of ["claude-code", "codex"] as const) assert.ok(read(globalFile(m, h)).startsWith(BUILT_IN_START));
   // --json names the error, and nothing is a conflict
@@ -465,9 +461,9 @@ test("--plan writes nothing and says what would change, in text and --json", asy
       .filter((a) => a.kind === "write")
       .map((a) => [path.basename(a.path), a.note?.replace(/; backup .*-backup-\d{8}-\d{6}\.md$/, "; backup <file>")]),
     [
-      ["CLAUDE.md", "skills block (built-in text; release-17 has no SHARED.md)"],
+      ["CLAUDE.md", "skills block (the pointer to /oneezy-agents)"],
       ["settings.json", "session hook"],
-      ["AGENTS.md", "skills block replaces brain (built-in text; release-17 has no SHARED.md); backup <file>"],
+      ["AGENTS.md", "skills block replaces brain (the pointer to /oneezy-agents); backup <file>"],
       ["hooks.json", "session hook"],
     ],
   );
@@ -475,7 +471,7 @@ test("--plan writes nothing and says what would change, in text and --json", asy
   assert.deepEqual(snapshot(m.home), before);
 });
 
-test("GitHub unreachable: a missing block gets the built-in text, one note says why beside the one red line naming the release, exit 1", async () => {
+test("GitHub unreachable: both blocks get the pointer all the same beside the one red line naming the release, exit 1", async () => {
   const m = machine({ github: null });
   const r = await cli(m, []);
   assert.equal(r.status, 1, r.stderr);
@@ -484,9 +480,8 @@ test("GitHub unreachable: a missing block gets the built-in text, one note says 
   const reds = out.filter((l) => l.startsWith("!"));
   assert.equal(reds.length, 1, r.stdout);
   assert.ok(reds[0].includes("oneezy/skills") && reds[0].includes("latest release not read"), reds[0]);
-  assert.equal(out.filter((l) => l.includes("SHARED.md  (not read:")).length, 1, r.stdout);
   // each written block names its text
-  assert.equal(out.filter((l) => l.includes("skills block (built-in text; SHARED.md not read)")).length, 2, r.stdout);
+  assert.equal(out.filter((l) => l.includes("skills block (the pointer to /oneezy-agents)")).length, 2, r.stdout);
   // the two blocks and the two hook entries need no release
   assert.equal(out.at(-1), "4 changed, 0 already right, 1 left alone");
   const j = await cli(m, ["--json"]);
@@ -495,9 +490,13 @@ test("GitHub unreachable: a missing block gets the built-in text, one note says 
   assert.equal(s.release, null);
   assert.match(s.error ?? "", /releases\/latest/);
   assert.equal(s.actions.filter((a) => a.kind === "conflict").length, 1);
+  // the blocks are current without the release, and so are the hook entries
   assert.deepEqual(
-    s.actions.filter((a) => a.kind === "skip").map((a) => path.basename(a.path)),
-    ["settings.json", "hooks.json"],
+    s.actions
+      .filter((a) => a.kind === "skip")
+      .map((a) => path.basename(a.path))
+      .sort(),
+    ["AGENTS.md", "CLAUDE.md", "hooks.json", "settings.json"],
   );
 });
 

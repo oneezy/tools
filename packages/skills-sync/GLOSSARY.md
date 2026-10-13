@@ -126,15 +126,15 @@ A run that acts on this Host against the latest Release on GitHub and keeps noth
 _Avoid_: remote command, online command
 
 **Global block**:
-The one managed block `sync` writes into a Harness's global instructions file (`~/.claude/CLAUDE.md`, `~/.codex/AGENTS.md`), between `skills-sync` markers (ADR-0011 in oneezy/skills): the Shared text of the latest Release, verbatim, its start marker carrying a Stamp. Never written into a repository; a block an older version left there is reported, not edited. In a cloud session it is the whole sync. `status` calls it current, stale (another text than the latest Release's, or an older block) or hand-edited (its text no longer matches its Stamp).
+The one managed block `sync` writes into a Harness's global instructions file (`~/.claude/CLAUDE.md`, `~/.codex/AGENTS.md`), between `skills-sync` markers (ADR-0011 in oneezy/skills): the tool's own pointer to the `/oneezy-agents` skill, which loads Justin's rules, plus the invocation table, its start marker carrying a Stamp (oneezy/tools#205). Written with or without the Release. Never written into a repository; a block an older version left there is reported, not edited. In a cloud session it is the whole sync. `status` calls it current, stale (another text than this tool's, or an older block) or hand-edited (its text no longer matches its Stamp).
 _Avoid_: entrypoint (the per-library manifest, retired in 0.15.0), instructions block, brain block (its old id)
 
 **Shared text**:
-`SHARED.md` at the root of the Library, the one canonical text of Justin's global instructions, read at the commit of the latest Release (the commit its Plugins come from) and written as the Global block. A Release without one gets the tool's built-in text instead. When it cannot be read, a Global block already there stays as it is, a file without one gets the built-in text (Stamp `built-in`), and one line says so.
+Retired in 0.16.0: `SHARED.md` at the root of the Library, which 0.12.0 to 0.15.0 wrote as the Global block. Justin's rules are now `skills/oneezy/agents.md`, loaded by `/oneezy-agents`; the tool reads no text from the Library for the block.
 _Avoid_: brain routing (its Brain section replaced the retired `brain-routing.md`), shared instructions file
 
 **Stamp**:
-What the Global block's start marker carries after its id: the Release its text was read at and the sha256 of that text (`<!-- skills-sync:skills:start release-26 sha256:<hex> -->`), or `built-in` for the built-in text written while the Shared text could not be read. The text decides: a Release with the same Shared text changes no block; a text that no longer hashes to its Stamp was edited by hand.
+What the Global block's start marker carries after its id: `built-in` and the sha256 of the text (`<!-- skills-sync:skills:start built-in sha256:<hex> -->`); 0.15.0 and older stamped the Release a Shared text was read at instead. The text decides: another text than this tool's is stale; a text that no longer hashes to its Stamp was edited by hand.
 _Avoid_: version marker, checksum
 
 **Backup**:

@@ -376,8 +376,8 @@ test("a block sync appended to a file goes with the blank line sync put before i
   write(agents, "mine\n");
   const synced = await cli(m, ["--quiet"]);
   assert.equal(synced.status, 0, synced.stderr + synced.stdout);
-  // sync stamps its start marker with the release and the text's sha256
-  assert.ok(read(agents).startsWith(`mine\n\n${START.replace(" -->", " release-17 sha256:")}`), read(agents));
+  // sync stamps its start marker built-in with the text's sha256
+  assert.ok(read(agents).startsWith(`mine\n\n${START.replace(" -->", " built-in sha256:")}`), read(agents));
   const r = await cli(m, ["unlink", "--quiet"]);
   assert.equal(r.status, 0, r.stderr + r.stdout);
   assert.equal(read(agents), "mine\n");

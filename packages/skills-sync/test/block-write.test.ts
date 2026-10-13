@@ -7,7 +7,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, test } from "vite-plus/test";
-import { BLOCK_BODY, blockAction, blockSource, leftoverTemps, readBlock, withBlock } from "../src/block.js";
+import { BLOCK_BODY, BLOCK_SOURCE, blockAction, leftoverTemps, readBlock, withBlock } from "../src/block.js";
 import { toHash } from "../src/fs.js";
 import { apply, Report, writeInstruction } from "../src/plan.js";
 
@@ -23,7 +23,7 @@ function folder(): string {
 }
 
 const NOW = new Date("2026-10-11T12:00:00.123Z");
-const SOURCE = blockSource("release-26", "# How Justin works\n");
+const SOURCE = BLOCK_SOURCE;
 const run = (file: string) => {
   const report = new Report();
   const a = blockAction(file, SOURCE, NOW)!;
@@ -68,7 +68,7 @@ test("another run's fresh lock skips the file silently: nothing written, no back
   fs.utimesSync(lock, old, old);
   const b = run(file);
   assert.equal(b.kind, "write", b.note);
-  assert.ok(fs.readFileSync(file, "utf8").startsWith("mine\n\n<!-- skills-sync:skills:start release-26"));
+  assert.ok(fs.readFileSync(file, "utf8").startsWith("mine\n\n<!-- skills-sync:skills:start built-in"));
   // the lock went with the write, and no temp file is left
   assert.deepEqual(others(dir, file), ["CLAUDE-backup-20261011-120000.md"]);
 });
@@ -122,12 +122,12 @@ test("only the skills and brain ids are the tool's: a user's example markers are
   assert.deepEqual(readBlock(file).ids, []);
   run(file);
   assert.equal(fs.readFileSync(file, "utf8"), `${mine}\n${withBlock("", SOURCE)}`);
-  // and the built-in text is what an unreadable release leaves a file without a block
+  // the default text is the pointer, stamped built-in
   const fresh = path.join(dir, "AGENTS.md");
   const report = new Report();
-  report.add(blockAction(fresh, null, NOW)!);
+  report.add(blockAction(fresh, undefined, NOW));
   apply(report, false);
-  assert.equal(fs.readFileSync(fresh, "utf8"), withBlock("", blockSource("built-in", null)));
+  assert.equal(fs.readFileSync(fresh, "utf8"), withBlock("", BLOCK_SOURCE));
   assert.ok(fs.readFileSync(fresh, "utf8").startsWith("<!-- skills-sync:skills:start built-in sha256:"));
   assert.ok(fs.readFileSync(fresh, "utf8").includes(BLOCK_BODY));
 });
