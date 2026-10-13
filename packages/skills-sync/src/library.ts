@@ -1,8 +1,9 @@
 // The skills library: a checkout with skills/ (own skills, flat or grouped by plugin) beside the committed config
 // skills-sync.json (third-party sources, plugins; its lock is skills-sync.lock.json) or the npx skills lock
-// skills-lock.json alone. Only the library commands (update, refresh, versions, add, build, check and the brain and alias
-// migrations) run in one, named by --repo or found above the current folder; a machine command never looks for a library
-// and never clones one (ADR-0007). ~/.skills-sync, where older versions kept their clone, is only ever detected now.
+// skills-lock.json alone. Only the library commands (update, refresh, versions, add, remove, build, check and the brain
+// and alias migrations) run in one, named by --repo or found above the current folder; a machine command never looks for
+// a library and never clones one (ADR-0007). ~/.skills-sync, where older versions kept their clone, is only ever
+// detected now.
 import { spawnSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";

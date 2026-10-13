@@ -120,7 +120,12 @@ export function renamesOf(s: Source): Map<string, string> {
 
 /** The config, validated against the shipped schema, with the switches, sources and plugins filled in when absent; throws with every problem listed. */
 export function readConfig(file: string): Config {
-  const parsed = readConfigRaw(file) as Partial<Config>;
+  return configOf(readConfigRaw(file));
+}
+
+/** A raw config (as readConfigRaw gives it, or as remove will write it) with the switches, sources and plugins filled in. */
+export function configOf(raw: Record<string, unknown>): Config {
+  const parsed = raw as Partial<Config>;
   return {
     ...parsed,
     version: 1,

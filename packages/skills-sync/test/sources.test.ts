@@ -498,3 +498,111 @@ test("add <path to the upstream> writes the config entry (default branch, all sk
   assert.deepEqual(fs.readdirSync(homeDir), [], "add writes nothing into the home folder or any harness");
   assert.deepEqual(stagedClones(), [], "temp clones deleted");
 });
+
+test("remove <source> takes out what add put in and what build made of it: the config entry and its plugin, the lock entry, the snapshot, the working-set copies, the package and its Hermes rendering, the catalog entries; an authored group, a plugin id, an unknown or ambiguous source and a plugin still referenced elsewhere are refused with nothing written; --plan writes nothing; check is clean after", () => {
+  config(
+    {},
+    {
+      library: { version: "1.0.0" },
+      renderings: { hermes: "dist/hermes" },
+      plugins: { oneezy: { displayName: "Oneezy", group: "oneezy" } },
+    },
+  );
+  for (const args of [
+    ["add", up.dir, "--skills", "a,b"],
+    ["add", up.dir, "--id", "other", "--skills", "c", "--plugin", "other-plugin"],
+    ["build"],
+  ]) {
+    const r = cli(...args, "--quiet");
+    assert.equal(r.status, 0, `${args.join(" ")}: ${r.stderr}`);
+  }
+  assert.equal(cli("check").status, 0, "clean before");
+  const catalog = path.join(lib.root, ".claude-plugin", "marketplace.json");
+  const names = () => (json(catalog).plugins as Array<{ name: string }>).map((p) => p.name).sort();
+  assert.deepEqual(names(), ["oneezy", "other-plugin", "up"]);
+  const files = [lib.configFile, lib.lockFile, catalog];
+  const before = () => files.map((f) => fs.readFileSync(f, "utf8"));
+  const was = before();
+
+  for (const [spec, reason] of [
+    ["nope", /no source nope/],
+    ["oneezy", /oneezy is an authored group/],
+    ["other-plugin", /other-plugin is a plugin; its source is other: remove other/],
+    [up.dir, /matches 2 sources \(other, up\)/],
+  ] as const) {
+    const r = cli("remove", spec);
+    assert.equal(r.status, 2, `${spec}: ${r.stderr}`);
+    assert.match(r.stderr, reason);
+    assert.equal(r.stderr.trim().split("\n").length, 1, "one line");
+  }
+  const held = json(lib.configFile);
+  fs.writeFileSync(
+    lib.configFile,
+    JSON.stringify({ ...held, machines: { plugins: { codex: ["up"] } } }, null, 2) + "\n",
+  );
+  const referenced = cli("remove", "up");
+  assert.equal(referenced.status, 1);
+  assert.match(referenced.stderr, /machines\.plugins\.codex/);
+  fs.writeFileSync(lib.configFile, was[0]);
+  assert.deepEqual(before(), was, "nothing written by a refused remove");
+
+  const plan = cli("remove", "up", "--plan", "--json");
+  assert.equal(plan.status, 0, plan.stderr);
+  assert.deepEqual(before(), was, "--plan writes nothing");
+  const planned = changes(plan).map((a) => `${a.kind} ${path.relative(lib.root, a.path).split(path.sep).join("/")}`);
+  for (const p of [
+    "write skills-sync.json",
+    "write skills-sync.lock.json",
+    "delete upstream/up",
+    "delete .agents/skills/a",
+    "delete .agents/skills/b",
+    "delete plugins/up",
+    "delete dist/hermes/up",
+    "write .claude-plugin/marketplace.json",
+  ])
+    assert.ok(planned.includes(p), `--plan lists ${p}: ${planned.join(", ")}`);
+  assert.deepEqual(JSON.parse(plan.stdout).removed, {
+    source: "up",
+    repo: up.dir,
+    ref: "main",
+    plugins: ["up"],
+    skills: ["a", "b"],
+  });
+  assert.ok(fs.existsSync(path.join(lib.plugins, "up")) && fs.existsSync(path.join(lib.upstream, "up")));
+
+  const r = cli("remove", "up");
+  assert.equal(r.status, 0, r.stderr);
+  assert.match(r.stdout, /^removed up: .*@main, plugin up, 2 skills \(a, b\)/m);
+  const c = json(lib.configFile);
+  assert.deepEqual(Object.keys(c.sources), ["other"]);
+  assert.deepEqual(Object.keys(c.plugins).sort(), ["oneezy", "other-plugin"], "the authored group stays");
+  assert.deepEqual(Object.keys(json(lib.lockFile).sources), ["other"]);
+  for (const gone of [
+    path.join(lib.upstream, "up"),
+    path.join(lib.agents, "a"),
+    path.join(lib.agents, "b"),
+    path.join(lib.plugins, "up"),
+    path.join(lib.root, "dist", "hermes", "up"),
+  ])
+    assert.ok(!lexists(gone), `${gone} removed`);
+  assert.ok(fs.existsSync(path.join(lib.agents, "c", "SKILL.md")), "another source's copy stays");
+  assert.ok(fs.existsSync(path.join(lib.plugins, "other-plugin")) && fs.existsSync(path.join(lib.plugins, "oneezy")));
+  assert.deepEqual(names(), ["oneezy", "other-plugin"]);
+  const after = cli("check");
+  assert.equal(after.status, 0, `check clean after: ${after.stdout}`);
+
+  // a GitHub source by owner/repo or its URL, whatever the case
+  fs.writeFileSync(
+    lib.configFile,
+    JSON.stringify(
+      { ...json(lib.configFile), sources: { ...c.sources, gh: { repo: "Owner/Thing", ref: "main", skills: ["x"] } } },
+      null,
+      2,
+    ) + "\n",
+  );
+  assert.equal(cli("remove", "https://github.com/owner/thing.git", "--plan").status, 0);
+  const gh = cli("remove", "owner/thing", "--quiet");
+  assert.equal(gh.status, 0, gh.stderr);
+  assert.deepEqual(Object.keys(json(lib.configFile).sources), ["other"]);
+  assert.deepEqual(stagedClones(), [], "remove clones nothing");
+});
