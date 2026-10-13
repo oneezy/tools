@@ -34,6 +34,11 @@ export interface Installed {
   readInPlace?: boolean;
   /** Claude Code: "user" for a CLI install, "synced" for an account plugin claude.ai delivered */
   scope?: string;
+  /**
+   * Codex: false for a plugin it lists but has not installed here, as it lists the ChatGPT account's plugins that are
+   * not added to this Codex; listInstalled leaves those out, listAll keeps them
+   */
+  installed?: boolean;
 }
 
 /** One marketplace a harness has registered: where it reads it from, and the source it was added from. */
@@ -207,7 +212,7 @@ const codex: Driver = {
     const v = (r.ok ? json(r.out) : null) as { installed?: unknown } | null;
     if (!v || !Array.isArray(v.installed)) return null;
     return v.installed
-      .filter((p) => str(p?.pluginId) && p.installed !== false)
+      .filter((p) => str(p?.pluginId))
       .map((p) => ({
         id: p.pluginId,
         name: str(p.name) ?? splitId(p.pluginId).name,
@@ -215,6 +220,7 @@ const codex: Driver = {
         version: str(p.version),
         enabled: p.enabled === true,
         folder: null,
+        installed: p.installed !== false,
       }));
   },
   addMarketplace: codexMarketplaceAdd,
@@ -381,6 +387,11 @@ export function harnessCli(
 
 /** What the harness lists as installed, account plugins included; null when it cannot list. */
 export function listInstalled(h: Harness, run: Run): Installed[] | null {
+  return listAll(h, run)?.filter((p) => p.installed !== false) ?? null;
+}
+
+/** Everything the harness lists, installed here or not (Codex lists the ChatGPT account's plugins either way). */
+export function listAll(h: Harness, run: Run): Installed[] | null {
   return DRIVERS[h.id]?.installed(run) ?? null;
 }
 
@@ -620,7 +631,7 @@ export function pluginDependency(
     const market = d.marketplaces(run)?.find((item) => item.name === catalog.marketplace);
     if (market && !(market.root && samePath(market.root, lib.root))) return null;
     const id = `${b.name}@${catalog.marketplace}`;
-    const installed = d.installed(run);
+    const installed = d.installed(run)?.filter((p) => p.installed !== false) ?? null;
     if (!installed || installed.some((item) => item.name === b.name && item.id !== id)) return null;
     const current = installed.find((item) => item.id === id);
     if (current && !current.enabled) return null;

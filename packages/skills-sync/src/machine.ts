@@ -20,7 +20,7 @@ import {
   codexPluginSkills,
   promptedSkills,
   harnessCli,
-  listInstalled,
+  listAll,
   listMarketplaces,
   runner,
   supportsPlugins,
@@ -103,6 +103,8 @@ export interface HarnessState {
   hook: HookState | null;
   /** Codex: how its CLI is signed in (`codex login status`), which decides whether it lists the ChatGPT account's plugins; null elsewhere or unread */
   login?: "chatgpt" | "other" | "none" | null;
+  /** Codex: the plugins it lists but has not installed here (the ChatGPT account's that are not added to this Codex) */
+  listedOnly?: CliPlugin[];
 }
 
 /** The old tool's ~/.skills-sync: a link to its library clone, or the clone itself. Detected; never read, never removed. */
@@ -242,7 +244,8 @@ function probeHarness(
     if (!cli.file) state.note = `no ${cli.bin} on PATH`;
     else if (h.id !== "hermes") {
       const run = runner(cli.file);
-      const listed = supportsPlugins(run) ? listInstalled(h, run) : null;
+      const all = supportsPlugins(run) ? listAll(h, run) : null;
+      const listed = all?.filter((p) => p.installed !== false) ?? null;
       if (!listed) state.note = `${cli.bin} cannot list its plugins`;
       else {
         state.listed = true;
@@ -250,6 +253,17 @@ function probeHarness(
         // a Codex signed in with ChatGPT lists the account's plugins among its own: the ChatGPT destination (chatgpt.ts);
         // only status asks, so sync and the session hook spend no extra process on it
         if (h.id === "codex" && login) state.login = codexLogin(run);
+        if (h.id === "codex")
+          state.listedOnly = (all ?? [])
+            .filter((p) => p.installed === false)
+            .map((p) => ({
+              id: p.name,
+              marketplace: p.marketplace,
+              version: p.version,
+              enabled: false,
+              path: null,
+              skills: null,
+            }));
         // Codex names no folder for a plugin; its loaded skills come from the prompt input it renders locally
         let codexSkills: ReturnType<typeof codexPluginSkills> = null;
         if (h.id === "codex" && listed.length) {

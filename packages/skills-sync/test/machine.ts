@@ -372,7 +372,7 @@ export function installedPlugin(
   m: PretendMachine,
   harness: "claude-code" | "codex",
   id: string,
-  p: PluginFiles & { marketplace?: string; enabled?: boolean } = {},
+  p: PluginFiles & { marketplace?: string; enabled?: boolean; installed?: boolean } = {},
 ): string {
   const marketplace = p.marketplace ?? "oneezy-skills";
   const root = path.join(m.base, "marketplaces", harness, marketplace);
@@ -384,7 +384,14 @@ export function installedPlugin(
   const skills = fs.existsSync(path.join(dir, "skills"))
     ? fs.readdirSync(path.join(dir, "skills")).filter((n) => fs.existsSync(path.join(dir, "skills", n, "SKILL.md")))
     : [];
-  state.plugins[`${id}@${marketplace}`] = { version: p.version ?? "unknown", enabled: p.enabled ?? true, dir, skills };
+  state.plugins[`${id}@${marketplace}`] = {
+    version: p.version ?? "unknown",
+    enabled: p.enabled ?? true,
+    dir,
+    skills,
+    // false: listed (a ChatGPT account plugin Codex knows of) but not installed in this Codex
+    ...(p.installed === false ? { installed: false } : {}),
+  };
   write(file, JSON.stringify(state, null, 2));
   return dir;
 }
