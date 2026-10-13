@@ -591,6 +591,20 @@ test("remove <source> takes out what add put in and what build made of it: the c
   const after = cli("check");
   assert.equal(after.status, 0, `check clean after: ${after.stdout}`);
 
+  // a source that selects a name another source holds in the lock leaves that copy alone
+  fs.writeFileSync(
+    lib.configFile,
+    JSON.stringify(
+      { ...json(lib.configFile), sources: { ...c.sources, dup: { repo: up.dir, ref: "main", skills: ["c"] } } },
+      null,
+      2,
+    ) + "\n",
+  );
+  const dup = cli("remove", "dup", "--quiet");
+  assert.equal(dup.status, 0, dup.stderr);
+  assert.ok(fs.existsSync(path.join(lib.agents, "c", "SKILL.md")), "the copy other holds stays");
+  assert.deepEqual(Object.keys(json(lib.configFile).sources), ["other"]);
+
   // a GitHub source by owner/repo or its URL, whatever the case
   fs.writeFileSync(
     lib.configFile,

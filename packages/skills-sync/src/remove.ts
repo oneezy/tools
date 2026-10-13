@@ -99,9 +99,8 @@ export function removeSource(lib: Library, spec: string): RemoveResult {
     ]),
   ].sort(cmp);
 
+  // the config is written last, so a run that stops partway leaves the source declared and update puts it back
   const report = new Report();
-  const note = `sources.${id}${mine.length ? ` and plugins.${mine.join(", plugins.")}` : ""} removed`;
-  report.add({ kind: "write", path: lib.configFile, payload: configText(next), note });
   if (lock && locked)
     report.add({
       kind: "write",
@@ -112,12 +111,20 @@ export function removeSource(lib: Library, spec: string): RemoveResult {
   const snapshot = path.join(lib.upstream, id);
   if (isDir(snapshot)) report.add({ kind: "delete", path: snapshot, note: `source ${id} removed` });
   // a working-set copy of its skills, never an own skill's name or a link someone made there
+  // or a name another source holds in the lock (the first source to select a name keeps it)
   const own = new Set(lib.ownSkills());
+  const held = new Set(
+    Object.entries(lock?.sources ?? {})
+      .filter(([other]) => other !== id)
+      .flatMap(([, s]) => Object.keys(s.skills ?? {})),
+  );
   for (const n of skills) {
     const copy = path.join(lib.agents, n);
-    if (!own.has(n) && !isLink(copy) && isSkillDir(copy))
+    if (!own.has(n) && !held.has(n) && !isLink(copy) && isSkillDir(copy))
       report.add({ kind: "delete", path: copy, note: `source ${id} removed` });
   }
+  const note = `sources.${id}${mine.length ? ` and plugins.${mine.join(", plugins.")}` : ""} removed`;
+  report.add({ kind: "write", path: lib.configFile, payload: configText(next), note });
   return { ok: true, id, entry, plugins: mine, skills, config: next, report };
 }
 
