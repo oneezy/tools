@@ -13,7 +13,7 @@ import path from "node:path";
 import YAML from "yaml";
 import { adaptFiles, compileAdapt, forbiddenInFiles, type Compiled, type Hit } from "./adapt.js";
 import { archives, type Built } from "./artifacts.js";
-import { isDir, isLink, isSkillDir, lexists } from "./fs.js";
+import { isDir, isLink, isSkillDir, lexists, under } from "./fs.js";
 import { hermesNamespace } from "./hermes.js";
 import { Library } from "./library.js";
 import { apply, Report } from "./plan.js";
@@ -101,6 +101,26 @@ export const PLUGIN_SCHEMA = "https://agent-plugins.org/schemas/1.0.0/plugin.sch
  */
 export const HERMES_PATH = "dist/hermes";
 const SKILL_MD = /^skills\/([^/]+)\/SKILL\.md$/;
+/**
+ * Where Development builds go inside the Library (develop-build.ts), / separators: under dist/, which git ignores and the
+ * skills CLI never scans. The release build never writes there.
+ */
+export const DEVELOPMENT_PATH = "dist/development";
+
+/**
+ * Why the config's Hermes rendering cannot be built: its folder holds the development output or lies inside it, so the
+ * release build would delete the Development builds as packages no longer in the config, or write release files among
+ * them (tools#215). Null when the two stay apart or the library has not opted in. Both builds refuse it.
+ */
+export function renderingOverlap(lib: Library, config: Config): string | null {
+  const hermes = hermesPath(config);
+  if (!hermes) return null;
+  const rendering = hermesRoot(lib.root, hermes);
+  const development = path.join(lib.root, ...DEVELOPMENT_PATH.split("/"));
+  return under(rendering, development) || under(development, rendering)
+    ? `renderings.hermes (${hermes}) overlaps ${DEVELOPMENT_PATH}; release and development output must stay apart`
+    : null;
+}
 
 /** The folder the config sends the Hermes rendering to, / separators; null when the library has not opted in. */
 export function hermesPath(config: Config): string | null {
@@ -199,6 +219,14 @@ export function build(lib: Library, opts: BuildOptions): BuildResult {
     unusedRules: [],
   };
   if (result.off) return result;
+  const overlap = renderingOverlap(lib, config);
+  if (overlap) {
+    // nothing is built: the Hermes pass would delete or write inside the Development builds
+    const rendering = hermesRoot(lib.root, hermesPath(config)!);
+    report.add({ kind: "conflict", path: rendering, note: `${overlap}; nothing built` });
+    if (opts.check) result.drift = [path.relative(lib.root, rendering).split("\\").join("/")];
+    return result;
+  }
   const changes = new Report(); // what differs from disk, applied unless checking
   // a check never looks at artifacts/: the archives are upload material, generated and ignored by git
   const artifacts = opts.artifacts && !opts.check;

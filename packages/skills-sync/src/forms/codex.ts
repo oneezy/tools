@@ -13,7 +13,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { CHATGPT_LINE, isAccountMarketplace } from "../chatgpt.js";
-import { catalogOf, pluginsFor, type FormFn } from "../desired.js";
+import { catalogOf, developmentMarketplaceOf, pluginsFor, type FormFn } from "../desired.js";
 import { lexists, toHash } from "../fs.js";
 import {
   addMarketplace,
@@ -122,16 +122,34 @@ export const codex: FormFn = (release, state, _machine, options) => {
   const skipped = new Set<string>();
   const behind: Array<{ p: ReleasePlugin; now: CliPlugin }> = [];
   let wrote = false;
+  const dev = developmentMarketplaceOf(mkt, h.id);
   for (const p of wanted) {
     const id = `${p.id}@${mkt}`;
     for (const other of have.filter((x) => x.id === p.id && x.marketplace !== mkt))
-      out.push({
-        kind: "note",
-        path: where(`plugin ${p.id}@${other.marketplace}`),
-        note: isAccountMarketplace(other.marketplace)
-          ? `the ChatGPT account's copy of ${p.id}: Codex lists its skills a second time beside ${id}; it stays, and ChatGPT keeps it at the release when Justin types there: ${CHATGPT_LINE}`
-          : `lists every skill of ${p.id} a second time beside ${id}; uninstall it by hand: ChatGPT > Plugins > Installed > Uninstall plugin, or codex plugin remove ${p.id}@${other.marketplace}`,
-      });
+      // the development copy `develop setup` added (develop-codex.ts): never removed or switched here; off for the
+      // user, on only in the projects set up for it, so on for the user it doubles the released copy everywhere
+      if (other.marketplace === dev)
+        out.push(
+          other.enabled
+            ? {
+                kind: "conflict",
+                path: where(`plugin ${p.id}@${dev}`),
+                note: `the development copy of ${p.id} is on for every project, so Codex lists its skills a second time beside ${id} in each; run skills-sync develop setup in a Development project to switch it off again`,
+              }
+            : {
+                kind: "note",
+                path: where(`plugin ${p.id}@${dev}`),
+                note: `the development copy of ${p.id}: on only in the projects skills-sync develop setup connected, off everywhere else; it stays`,
+              },
+        );
+      else
+        out.push({
+          kind: "note",
+          path: where(`plugin ${p.id}@${other.marketplace}`),
+          note: isAccountMarketplace(other.marketplace)
+            ? `the ChatGPT account's copy of ${p.id}: Codex lists its skills a second time beside ${id}; it stays, and ChatGPT keeps it at the release when Justin types there: ${CHATGPT_LINE}`
+            : `lists every skill of ${p.id} a second time beside ${id}; uninstall it by hand: ChatGPT > Plugins > Installed > Uninstall plugin, or codex plugin remove ${p.id}@${other.marketplace}`,
+        });
     const current = mine(have, p);
     if (!current) {
       out.push({ kind: "install", path: where(`plugin ${id}`), note: p.version ?? "unversioned" });
