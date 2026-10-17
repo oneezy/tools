@@ -34,6 +34,8 @@ These are documented mechanisms and outstanding test requirements, not successfu
 
 ## Verification still required
 
+The Windows run that settles these is `runbooks/development-plugins-windows.md`. `development-plugins-compatibility.md` tracks what each cloud test and each Windows step has proven.
+
 - Source editing through a project link reaches the original Library; changes trigger one rebuild even with multiple participating projects.
 - Whole-plugin Windows links, local loading and same-name precedence in Claude Code, including account-delivered copies.
 - Codex Desktop local-plugin installation, installation-cache refresh, same-name precedence and project-scoped control of the plugin origins actually installed on this machine.

@@ -48,7 +48,44 @@ skills-sync develop status                                 # what is connected, 
 skills-sync develop remove                                 # take back exactly what setup made
 ```
 
-Setup links `.agents/skills-library` to this package, so an edit made there is an edit here. It also writes the project record `.agents/skills-sync-project.json` and keeps both out of git through `.git/info/exclude`. It refuses any name that is not exactly one Plugin's id. It activates nothing in Claude Code or Codex yet. The Claude Code adapter exists but stays unverified until its Windows proof (#213); the Codex adapter is #214. Once verified, setup builds the selection first, and a failed build activates nothing. In Claude Code the development copy arrives through a local-scope marketplace over `dist/development`, and the released copy is off in that project only. A running chat keeps what it loaded until you type `/reload-plugins` or start a new chat. The research is in `packages/skills-sync/docs/research/`. `skills-sync --help` has the details. The decisions are in `packages/skills-sync/docs/adr`.
+Setup links `.agents/skills-library` to this package, so an edit made there is an edit here. It writes the project record `.agents/skills-sync-project.json` and keeps both out of git through `.git/info/exclude`. It refuses any name that is not exactly one Plugin's id, and a conflict changes nothing.
+
+Setup builds the selection first, and a failed build activates nothing. In Claude Code the development copy arrives through a local-scope marketplace over `dist/development`, with the released copy off in that project only. In Codex it arrives through a development marketplace that is off for every project and on through the project's `.codex/config.toml`. Marketplace and account copies stay installed, and other projects keep them.
+
+**The adapters are unverified until the Windows proof (#217).** Until then setup activates nothing in Claude Code or Codex unless the shell opts in. `status` and `remove` need the same opt-in in the shell where they run, because `remove` refuses a project whose Harness state has no verified adapter. Set it for one window only, never in a profile:
+
+```powershell
+$env:SKILLS_SYNC_TEST_UNVERIFIED_ADAPTERS = "claude-code,codex"
+```
+
+The proof is `packages/skills-sync/docs/runbooks/development-plugins-windows.md`, and what is proven is in `packages/skills-sync/docs/development-plugins-compatibility.md`.
+
+### Status
+
+`skills-sync develop status` reports separate states: the Source alias, each Plugin's last Development build (`ok`, `stale`, `failed`, `not built`), each Harness (`installed`, `active`, `stale`, `on everywhere`, `drifted`), and the watcher (`running` or `stopped`, with the builds it is behind). Installed is not loaded: a chat keeps the copy it loaded when it started. Exit 1 means a problem is listed.
+
+### Reload
+
+- **Claude Code.** Type `/reload-plugins` in the open chat, or start a new chat. Skills Sync cannot reload a running chat.
+- **Codex.** A rebuild reaches Codex only when setup adds it again: run `skills-sync develop setup` in the project, then restart the ChatGPT desktop app (a Codex CLI needs a new session).
+
+Nothing here restarts or interrupts a chat.
+
+### Switch off
+
+`skills-sync develop remove` in each project takes back exactly what setup made, keeps anything changed since, and never touches the source or `dist/development`. `--plan` previews it. Marketplace Plugins stay installed. Claude Code keeps `oneezy-skills-development` as an inactive entry in its marketplace list (ADR-0006). To delete the output after the last project is removed, follow ADR-0008.
+
+### Recovery
+
+| Symptom | Do |
+| --- | --- |
+| Setup prints a conflict | Nothing changed. Fix what it names and run setup again. `--plan` previews. |
+| `develop build` says `failed` or `stale` | Fix the error line under it (a `SKILL.md` frontmatter problem). The last good output stays in use meanwhile. |
+| Status says the watcher is `stopped` | Run `skills-sync develop watch` in a terminal. It builds what changed while it was stopped. |
+| A chat shows the old text | See Reload. |
+| Codex status says `on everywhere` | Run `skills-sync develop setup` in a Development project: it switches the development copy off again. |
+| `remove` refuses ("no verified adapter") | Set the opt-in above in that shell, then run `remove` again. |
+| Setup or remove stopped part-way | Run it again. A failed Harness command leaves no record, so the retry finishes the job, and repeated runs change nothing. |
 
 ## Development watcher
 
