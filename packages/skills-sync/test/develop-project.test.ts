@@ -7,7 +7,7 @@ import { spawnSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import { afterEach, test } from "vite-plus/test";
-import { removeProject, setupProject, type HarnessAdapter } from "../src/develop-project.js";
+import { projectStatus, removeProject, setupProject, type HarnessAdapter } from "../src/develop-project.js";
 import { isLink, linkTarget } from "../src/fs.js";
 import { Library } from "../src/library.js";
 import { Report } from "../src/plan.js";
@@ -705,4 +705,49 @@ test("when a later adapter's commands fail, setup takes back the earlier ones; o
     { first: { plugins: ["play"] } },
     "the record holds only what is still activated, so develop remove can take it back",
   );
+});
+
+/** A Claude Code stand-in that writes the project file its excludes name, verified or not. */
+function excludingAdapter(verified: boolean): HarnessAdapter {
+  return {
+    harness: "claude-code",
+    verified,
+    excludes: ["/.claude/settings.local.json"],
+    setup: (ctx) => {
+      const report = new Report();
+      const file = path.join(ctx.project, ".claude", "settings.local.json");
+      if (!fs.existsSync(file)) report.add({ kind: "write", path: file, payload: "{}\n", expectedHash: null });
+      return { report, owned: { version: 1 } };
+    },
+    remove: () => new Report(),
+  };
+}
+
+test("setup in a shell where the adapter is unverified keeps its exclude entries while the record holds its state", () => {
+  const { lib, a } = machineWithProjectsSync();
+  setupProject(a, new Library(lib), ["play"], { plan: false, adapters: [excludingAdapter(true)] });
+
+  const again = setupProject(a, new Library(lib), [], { plan: false, adapters: [excludingAdapter(false)] });
+
+  assert.deepEqual(again.conflicts(), []);
+  assert.match(
+    fs.readFileSync(path.join(a, ".git", "info", "exclude"), "utf8"),
+    /^\/\.claude\/settings\.local\.json$/m,
+  );
+  assert.equal(gitIn(a, "status", "--porcelain", "--untracked-files=all"), "?? README.md\n");
+});
+
+test("status and setup name a Harness the record holds state for but this shell cannot manage, and the switch it needs", () => {
+  const { lib, a } = machineWithProjectsSync();
+  setupProject(a, new Library(lib), ["play"], { plan: false, adapters: [excludingAdapter(true)] });
+
+  const status = projectStatus(a, null, [excludingAdapter(false)]);
+  const setup = setupProject(a, new Library(lib), [], { plan: false, adapters: [excludingAdapter(false)] });
+
+  const claude = status.harnesses.find((h) => h.harness === "claude-code")!;
+  assert.equal(claude.state, "activated, adapter unverified");
+  assert.match(claude.note, /SKILLS_SYNC_TEST_UNVERIFIED_ADAPTERS=claude-code/);
+  const notes = setup.actions.map((x) => x.note ?? "").join("\n");
+  assert.match(notes, /claude-code: activated, adapter unverified: .*SKILLS_SYNC_TEST_UNVERIFIED_ADAPTERS=claude-code/);
+  assert.doesNotMatch(notes, /claude-code: not activated/);
 });

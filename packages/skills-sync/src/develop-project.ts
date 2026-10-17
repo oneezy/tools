@@ -18,6 +18,7 @@ import {
   readProjects,
   readRecord,
   RECORD_PATH,
+  TEST_SWITCH,
   testSwitch,
   type HarnessAdapter,
   type ProjectRecord,
@@ -91,10 +92,21 @@ export function gitExcludeFile(project: string): string | null {
 /** The paths setup keeps out of git, as exclude patterns anchored at the project root. */
 const EXCLUDED = [`/${ALIAS_PATH}`, `/${RECORD_PATH}`];
 
-/** The block's entries: setup's own, then each verified adapter's, once each in that order. */
-function excludeEntries(adapters: HarnessAdapter[]): string[] {
-  return [...new Set([...EXCLUDED, ...adapters.filter((a) => a.verified).flatMap((a) => a.excludes ?? [])])];
+/**
+ * The block's entries: setup's own, then the excludes of each adapter that is verified or owns state in the record,
+ * once each in that order. While the record holds any Harness state the block never shrinks: the previous entries stay,
+ * so a shell where an adapter is unverified never lets git see that adapter's files.
+ */
+function excludeEntries(adapters: HarnessAdapter[], previous: ProjectRecord | null): string[] {
+  const owning = (a: HarnessAdapter) => a.verified || previous?.harnesses[a.harness] !== undefined;
+  const kept = Object.keys(previous?.harnesses ?? {}).length ? (previous?.exclude?.entries ?? []) : [];
+  return [...new Set([...EXCLUDED, ...adapters.filter(owning).flatMap((a) => a.excludes ?? []), ...kept])];
 }
+
+/** What a Harness is when the record holds its state but this shell has no verified adapter to manage it. */
+export const UNVERIFIED_STATE = "activated, adapter unverified";
+const unverifiedNote = (harness: string) =>
+  `the record holds its state, and this shell has no verified adapter for it: run with ${TEST_SWITCH}=${harness} to manage it`;
 
 /** The exclude file's text with this setup's block in it (once, at the end), or without it. */
 export function excludeText(before: string, present: boolean, entries: string[] = EXCLUDED): string {
@@ -174,7 +186,7 @@ export function setupProject(project: string, lib: Library, plugins: string[], o
   let exclude: ProjectRecord["exclude"] = null;
   if (excludeFile) {
     const exists = lexists(excludeFile);
-    const entries = excludeEntries(adapters);
+    const entries = excludeEntries(adapters, previous);
     exclude = { file: excludeFile, created: previous?.exclude?.created ?? !exists, entries };
     const before = exists ? fs.readFileSync(excludeFile) : null;
     try {
@@ -194,7 +206,15 @@ export function setupProject(project: string, lib: Library, plugins: string[], o
     harnesses: { ...previous?.harnesses },
   };
   for (const adapter of adapters.filter((x) => !x.verified))
-    report.add({ kind: "note", path: project, note: `${adapter.harness}: not activated: its adapter is not verified` });
+    report.add({
+      kind: "note",
+      path: project,
+      loud: next.harnesses[adapter.harness] !== undefined,
+      note:
+        next.harnesses[adapter.harness] === undefined
+          ? `${adapter.harness}: not activated: its adapter is not verified`
+          : `${adapter.harness}: ${UNVERIFIED_STATE}: ${unverifiedNote(adapter.harness)}; left as it is`,
+    });
   const activating = adapters.filter((x) => x.verified);
   // build and validate before the first activation: a failed build leaves the project's Harness configuration alone
   const build = activating.length ? buildDevelopment(lib, { plugins: next.plugins, plan: options.plan }) : null;
@@ -246,7 +266,8 @@ export function setupProject(project: string, lib: Library, plugins: string[], o
   write(last, recordPath, JSON.stringify(next, null, 2) + "\n", before);
   apply(last, options.plan);
   report.merge(last);
-  const active = Object.keys(next.harnesses);
+  const managed = (h: string) => adapters.some((a) => a.harness === h && a.verified);
+  const active = Object.keys(next.harnesses).map((h) => (managed(h) ? h : `${h} (adapter unverified in this shell)`));
   report.add({
     kind: "note",
     path: project,
@@ -303,7 +324,7 @@ export function removeProject(project: string, options: ProjectOptions): Report 
       report.add({
         kind: "conflict",
         path: recordPath,
-        note: `${harness} owns state here, and no verified adapter for it is in this version; nothing removed`,
+        note: `${harness} owns state here, and no verified adapter for it is in this version; nothing removed (run with ${TEST_SWITCH}=${harness} to remove it)`,
       });
       continue;
     }
@@ -530,7 +551,8 @@ export function projectStatus(project: string, lib: Library | null, adapters = A
   for (const h of s.harnesses) {
     const adapter = adapters.find((x) => x.harness === h.harness && x.verified);
     const owned = record.harnesses[h.harness] ?? null;
-    if (adapter?.status)
+    if (!adapter && owned !== null) Object.assign(h, { state: UNVERIFIED_STATE, note: unverifiedNote(h.harness) });
+    else if (adapter?.status)
       Object.assign(h, adapter.status({ project, library, plugins: record.plugins, owned, plan: true, build: null }));
   }
   const builds = readDevelopmentStatus(library)?.plugins ?? {};
