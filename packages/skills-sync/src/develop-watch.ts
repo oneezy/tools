@@ -1,5 +1,5 @@
-// Watching the Library's source: one recursive watch on the Library root, events for generated folders dropped by
-// name, a quiet period (debounce) before anything runs, and digests of the source that tell an edit apart from a save
+// Watching the Library's source: one recursive watch on the Library root, events outside the source folders dropped by
+// path, a quiet period (debounce) before anything runs, and digests of the source that tell an edit apart from a save
 // that changed nothing. Two watchers use it: `develop --watch`, which keeps the loose-skill links in step, and the
 // Development watcher (develop-watcher.ts), which rebuilds the Development builds.
 import fs from "node:fs";
@@ -7,8 +7,13 @@ import path from "node:path";
 import { createHash } from "node:crypto";
 import { cmp } from "./sources.js";
 
-/** Folders under the Library that are never source: git, tooling, and generated output (dist/ holds the Development builds). */
+/**
+ * Folders at the Library root that are never source: git, tooling, and generated output (dist/ holds the Development
+ * builds). Only the root's: inside a skill, a dist/ or node_modules/ is packaged like any other file, so it is source.
+ */
 const ignored = new Set([".git", "node_modules", "dist", "__pycache__"]);
+const skipped = (root: string, dir: string, name: string) =>
+  ignored.has(name) && path.resolve(dir) === path.resolve(root);
 
 export function developmentSnapshot(root: string) {
   const content = createHash("sha256");
@@ -16,7 +21,7 @@ export function developmentSnapshot(root: string) {
   const walk = (dir: string) => {
     if (!fs.existsSync(dir)) return;
     for (const entry of fs.readdirSync(dir, { withFileTypes: true }).sort((a, b) => a.name.localeCompare(b.name))) {
-      if (ignored.has(entry.name) || entry.isSymbolicLink()) continue;
+      if (skipped(root, dir, entry.name) || entry.isSymbolicLink()) continue;
       const file = path.join(dir, entry.name);
       if (entry.isDirectory()) walk(file);
       else if (entry.isFile()) {
@@ -147,7 +152,7 @@ export class BuildInputs {
         return;
       }
       for (const entry of entries.sort((a, b) => cmp(a.name, b.name))) {
-        if (ignored.has(entry.name) || entry.isSymbolicLink()) continue;
+        if (skipped(this.root, dir, entry.name) || entry.isSymbolicLink()) continue;
         const file = path.join(dir, entry.name);
         if (entry.isDirectory()) walk(file);
         else if (entry.isFile()) add(file);
