@@ -2,11 +2,13 @@
 // project's Source alias (.agents/skills-library) to the Library root, keeps both out of git through a marked block in
 // the repository's info/exclude, and writes the project record (.agents/skills-sync-project.json): the Library, the
 // selected Plugins, and what setup made, so that remove takes away exactly that and nothing a person changed since.
-// Nothing here activates a Plugin in a Harness: that is a Harness adapter's job, and none is verified yet.
+// Activating a Plugin in a Harness is a Harness adapter's job: setup builds the selection first when a verified adapter
+// will run, hands it the build, applies the actions it planned with its own, runs its Harness CLI commands, and only then
+// writes the record. No adapter is verified yet.
 import fs from "node:fs";
 import path from "node:path";
 import { hasLinkedParent, isDir, isLink, lexists, linkTarget, real, samePath, toHash, under } from "./fs.js";
-import { developmentDirs, readDevelopmentStatus } from "./develop-build.js";
+import { buildDevelopment, developmentDirs, readDevelopmentStatus, type DevelopmentBuild } from "./develop-build.js";
 import { Library } from "./library.js";
 import { apply, Report } from "./plan.js";
 import { cmp, readConfig } from "./sources.js";
@@ -29,8 +31,12 @@ export interface ProjectRecord {
   alias: string;
   /** folders setup made, relative to the project: removed by remove when they are empty again */
   created: string[];
-  /** the git exclude file holding this setup's block, and whether setup made the file; null outside git */
-  exclude: { file: string; created: boolean } | null;
+  /**
+   * the git exclude file holding this setup's block, whether setup made the file, and the entries the block lists (its
+   * own two and the verified adapters' excludes; absent in a record written before adapters could add any); null
+   * outside git
+   */
+  exclude: { file: string; created: boolean; entries?: string[] } | null;
   /** what each Harness adapter owns in this project, by Harness id; empty while no adapter is verified */
   harnesses: Record<string, unknown>;
 }
@@ -43,6 +49,27 @@ export interface AdapterContext {
   /** what this adapter's last setup returned as owned (record.harnesses[harness]); null the first time */
   owned: unknown;
   plan: boolean;
+  /**
+   * setup: the Development build of the selection, made before any adapter is asked (on plan: previewed, nothing
+   * written). No selected Plugin in it is failed: setup refuses that before it calls an adapter. A stale one keeps its
+   * last successful output. null in remove and status.
+   */
+  build: DevelopmentBuild | null;
+}
+
+/**
+ * What an adapter's setup or remove gives back. `report` holds the file actions core applies with its own, all or none
+ * (install and uninstall actions in it are only shown: apply() never runs them). `commands` is the adapter's Harness
+ * CLI work (claude plugin ..., codex plugin ...): core calls it at most once, never on plan, and merges the Report it
+ * returns; an action in it marked failed stops the run. In setup it runs after every planned action is applied and
+ * before the record is written, so a failure leaves no record and the next setup tries again; in remove it runs before
+ * any planned action, so a failure keeps the whole setup, record included, for a retry. On a failure the adapter undoes
+ * what its own commands did in that call. Reading Harness state while planning (a plugin listing) is allowed; writing
+ * it is not.
+ */
+export interface AdapterResult {
+  report: Report;
+  commands?: () => Report;
 }
 
 /**
@@ -54,8 +81,14 @@ export interface AdapterContext {
 export interface HarnessAdapter {
   harness: string;
   verified: boolean;
-  setup(ctx: AdapterContext): { report: Report; owned: unknown };
-  remove(ctx: AdapterContext): Report;
+  /**
+   * project files this adapter's setup or commands may create, as exclude patterns anchored at the project root
+   * (`/.claude/settings.local.json`): setup lists them in the exclude block, so git never sees them
+   */
+  excludes?: string[];
+  /** `owned` is kept as record.harnesses[harness]; null or undefined keeps nothing for this Harness */
+  setup(ctx: AdapterContext): AdapterResult & { owned: unknown };
+  remove(ctx: AdapterContext): AdapterResult | Report;
   status?(ctx: AdapterContext): { state: string; note: string };
 }
 
@@ -99,7 +132,11 @@ export function readRecord(project: string): { record: ProjectRecord | null; err
       // setup only ever makes .agents; anything else here would point remove outside what setup made
       !Array.isArray(r.created) ||
       !r.created.every((d) => d === ".agents") ||
-      (r.exclude !== null && (typeof r.exclude?.file !== "string" || typeof r.exclude.created !== "boolean")) ||
+      (r.exclude !== null &&
+        (typeof r.exclude?.file !== "string" ||
+          typeof r.exclude.created !== "boolean" ||
+          (r.exclude.entries !== undefined &&
+            (!Array.isArray(r.exclude.entries) || !r.exclude.entries.every((e) => typeof e === "string"))))) ||
       typeof r.harnesses !== "object" ||
       r.harnesses === null
     )
@@ -126,15 +163,20 @@ export function gitExcludeFile(project: string): string | null {
 /** The paths setup keeps out of git, as exclude patterns anchored at the project root. */
 const EXCLUDED = [`/${ALIAS_PATH}`, `/${RECORD_PATH}`];
 
+/** The block's entries: setup's own, then each verified adapter's, once each in that order. */
+function excludeEntries(adapters: HarnessAdapter[]): string[] {
+  return [...new Set([...EXCLUDED, ...adapters.filter((a) => a.verified).flatMap((a) => a.excludes ?? [])])];
+}
+
 /** The exclude file's text with this setup's block in it (once, at the end), or without it. */
-export function excludeText(before: string, present: boolean): string {
+export function excludeText(before: string, present: boolean, entries: string[] = EXCLUDED): string {
   const start = before.indexOf(START);
   const end = before.indexOf(END);
   if (start < 0 !== end < 0 || (start >= 0 && end < start)) throw new Error("incomplete development exclude markers");
   const rest = start < 0 ? before : before.slice(0, start) + before.slice(end + END.length).replace(/^\r?\n/, "");
   if (!present) return rest;
   const head = rest && !rest.endsWith("\n") ? `${rest}\n` : rest;
-  return `${head}${START}\n${EXCLUDED.join("\n")}\n${END}\n`;
+  return `${head}${START}\n${entries.join("\n")}\n${END}\n`;
 }
 
 /** The block as this setup writes it; anything else between the markers is a person's edit. */
@@ -190,14 +232,16 @@ export function setupProject(project: string, lib: Library, plugins: string[], o
   else if (isLink(aliasPath) && samePath(real(aliasPath), library)) report.add({ kind: "skip", path: aliasPath });
   else conflict(aliasPath, "Something else is at the Source alias; left untouched");
 
+  const adapters = options.adapters ?? ADAPTERS;
   const excludeFile = gitExcludeFile(project);
   let exclude: ProjectRecord["exclude"] = null;
   if (excludeFile) {
     const exists = lexists(excludeFile);
-    exclude = { file: excludeFile, created: previous?.exclude?.created ?? !exists };
+    const entries = excludeEntries(adapters);
+    exclude = { file: excludeFile, created: previous?.exclude?.created ?? !exists, entries };
     const before = exists ? fs.readFileSync(excludeFile) : null;
     try {
-      write(report, excludeFile, excludeText(before?.toString("utf8") ?? "", true), before);
+      write(report, excludeFile, excludeText(before?.toString("utf8") ?? "", true, entries), before);
     } catch (e) {
       conflict(excludeFile, `${String(e)}; left untouched`);
     }
@@ -212,19 +256,35 @@ export function setupProject(project: string, lib: Library, plugins: string[], o
     exclude,
     harnesses: { ...previous?.harnesses },
   };
-  for (const adapter of options.adapters ?? ADAPTERS) {
-    if (!adapter.verified) {
+  for (const adapter of adapters.filter((x) => !x.verified))
+    report.add({ kind: "note", path: project, note: `${adapter.harness}: not activated: its adapter is not verified` });
+  const activating = adapters.filter((x) => x.verified);
+  // build and validate before the first activation: a failed build leaves the project's Harness configuration alone
+  const build = activating.length ? buildDevelopment(lib, { plugins: next.plugins, plan: options.plan }) : null;
+  if (build?.refused) conflict(build.output, `Development build refused: ${build.refused}; nothing activated`);
+  for (const p of build?.plugins ?? []) {
+    if (p.state === "failed")
+      conflict(
+        p.output ?? build!.output,
+        `${p.id}: development build failed: ${p.errors.join("; ")}; nothing activated`,
+      );
+    if (p.state === "stale")
       report.add({
         kind: "note",
-        path: project,
-        note: `${adapter.harness}: not activated: its adapter is not verified`,
+        path: p.output!,
+        loud: true,
+        note: `${p.id}: development build failed (${p.errors.join("; ")}); its last successful build is used`,
       });
-      continue;
-    }
+  }
+  if (report.conflicts().length) return report;
+  const commands: (() => Report)[] = [];
+  for (const adapter of activating) {
     const ctx = { project, library: lib, plugins: next.plugins, owned: previous?.harnesses[adapter.harness] ?? null };
-    const planned = adapter.setup({ ...ctx, plan: options.plan });
+    const planned = adapter.setup({ ...ctx, plan: options.plan, build });
     report.merge(planned.report);
-    next.harnesses[adapter.harness] = planned.owned;
+    if (planned.commands) commands.push(planned.commands);
+    if (planned.owned === null || planned.owned === undefined) delete next.harnesses[adapter.harness];
+    else next.harnesses[adapter.harness] = planned.owned;
   }
   if (hasLinkedParent(path.dirname(projectsFile(lib))))
     conflict(projectsFile(lib), "A parent folder is a link; left untouched");
@@ -232,6 +292,7 @@ export function setupProject(project: string, lib: Library, plugins: string[], o
   if (report.conflicts().length) return report;
   apply(report, options.plan);
   if (report.actions.some((a) => a.failed)) return report;
+  if (!options.plan && !runCommands(report, commands)) return report;
   const last = new Report();
   const before = lexists(recordPath) ? fs.readFileSync(recordPath) : null;
   write(last, recordPath, JSON.stringify(next, null, 2) + "\n", before);
@@ -287,6 +348,7 @@ export function removeProject(project: string, options: ProjectOptions): Report 
   }
   const kept = (file: string, why: string) => report.add({ kind: "note", path: file, note: why, loud: true });
   const lib = new Library(record.library);
+  const commands: (() => Report)[] = [];
   for (const [harness, owned] of Object.entries(record.harnesses)) {
     const adapter = (options.adapters ?? ADAPTERS).find((x) => x.harness === harness && x.verified);
     if (!adapter) {
@@ -297,7 +359,19 @@ export function removeProject(project: string, options: ProjectOptions): Report 
       });
       continue;
     }
-    report.merge(adapter.remove({ project, library: lib, plugins: record.plugins, owned, plan: options.plan }));
+    const planned = adapter.remove({
+      project,
+      library: lib,
+      plugins: record.plugins,
+      owned,
+      plan: options.plan,
+      build: null,
+    });
+    if (planned instanceof Report) report.merge(planned);
+    else {
+      report.merge(planned.report);
+      if (planned.commands) commands.push(planned.commands);
+    }
   }
   if (report.conflicts().length) return report;
   if (hasLinkedParent(path.dirname(recordPath))) {
@@ -313,7 +387,7 @@ export function removeProject(project: string, options: ProjectOptions): Report 
   if (file && lexists(file)) {
     const before = fs.readFileSync(file);
     const block = blockOf(before.toString("utf8"));
-    const ours = blockOf(excludeText("", true));
+    const ours = blockOf(excludeText("", true, record.exclude?.entries ?? EXCLUDED));
     const others = connectedWorktrees(project, file);
     if (block === null) {
       // gone already
@@ -328,6 +402,11 @@ export function removeProject(project: string, options: ProjectOptions): Report 
   }
   if (isDir(lib.root) && !hasLinkedParent(path.dirname(projectsFile(lib)))) planProjects(report, lib, project, null);
   report.add({ kind: "delete", path: recordPath });
+  // the Harnesses first: when one refuses, nothing of the setup is taken away and the record stays for a retry
+  if (!options.plan && !runCommands(report, commands)) {
+    report.actions = report.actions.filter((a) => a.kind === "conflict" || a.kind === "note" || a.failed);
+    return report;
+  }
   apply(report, options.plan);
   if (report.actions.some((a) => a.failed)) return report;
   const leaving = new Set(report.changes().map((a) => path.resolve(a.path)));
@@ -340,6 +419,16 @@ export function removeProject(project: string, options: ProjectOptions): Report 
     report.add({ kind: "delete", path: dir });
   }
   return report;
+}
+
+/** Run each adapter's commands in turn, merging what they did; false (and the rest not run) once an action failed. */
+function runCommands(report: Report, commands: (() => Report)[]): boolean {
+  for (const run of commands) {
+    const done = run();
+    report.merge(done);
+    if (done.actions.some((a) => a.failed)) return false;
+  }
+  return true;
 }
 
 /** The other worktrees of the repository sharing this exclude file that are Development projects too. */
@@ -452,7 +541,7 @@ export function projectStatus(project: string, lib: Library | null, adapters = A
     const adapter = adapters.find((x) => x.harness === h.harness && x.verified);
     const owned = record.harnesses[h.harness] ?? null;
     if (adapter?.status)
-      Object.assign(h, adapter.status({ project, library, plugins: record.plugins, owned, plan: true }));
+      Object.assign(h, adapter.status({ project, library, plugins: record.plugins, owned, plan: true, build: null }));
   }
   const builds = readDevelopmentStatus(library)?.plugins ?? {};
   const dirs = developmentDirs(library);
