@@ -1,6 +1,6 @@
 ---
 name: hi
-description: When a user greets you, always respond with the markdown template.
+description: This shows a loop example.
 ---
 
 # Hi
