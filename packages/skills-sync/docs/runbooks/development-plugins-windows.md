@@ -27,7 +27,7 @@ Paste this block into every PowerShell 7 window used in this run, watcher window
 $Main       = "V:\dev\tools"                          # your normal tools checkout
 $Tools      = "V:\dev\tools-issue-217-windows-proof"  # the worktree step 2 makes
 $Lib        = "$Tools\packages\skills"
-$Root       = "C:\dev\proof-217"
+$Root       = "V:\dev\proof-217"
 $P1 = "$Root\P1"; $P2 = "$Root\P2"; $N = "$Root\N"; $P3 = "$Root\P3"
 $Evidence   = "$Root\evidence"
 $ClaudeHome = if ($env:CLAUDE_CONFIG_DIR) { $env:CLAUDE_CONFIG_DIR } else { "$HOME\.claude" }
@@ -94,7 +94,7 @@ Take one screenshot of the page where Plugins are switched on for the Claude acc
 The launcher is the global `skills-sync`, linked to the checkout this step builds. Use a worktree so your own checkout stays as it is.
 
 ```powershell
-$Branch = "feat/209-shared-dev-plugins"   # before the orchestrator merged #215 into it, use feat/215-keep-dev-selection-during-sync
+$Branch = "feat/209-shared-dev-plugins"
 git -C $Main fetch origin
 git -C $Main worktree add --detach $Tools "origin/$Branch"
 git -C $Tools rev-parse HEAD
