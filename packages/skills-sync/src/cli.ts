@@ -21,6 +21,7 @@ import { runUnlink } from "./commands/unlink.js";
 import { develop } from "./develop.js";
 import { buildDevelopment, DEVELOPMENT_PATH, type DevelopmentBuild } from "./develop-build.js";
 import { watchDevelopment } from "./develop-watch.js";
+import { runWatcher } from "./develop-watcher.js";
 import {
   findProject,
   projectStatus,
@@ -75,6 +76,13 @@ Commands
                    develop status: the project's Library, alias, each selected Plugin's development build and Harness
                    activation, and the Library's connected projects (--json; exit 1 on a problem); writes nothing.
                    develop remove: take back exactly what setup made, keeping anything changed since and the source.
+                   develop watch: the Library's one Development watcher, in this terminal's foreground: it builds the
+                   Plugins the connected projects select as their source changes (edits through any project's alias
+                   are one edit of the one source; identical saves and generated output do nothing) and once as it
+                   starts, which catches up on edits made while none ran. The first terminal owns it; a later launch
+                   names that owner (pid, project, start) and exits 0, starting nothing. Ctrl+C or closing the
+                   terminal stops it; nothing detaches, nothing starts it with the machine. Stopping keeps the builds;
+                   develop status shows the watcher running or stopped and the builds it is behind.
                    Run them from any project through a global install (npm install --global, pnpm skills:dev:launcher).
   sync (default)   bring every detected harness to its one form (ADR-0007): Claude Code the account plugins claude.ai
                    delivers, Codex the library's plugins from GitHub, Hermes its plugins; and the skills block in each
@@ -217,7 +225,7 @@ Options
                          refuses one)
   --junctions            library commands, Windows: make junctions only
   --watch                develop: watch local skill changes; ignored by legacy machine commands
-                         develop setup, status, remove: --root <project> names the project; --repo <library> the Library
+                         develop setup, status, remove, watch: --root <project> names the project; --repo <library> the Library
                          (setup only, the first time; later the project record names it; $SKILLS_REPO is the default)
   -h, --help
 
@@ -494,6 +502,7 @@ async function libraryCommand(args: Args): Promise<void> {
   const log = (m: string) => (args.json ? undefined : process.stderr.write(m + "\n"));
   const setup = new Report();
   if (args.command === "develop" && args.positional[0] === "build") return runDevelopBuild(args);
+  if (args.command === "develop" && args.positional[0] === "watch") return runDevelopWatch(args);
   if (args.command === "develop" && ["setup", "status", "remove"].includes(args.positional[0]))
     return runDevelopProject(args);
   if (args.command === "develop") {
@@ -942,6 +951,26 @@ function runDevelopProject(args: Args): void {
   printReport(report, args, { project });
 }
 
+/**
+ * develop watch: own the Library's one Development watcher in this terminal, or name the terminal that owns it. The
+ * Library is --repo, else the one the project's record names, else $SKILLS_REPO.
+ */
+async function runDevelopWatch(args: Args): Promise<void> {
+  if (args.positional.length > 1) bail("develop watch takes no Plugin: it builds what the connected projects select");
+  if (args.plan || args.json) bail("develop watch takes no --plan or --json; develop status --json shows the watcher");
+  const project = args.root ? path.resolve(args.root) : findProject(process.cwd());
+  const { record } = readRecord(project);
+  const repo = args.repo ?? record?.library ?? process.env.SKILLS_REPO;
+  if (!repo) bail("develop watch needs --repo <library>, or a Development project to run in");
+  const lib = new Library(real(path.resolve(repo)));
+  if (!lib.hasConfig())
+    bail(`no ${path.basename(lib.configFile)} in ${lib.root}; develop watch needs a config library`);
+  process.exitCode = await runWatcher(lib, {
+    project: record ? project : null,
+    print: (line) => process.stdout.write(line + "\n"),
+  });
+}
+
 function projectStatusText(s: ProjectStatus): string {
   const out: string[] = [];
   if (!s.registered)
@@ -954,6 +983,11 @@ function projectStatusText(s: ProjectStatus): string {
     for (const p of s.plugins)
       out.push(`  plugin ${p.id}: development build ${p.build}${p.output ? ` (${p.output})` : ""}`);
     for (const h of s.harnesses) out.push(`  ${h.harness}: ${h.state} (${h.note})`);
+  }
+  if (s.watcher) {
+    const w = s.watcher;
+    out.push(`Development watcher: ${w.state} (${w.note})`);
+    if (w.behind.length) out.push(`  not built yet: ${w.behind.join(", ")}; develop watch builds them as it starts`);
   }
   if (s.projects.length) {
     out.push(`Projects connected to ${s.library}:`);
