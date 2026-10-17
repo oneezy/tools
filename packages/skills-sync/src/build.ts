@@ -689,11 +689,18 @@ function notice(pkg: Package, config: Config, head: Head, commitOverride?: strin
   ].join("\n");
 }
 
+/** The name both root catalogs give the Library's marketplace: <owner>-<name>, or the name alone without an owner. */
+export function marketplaceName(config: Config, lib: Library): string {
+  const l = config.library ?? {};
+  const name = l.name ?? path.basename(lib.root);
+  return l.owner ? `${l.owner}-${name}` : name;
+}
+
 /** The two root catalogs, file -> bytes: Claude Code's and Codex's, each entry pointing at ./plugins/<id> for every plugin built. */
 function catalogs(config: Config, lib: Library, ids: string[]): Map<string, Buffer> {
   const l = config.library ?? {};
   const name = l.name ?? path.basename(lib.root);
-  const marketplace = l.owner ? `${l.owner}-${name}` : name;
+  const marketplace = marketplaceName(config, lib);
   const description = (id: string) => config.plugins[id].description;
   const claude = {
     name: marketplace,

@@ -475,3 +475,179 @@ test("remove refuses a record edited to own something setup never makes", async 
   assert.deepEqual(snapshot(a), before);
   assert.ok(fs.existsSync(outside));
 });
+
+/** A verified adapter whose Harness CLI work is a call log: what a real adapter would run through `claude` or `codex`. */
+function commandAdapter(calls: string[], options: { fail?: "setup" | "remove"; excludes?: string[] } = {}) {
+  const ran = (what: string, failed: boolean) => {
+    const report = new Report();
+    calls.push(what);
+    report.add(
+      failed
+        ? { kind: "conflict", path: what, note: `${what} refused`, failed: true }
+        : { kind: "install", path: what, note: `${what} ran` },
+    );
+    return report;
+  };
+  const adapter: HarnessAdapter = {
+    harness: "fake",
+    verified: true,
+    excludes: options.excludes,
+    setup: (ctx) => ({
+      report: new Report(),
+      owned: { plugins: ctx.plugins },
+      commands: () => ran(`setup ${ctx.plugins.join(",")}`, options.fail === "setup"),
+    }),
+    remove: () => ({ report: new Report(), commands: () => ran("remove", options.fail === "remove") }),
+  };
+  return adapter;
+}
+
+test("an adapter's commands run after setup's planned actions and before the record, never on plan", () => {
+  const { lib, a } = machineWithProjectsSync();
+  const calls: string[] = [];
+  const base = commandAdapter(calls);
+  const seen: boolean[] = [];
+  const watched: HarnessAdapter = {
+    ...base,
+    setup: (ctx) => {
+      const r = base.setup(ctx);
+      const commands = r.commands!;
+      return {
+        ...r,
+        commands: () => {
+          // the alias (applied by core) is in place, the record is not written yet
+          seen.push(isLink(alias(a)), fs.existsSync(record(a)));
+          return commands();
+        },
+      };
+    },
+  };
+  const adapters = [watched];
+
+  const planned = setupProject(a, new Library(lib), ["play"], { plan: true, adapters });
+  assert.deepEqual(calls, [], "plan runs no Harness command");
+  assert.equal(fs.existsSync(record(a)), false);
+  assert.deepEqual(planned.conflicts(), []);
+
+  const done = setupProject(a, new Library(lib), ["play"], { plan: false, adapters });
+  assert.deepEqual(done.conflicts(), []);
+  assert.deepEqual(calls, ["setup play"]);
+  assert.deepEqual(seen, [true, false]);
+  assert.deepEqual(JSON.parse(fs.readFileSync(record(a), "utf8")).harnesses, { fake: { plugins: ["play"] } });
+});
+
+test("a failed adapter command leaves no record, so the next setup tries again", () => {
+  const { lib, a } = machineWithProjectsSync();
+  const calls: string[] = [];
+
+  const r = setupProject(a, new Library(lib), ["play"], {
+    plan: false,
+    adapters: [commandAdapter(calls, { fail: "setup" })],
+  });
+
+  assert.match(
+    r
+      .conflicts()
+      .map((x) => x.note)
+      .join("\n"),
+    /setup play refused/,
+  );
+  assert.equal(fs.existsSync(record(a)), false);
+  const again = setupProject(a, new Library(lib), ["play"], { plan: false, adapters: [commandAdapter(calls)] });
+  assert.deepEqual(again.conflicts(), []);
+  assert.ok(fs.existsSync(record(a)));
+});
+
+test("remove runs an adapter's commands first, and keeps the whole setup when one fails", () => {
+  const { lib, a } = machineWithProjectsSync();
+  const calls: string[] = [];
+  setupProject(a, new Library(lib), ["play"], { plan: false, adapters: [commandAdapter(calls)] });
+  const connected = snapshot(a);
+
+  assert.deepEqual(removeProject(a, { plan: true, adapters: [commandAdapter(calls)] }).conflicts(), []);
+  const failed = removeProject(a, { plan: false, adapters: [commandAdapter(calls, { fail: "remove" })] });
+
+  assert.match(
+    failed
+      .conflicts()
+      .map((x) => x.note)
+      .join("\n"),
+    /remove refused/,
+  );
+  assert.deepEqual(snapshot(a), connected, "alias, record and exclude block all stay for a retry");
+  const removed = removeProject(a, { plan: false, adapters: [commandAdapter(calls)] });
+  assert.deepEqual(removed.conflicts(), []);
+  assert.equal(fs.existsSync(record(a)), false);
+  assert.deepEqual(calls, ["setup play", "remove", "remove"]);
+});
+
+test("setup builds the selection before a verified adapter activates it, and a failed first build activates nothing", () => {
+  const { lib, a } = machineWithProjectsSync();
+  const builds: (string | null)[][] = [];
+  const watching: HarnessAdapter = {
+    harness: "fake",
+    verified: true,
+    setup: (ctx) => {
+      builds.push(ctx.build!.plugins.map((p) => `${p.id} ${p.state} ${p.output && fs.existsSync(p.output)}`));
+      return { report: new Report(), owned: { on: true } };
+    },
+    remove: () => new Report(),
+  };
+  const broken = path.join(lib, "skills", "play", "play-hi", "SKILL.md");
+  fs.writeFileSync(broken, "no frontmatter\n");
+  const before = snapshot(a);
+
+  const refused = setupProject(a, new Library(lib), ["play"], { plan: false, adapters: [watching] });
+
+  assert.match(
+    refused
+      .conflicts()
+      .map((x) => x.note)
+      .join("\n"),
+    /play: development build failed: .*SKILL\.md.*; nothing activated/,
+  );
+  assert.deepEqual(builds, [], "the adapter is never asked");
+  assert.deepEqual(snapshot(a), before, "the project is left as it was");
+
+  fs.writeFileSync(broken, skill("play-hi"));
+  const planned = setupProject(a, new Library(lib), ["play"], { plan: true, adapters: [watching] });
+  assert.deepEqual(planned.conflicts(), []);
+  const done = setupProject(a, new Library(lib), ["play"], { plan: false, adapters: [watching] });
+  assert.deepEqual(done.conflicts(), []);
+  assert.deepEqual(builds, [["play built false"], ["play built true"]]);
+  assert.ok(fs.existsSync(path.join(lib, "dist", "development", "plugins", "play", ".claude-plugin", "plugin.json")));
+});
+
+test("an adapter's excludes keep its project files out of git until remove takes the block back", async () => {
+  const { lib, a } = machineWithProjectsSync();
+  const exclude = path.join(a, ".git", "info", "exclude");
+  const original = fs.readFileSync(exclude, "utf8");
+  const local = path.join(a, ".fake", "settings.local.json");
+  const adapter: HarnessAdapter = {
+    harness: "fake",
+    verified: true,
+    excludes: ["/.fake/settings.local.json"],
+    setup: () => ({
+      report: new Report(),
+      owned: { local },
+      commands: () => {
+        write(local, "{}\n");
+        return new Report();
+      },
+    }),
+    remove: () => ({
+      report: new Report(),
+      commands: () => {
+        fs.rmSync(path.dirname(local), { recursive: true });
+        return new Report();
+      },
+    }),
+  };
+
+  assert.deepEqual(setupProject(a, new Library(lib), ["play"], { plan: false, adapters: [adapter] }).conflicts(), []);
+
+  assert.equal(gitIn(a, "status", "--porcelain", "--untracked-files=all"), "?? README.md\n");
+  assert.match(fs.readFileSync(exclude, "utf8"), /^\/\.fake\/settings\.local\.json$/m);
+  assert.deepEqual(removeProject(a, { plan: false, adapters: [adapter] }).conflicts(), []);
+  assert.equal(fs.readFileSync(exclude, "utf8"), original);
+});

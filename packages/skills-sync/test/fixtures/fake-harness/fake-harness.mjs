@@ -31,6 +31,20 @@
 // installs at ffff... instead of the --ref. What the install prints through Rich wraps at COLUMNS (80 without it);
 // FAKE_HARNESS_FAIL_ENABLE=<names> makes `enable` fail for those names and FAKE_HARNESS_FAIL_LIST (with hermes in it)
 // makes `list` fail. `list --json` prints the rows the real CLI prints, a bundled one unless --no-bundled.
+//
+// Claude's local scope (Claude Code 2.1.302, observed against a temporary home): `--scope local` acts on the project
+// the CLI runs in (the nearest folder at or above the working directory with .git, else the working directory) and
+// writes that project's .claude/settings.local.json, keeping its other keys. `plugin marketplace add <dir> --scope local`
+// declares extraKnownMarketplaces.<name> there (a directory source) and registers the marketplace for the user;
+// `plugin install <id> --scope local` records an install for that project (state `local`: id -> [{ projectPath, dir }])
+// and sets enabledPlugins.<id> true; `plugin uninstall <id> --scope local` takes the project's install back and deletes
+// that key when it is there, leaving the file untouched otherwise, and fails with not_installed_at_scope when the
+// project has none. `plugin list --json` rows carry each id's enablement in the running project: the local key, else
+// the project's .claude/settings.json key, else the user state; one local row per project install, with projectPath.
+// `plugin details <name>` (no @) names the copy the project loads: an enabled installed copy (user or this project's
+// local install; the user copy first when both are on, as observed) over an enabled account copy. Help lists the local
+// scope unless FAKE_HARNESS_NO_LOCAL_SCOPE has claude; FAKE_HARNESS_FAIL_LOCAL_INSTALL=<ids> makes those local installs
+// fail.
 import fs from "node:fs";
 import path from "node:path";
 import {spawnSync} from "node:child_process";
@@ -74,11 +88,50 @@ const blocked = (reason, report) => {
   say(`Blocked: Security scan blocked plugin install: ${reason}\n\n${report}\nReview the findings above. Install only plugins from sources you trust. (Scanning can be configured via plugins.scan_on_install in config.yaml.)`);
   process.exit(1);
 };
-const words = args.filter((a) => !a.startsWith("-"));
+// a flag's value is not a word: `plugin install play@x --scope local` has the words plugin, install, play@x
+const VALUED = new Set(["--scope", "-s", "--ref", "--config", "--marketplace", "--registry", "--sparse"]);
+const words = args.filter((a, i) => !a.startsWith("-") && !VALUED.has(args[i - 1]));
 // "plugin marketplace add", "plugin install": the command's words, without its argument
 const cmd = words.slice(0, words[1] === "marketplace" ? 3 : 2).join(" ");
 // the value of a `--flag value` option, when given
 const option = (flag) => (args.includes(flag) ? args[args.indexOf(flag) + 1] : undefined);
+const scope = option("--scope") ?? option("-s");
+
+// Claude's project files, for the project the CLI runs in
+const projectDir = () => {
+  for (let dir = process.cwd(); ; dir = path.dirname(dir)) {
+    if (fs.existsSync(path.join(dir, ".git"))) return dir;
+    if (path.dirname(dir) === dir) return process.cwd();
+  }
+};
+const localFile = () => path.join(projectDir(), ".claude", "settings.local.json");
+const readJson = (file) => (fs.existsSync(file) ? JSON.parse(fs.readFileSync(file, "utf8")) : null);
+const editLocal = (edit) => {
+  const file = localFile();
+  const settings = readJson(file) ?? {};
+  if (edit(settings) === false) return;
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  fs.writeFileSync(file, JSON.stringify(settings, null, 2) + "\n");
+};
+/** the id's enablement in the running project: the local key, else the project key, else `fallback` */
+const enabledHere = (id, fallback) => {
+  for (const file of [localFile(), path.join(projectDir(), ".claude", "settings.json")]) {
+    const v = readJson(file)?.enabledPlugins?.[id];
+    if (typeof v === "boolean") return v;
+  }
+  return fallback;
+};
+const samePlace = (a, b) => {
+  try {
+    return fs.realpathSync(a) === fs.realpathSync(b);
+  } catch {
+    return path.resolve(a) === path.resolve(b);
+  }
+};
+const localRows = () =>
+  Object.entries(state.local ?? {}).flatMap(([id, installs]) =>
+    installs.map((i) => ({ id, version: "unknown", scope: "local", enabled: enabledHere(id, false), readFromFolder: i.dir, projectPath: i.projectPath })),
+  );
 
 if (host === "hermes") {
   hermes();
@@ -175,7 +228,7 @@ const synced = () => {
 if (args[0] === "plugin" && args.includes("--help")) {
   if (cmd === "plugin update" && process.env.FAKE_HARNESS_NO_UPDATE) fail("unknown command update");
   if (has(process.env.FAKE_HARNESS_OLD, host)) out(`Usage: ${host} [options] [prompt]`);
-  else out(`Usage: ${host} plugin [command]\n\nCommands:\n  install  update  list  marketplace  uninstall\n${has(process.env.FAKE_HARNESS_NO_WRITE_JSON, host) ? "" : "Options:\n  --json  Print machine-readable result"}`);
+  else out(`Usage: ${host} plugin [command]\n\nCommands:\n  install  update  list  marketplace  uninstall\n${has(process.env.FAKE_HARNESS_NO_WRITE_JSON, host) ? "" : "Options:\n  --json  Print machine-readable result"}${host === "claude" && !has(process.env.FAKE_HARNESS_NO_LOCAL_SCOPE, host) ? "\n  -s, --scope <scope>  Installation scope: user, project, or local" : ""}`);
 } else if (has(process.env.FAKE_HARNESS_OLD, host)) {
   fail(`unknown command ${args.join(" ")}`);
 } else if (host === "codex" && words[0] === "login" && words[1] === "status") {
@@ -232,6 +285,11 @@ if (args[0] === "plugin" && args.includes("--help")) {
   state.marketplaces[name] = root;
   if (host === "codex") (state.sources ??= {})[name] = source;
   save();
+  if (host === "claude" && scope === "local")
+    editLocal((s) => {
+      s.extraKnownMarketplaces ??= {};
+      s.extraKnownMarketplaces[name] = { source: { source: "directory", path: root } };
+    });
   out(host === "claude" ? { outcome: "ok", marketplace: name } : { marketplaceName: name, installedRoot: root, alreadyAdded: false });
 } else if (cmd === "plugin marketplace remove") {
   if (has(process.env.FAKE_HARNESS_NO_WRITE_JSON, host) && args.includes("--json")) fail("unknown option '--json'");
@@ -284,9 +342,10 @@ if (args[0] === "plugin" && args.includes("--help")) {
   out(
     host === "claude"
       ? [
-          ...rows.map(([id, p]) => ({ id, version: p.version, scope: "user", enabled: p.enabled,
+          ...rows.map(([id, p]) => ({ id, version: p.version, scope: "user", enabled: enabledHere(id, p.enabled),
             ...(process.env.FAKE_HARNESS_CACHE ? {installPath: p.dir} : {readFromFolder: p.dir}) })),
-          ...synced(),
+          ...localRows(),
+          ...synced().map((s) => ({ ...s, enabled: enabledHere(s.id, s.enabled) })),
         ]
       : {
           installed: rows.map(([id, p]) => {
@@ -309,6 +368,53 @@ if (args[0] === "plugin" && args.includes("--help")) {
           available: [],
         },
   );
+} else if (host === "claude" && cmd === "plugin install" && scope === "local") {
+  if (has(process.env.FAKE_HARNESS_FAIL_LOCAL_INSTALL, words[2])) fail(`fixture local install denied: ${words[2]}`);
+  const p = resolve(words[2]);
+  const installs = ((state.local ??= {})[words[2]] ??= []);
+  const project = projectDir();
+  if (installs.some((i) => samePlace(i.projectPath, project))) {
+    out({ command: "install", outcome: "ok", pluginId: words[2], scope: "local", message: "already installed" });
+    process.exit(0);
+  }
+  installs.push({ projectPath: project, dir: p.dir });
+  save();
+  editLocal((s) => {
+    s.enabledPlugins ??= {};
+    s.enabledPlugins[words[2]] = true;
+  });
+  out({ command: "install", outcome: "ok", pluginId: words[2], scope: "local" });
+} else if (host === "claude" && cmd === "plugin uninstall" && scope === "local") {
+  if (has(process.env.FAKE_HARNESS_FAIL_UNINSTALL, words[2])) fail(`fixture uninstall denied: ${words[2]}`);
+  const installs = state.local?.[words[2]] ?? [];
+  const project = projectDir();
+  if (!installs.some((i) => samePlace(i.projectPath, project))) {
+    out({ command: "uninstall", outcome: "failed", plugin: words[2], scope: "local", failureCode: "not_installed_at_scope" });
+    fail(`✘ Failed to uninstall plugin "${words[2]}": Plugin "${words[2]}" is not installed in local scope.`);
+  }
+  state.local[words[2]] = installs.filter((i) => !samePlace(i.projectPath, project));
+  if (!state.local[words[2]].length) delete state.local[words[2]];
+  save();
+  editLocal((s) => {
+    if (s.enabledPlugins?.[words[2]] === undefined) return false;
+    delete s.enabledPlugins[words[2]];
+  });
+  out({ command: "uninstall", outcome: "ok", pluginId: words[2], scope: "local" });
+} else if (host === "claude" && cmd === "plugin details" && !words[2]?.includes("@")) {
+  const name = words[2];
+  const project = projectDir();
+  const named = (id) => id.slice(0, id.lastIndexOf("@")) === name;
+  const installed = [
+    ...Object.entries(state.plugins).filter(([id, p]) => named(id) && enabledHere(id, p.enabled)).map(([id, p]) => ({ id, dir: p.dir })),
+    ...Object.entries(state.local ?? {})
+      .filter(([id]) => named(id) && enabledHere(id, false))
+      .flatMap(([id, installs]) => installs.filter((i) => samePlace(i.projectPath, project)).map((i) => ({ id, dir: i.dir }))),
+  ];
+  const account = synced().filter((s) => named(s.id) && enabledHere(s.id, s.enabled)).map((s) => ({ id: s.id, dir: s.installPath }));
+  const loads = installed[0] ?? account[0];
+  if (!loads) fail(`Plugin "${name}" not found.`);
+  const skills = skillsOf(loads.dir);
+  out(`${name}\n  Source: ${loads.id}\n\nComponent inventory\n  Skills (${skills.length})  ${skills.join(", ")}\n  Agents (0)`);
 } else if ((host === "claude" && ["plugin install", "plugin update"].includes(cmd)) || (host === "codex" && cmd === "plugin add")) {
   if (has(process.env.FAKE_HARNESS_NO_WRITE_JSON, host) && args.includes("--json")) fail("unknown option '--json'");
   if (host === "codex" && has(process.env.FAKE_HARNESS_FAIL_ADD, words[2])) {

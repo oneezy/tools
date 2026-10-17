@@ -48,7 +48,7 @@ skills-sync develop status                                 # what is connected, 
 skills-sync develop remove                                 # take back exactly what setup made
 ```
 
-Setup links `.agents/skills-library` to this package, so an edit made there is an edit here. It also writes the project record `.agents/skills-sync-project.json` and keeps both out of git through `.git/info/exclude`. It refuses any name that is not exactly one Plugin's id. It activates nothing in Claude Code or Codex yet: the Harness adapters (#213, #214) wait on runtime proof. `skills-sync --help` has the details. The decisions are in `packages/skills-sync/docs/adr`.
+Setup links `.agents/skills-library` to this package, so an edit made there is an edit here. It also writes the project record `.agents/skills-sync-project.json` and keeps both out of git through `.git/info/exclude`. It refuses any name that is not exactly one Plugin's id. It activates nothing in Claude Code or Codex yet. The Claude Code adapter exists but stays unverified until its Windows proof (#213); the Codex adapter is #214. Once verified, setup builds the selection first, and a failed build activates nothing. In Claude Code the development copy arrives through a local-scope marketplace over `dist/development`, and the released copy is off in that project only. A running chat keeps what it loaded until you type `/reload-plugins` or start a new chat. The research is in `packages/skills-sync/docs/research/`. `skills-sync --help` has the details. The decisions are in `packages/skills-sync/docs/adr`.
 
 ## Development watcher
 

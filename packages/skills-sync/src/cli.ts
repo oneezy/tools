@@ -72,7 +72,10 @@ Commands
                    by a marked block in .git/info/exclude; the project listed in ${DEVELOPMENT_PATH}/projects.json.
                    Each Plugin is named by its exact Library id; with none named, the recorded selection. Refuses,
                    changing nothing, an unknown, Harness-qualified or ambiguous name, a path it did not make, another
-                   Library. Activates nothing in any Harness yet (no verified adapter). Repeated: no change.
+                   Library. A verified Harness adapter builds the selection first (a failed build activates nothing)
+                   and activates it in this project only; Claude Code's (a local-scope marketplace over
+                   ${DEVELOPMENT_PATH}, the released copies off here) is not verified yet, so none runs. Repeated: no
+                   change.
                    develop status: the project's Library, alias, each selected Plugin's development build and Harness
                    activation, and the Library's connected projects (--json; exit 1 on a problem); writes nothing.
                    develop remove: take back exactly what setup made, keeping anything changed since and the source.
