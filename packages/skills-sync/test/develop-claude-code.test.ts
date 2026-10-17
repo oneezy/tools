@@ -82,13 +82,11 @@ function machine(options: { release?: "marketplace" | "synced" } = {}) {
 
 /** The fake claude run directly in `cwd`, the way a person would in that project. */
 function fakeClaude(m: PretendMachine, cwd: string, args: string[]): string {
-  const bin = path.join(m.bin, process.platform === "win32" ? "claude.cmd" : "claude");
-  const r = spawnSync(bin, args, {
-    cwd,
-    env: { ...process.env, ...m.env },
-    encoding: "utf8",
-    shell: process.platform === "win32",
-  });
+  const win = process.platform === "win32";
+  const bin = path.join(m.bin, win ? "claude.cmd" : "claude");
+  // Windows runs the .cmd shim through the shell, which needs every path quoted
+  const q = (x: string) => (win ? `"${x}"` : x);
+  const r = spawnSync(q(bin), args.map(q), { cwd, env: { ...process.env, ...m.env }, encoding: "utf8", shell: win });
   if (r.status !== 0) return `failed: ${r.stderr}`;
   const source = /Source: (\S+)/.exec(r.stdout)?.[1];
   const skills = /Skills \(\d+\)\s+(.*)/.exec(r.stdout)?.[1]?.trim();
@@ -143,7 +141,7 @@ test("setup puts the development play in one project only; the released copy and
   assert.match(r.stdout, /type \/reload-plugins in it or start a new chat/);
 });
 
-test("an account copy synced from claude.ai is switched off in the project only", async () => {
+test("an Account plugin from claude.ai is switched off in the project only", async () => {
   const { lib, a, normal, develop, loads } = machine({ release: "synced" });
 
   const r = await develop(a, ["setup", "play", "--repo", lib]);
@@ -324,4 +322,21 @@ test("status tells installed for the project apart from what a chat has loaded, 
       note: "play@oneezy-skills is on here again; develop setup puts it back",
     },
   );
+});
+
+test("a refused uninstall keeps the whole setup for a retry, and the retry restores the project", async () => {
+  const { lib, a, develop, loads } = machine();
+  const before = snapshot(a);
+  await develop(a, ["setup", "play", "--repo", lib]);
+  const connected = snapshot(a);
+
+  const refused = await develop(a, ["remove"], { ...ON, FAKE_HARNESS_FAIL_UNINSTALL: `play@${DEV}` });
+
+  assert.equal(refused.status, 1);
+  assert.match(refused.stdout, /claude plugin uninstall play@oneezy-skills-development --scope local failed/);
+  assert.deepEqual(snapshot(a), connected, "settings, alias, record and exclude block all stay");
+  assert.equal(loads(a), `play@${DEV} play-hi`);
+  const retry = await develop(a, ["remove"]);
+  assert.equal(retry.status, 0, retry.stdout + retry.stderr);
+  assert.deepEqual(snapshot(a), before);
 });

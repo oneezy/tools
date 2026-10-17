@@ -8,7 +8,7 @@
 //   enabledPlugins."<id>@<release>": false, enabledPlugins."<id>@synced": false   (the released copies, this project only)
 //
 // Claude Code tells same-name Plugins apart by the manifest name and loads one copy: an installed marketplace copy over
-// an account (synced) copy; of two enabled marketplace copies, not the development one. So each released copy is
+// an Account plugin (<id>@synced); of two enabled marketplace copies, not the development one. So each released copy is
 // switched off here, never uninstalled, and stays on in every other project. Remove takes back exactly what setup did,
 // checking each key first: the local installs (claude plugin uninstall --scope local), the released copies' keys back
 // to what they were, the marketplace's local declaration. It never runs `claude plugin marketplace remove`: that drops
@@ -18,6 +18,7 @@
 import { spawnSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
+import { marketplaceName } from "./build.js";
 import { developmentDirs } from "./develop-build.js";
 import type { AdapterContext, HarnessAdapter } from "./develop-project.js";
 import { hasLinkedParent, isDir, isLink, lexists, real, samePath, toHash } from "./fs.js";
@@ -30,7 +31,7 @@ import { cmp, readConfig } from "./sources.js";
 export const LOCAL_SETTINGS = ".claude/settings.local.json";
 /** The catalog of the development marketplace, relative to dist/development. */
 export const DEVELOPMENT_CATALOG = ".claude-plugin/marketplace.json";
-/** An account plugin's origin in Claude Code. */
+/** An Account plugin's origin in Claude Code. */
 const SYNCED = "synced";
 
 export interface ClaudeCodeOptions {
@@ -77,12 +78,19 @@ const splitId = (id: string) => ({ name: id.slice(0, id.lastIndexOf("@")), origi
 const obj = (v: unknown): Record<string, unknown> =>
   v && typeof v === "object" && !Array.isArray(v) ? (v as Record<string, unknown>) : {};
 
-/** The release marketplace's name (as build names the catalog) and the development marketplace's. */
+/** The release marketplace's name (the one build gives the Catalogs) and the development marketplace's. */
 export function marketplaceNames(lib: Library): { release: string; development: string } {
-  const l = readConfig(lib.configFile).library ?? {};
-  const name = l.name ?? path.basename(lib.root);
-  const release = l.owner ? `${l.owner}-${name}` : name;
+  const release = marketplaceName(readConfig(lib.configFile), lib);
   return { release, development: `${release}-development` };
+}
+
+/** Each released copy setup switched off goes back to what it was, while it still holds the false setup left there. */
+function restoreOff(keys: Record<string, unknown>, off: ClaudeOwned["plugins"][string]["off"]): void {
+  for (const x of off)
+    if (keys[x.id] === false) {
+      if (x.prior === null) delete keys[x.id];
+      else keys[x.id] = x.prior;
+    }
 }
 
 function isOwned(v: unknown): v is ClaudeOwned {
@@ -361,12 +369,7 @@ export function claudeCodeAdapter(options: ClaudeCodeOptions = {}): HarnessAdapt
         if (s.error) return failed(`${LOCAL_SETTINGS} is ${s.error} after the install`);
         const keys = obj(s.data.enabledPlugins);
         for (const p of Object.values(owned.plugins)) for (const x of p.off) keys[x.id] = false;
-        for (const [, p] of dropped)
-          for (const x of p.off)
-            if (keys[x.id] === false) {
-              if (x.prior === null) delete keys[x.id];
-              else keys[x.id] = x.prior;
-            }
+        for (const [, p] of dropped) restoreOff(keys, p.off);
         s.data.enabledPlugins = keys;
         const wrote = writeSettings(s, settingsText(s.data, owned), "released copies off in this project only");
         done.merge(wrote);
@@ -476,11 +479,7 @@ export function claudeCodeAdapter(options: ClaudeCodeOptions = {}): HarnessAdapt
           const keys = obj(s.data.enabledPlugins);
           for (const p of Object.values(owned.plugins)) {
             if (p.installed && keys[p.id] === true) delete keys[p.id];
-            for (const x of p.off)
-              if (keys[x.id] === false) {
-                if (x.prior === null) delete keys[x.id];
-                else keys[x.id] = x.prior;
-              }
+            restoreOff(keys, p.off);
           }
           if ("enabledPlugins" in s.data) s.data.enabledPlugins = keys;
           const m = obj(s.data.extraKnownMarketplaces);

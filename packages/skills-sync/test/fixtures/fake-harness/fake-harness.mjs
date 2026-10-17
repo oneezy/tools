@@ -385,6 +385,7 @@ if (args[0] === "plugin" && args.includes("--help")) {
   });
   out({ command: "install", outcome: "ok", pluginId: words[2], scope: "local" });
 } else if (host === "claude" && cmd === "plugin uninstall" && scope === "local") {
+  if (has(process.env.FAKE_HARNESS_FAIL_UNINSTALL, words[2])) fail(`fixture uninstall denied: ${words[2]}`);
   const installs = state.local?.[words[2]] ?? [];
   const project = projectDir();
   if (!installs.some((i) => samePlace(i.projectPath, project))) {

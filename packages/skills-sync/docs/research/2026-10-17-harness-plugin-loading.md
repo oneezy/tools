@@ -63,7 +63,7 @@ A loose skill working in a Harness says nothing about how that Harness loads a p
 - A project `.claude/skills/<plugin>` link beats `@synced` in that project only [obs].
   - It needs workspace trust [obs].
   - It loses to an installed marketplace copy even when that copy is disabled in the project [obs].
-  - It therefore covers only the synced case. The adapter uses a local marketplace instead, which outranks both [doc].
+  - It therefore covers only the Account plugin case. The adapter uses a local marketplace instead, which outranks both [doc].
 
 ### Settings scopes
 
