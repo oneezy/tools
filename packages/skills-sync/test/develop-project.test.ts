@@ -424,18 +424,24 @@ test("a global install's launcher connects only the project it is run in", async
   const prefix = path.join(m.base, "npm-global");
   const npmEnv = { ...process.env, npm_config_prefix: prefix, npm_config_cache: path.join(m.base, "npm-cache") };
   const win = process.platform === "win32";
-  const installed = spawnSync(win ? "npm.cmd" : "npm", ["install", "--global", "--no-audit", "--no-fund", "."], {
-    cwd: path.resolve(import.meta.dirname, ".."),
-    env: npmEnv,
-    encoding: "utf8",
-    shell: win,
-  });
+  // Windows runs the .cmd shims through the shell, which needs every path quoted
+  const q = (x: string) => (win ? `"${x}"` : x);
+  // --prefix as a flag, not only the env var: on Windows an inherited NPM_CONFIG_PREFIX can win over npm_config_prefix
+  const installed = spawnSync(
+    win ? "npm.cmd" : "npm",
+    ["install", "--global", "--prefix", q(prefix), "--no-audit", "--no-fund", "."],
+    {
+      cwd: path.resolve(import.meta.dirname, ".."),
+      env: npmEnv,
+      encoding: "utf8",
+      shell: win,
+    },
+  );
   assert.equal(installed.status, 0, installed.stderr);
   const bin = win ? path.join(prefix, "skills-sync.cmd") : path.join(prefix, "bin", "skills-sync");
+  assert.ok(fs.existsSync(bin), `npm put no launcher at ${bin}: ${installed.stdout}${installed.stderr}`);
   const env = { ...process.env, ...m.env };
   delete env.SKILLS_REPO;
-  // Windows runs the .cmd shim through the shell, which needs every path quoted
-  const q = (x: string) => (win ? `"${x}"` : x);
   const launcher = (cwd: string, ...args: string[]) =>
     spawnSync(q(bin), args.map(q), { cwd, env, encoding: "utf8", shell: win });
   const home = snapshot(m.home);
