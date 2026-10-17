@@ -17,6 +17,8 @@
 // FAKE_HARNESS_FAIL_UNINSTALL=<id,...> makes `plugin uninstall <id>` (Codex: `plugin remove <id>`) fail for those ids.
 // Codex's `debug prompt-input` lists each enabled plugin's skills except those whose agents/openai.yaml sets
 // policy.allow_implicit_invocation: false, which the real one loads but keeps out of the model's skill list.
+// Codex's global `-C <dir>` before a command is taken off (and logged); FAKE_HARNESS_CODEX_CONFIG=1 keeps the plugin
+// switches in config.toml files as the real CLI does (see codexConfig below).
 //
 // The third host is hermes (`hermes plugins ...`, hermes-agent v0.21.6 shapes). Its state is Hermes's own files under
 // HERMES_HOME, the ones the real CLI writes and the tool reads: plugins/<name>/ (copied from a pretend GitHub checkout
@@ -50,13 +52,16 @@ import path from "node:path";
 import {spawnSync} from "node:child_process";
 import YAML from "yaml";
 
-const [host, ...args] = process.argv.slice(2);
+const [host, ...given] = process.argv.slice(2);
+// Codex's global `-C <dir>` (--cd): the folder a command acts in, taken off before the command's own words
+const cd = host === "codex" && ["-C", "--cd"].includes(given[0]) ? path.resolve(given[1]) : null;
+const args = cd ? given.slice(2) : given;
 const has = (v, h) => (v ?? "").split(",").includes(h);
 const home = host === "claude" ? process.env.CLAUDE_CONFIG_DIR : host === "hermes" ? process.env.HERMES_HOME : process.env.CODEX_HOME;
 const file = path.join(home, "fake-harness.json");
 const state = fs.existsSync(file) ? JSON.parse(fs.readFileSync(file, "utf8")) : { marketplaces: {}, plugins: {} };
 const save = () => (fs.mkdirSync(home, { recursive: true }), fs.writeFileSync(file, JSON.stringify(state, null, 2)));
-if (process.env.FAKE_HARNESS_LOG) fs.appendFileSync(process.env.FAKE_HARNESS_LOG, JSON.stringify([host, ...args]) + "\n");
+if (process.env.FAKE_HARNESS_LOG) fs.appendFileSync(process.env.FAKE_HARNESS_LOG, JSON.stringify([host, ...given]) + "\n");
 const out = (v) => process.stdout.write((typeof v === "string" ? v : JSON.stringify(v, null, 2)) + "\n");
 const fail = (m) => (process.stderr.write(m + "\n"), process.exit(1));
 /**
@@ -195,12 +200,101 @@ const clone = (from, to) => {
 const codexInstall = (p, enabled) => {
   const version = codexVersion(p.dir);
   let dir = p.dir;
-  if (sourceOf(p.mkt).sourceType === "git") {
+  if (sourceOf(p.mkt).sourceType === "git" || codexConfig) {
     dir = path.join(home, "plugins", "cache", p.mkt, p.name, version ?? "unversioned");
     clone(p.dir, dir);
   }
   return { version, enabled, dir, skills: skillsOf(dir) };
 };
+// FAKE_HARNESS_CODEX_CONFIG=1: Codex's config.toml as codex-cli 0.163.0 keeps it (observed against a temporary
+// CODEX_HOME): `plugin add` copies a local marketplace's plugin into plugins/cache/<mkt>/<name>/<version>/ as well (a
+// second add replaces that copy whole) and sets [plugins."<id>"] enabled = true in <CODEX_HOME>/config.toml, in place
+// when the table is there (its comments kept), so an add switches a disabled copy back on; `plugin remove` takes the
+// table out; `plugin list` reports the user config's switch only; `debug prompt-input` lists the copies that are on once
+// each trusted project's .codex/config.toml, from the -C folder (else the cwd) up, nearest last, is laid over the user
+// config. [projects."<path>"] trust_level = "trusted" in the user config trusts that folder and every folder under it;
+// an untrusted project's file is ignored. A table named twice makes Codex refuse the file, and so does this fake.
+const codexConfig = host === "codex" && !!process.env.FAKE_HARNESS_CODEX_CONFIG;
+const userToml = () => path.join(home, "config.toml");
+// a basic string's escapes as TOML reads them (JSON's, for what a config holds: "D:\\a" is D:\a); a literal one as is
+const unquote = (k) => {
+  const t = k.trim();
+  return /^".*"$/.test(t) ? JSON.parse(t) : t.replace(/^'(.*)'$/, "$1");
+};
+const readToml = (file) => {
+  const text = fs.existsSync(file) ? fs.readFileSync(file, "utf8") : "";
+  const plugins = {};
+  const trusted = [];
+  const seen = new Set();
+  let table = "";
+  for (const line of text.split(/\r?\n/)) {
+    const h = /^\s*\[\s*([^\]]+?)\s*\]\s*(?:#.*)?$/.exec(line);
+    if (h) {
+      table = h[1].replace(/\s*\.\s*/g, ".");
+      if (seen.has(table)) fail(`Error loading config.toml: ${file}: duplicate key \`${table}\``);
+      seen.add(table);
+      continue;
+    }
+    const plugin = /^plugins\.("[^"]*"|[\w-]+)$/.exec(table);
+    const enabled = /^\s*enabled\s*=\s*(true|false)\b/.exec(line);
+    if (plugin && enabled) plugins[unquote(plugin[1])] = enabled[1] === "true";
+    const project = /^projects\.("[^"]*"|'[^']*')$/.exec(table);
+    if (project && /^\s*trust_level\s*=\s*"trusted"/.test(line)) trusted.push(unquote(project[1]));
+  }
+  return { text, plugins, trusted };
+};
+const tableAt = (lines, id) => {
+  const at = lines.findIndex((l) => l.trim().replace(/\s*#.*$/, "") === `[plugins.${JSON.stringify(id)}]`);
+  if (at < 0) return null;
+  const next = lines.findIndex((l, i) => i > at && /^\s*\[/.test(l));
+  return { at, end: next < 0 ? lines.length : next };
+};
+const enableInUserConfig = (id) => {
+  const text = readToml(userToml()).text;
+  const lines = text.split("\n");
+  const t = tableAt(lines, id);
+  if (!t) {
+    fs.mkdirSync(home, { recursive: true });
+    const head = text && !text.endsWith("\n") ? `${text}\n` : text;
+    fs.writeFileSync(userToml(), `${head}${head.trim() ? "\n" : ""}[plugins.${JSON.stringify(id)}]\nenabled = true\n`);
+    return;
+  }
+  const e = lines.findIndex((l, i) => i > t.at && i < t.end && /^\s*enabled\s*=/.test(l));
+  if (e >= 0) lines[e] = lines[e].replace(/^(\s*enabled\s*=\s*)(true|false)/, "$1true");
+  else lines.splice(t.at + 1, 0, "enabled = true");
+  fs.writeFileSync(userToml(), lines.join("\n"));
+};
+const dropFromUserConfig = (id) => {
+  const lines = readToml(userToml()).text.split("\n");
+  const t = tableAt(lines, id);
+  if (!t) return;
+  lines.splice(t.at, t.end - t.at);
+  fs.writeFileSync(userToml(), lines.join("\n"));
+};
+const realOr = (p) => {
+  try {
+    return fs.realpathSync(p);
+  } catch {
+    return path.resolve(p);
+  }
+};
+/** each plugin id's switch: the user config's, with each trusted project file from the -C folder (or cwd) up laid over it */
+const switches = () => {
+  const user = readToml(userToml());
+  const trusted = (dir) =>
+    user.trusted.some((t) => {
+      const rel = path.relative(realOr(t), realOr(dir));
+      return rel === "" || (!rel.startsWith("..") && !path.isAbsolute(rel));
+    });
+  const layers = [];
+  for (let dir = cd ?? process.cwd(); ; dir = path.dirname(dir)) {
+    const f = path.join(dir, ".codex", "config.toml");
+    if (realOr(f) !== realOr(userToml()) && fs.existsSync(f) && trusted(dir)) layers.unshift(f);
+    if (path.dirname(dir) === dir) break;
+  }
+  return Object.assign({ ...user.plugins }, ...layers.map((f) => readToml(f).plugins));
+};
+
 // the account plugins: every folder under plugins/synced/<bucket>/, the bucket's manifest.json and *.meta.json skipped
 const synced = () => {
   const root = path.join(home, "plugins", "synced");
@@ -339,6 +433,7 @@ if (args[0] === "plugin" && args.includes("--help")) {
 } else if (cmd === "plugin list") {
   if (has(process.env.FAKE_HARNESS_FAIL_LIST, host)) fail("fixture plugin list failed");
   const rows = Object.entries(state.plugins);
+  const userSwitch = codexConfig ? readToml(userToml()).plugins : {};
   out(
     host === "claude"
       ? [
@@ -358,7 +453,7 @@ if (args[0] === "plugin" && args.includes("--help")) {
               marketplaceName: mkt,
               version: p.version ?? null,
               installed: p.installed !== false,
-              enabled: p.installed !== false && p.enabled,
+              enabled: p.installed !== false && (userSwitch[id] ?? p.enabled),
               source: { source: "local", path: p.source ?? p.dir },
               marketplaceSource: { sourceType, source: source ?? null },
               installPolicy: "AVAILABLE",
@@ -443,6 +538,7 @@ if (args[0] === "plugin" && args.includes("--help")) {
     const installed = codexInstall(p, at?.enabled ?? true);
     state.plugins[words[2]] = { ...installed, source: p.dir };
     save();
+    if (codexConfig) enableInUserConfig(words[2]);
     out({ pluginId: words[2], name: p.name, marketplaceName: p.mkt, version: installed.version, installedPath: installed.dir, authPolicy: "ON_USE" });
     process.exit(0);
   }
@@ -472,6 +568,7 @@ if (args[0] === "plugin" && args.includes("--help")) {
   if (host === "codex") {
     // removes the [plugins] entry and the cache version folder
     if (p.dir && p.dir.startsWith(path.join(home, "plugins", "cache"))) fs.rmSync(p.dir, { recursive: true, force: true });
+    if (codexConfig) dropFromUserConfig(words[2]);
     const at = words[2].lastIndexOf("@");
     out({ pluginId: words[2], name: words[2].slice(0, at), marketplaceName: words[2].slice(at + 1) });
   } else out({ outcome: "ok" });
@@ -486,9 +583,10 @@ if (args[0] === "plugin" && args.includes("--help")) {
   if (has(process.env.FAKE_HARNESS_FAIL_PROMPT, host)) fail("fixture prompt inventory failed");
   const lines = [];
   let rootIndex = 0;
+  const on = codexConfig ? switches() : {};
   if (!has(process.env.FAKE_HARNESS_BROKEN, host))
     for (const [id, p] of Object.entries(state.plugins)) {
-      if (!p.enabled || p.installed === false) continue;
+      if (!(on[id] ?? p.enabled) || p.installed === false) continue;
       const alias = `r${rootIndex++}`;
       if (process.env.FAKE_HARNESS_ALIASES) lines.push(`- \`${alias}\` = \`${path.join(p.dir, "skills")}\``);
       // as the real one, a skill whose agents/openai.yaml sets policy.allow_implicit_invocation: false is loaded but kept

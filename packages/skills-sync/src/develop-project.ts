@@ -4,13 +4,14 @@
 // selected Plugins, and what setup made, so that remove takes away exactly that and nothing a person changed since.
 // Activating a Plugin in a Harness is a Harness adapter's job: setup builds the selection first when a verified adapter
 // will run, hands it the build, applies the actions it planned with its own, runs its Harness CLI commands, and only then
-// writes the record. The Claude Code adapter (develop-claude-code.ts) is here but not verified: until the Windows runtime
-// proof exists, setup names it and never runs it.
+// writes the record. The Claude Code and Codex adapters (develop-claude-code.ts, develop-codex.ts) are here but not
+// verified: until the Windows runtime proof exists, setup names them and never runs them.
 import fs from "node:fs";
 import path from "node:path";
 import { hasLinkedParent, isDir, isLink, lexists, linkTarget, real, samePath, toHash, under } from "./fs.js";
 import { claudeCodeAdapter } from "./develop-claude-code.js";
 import { buildDevelopment, developmentDirs, readDevelopmentStatus, type DevelopmentBuild } from "./develop-build.js";
+import { codexAdapter } from "./develop-codex.js";
 import { watcherStatus, type WatcherStatus } from "./develop-watcher.js";
 import { Library } from "./library.js";
 import { apply, Report } from "./plan.js";
@@ -104,8 +105,14 @@ export function testSwitch(harness: string): boolean {
   return (process.env.SKILLS_SYNC_TEST_UNVERIFIED_ADAPTERS ?? "").split(",").includes(harness);
 }
 
-/** The adapters this version has. None is verified yet: Claude Code waits on its Windows proof (#213), Codex is #214. */
-export const ADAPTERS: HarnessAdapter[] = [claudeCodeAdapter({ verified: testSwitch("claude-code") })];
+/**
+ * The adapters this version has. None is verified yet: Claude Code waits on its Windows proof (#213), Codex on its proof
+ * in the ChatGPT desktop app on Windows (#214, #217).
+ */
+export const ADAPTERS: HarnessAdapter[] = [
+  claudeCodeAdapter({ verified: testSwitch("claude-code") }),
+  codexAdapter({ verified: testSwitch("codex") }),
+];
 
 export interface ProjectOptions {
   plan: boolean;
