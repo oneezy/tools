@@ -13,9 +13,9 @@ import { randomBytes } from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 import { alive, buildDevelopment, developmentDirs, type DevelopmentBuild } from "./develop-build.js";
-import { readProjects, readRecord } from "./develop-project.js";
+import { readProjects, readRecord } from "./develop-record.js";
 import { BuildInputs, isBuildInput, watchSource } from "./develop-watch.js";
-import { real, samePath } from "./fs.js";
+import { real, renameRetrying, samePath } from "./fs.js";
 import { Library } from "./library.js";
 import { cmp } from "./sources.js";
 
@@ -327,18 +327,11 @@ function claim(lib: Library, record: WatcherRecord): true | WatcherRecord {
 function writeRecord(file: string, record: WatcherRecord): void {
   const tmp = `${file}.${process.pid}.${randomBytes(4).toString("hex")}.tmp`;
   fs.writeFileSync(tmp, JSON.stringify(record, null, 2) + "\n");
-  for (let attempt = 0; ; attempt++) {
-    try {
-      fs.renameSync(tmp, file);
-      return;
-    } catch (error) {
-      // Windows refuses to replace a file another process has open for a moment
-      if (attempt >= 20 || (error as NodeJS.ErrnoException).code !== "EPERM") {
-        fs.rmSync(tmp, { force: true });
-        throw error;
-      }
-      sleep(25);
-    }
+  try {
+    renameRetrying(tmp, file);
+  } catch (error) {
+    fs.rmSync(tmp, { force: true });
+    throw error;
   }
 }
 

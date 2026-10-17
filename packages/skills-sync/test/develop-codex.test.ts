@@ -495,3 +495,84 @@ test("the CLI: unverified, Codex is left alone; switched on for tests, two proje
   assert.equal(fs.readFileSync(userConfig, "utf8"), userBefore);
   assert.equal(fs.existsSync(path.join(a, ".codex")), false);
 });
+
+test("a setup over the block an interrupted run left without a record counts it as its own, so remove takes .codex back", () => {
+  const { a, plain, adapter, loaded, library } = codexMachine();
+  const released = loaded(plain);
+  setupProject(a, library, ["play"], { plan: false, adapters: [adapter()] });
+  // a run that stopped after Codex's commands and before the record
+  fs.rmSync(path.join(a, ".agents", "skills-sync-project.json"));
+
+  assert.deepEqual(setupProject(a, library, ["play"], { plan: false, adapters: [adapter()] }).conflicts(), []);
+  assert.deepEqual(removeProject(a, { plan: false, adapters: [adapter()] }).conflicts(), []);
+
+  assert.equal(fs.existsSync(path.join(a, ".codex")), false);
+  assert.deepEqual(loaded(a), released);
+});
+
+test("with the Library's projects.json missing or unreadable, remove keeps the development copies in Codex", () => {
+  const { m, a, b, adapter, loaded, library, lib } = codexMachine();
+  setupProject(a, library, ["play"], { plan: false, adapters: [adapter()] });
+  setupProject(b, library, ["play"], { plan: false, adapters: [adapter()] });
+  const index = path.join(lib, "dist", "development", "projects.json");
+
+  fs.writeFileSync(index, "not json");
+  fs.rmSync(m.log, { force: true });
+  const unreadable = removeProject(a, { plan: false, adapters: [adapter()] });
+  fs.rmSync(index);
+  const missing = removeProject(b, { plan: false, adapters: [adapter()] });
+
+  assert.deepEqual(unreadable.conflicts(), []);
+  assert.deepEqual(missing.conflicts(), []);
+  assert.deepEqual(calls(m), [], "no plugin or marketplace is taken out of Codex");
+  for (const r of [unreadable, missing])
+    assert.match(r.actions.map((x) => x.note ?? "").join("\n"), /projects\.json .*; the development copies stay/);
+  assert.equal(loaded(a).filter((x) => x.endsWith("oneezy-skills-dev")).length, 0, "a is back on the released copy");
+});
+
+test("a block remove keeps because it changed still switches the development copy on, so Codex keeps that copy", () => {
+  const { m, a, adapter, library } = codexMachine();
+  const config = path.join(a, ".codex", "config.toml");
+  setupProject(a, library, ["play"], { plan: false, adapters: [adapter()] });
+  fs.writeFileSync(config, fs.readFileSync(config, "utf8").replace("enabled = false", "enabled = true"));
+  fs.rmSync(m.log, { force: true });
+
+  const kept = removeProject(a, { plan: false, adapters: [adapter()] });
+
+  assert.deepEqual(kept.conflicts(), []);
+  assert.deepEqual(calls(m), [], "the copies and the marketplace the kept block names stay in Codex");
+  assert.match(kept.actions.map((x) => x.note ?? "").join("\n"), /block changed since setup; kept.*stay installed/);
+});
+
+test("a block whose only change is CRLF line endings is still setup's: remove takes it back", () => {
+  const { m, a, plain, adapter, loaded, library } = codexMachine();
+  const released = loaded(plain);
+  const config = path.join(a, ".codex", "config.toml");
+  setupProject(a, library, ["play"], { plan: false, adapters: [adapter()] });
+  // PowerShell's Set-Content rewrote the file with CRLF
+  fs.writeFileSync(config, fs.readFileSync(config, "utf8").replace(/\n/g, "\r\n"));
+  fs.rmSync(m.log, { force: true });
+
+  const removed = removeProject(a, { plan: false, adapters: [adapter()] });
+
+  assert.deepEqual(removed.conflicts(), []);
+  assert.equal(fs.existsSync(path.join(a, ".codex")), false);
+  assert.deepEqual(loaded(a), released);
+  assert.ok(calls(m).includes("plugin marketplace remove oneezy-skills-dev --json"));
+});
+
+test("when git cannot say whether .codex/config.toml is tracked, setup refuses instead of guessing", () => {
+  const { m, a, adapter, library } = codexMachine();
+  write(path.join(a, ".codex", "config.toml"), 'model = "gpt-5"\n');
+  const before = snapshot(a);
+  fs.rmSync(m.log, { force: true });
+
+  const r = setupProject(a, library, ["play"], {
+    plan: false,
+    adapters: [adapter({ GIT_DIR: path.join(m.base, "no-such-repository") })],
+  });
+
+  assert.match(conflictNotes(r), /git cannot say whether \.codex\/config\.toml is tracked/);
+  assert.deepEqual(calls(m), []);
+  assert.deepEqual(snapshot(a), before);
+});

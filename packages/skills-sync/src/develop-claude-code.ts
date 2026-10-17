@@ -15,13 +15,12 @@
 // the marketplace for every project and uninstalls its Plugins there. A running chat keeps the copy it loaded until the
 // person types /reload-plugins in it or starts a new one; nothing here can reload a chat, so it says so.
 // The decision is ADR-0006; the evidence is in docs/research/2026-10-17-harness-plugin-loading.md.
-import { spawnSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import { marketplaceName } from "./build.js";
 import { developmentMarketplaceOf } from "./desired.js";
 import { developmentDirs } from "./develop-build.js";
-import type { AdapterContext, HarnessAdapter } from "./develop-project.js";
+import { gitTracks, repositoryRoot, type AdapterContext, type HarnessAdapter } from "./develop-record.js";
 import { hasLinkedParent, isDir, isLink, lexists, real, samePath, toHash } from "./fs.js";
 import { json, refused, runner, which, type Run } from "./install.js";
 import type { Library } from "./library.js";
@@ -161,20 +160,31 @@ const declaredAs = (v: unknown, root: string) => {
   return src.source === "directory" && typeof src.path === "string" && samePath(real(src.path), real(root));
 };
 
-/** The nearest folder at or above `project` holding .git: Claude Code keeps --scope local settings there. */
-function repositoryRoot(project: string): string | null {
-  for (let dir = path.resolve(project); ; dir = path.dirname(dir)) {
-    if (lexists(path.join(dir, ".git"))) return dir;
-    if (path.dirname(dir) === dir) return null;
-  }
-}
-
-function tracked(project: string): boolean {
-  if (!lexists(path.join(project, ".git"))) return false;
-  const r = spawnSync("git", ["-C", project, "ls-files", "--error-unmatch", "--", LOCAL_SETTINGS], {
-    encoding: "utf8",
-  });
-  return r.status === 0;
+/**
+ * settings.local.json's object without what setup writes there: the development marketplace's declaration, its
+ * Plugins' keys and the released copies' false keys; a key left empty goes too.
+ */
+function withoutOwn(
+  data: Record<string, unknown>,
+  development: string,
+  root: string,
+  released: (id: string) => boolean,
+): Record<string, unknown> {
+  const next = { ...data };
+  const keys = { ...obj(next.enabledPlugins) };
+  for (const [id, v] of Object.entries(keys))
+    if (splitId(id).origin === development || (released(id) && v === false)) delete keys[id];
+  const markets = { ...obj(next.extraKnownMarketplaces) };
+  if (declaredAs(markets[development], root)) delete markets[development];
+  for (const [key, v] of [
+    ["enabledPlugins", keys],
+    ["extraKnownMarketplaces", markets],
+  ] as const)
+    if (key in next) {
+      if (Object.keys(v).length) next[key] = v;
+      else delete next[key];
+    }
+  return next;
 }
 
 /** The text settings.local.json gets from `data`; null when the file should go (setup made it and nothing is left). */
@@ -225,6 +235,7 @@ export function claudeCodeAdapter(options: ClaudeCodeOptions = {}): HarnessAdapt
         else report.add({ kind: "note", path: ctx.project, note: "claude-code: not activated: no claude CLI on PATH" });
         return { report, owned: prev };
       }
+      // Claude Code keeps --scope local settings at the repository root
       const repo = repositoryRoot(ctx.project);
       if (repo && !samePath(real(repo), real(ctx.project)))
         conflict(`Claude Code keeps this project's local settings at its repository root ${repo}; set up that folder`);
@@ -234,8 +245,14 @@ export function claudeCodeAdapter(options: ClaudeCodeOptions = {}): HarnessAdapt
         conflict("this claude has no local plugin scope (claude plugin install --scope local); update Claude Code");
       const settings = readSettings(ctx.project);
       if (settings.error) conflict(`${LOCAL_SETTINGS} is ${settings.error}`);
-      else if (tracked(ctx.project))
-        conflict(`${LOCAL_SETTINGS} is tracked by git, so its development entries would be committed`);
+      else {
+        const tracked = gitTracks(ctx.project, LOCAL_SETTINGS);
+        if (tracked) conflict(`${LOCAL_SETTINGS} is tracked by git, so its development entries would be committed`);
+        if (tracked === null)
+          conflict(
+            `git cannot say whether ${LOCAL_SETTINGS} is tracked, so its development entries might be committed`,
+          );
+      }
       if (report.conflicts().length) return { report, owned: prev };
 
       const { release, development } = marketplaceNames(ctx.library);
@@ -276,15 +293,28 @@ export function claudeCodeAdapter(options: ClaudeCodeOptions = {}): HarnessAdapt
       if (before?.toString("utf8") === text) report.add({ kind: "skip", path: catalog });
       else report.add({ kind: "write", path: catalog, payload: text, expectedHash: before ? toHash(before) : null });
 
+      // Without a record, this marketplace's declaration and local installs of its Plugins are what an interrupted
+      // setup left (nothing else names a marketplace <release>-development reading this Library): they count as setup's
+      // own, and so does a released copy's false key beside them, so remove takes them back.
+      const leftover =
+        prev === null &&
+        (declaredAs(declared, root) ||
+          rows.some((r) => r.origin === development && !!localHere(rows, r.id, ctx.project)));
+      const isReleased = (id: string) =>
+        ctx.plugins.includes(splitId(id).name) && [release, SYNCED].includes(splitId(id).origin);
+      const theirs = leftover ? withoutOwn(settings.data, development, root, isReleased) : settings.data;
+      const folder = path.join(ctx.project, ".claude");
+      const created = !settings.bytes || (leftover && !Object.keys(theirs).length);
       const owned: ClaudeOwned = {
         version: 1,
         marketplace: development,
         root,
-        declared: prev?.declared ?? declared === undefined,
+        declared: prev?.declared ?? (declared === undefined || (leftover && declaredAs(declared, root))),
         settings: prev?.settings ?? {
-          created: !settings.bytes,
-          folder: !isDir(path.join(ctx.project, ".claude")),
-          keys: Object.keys(settings.data),
+          created,
+          folder:
+            !isDir(folder) || (created && fs.readdirSync(folder).every((n) => n === path.basename(LOCAL_SETTINGS))),
+          keys: Object.keys(theirs),
         },
         plugins: {},
       };
@@ -298,12 +328,12 @@ export function claudeCodeAdapter(options: ClaudeCodeOptions = {}): HarnessAdapt
         const dev = `${id}@${development}`;
         const mine = localHere(rows, dev, ctx.project);
         const was = prev?.plugins[id];
-        const entry = { id: dev, installed: was?.installed ?? !mine, off: [...(was?.off ?? [])] };
+        const entry = { id: dev, installed: was?.installed ?? (!mine || leftover), off: [...(was?.off ?? [])] };
         if (!mine) preview("install", `claude plugin install ${dev} --scope local`);
         for (const r of rows.filter((x) => x.name === id && x.origin !== development)) {
           if (entry.off.some((x) => x.id === r.id)) continue;
           if (r.origin === release || r.origin === SYNCED) {
-            const prior = local[r.id];
+            const prior = leftover && local[r.id] === false ? null : local[r.id];
             entry.off.push({ id: r.id, prior: typeof prior === "boolean" ? prior : null });
           } else if (r.origin === "skills-dir")
             report.add({

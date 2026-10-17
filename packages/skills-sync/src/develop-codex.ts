@@ -18,7 +18,6 @@
 // cannot override a workspace-managed plugin, so setup refuses activation while one is on. The adapter stays unverified
 // until Codex in the ChatGPT desktop app on Windows proves it (tools#217); a test switches it on. The decision and the
 // open question are docs/adr/0007.
-import { spawnSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -39,12 +38,14 @@ import {
 } from "./codex-toml.js";
 import { developmentDirs, digest, readDevelopmentStatus } from "./develop-build.js";
 import {
-  readProjects,
+  projectsFile,
+  gitTracks,
+  readProjectsIndex,
   readRecord,
   type AdapterContext,
   type AdapterResult,
   type HarnessAdapter,
-} from "./develop-project.js";
+} from "./develop-record.js";
 import { hasLinkedParent, isDir, isLink, lexists, real, samePath, toHash, under } from "./fs.js";
 import { harnessTable, type Harness } from "./harnesses.js";
 import {
@@ -186,23 +187,20 @@ function trusted(project: string, userToml: string): boolean {
   return trustedProjects(userToml).some((t) => under(real(project), real(t)));
 }
 
-/** Does git track the file: true, false, or null when git cannot say (no git, not a repository). */
-function tracked(project: string, relative: string, env: NodeJS.ProcessEnv): boolean | null {
-  const r = spawnSync("git", ["-C", project, "ls-files", "--error-unmatch", "--", relative], {
-    encoding: "utf8",
-    env: { ...process.env, ...env },
-    windowsHide: true,
-  });
-  if (r.status === 0) return true;
-  return r.status === 1 && !r.error && /did not match/.test(r.stderr) ? false : null;
-}
+/** Text with CRLF line breaks read as LF: an editor that rewrote the line endings changed nothing of a block. */
+const lf = (text: string) => text.replace(/\r\n/g, "\n");
 
 const read = (file: string): Buffer | null => (lexists(file) ? fs.readFileSync(file) : null);
 
-/** The Plugins other connected projects of this Library load from the development marketplace in Codex. */
-function usedElsewhere(lib: Library, project: string): Set<string> {
+/**
+ * The Plugins other connected projects of this Library load from the development marketplace in Codex; null when the
+ * Library's projects.json is missing or does not parse, so no caller can tell this project is the last one.
+ */
+function usedElsewhere(lib: Library, project: string): Set<string> | null {
+  const index = readProjectsIndex(lib);
+  if (!index) return null;
   const used = new Set<string>();
-  for (const p of Object.keys(readProjects(lib).projects)) {
+  for (const p of Object.keys(index.projects)) {
     if (samePath(real(p), real(project))) continue;
     const { record } = readRecord(p);
     if (!record || !samePath(real(record.library), real(lib.root))) continue;
@@ -210,6 +208,9 @@ function usedElsewhere(lib: Library, project: string): Set<string> {
   }
   return used;
 }
+
+const unreadableIndexNote = (lib: Library) =>
+  `codex: ${projectsFile(lib)} is missing or does not parse, so other projects may still use them; the development copies stay installed in Codex, switched off for every project`;
 
 /** The copy Codex runs of an installed plugin: its cache folder for the version it lists. */
 function cacheOf(h: Harness, market: string, row: Installed): string {
@@ -385,25 +386,35 @@ function setup(o: Resolved, ctx: AdapterContext): AdapterResult & { owned: unkno
   const covered = release.filter((id) => skillsDev.get(id) === false);
   const disabled = release.filter((id) => !skillsDev.has(id));
   const block = blockText(on, disabled);
-  if (ours !== null && ours !== block && ours !== previous?.block)
+  if (ours !== null && lf(ours) !== block && lf(ours) !== previous?.block)
     conflict(config, "develop setup's block was changed since setup; left untouched (develop remove keeps it too)");
-  if (tracked(ctx.project, ".codex/config.toml", o.env))
+  const tracked = gitTracks(ctx.project, ".codex/config.toml", o.env);
+  if (tracked)
     conflict(
       config,
       "git tracks .codex/config.toml: the development switches would be committed and reach cloud sessions; not activated",
     );
+  if (tracked === null)
+    conflict(
+      config,
+      "git cannot say whether .codex/config.toml is tracked: the development switches might be committed; not activated",
+    );
   if (report.conflicts().length) return { report, owned: ctx.owned ?? null };
 
   const next = withBlock(text, PLUGINS_START, PLUGINS_END, block);
+  // without a record, a file holding nothing but this block is what an interrupted setup left: setup made it (and its
+  // .codex, when nothing else is in there)
+  const leftover = !previous && ours !== null && !withoutBlock(text, PLUGINS_START, PLUGINS_END).trim();
+  const fileCreated = previous?.created.file ?? (!before || leftover);
+  const dirCreated =
+    !isDir(path.dirname(config)) ||
+    (leftover && fs.readdirSync(path.dirname(config)).every((n) => n === path.basename(config)));
   const owned: CodexOwned = {
     version: 1,
     marketplace: dev,
     config,
     block,
-    created: {
-      file: previous?.created.file ?? !before,
-      dir: previous?.created.dir ?? !isDir(path.dirname(config)),
-    },
+    created: { file: fileCreated, dir: previous?.created.dir ?? dirCreated },
     plugins: [...ctx.plugins],
     disabled,
     covered,
@@ -427,8 +438,13 @@ function setup(o: Resolved, ctx: AdapterContext): AdapterResult & { owned: unkno
   const others = usedElsewhere(lib, ctx.project);
   const dropped = (previous?.plugins ?? []).filter(
     (id) =>
-      !ctx.plugins.includes(id) && !others.has(id) && installed.some((p) => p.name === id && p.marketplace === dev),
+      !ctx.plugins.includes(id) &&
+      !!others &&
+      !others.has(id) &&
+      installed.some((p) => p.name === id && p.marketplace === dev),
   );
+  if (!others && (previous?.plugins ?? []).some((id) => !ctx.plugins.includes(id)))
+    report.add({ kind: "note", path: ctx.project, loud: true, note: unreadableIndexNote(lib) });
   if (!devMarket) report.add({ kind: "install", path: dirs.output, note: `codex plugin marketplace add (${dev})` });
   for (const id of toAdd)
     report.add({
@@ -537,20 +553,25 @@ function remove(o: Resolved, ctx: AdapterContext): AdapterResult {
   const before = isLink(config) ? null : read(config);
   const text = before?.toString("utf8") ?? "";
   let block: string | null = null;
+  // a kept block still switches the development copies on here, so they and their marketplace stay in Codex
+  let keptBlock = false;
+  const staying = "the development copies and marketplace it switches on stay installed in Codex";
   try {
     block = blockIn(text, PLUGINS_START, PLUGINS_END);
   } catch (e) {
-    report.add({ kind: "note", path: config, loud: true, note: `codex: ${String(e)}; kept` });
+    keptBlock = true;
+    report.add({ kind: "note", path: config, loud: true, note: `codex: ${String(e)}; kept, and ${staying}` });
   }
   let next: string | null | undefined; // undefined: leave the file as it is
-  if (block !== null && block !== owned.block)
+  if (block !== null && lf(block) !== owned.block) {
+    keptBlock = true;
     report.add({
       kind: "note",
       path: config,
       loud: true,
-      note: "codex: develop setup's block changed since setup; kept",
+      note: `codex: develop setup's block changed since setup; kept, and ${staying}`,
     });
-  else if (block !== null) {
+  } else if (block !== null) {
     const rest = withoutBlock(text, PLUGINS_START, PLUGINS_END);
     next = !rest && owned.created.file ? null : rest;
   }
@@ -568,10 +589,15 @@ function remove(o: Resolved, ctx: AdapterContext): AdapterResult {
       loud: true,
       note: `codex: ${run ? "codex cannot list its plugins" : "no codex CLI on PATH"}; the development copies stay installed in Codex, switched off for every project`,
     });
+  if (!others) report.add({ kind: "note", path: ctx.project, loud: true, note: unreadableIndexNote(lib) });
   const drop = owned.plugins.filter(
-    (id) => !others.has(id) && !!listed?.some((p) => p.name === id && p.marketplace === dev && p.installed !== false),
+    (id) =>
+      !keptBlock &&
+      !!others &&
+      !others.has(id) &&
+      !!listed?.some((p) => p.name === id && p.marketplace === dev && p.installed !== false),
   );
-  const dropMarket = !!markets?.some((m) => m.name === dev) && !others.size && !!run;
+  const dropMarket = !keptBlock && !!markets?.some((m) => m.name === dev) && !!others && !others.size && !!run;
   if (next !== undefined && ctx.plan)
     report.add(
       next === null

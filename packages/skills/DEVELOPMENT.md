@@ -85,7 +85,7 @@ Nothing here restarts or interrupts a chat.
 | A chat shows the old text | See Reload. |
 | Codex status says `on everywhere` | Run `skills-sync develop setup` in a Development project: it switches the development copy off again. |
 | `remove` refuses ("no verified adapter") | Set the opt-in above in that shell, then run `remove` again. |
-| Setup or remove stopped part-way | Run it again. A failed Harness command leaves no record, so the retry finishes the job, and repeated runs change nothing. |
+| Setup or remove stopped part-way | Run it again. A failed Harness command in setup takes back what the other Harnesses' commands did and writes no record. A Harness it cannot take back stays in the record and is named, so `remove` takes it back. A failed remove keeps the whole setup. The retry finishes the job: it counts what an interrupted run left as its own. |
 
 ## Development watcher
 
