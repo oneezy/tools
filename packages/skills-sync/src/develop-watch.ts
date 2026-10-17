@@ -5,6 +5,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { createHash } from "node:crypto";
+import { cmp } from "./sources.js";
 
 /** Folders under the Library that are never source: git, tooling, and generated output (dist/ holds the Development builds). */
 const ignored = new Set([".git", "node_modules", "dist", "__pycache__"]);
@@ -145,7 +146,7 @@ export class BuildInputs {
       } catch {
         return;
       }
-      for (const entry of entries.sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0))) {
+      for (const entry of entries.sort((a, b) => cmp(a.name, b.name))) {
         if (ignored.has(entry.name) || entry.isSymbolicLink()) continue;
         const file = path.join(dir, entry.name);
         if (entry.isDirectory()) walk(file);

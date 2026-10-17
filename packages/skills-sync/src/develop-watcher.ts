@@ -141,7 +141,7 @@ export interface WatchOptions {
  * at once when another launch owns it.
  */
 export function runWatcher(lib: Library, options: WatchOptions): Promise<number> {
-  const heartbeatMs = Number(process.env.SKILLS_SYNC_WATCH_HEARTBEAT_MS) || HEARTBEAT_MS;
+  const heartbeatMs = Math.max(50, Number(process.env.SKILLS_SYNC_WATCH_HEARTBEAT_MS) || HEARTBEAT_MS);
   const record: WatcherRecord = {
     version: 1,
     state: "running",
@@ -169,6 +169,7 @@ export function runWatcher(lib: Library, options: WatchOptions): Promise<number>
     let builds = 0;
     let last: { digest: string; served: string } | null = null;
     let retry = false;
+    let waiting = false;
     let stopped = false;
     let quiet = false;
 
@@ -195,11 +196,14 @@ export function runWatcher(lib: Library, options: WatchOptions): Promise<number>
       }
       const r = buildDevelopment(lib, { plugins });
       if (r.refused) {
-        // another build holds the lock: try again on the next beat
-        retry = true;
-        print(`${clock()} build waits: ${r.refused}`);
+        // another build holds the lock: try again each beat until it ends; any other refusal waits for the next edit
+        retry = r.refused.startsWith("another development build");
+        if (!waiting) print(`${clock()} build refused: ${r.refused}`);
+        waiting = retry;
+        if (!retry) last = { digest, served };
         return;
       }
+      waiting = false;
       builds++;
       print(`${clock()} build ${builds}: ${summary(r)}`);
       for (const p of r.plugins) for (const e of p.errors) print(`  ! ${p.id}: ${e}`);
@@ -241,16 +245,24 @@ export function runWatcher(lib: Library, options: WatchOptions): Promise<number>
       quiet = true;
       stop("its terminal closed", 0);
     };
-    const close = watchSource(
-      lib.root,
-      isBuildInput,
-      guarded,
-      (error) => {
-        print(`${clock()} the source watch failed: ${error instanceof Error ? error.message : String(error)}`);
-        stop("its source watch failed", 1);
-      },
-      options.delay,
-    );
+    const failed = (error: unknown) => {
+      print(`${clock()} the source watch failed: ${error instanceof Error ? error.message : String(error)}`);
+      stop("its source watch failed", 1);
+    };
+    let close = () => {};
+    try {
+      close = watchSource(lib.root, isBuildInput, guarded, failed, options.delay);
+    } catch (error) {
+      // no watch at all (the root gone, no watch handles left): stopped before anything started
+      writeRecord(file, {
+        ...record,
+        state: "stopped",
+        stoppedAt: new Date().toISOString(),
+        stopReason: "no source watch",
+      });
+      print(`The source watch could not start: ${error instanceof Error ? error.message : String(error)}`);
+      return resolve(1);
+    }
     const timer = setInterval(beat, heartbeatMs);
     function stop(reason: string, code: number) {
       if (stopped) return;
