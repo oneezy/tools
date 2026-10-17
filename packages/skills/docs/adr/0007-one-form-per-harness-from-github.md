@@ -2,6 +2,8 @@
 
 Date: 2026-10-11. Status: accepted. Amends ADR-0003 ("both forms stay") for machines; the library still builds both forms. Decided in Justin's Skills Sync repair grilling of 2026-10-10 (Q1, Q3, Q6, Q10, Q13, Q17).
 
+Amended 2026-10-17 by ADR-0020, for Development projects only: an opted-in local project may install Project plugins from the Development build. The text below is unchanged and holds everywhere else.
+
 ## Context
 
 Machines carried a library clone at `~/.skills-sync` that skills-sync re-pointed at whatever checkout last ran it (a detached, shallow Codex test clone on the PC), plus loose links into it and into `V:\dev\skills`, CLI-installed plugins, and real folders in `~/.codex/skills`. Cloud threads got the claude.ai account plugins and 101 loose links from the setup script, so every skill was listed twice and bare `/name` broke. There were three places to edit and no telling which one a harness was reading.
