@@ -8,14 +8,13 @@
 import { randomBytes, createHash } from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
-import { developmentPackage, folderFiles as packageFiles } from "./build.js";
+import { DEVELOPMENT_PATH, developmentPackage, folderFiles as packageFiles, renderingOverlap } from "./build.js";
 import { frontmatterProblems } from "./check.js";
 import { isDir, isLink, lexists, under } from "./fs.js";
 import { Library } from "./library.js";
 import { cmp, readConfig, type Config } from "./sources.js";
 
-/** Where Development builds go inside the Library, / separators: under dist/, which git ignores and the skills CLI never scans. */
-export const DEVELOPMENT_PATH = "dist/development";
+export { DEVELOPMENT_PATH } from "./build.js";
 
 /**
  * One Plugin's outcome in this run. built: new output is in place; unchanged: the output already matched the source;
@@ -287,13 +286,7 @@ function recover(work: string, pluginsDir: string): void {
 function blockedDestination(lib: Library, config: Config, output: string): string | null {
   for (let p = output; under(p, lib.root) && p !== lib.root; p = path.dirname(p))
     if (isLink(p)) return `${path.relative(lib.root, p)} is a link; a development build never writes through one`;
-  const hermes = config.renderings?.hermes;
-  if (hermes) {
-    const rendering = path.join(lib.root, ...hermes.split("/"));
-    if (under(rendering, output) || under(output, rendering))
-      return `renderings.hermes (${hermes}) overlaps ${DEVELOPMENT_PATH}; release and development output must stay apart`;
-  }
-  return null;
+  return renderingOverlap(lib, config);
 }
 
 function writeStatus(file: string, before: StatusFile | null, records: Record<string, StatusRecord>): void {

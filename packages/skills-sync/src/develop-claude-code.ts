@@ -19,6 +19,7 @@ import { spawnSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import { marketplaceName } from "./build.js";
+import { developmentMarketplaceOf } from "./desired.js";
 import { developmentDirs } from "./develop-build.js";
 import type { AdapterContext, HarnessAdapter } from "./develop-project.js";
 import { hasLinkedParent, isDir, isLink, lexists, real, samePath, toHash } from "./fs.js";
@@ -81,7 +82,7 @@ const obj = (v: unknown): Record<string, unknown> =>
 /** The release marketplace's name (the one build gives the Catalogs) and the development marketplace's. */
 export function marketplaceNames(lib: Library): { release: string; development: string } {
   const release = marketplaceName(readConfig(lib.configFile), lib);
-  return { release, development: `${release}-development` };
+  return { release, development: developmentMarketplaceOf(release, "claude-code")! };
 }
 
 /** Each released copy setup switched off goes back to what it was, while it still holds the false setup left there. */

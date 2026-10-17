@@ -8,14 +8,14 @@
 // second time. The rules for "a library copy" and "the release's own files" are the forms' own (machine.ts's libraryCopy,
 // the Codex form's sameFiles), so status and sync agree on what sync removes and what it leaves for a person.
 import { CHATGPT_BOOTSTRAP, CHATGPT_LINE, chatgptState, isAccountMarketplace, needsBootstrap } from "../chatgpt.js";
-import { catalogOf, formOf, pluginsFor, sameCatalog, serves } from "../desired.js";
+import { catalogOf, developmentMarketplaceOf, formOf, pluginsFor, sameCatalog, serves } from "../desired.js";
 import { sameFiles } from "../forms/codex.js";
 import { lexists } from "../fs.js";
 import { libraryCopy, type HarnessState, type Machine } from "../machine.js";
 import type { Release } from "../release.js";
 
 export interface ManualStep {
-  /** stable: claude-plugins, claude-account, codex-trust, codex-other-plugins, adopt-or-delete, chatgpt-update, cloud-setup */
+  /** stable: claude-plugins, claude-account, codex-trust, codex-other-plugins, development-everywhere, adopt-or-delete, chatgpt-update, cloud-setup */
   id: string;
   title: string;
   /** numbered when printed, in order */
@@ -49,6 +49,7 @@ export function manualSteps(machine: Machine, release: Release | null): ManualSt
     if (state.harness.id === "codex") {
       push(out, codexTrust(state));
       push(out, otherPlugins(state, release));
+      push(out, developmentEverywhere(state, release));
       push(out, adoptOrDelete(state, release));
     }
   }
@@ -175,6 +176,7 @@ function otherPlugins(state: HarnessState, release: Release | null): ManualStep 
         p.enabled &&
         !sameCatalog(p.marketplace, catalogOf(release)) &&
         !isAccountMarketplace(p.marketplace) &&
+        p.marketplace !== developmentMarketplaceOf(catalogOf(release), state.harness.id) &&
         ids(release, state).includes(p.id),
     )
     .sort((a, b) => a.id.localeCompare(b.id));
@@ -188,6 +190,26 @@ function otherPlugins(state: HarnessState, release: Release | null): ManualStep 
         (p) =>
           `${p.id}@${p.marketplace}: open ChatGPT > Plugins > Installed, find ${p.id} and choose Uninstall plugin; or run codex plugin remove ${p.id}@${p.marketplace}.`,
       ),
+      "Run status again: each skill name should be listed once.",
+    ],
+  };
+}
+
+/**
+ * A development copy (`develop setup`'s, develop-codex.ts) switched on for the user doubles the library's plugin in every
+ * project, not only the ones set up for development. It is not uninstalled: `develop setup` switches it off again.
+ */
+function developmentEverywhere(state: HarnessState, release: Release | null): ManualStep | null {
+  if (!release) return null;
+  const dev = developmentMarketplaceOf(catalogOf(release), state.harness.id);
+  const on = state.installed.filter((p) => p.enabled && p.marketplace === dev && ids(release, state).includes(p.id));
+  if (!on.length) return null;
+  const list = on.map((p) => `${p.id}@${p.marketplace}`).join(", ");
+  return {
+    id: "development-everywhere",
+    title: `Switch the ${state.harness.name} development copies off outside Development projects: ${list}`,
+    steps: [
+      "In a project set up for development (it holds .agents/skills-sync-project.json), run skills-sync develop setup: it switches them off for every other project and keeps them on there.",
       "Run status again: each skill name should be listed once.",
     ],
   };

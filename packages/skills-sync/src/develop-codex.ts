@@ -24,6 +24,7 @@ import os from "node:os";
 import path from "node:path";
 import { CATEGORY, folderFiles, marketplaceName } from "./build.js";
 import { isAccountMarketplace } from "./chatgpt.js";
+import { developmentMarketplaceOf } from "./desired.js";
 import {
   PLUGINS_END,
   PLUGINS_START,
@@ -128,7 +129,7 @@ function resolve(options: CodexAdapterOptions): Resolved {
 
 /** The development marketplace's name: the release marketplace's (as build names it) with -dev. */
 export function developmentMarketplace(lib: Library): string {
-  return `${marketplaceName(readConfig(lib.configFile), lib)}-dev`;
+  return developmentMarketplaceOf(marketplaceName(readConfig(lib.configFile), lib), "codex")!;
 }
 
 /** The development marketplace's Codex catalog, inside the Development output. */
@@ -341,6 +342,11 @@ function setup(o: Resolved, ctx: AdapterContext): AdapterResult & { owned: unkno
     }
     release.push(id);
   }
+  // the release catalog's copy is off here before it is even installed: a later sync adds it from GitHub and switches it
+  // on for the user, and the block must already hold it off in this project (tools#215)
+  const installedHere = [...release];
+  const releaseMarket = marketplaceName(readConfig(lib.configFile), lib);
+  for (const id of ctx.plugins) if (!release.includes(`${id}@${releaseMarket}`)) release.push(`${id}@${releaseMarket}`);
   release.sort(cmp);
   const on = ctx.plugins.map((id) => `${id}@${dev}`);
 
@@ -512,7 +518,7 @@ function setup(o: Resolved, ctx: AdapterContext): AdapterResult & { owned: unkno
       path: config,
       note:
         toAdd.length || next !== text
-          ? `codex: ${ctx.plugins.map((id) => `${id}@${dev}`).join(", ")} on in this project, ${[...disabled, ...covered].join(", ") || "no other copy"} off; ${RESTART}. Visible but inactive: ${on.join(", ")} in Codex's plugin list for every other project${release.length ? `, ${release.join(", ")} still installed` : ""}`
+          ? `codex: ${ctx.plugins.map((id) => `${id}@${dev}`).join(", ")} on in this project, ${[...disabled, ...covered].join(", ") || "no other copy"} off; ${RESTART}. Visible but inactive: ${on.join(", ")} in Codex's plugin list for every other project${installedHere.length ? `, ${installedHere.sort(cmp).join(", ")} still installed` : ""}`
           : "codex: already active here; no restart needed",
     });
     return done;

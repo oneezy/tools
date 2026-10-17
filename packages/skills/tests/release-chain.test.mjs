@@ -145,3 +145,32 @@ test("the next main commit: a promotion that changes no package releases nothing
   assert.deepEqual(record.changes, { added: [], changed: ["oneezy"], removed: [] });
   assert.equal(parseRelease("oneezy/skills", "release-2", "", next.bytes).plugins.oneezy.version, "0.2.0");
 });
+
+test("the release job beside Development builds: build --artifacts and release.mjs record plugins/ only and leave dist/development as it was", () => {
+  const lib = library();
+  lib.commit("0.1.0");
+  // what `skills-sync develop build` and `develop setup` leave in the Library: a build, its status and both catalogs
+  const dev = path.join(lib.root, "dist", "development");
+  const files = {
+    "plugins/oneezy/plugin.json": '{"name":"oneezy","version":"0.1.0"}\n',
+    "plugins/oneezy/skills/own-one/SKILL.md": "---\nname: own-one\ndescription: development copy\n---\nedited\n",
+    "status.json": '{"version":1,"plugins":{}}\n',
+    "projects.json": '{"version":1,"projects":{}}\n',
+    ".claude-plugin/marketplace.json": '{"name":"oneezy-skills-development","plugins":[]}\n',
+    ".agents/plugins/marketplace.json": '{"name":"oneezy-skills-dev","plugins":[]}\n',
+  };
+  for (const [rel, body] of Object.entries(files)) {
+    fs.mkdirSync(path.dirname(path.join(dev, rel)), { recursive: true });
+    fs.writeFileSync(path.join(dev, rel), body);
+  }
+  const before = packageFiles(dev);
+
+  const r = lib.release(null);
+
+  assert.equal(r.status, 0, r.out);
+  assert.deepEqual(packageFiles(dev), before);
+  const record = JSON.parse(r.bytes.toString("utf8"));
+  assert.deepEqual(Object.keys(record.plugins), ["oneezy"]);
+  assert.deepEqual(record.plugins.oneezy.files, packageFiles(path.join(lib.root, "plugins", "oneezy")));
+  assert.doesNotMatch(r.bytes.toString("utf8"), /development/);
+});
