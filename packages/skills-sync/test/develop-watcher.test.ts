@@ -101,11 +101,18 @@ interface Terminal {
   exited: Promise<number | null>;
 }
 
-/** `skills-sync develop watch <args>` in a new fake terminal, in `cwd`. */
+/**
+ * `skills-sync develop watch <args>` in a new fake terminal, in `cwd`: a shell's by default, or run by a Node parent
+ * (pnpm) with `kind` "node" (see fixtures/fake-terminal for why that differs on Windows).
+ */
 function terminal(m: PretendMachine, cwd: string, ...args: string[]): Terminal {
+  return terminalOf("shell", m, cwd, ...args);
+}
+
+function terminalOf(kind: "shell" | "node", m: PretendMachine, cwd: string, ...args: string[]): Terminal {
   const log = path.join(m.base, `terminal-${terminals.length}.log`);
   fs.writeFileSync(log, "");
-  const child = spawn(process.execPath, [TERMINAL, log, process.execPath, CLI, "develop", "watch", ...args], {
+  const child = spawn(process.execPath, [TERMINAL, log, kind, process.execPath, CLI, "develop", "watch", ...args], {
     cwd,
     env: cliEnv(m),
     stdio: "ignore",
@@ -190,9 +197,9 @@ test("closing the owning terminal stops the watcher; the last build stays, statu
   t.process.kill("SIGKILL");
   await until("the watcher to stop", () => !alive(pid));
 
-  assert.match(t.log(), /Watcher stopped: its terminal closed\. The last successful builds stay in place/);
-  const record = JSON.parse(fs.readFileSync(path.join(output, "watcher.json"), "utf8"));
-  assert.equal(record.state, "stopped");
+  const record = fs.readFileSync(path.join(output, "watcher.json"), "utf8");
+  assert.match(t.log(), /Watcher stopped: its terminal closed\. The last successful builds stay in place/, record);
+  assert.equal(JSON.parse(record).state, "stopped", record);
   assert.match(built() ?? "", /play-hi body/);
   fs.writeFileSync(via(b, "skills/play/play-hi/SKILL.md"), skill("play-hi", "edited while stopped"));
   await wait(600);
@@ -230,6 +237,32 @@ test("a watcher killed outright is reported stopped, and the next launch owns th
   assert.match(builds(second)[0] ?? "", /build 1: play built/);
   assert.match(built() ?? "", /edited while stopped/);
   assert.match(built("play-new/SKILL.md") ?? "", /play-new body/);
+});
+
+test("a terminal that is a Node process (pnpm) takes the watcher with it on Windows; status still says stopped", async () => {
+  const { m, a, b, output } = await connectedMachine();
+  const t = terminalOf("node", m, a);
+  const pid = await ownerPid(t);
+  await until("the first build", () => builds(t).length === 1);
+
+  t.process.kill("SIGKILL");
+  await until("the watcher to end", () => !alive(pid));
+
+  const record = fs.readFileSync(path.join(output, "watcher.json"), "utf8");
+  const s = (await cli(m, ["develop", "status", "--json"], {}, b)).json as unknown as StatusJson;
+  assert.equal(s.watcher.state, "stopped", record);
+  if (process.platform === "win32") {
+    // Windows ended the watcher with its parent's job: it had no moment to write, so the record still names it
+    assert.equal(JSON.parse(record).state, "running", record);
+    assert.doesNotMatch(t.log(), /Watcher stopped/);
+    assert.match(s.watcher.note, new RegExp(`its owner \\(pid ${pid}\\) ended without stopping`));
+  } else {
+    // elsewhere the watcher outlives its parent long enough to notice and stop cleanly
+    assert.equal(JSON.parse(record).state, "stopped", record);
+    assert.match(t.log(), /Watcher stopped: its terminal closed/);
+  }
+  const next = terminal(m, b);
+  assert.notEqual(await ownerPid(next), pid);
 });
 
 test.skipIf(process.platform === "win32")(
