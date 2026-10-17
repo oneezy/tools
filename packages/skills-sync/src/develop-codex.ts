@@ -198,6 +198,9 @@ function tracked(project: string, relative: string, env: NodeJS.ProcessEnv): boo
   return r.status === 1 && !r.error && /did not match/.test(r.stderr) ? false : null;
 }
 
+/** Text with CRLF line breaks read as LF: an editor that rewrote the line endings changed nothing of a block. */
+const lf = (text: string) => text.replace(/\r\n/g, "\n");
+
 const read = (file: string): Buffer | null => (lexists(file) ? fs.readFileSync(file) : null);
 
 /**
@@ -394,7 +397,7 @@ function setup(o: Resolved, ctx: AdapterContext): AdapterResult & { owned: unkno
   const covered = release.filter((id) => skillsDev.get(id) === false);
   const disabled = release.filter((id) => !skillsDev.has(id));
   const block = blockText(on, disabled);
-  if (ours !== null && ours !== block && ours !== previous?.block)
+  if (ours !== null && lf(ours) !== block && lf(ours) !== previous?.block)
     conflict(config, "develop setup's block was changed since setup; left untouched (develop remove keeps it too)");
   if (tracked(ctx.project, ".codex/config.toml", o.env))
     conflict(
@@ -555,20 +558,25 @@ function remove(o: Resolved, ctx: AdapterContext): AdapterResult {
   const before = isLink(config) ? null : read(config);
   const text = before?.toString("utf8") ?? "";
   let block: string | null = null;
+  // a kept block still switches the development copies on here, so they and their marketplace stay in Codex
+  let keptBlock = false;
+  const staying = "the development copies and marketplace it switches on stay installed in Codex";
   try {
     block = blockIn(text, PLUGINS_START, PLUGINS_END);
   } catch (e) {
-    report.add({ kind: "note", path: config, loud: true, note: `codex: ${String(e)}; kept` });
+    keptBlock = true;
+    report.add({ kind: "note", path: config, loud: true, note: `codex: ${String(e)}; kept, and ${staying}` });
   }
   let next: string | null | undefined; // undefined: leave the file as it is
-  if (block !== null && block !== owned.block)
+  if (block !== null && lf(block) !== owned.block) {
+    keptBlock = true;
     report.add({
       kind: "note",
       path: config,
       loud: true,
-      note: "codex: develop setup's block changed since setup; kept",
+      note: `codex: develop setup's block changed since setup; kept, and ${staying}`,
     });
-  else if (block !== null) {
+  } else if (block !== null) {
     const rest = withoutBlock(text, PLUGINS_START, PLUGINS_END);
     next = !rest && owned.created.file ? null : rest;
   }
@@ -589,11 +597,12 @@ function remove(o: Resolved, ctx: AdapterContext): AdapterResult {
   if (!others) report.add({ kind: "note", path: ctx.project, loud: true, note: UNKNOWN_PROJECTS(lib) });
   const drop = owned.plugins.filter(
     (id) =>
+      !keptBlock &&
       !!others &&
       !others.has(id) &&
       !!listed?.some((p) => p.name === id && p.marketplace === dev && p.installed !== false),
   );
-  const dropMarket = !!markets?.some((m) => m.name === dev) && !!others && !others.size && !!run;
+  const dropMarket = !keptBlock && !!markets?.some((m) => m.name === dev) && !!others && !others.size && !!run;
   if (next !== undefined && ctx.plan)
     report.add(
       next === null

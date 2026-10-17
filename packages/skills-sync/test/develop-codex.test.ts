@@ -529,3 +529,34 @@ test("with the Library's projects.json missing or unreadable, remove keeps the d
     assert.match(r.actions.map((x) => x.note ?? "").join("\n"), /projects\.json .*; the development copies stay/);
   assert.equal(loaded(a).filter((x) => x.endsWith("oneezy-skills-dev")).length, 0, "a is back on the released copy");
 });
+
+test("a block remove keeps because it changed still switches the development copy on, so Codex keeps that copy", () => {
+  const { m, a, adapter, library } = codexMachine();
+  const config = path.join(a, ".codex", "config.toml");
+  setupProject(a, library, ["play"], { plan: false, adapters: [adapter()] });
+  fs.writeFileSync(config, fs.readFileSync(config, "utf8").replace("enabled = false", "enabled = true"));
+  fs.rmSync(m.log, { force: true });
+
+  const kept = removeProject(a, { plan: false, adapters: [adapter()] });
+
+  assert.deepEqual(kept.conflicts(), []);
+  assert.deepEqual(calls(m), [], "the copies and the marketplace the kept block names stay in Codex");
+  assert.match(kept.actions.map((x) => x.note ?? "").join("\n"), /block changed since setup; kept.*stay installed/);
+});
+
+test("a block whose only change is CRLF line endings is still setup's: remove takes it back", () => {
+  const { m, a, plain, adapter, loaded, library } = codexMachine();
+  const released = loaded(plain);
+  const config = path.join(a, ".codex", "config.toml");
+  setupProject(a, library, ["play"], { plan: false, adapters: [adapter()] });
+  // PowerShell's Set-Content rewrote the file with CRLF
+  fs.writeFileSync(config, fs.readFileSync(config, "utf8").replace(/\n/g, "\r\n"));
+  fs.rmSync(m.log, { force: true });
+
+  const removed = removeProject(a, { plan: false, adapters: [adapter()] });
+
+  assert.deepEqual(removed.conflicts(), []);
+  assert.equal(fs.existsSync(path.join(a, ".codex")), false);
+  assert.deepEqual(loaded(a), released);
+  assert.ok(calls(m).includes("plugin marketplace remove oneezy-skills-dev --json"));
+});
