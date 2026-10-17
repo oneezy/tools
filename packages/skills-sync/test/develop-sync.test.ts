@@ -92,7 +92,11 @@ function machine(options: { account?: boolean } = {}) {
   const develop = (cwd: string, args: string[]) => cli(m, ["develop", ...args], ON, cwd);
   const env = { ...process.env, ...m.env, FAKE_HARNESS_LOG: "" };
   const fake = (host: "claude" | "codex", cwd: string, args: string[]) => {
-    const r = spawnSync(path.join(m.bin, host), args, { cwd, env, encoding: "utf8" });
+    const win = process.platform === "win32";
+    // Windows runs the .cmd shim through the shell, which needs every path quoted
+    const q = (x: string) => (win ? `"${x}"` : x);
+    const bin = path.join(m.bin, win ? `${host}.cmd` : host);
+    const r = spawnSync(q(bin), args.map(q), { cwd, env, encoding: "utf8", shell: win });
     assert.equal(r.status, 0, `${host} ${args.join(" ")}: ${r.stderr}`);
     return r.stdout;
   };
@@ -100,9 +104,11 @@ function machine(options: { account?: boolean } = {}) {
   const loads = (cwd: string) => {
     const claude = /Source: (\S+)/.exec(fake("claude", cwd, ["plugin", "details", "play"]))?.[1];
     const codex = [
-      ...fake("codex", cwd, ["-C", cwd, "debug", "prompt-input"]).matchAll(
-        /- play:([\w-]+): [^\n]*?\(file: ([^)]+)\)/g,
-      ),
+      // the inventory is JSON, so read its text before splitting paths: escaped Windows backslashes come doubled
+      ...(JSON.parse(fake("codex", cwd, ["-C", cwd, "debug", "prompt-input"])) as { content: { text: string }[] }[])
+        .flatMap((x) => x.content.map((c) => c.text))
+        .join("\n")
+        .matchAll(/- play:([\w-]+): [^\n]*?\(file: ([^)]+)\)/g),
     ]
       .map(([, s, file]) => {
         const parts = file.split(/[\\/]/);
