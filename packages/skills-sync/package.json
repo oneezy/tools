@@ -23,7 +23,7 @@
   },
   "scripts": {
     "build": "tsc -p tsconfig.json",
-    "test": "tsc -p tsconfig.json && vp test run",
+    "test": "vp run --cache build && vp test run",
     "start": "node dist/src/cli.js",
     "prepublishOnly": "npm run build && vp test run"
   },
