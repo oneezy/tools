@@ -11,6 +11,7 @@ import path from "node:path";
 import { hasLinkedParent, isDir, isLink, lexists, linkTarget, real, samePath, toHash, under } from "./fs.js";
 import { claudeCodeAdapter } from "./develop-claude-code.js";
 import { buildDevelopment, developmentDirs, readDevelopmentStatus, type DevelopmentBuild } from "./develop-build.js";
+import { watcherStatus, type WatcherStatus } from "./develop-watcher.js";
 import { Library } from "./library.js";
 import { apply, Report } from "./plan.js";
 import { cmp, readConfig } from "./sources.js";
@@ -511,6 +512,8 @@ export interface ProjectStatus {
   harnesses: { harness: string; state: string; note: string }[];
   /** every project the Library's projects.json names: connected while its record names this Library, else gone */
   projects: { path: string; plugins: string[]; state: "connected" | "gone" }[];
+  /** the Library's Development watcher: running (and its owner) or stopped (and which builds are behind); null without a Library */
+  watcher: WatcherStatus | null;
   problems: string[];
 }
 
@@ -532,6 +535,7 @@ export function projectStatus(project: string, lib: Library | null, adapters = A
       note: "no verified Harness adapter yet",
     })),
     projects: [],
+    watcher: library && isDir(library.root) ? watcherStatus(library) : null,
     problems,
   };
   if (library)
