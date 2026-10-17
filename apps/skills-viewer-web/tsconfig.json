@@ -1,5 +1,6 @@
 {
   "extends": "$app/tsconfig",
-  "include": ["src", "*"],
+  "compilerOptions": { "types": ["$app/types", "node"] },
+  "include": ["src", "dev", "*"],
   "exclude": ["src/service-worker"]
 }

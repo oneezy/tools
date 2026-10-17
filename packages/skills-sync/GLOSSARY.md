@@ -7,8 +7,17 @@ One skills library, linked into every Harness on every Host, with third-party sk
 ### The library
 
 **Library**:
-The git repo of skills that every Harness gets: own skills under `skills/`, the config and the lock beside them. Justin's is `oneezy/skills`.
+The Own skills and selected third-party skills maintained together and distributed to Harnesses. A Library can belong to a larger workspace; it does not require a separate Git repository.
 _Avoid_: repo, collection, registry
+
+**Development project**:
+A project explicitly opted in to using the Library's development Plugins instead of their released counterparts. Other projects retain their normal plugin selection.
+
+**Development build**:
+Generated Plugins made from the current working Library for local testing. The last successful Development build remains available when a later build fails.
+
+**Project plugin**:
+A Plugin installed for one project. In a local Development project, it takes precedence over its matching marketplace copy; unrelated external Plugins remain available.
 
 **Own skill**:
 A skill written in the Library itself, flat or inside a Group.

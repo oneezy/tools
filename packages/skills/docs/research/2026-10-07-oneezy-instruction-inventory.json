@@ -1,0 +1,58 @@
+[
+  {
+    "skill": "oneezy-migrate",
+    "baseline": "76a8ec9b62368a3624f27a29c101c2434042bd61",
+    "beforeWords": 895,
+    "afterWords": 347,
+    "frontmatterPreserved": true
+  },
+  {
+    "skill": "oneezy-estimate",
+    "baseline": "76a8ec9b62368a3624f27a29c101c2434042bd61",
+    "beforeWords": 1040,
+    "afterWords": 458,
+    "frontmatterPreserved": true
+  },
+  {
+    "skill": "oneezy-skills",
+    "baseline": "76a8ec9b62368a3624f27a29c101c2434042bd61",
+    "beforeWords": 1667,
+    "afterWords": 497,
+    "frontmatterPreserved": true
+  },
+  {
+    "skill": "oneezy-remote",
+    "baseline": "76a8ec9b62368a3624f27a29c101c2434042bd61",
+    "beforeWords": 499,
+    "afterWords": 211,
+    "frontmatterPreserved": true
+  },
+  {
+    "skill": "oneezy-status",
+    "baseline": "76a8ec9b62368a3624f27a29c101c2434042bd61",
+    "beforeWords": 732,
+    "afterWords": 245,
+    "frontmatterPreserved": true
+  },
+  {
+    "skill": "oneezy-brain",
+    "baseline": "76a8ec9b62368a3624f27a29c101c2434042bd61",
+    "beforeWords": 484,
+    "afterWords": 362,
+    "frontmatterPreserved": true
+  },
+  {
+    "skill": "oneezy-meeting",
+    "baseline": "76a8ec9b62368a3624f27a29c101c2434042bd61",
+    "beforeWords": 1040,
+    "afterWords": 280,
+    "frontmatterPreserved": true
+  },
+  {
+    "skill": "oneezy-merge",
+    "baseline": "76a8ec9b62368a3624f27a29c101c2434042bd61",
+    "beforeWords": 1005,
+    "afterWords": 291,
+    "frontmatterPreserved": true
+  }
+]

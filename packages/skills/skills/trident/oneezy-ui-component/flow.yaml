@@ -1,0 +1,87 @@
+skill: oneezy-ui-component
+purpose: Author a new @layerd/ui component in packages/ui of the Trident monorepo, from the folder to the generated barrel export.
+runtime: [a layerdbiz/tridentcubed checkout, pnpm]
+refs:
+  - token: /tdd
+    kind: skill
+    id: tdd
+    need: conditional
+    when: writing <name>.test.ts, once Vitest is in the workspace (it is not as of 2026-09-28)
+unresolved:
+  - token: "@layerd/ui"
+    note: the Trident UI package name, written as an import source; not a plugin or app
+  - token: "@tags"
+    note: JSDoc tag read by the stories generator; not a plugin or app
+  - token: "@story"
+    note: JSDoc tag read by the stories generator; not a plugin or app
+  - token: "@props"
+    note: JSDoc tag read by the stories generator; not a plugin or app
+  - token: "@ignore"
+    note: JSDoc tag read by the stories generator; not a plugin or app
+  - token: "@enable"
+    note: JSDoc tag read by the stories generator; not a plugin or app
+  - token: "@type"
+    note: JSDoc tag read by the stories generator; not a plugin or app
+  - token: "@layout"
+    note: JSDoc tag read by the stories generator; not a plugin or app
+  - token: "@dev"
+    note: JSDoc tag read by the stories generator; not a plugin or app
+  - token: "@reference"
+    note: the Tailwind at-rule that opens the component's style block; not a plugin or app
+agents:
+  max: 0
+steps:
+  - id: read-rules
+    does: read packages/ui/AGENTS.md and skim packages/ui/CONTEXT.md (tiers, rails, base props); the model to copy is the example atom, and the base component's API is component.svelte.ts and component.svelte
+    outcome:
+      done: the rules read
+  - id: place
+    after: read-rules
+    does: pick the tier by what the component is made of; folder and file share one lowercase word at packages/ui/src/lib/components/<tier>/<name>/<name>.svelte; <name>.svelte.ts only for rune state
+    outcome:
+      done: folder and name chosen
+  - id: open
+    after: place
+    does: a JSDoc block with the story tags, imports from the bare @layerd/ui only, an exported <Name>Props extends ComponentProps, and a destructure with ...props last
+    outcome:
+      done: the script block matches the example
+  - id: render
+    after: open
+    does: spread props onto Component, set tag when the element is not a div, put content in the layout snippets; a root override only when the markup needs several elements or a native element with structured children, and then it renders layout too
+    outcome:
+      done: the component renders through the default renderer, or its override renders layout
+  - id: style
+    after: render
+    does: Tailwind utilities in class= with palette utilities left out (white and black allowed); raw CSS in a postcss style block opened with the ui.css reference; a rule for the root element is written global
+    outcome:
+      done: no palette utilities, no unused scoped rule
+  - id: rails-icons
+    after: style
+    does: rails by their canonical names and icons through the icon prop
+    outcome:
+      done: canonical forms only
+  - id: breakpoints
+    after: rails-icons
+    does: the component reads no viewport and no mq; a consumer that needs two layouts branches around it
+    outcome:
+      done: no breakpoint logic inside
+  - id: barrel
+    after: breakpoints
+    does: run pnpm barrels from the repo root twice
+    needs: [pnpm]
+    outcome:
+      done: <Name> and <Name>Props exported by the barrels, and the second run leaves git status unchanged
+  - id: test
+    after: barrel
+    if: Vitest is in the workspace
+    calls:
+      skill: tdd
+    does: write <name>.test.ts beside the component
+    outcome:
+      done: the test file exists, or the report says in one line that Vitest is not yet in the workspace
+  - id: check
+    after: [barrel, test]
+    does: pnpm --filter @layerd/ui check
+    needs: [pnpm]
+    outcome:
+      done: 0 errors and 0 warnings

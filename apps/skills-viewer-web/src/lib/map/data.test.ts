@@ -54,6 +54,17 @@ describe("groupOf", () => {
 });
 
 describe("toMapData", () => {
+  it("live sources and plugin builds use the same library labels and colors", () => {
+    const live = toMapData(graph([node("hi", "skills/play/hi", { library: "play" })]), "skills");
+    const built = toMapData(
+      graph([
+        node("hi", "plugins/play/skills/hi", { plugin: "plugin:play" }),
+        node("tdd", "plugins/matt-pocock/skills/tdd", { plugin: "plugin:matt-pocock" }),
+      ]),
+      "skills",
+    );
+    expect(live.groups[0]).toEqual(built.groups.find((g) => g.key === "play"));
+  });
   it("groups by plugin, counts merged copies and drops edges to nothing", () => {
     const m = toMapData(
       graph(

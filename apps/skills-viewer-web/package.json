@@ -9,9 +9,9 @@
     "#lib/*": "./src/lib/*"
   },
   "scripts": {
-    "dev": "vp dev",
-    "build": "vp build",
-    "preview": "vp preview",
+    "dev": "vp dev --host --open",
+    "build": "vp run bundle",
+    "preview": "vp preview --open",
     "prepare": "svelte-kit sync || echo ''"
   },
   "dependencies": {

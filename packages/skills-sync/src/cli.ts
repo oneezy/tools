@@ -18,6 +18,8 @@ import { runHook } from "./commands/hook.js";
 import { runStatus } from "./commands/status.js";
 import { runSync, syncFacts } from "./commands/sync.js";
 import { runUnlink } from "./commands/unlink.js";
+import { develop } from "./develop.js";
+import { watchDevelopment } from "./develop-watch.js";
 import { harnessTable } from "./harnesses.js";
 import { findLibrary, Library, looksLikeLibrary, verifyLibraryRevision } from "./library.js";
 import { apply, line, Report } from "./plan.js";
@@ -44,6 +46,9 @@ flag is accepted, does nothing, and is named once on stderr; a word they do not 
 Usage: skills-sync [command] [options]
 
 Commands
+  develop          install live skills into --root <workspace>/.agents/skills and .claude/skills.
+                   Requires --repo <library> and --root <workspace>. Run refresh --frozen first for dependencies.
+                   Writes only inside the workspace, including Codex exclusions for external skills. --plan previews.
   sync (default)   bring every detected harness to its one form (ADR-0007): Claude Code the account plugins claude.ai
                    delivers, Codex the library's plugins from GitHub, Hermes its plugins; and the skills block in each
                    harness's global instructions file (~/.claude/CLAUDE.md, ~/.codex/AGENTS.md): the tool's pointer
@@ -184,6 +189,7 @@ Options
   --symlinks             library commands: make directory symlinks only (default: a symlink, or a junction when Windows
                          refuses one)
   --junctions            library commands, Windows: make junctions only
+  --watch                develop: watch local skill changes; ignored by legacy machine commands
   -h, --help
 
 Older flags (-y, --agents, --global, --no-projects, --no-wsl, --links, --plugins, --no-pull, --no-remember, --watch,
@@ -197,6 +203,7 @@ skills into projects any more (ADR-0007). adopt-brain and rollback-brain are ret
 const MACHINE_COMMANDS = new Set(["sync", "status", "hook", "branches", "unlink"]);
 /** The library commands: inside a checkout. */
 const LIBRARY_COMMANDS = new Set([
+  "develop",
   "update",
   "refresh",
   "versions",
@@ -250,6 +257,7 @@ interface Args {
   plan: boolean;
   quiet: boolean;
   json: boolean;
+  watch: boolean;
 }
 
 /** Older flags that take a value: accepted and skipped with it. */
@@ -290,6 +298,7 @@ function parseArgs(argv: string[]): Args {
     plan: false,
     quiet: false,
     json: false,
+    watch: false,
   };
   const list = (v: string) =>
     v
@@ -307,6 +316,7 @@ function parseArgs(argv: string[]): Args {
       process.stdout.write(HELP);
       process.exit(0);
     } else if (x === "--plan") a.plan = true;
+    else if (x === "--watch") a.watch = true;
     else if (x === "--quiet") a.quiet = true;
     else if (x === "--json") a.json = true;
     else if (x === "--library") a.library = next();
@@ -454,6 +464,44 @@ async function libraryCommand(args: Args): Promise<void> {
   const cwd = process.cwd();
   const log = (m: string) => (args.json ? undefined : process.stderr.write(m + "\n"));
   const setup = new Report();
+  if (args.command === "develop") {
+    if (!args.repo || !args.root) bail("develop requires --repo <library> and --root <workspace>");
+    if (args.positional.length) bail("develop takes no positional arguments");
+    if (args.given.includes("--global"))
+      bail("Global development installation is not available; develop is repo-local.");
+    if (args.watch && (args.plan || args.json)) bail("develop --watch cannot be combined with --plan or --json");
+    setLinkMode(args.links ?? "auto");
+    const lib = new Library(real(path.resolve(args.repo)));
+    const workspace = path.resolve(args.root);
+    const report = develop(lib, workspace, { plan: args.plan });
+    if (report.conflicts().length) process.exitCode = 1;
+    printReport(report, args, {});
+    if (!args.watch || report.conflicts().length) return;
+    const close = watchDevelopment(lib.root, {
+      restore: () => {
+        const result = refresh(lib, { frozen: true, plan: false, unavailable: [], log });
+        if (result.refused || result.problems.length || result.report.conflicts().length)
+          throw new Error(
+            result.refused ?? JSON.stringify({ problems: result.problems, conflicts: result.report.conflicts() }),
+          );
+      },
+      reconcile: () => {
+        const result = develop(lib, workspace, { plan: false });
+        if (result.conflicts().length) throw new Error(JSON.stringify(result.conflicts()));
+      },
+      log,
+      error: (error) => log(`Skill watcher: ${String(error)}; fix the source and save again.`),
+    });
+    const stop = () => {
+      close();
+      process.off("SIGINT", stop);
+      process.off("SIGTERM", stop);
+    };
+    process.on("SIGINT", stop);
+    process.on("SIGTERM", stop);
+    log("Watching local skills. Ctrl+C stops the watcher. Plugins are built only by pnpm build.");
+    return;
+  }
 
   const scopedAliases = args.command === "migrate-aliases" || args.command === "rollback-aliases";
   if (scopedAliases) {

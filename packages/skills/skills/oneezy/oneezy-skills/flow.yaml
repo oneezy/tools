@@ -1,0 +1,296 @@
+skill: oneezy-skills
+purpose: Keep Justin's skills in sync from the library by running the published sync tool through the script beside the skill; land updates, downgrades, adds and playground changes in the library as a release, take them on this machine, run oneezy-migrate, and end every run with the manual steps still open.
+runtime: [npx (Node 20+), git, gh]
+refs:
+  - token: references/aliases.md
+    kind: file
+    id: skills/oneezy/oneezy-skills/references/aliases.md
+    need: conditional
+    when: explicitly approved historical Skills/Status alias handoff or rollback
+  - token: /oneezy-status
+    kind: skill
+    id: oneezy-status
+    need: required
+    when: after every canonical sync attempt, including partial failure
+  - token: scripts/sync.ps1
+    kind: file
+    id: skills/oneezy/oneezy-skills/scripts/sync.ps1
+    need: conditional
+    when: Windows
+  - token: scripts/sync.sh
+    kind: file
+    id: skills/oneezy/oneezy-skills/scripts/sync.sh
+    need: conditional
+    when: Linux, macOS, WSL, cloud
+  - token: skills-sync.json
+    kind: file
+    id: skills-sync.json
+    need: conditional
+    when: change (a hold is written or cleared), add of a declared source, promote (the plugin description), a skill reported gone upstream
+  - token: .github/workflows/land.yml
+    kind: file
+    id: .github/workflows/land.yml
+    need: conditional
+    when: normal explicitly requested upstream/add/playground change; held for review/no-publication scope
+  - token: .github/workflows/run.yml
+    kind: file
+    id: .github/workflows/run.yml
+    need: conditional
+    when: update, add or versions from a session that cannot clone or push oneezy/skills (a cloud thread); the library's daily upstream check
+  - token: docs/agents/references.md
+    kind: file
+    id: docs/agents/references.md
+    need: conditional
+    when: playground create; the flow.yaml shape
+  - token: /oneezy-migrate
+    kind: skill
+    id: oneezy-migrate
+    need: conditional
+    when: after a normal landed change with update report; not a held development artifact
+  - token: /unslop
+    kind: skill
+    id: unslop
+    need: example
+    when: the source's own copy stays when a skill is copied to the playground
+  - token: references/global-block.md
+    kind: file
+    id: skills/oneezy/oneezy-skills/references/global-block.md
+    need: conditional
+    when: the named operation/reference branch in SKILL.md
+  - token: references/management.md
+    kind: file
+    id: skills/oneezy/oneezy-skills/references/management.md
+    need: conditional
+    when: the named operation/reference branch in SKILL.md
+  - token: references/report.md
+    kind: file
+    id: skills/oneezy/oneezy-skills/references/report.md
+    need: conditional
+    when: the named operation/reference branch in SKILL.md
+  - token: references/requests.md
+    kind: file
+    id: skills/oneezy/oneezy-skills/references/requests.md
+    need: conditional
+    when: the named operation/reference branch in SKILL.md
+  - token: references/changes.md
+    kind: file
+    id: skills/oneezy/oneezy-skills/references/changes.md
+    need: conditional
+    when: the named operation/reference branch in SKILL.md
+  - token: references/chatgpt-update.md
+    kind: file
+    id: skills/oneezy/oneezy-skills/references/chatgpt-update.md
+    need: conditional
+    when: update my ChatGPT plugins, inside ChatGPT
+  - token: references/capabilities/contract.md
+    kind: file
+    id: skills/oneezy/oneezy-skills/references/capabilities/contract.md
+    need: required
+    when: before any dependency call
+  - token: references/capabilities/chatgpt.md
+    kind: file
+    id: skills/oneezy/oneezy-skills/references/capabilities/chatgpt.md
+    need: conditional
+    when: ChatGPT host
+  - token: references/capabilities/claude.md
+    kind: file
+    id: skills/oneezy/oneezy-skills/references/capabilities/claude.md
+    need: conditional
+    when: Claude host
+  - token: references/capabilities/codex.md
+    kind: file
+    id: skills/oneezy/oneezy-skills/references/capabilities/codex.md
+    need: conditional
+    when: Codex host
+  - token: references/capabilities/catalog.json
+    kind: file
+    id: skills/oneezy/oneezy-skills/references/capabilities/catalog.json
+    need: conditional
+    when: inventory, management or missing dependency
+  - token: /skill-creator
+    kind: skill
+    id: skill-creator
+    need: conditional
+    when: skill authoring; actual runtime skill
+  - token: /writing-for-agents
+    kind: skill
+    id: writing-for-agents
+    need: conditional
+    when: authored agent instructions; Matt method governs
+  - token: /plugin-management:plugin-management
+    kind: skill
+    id: plugin-management:plugin-management
+    need: conditional
+    when: ChatGPT discovery/connection/permission inspection
+  - token: /plugin-creator:create-plugin
+    kind: skill
+    id: plugin-creator:create-plugin
+    need: conditional
+    when: authorized plugin creation
+  - token: /plugin-creator:update-plugin
+    kind: skill
+    id: plugin-creator:update-plugin
+    need: conditional
+    when: eligible plugin update/source inspection
+unresolved:
+  - token: "@oneezy/skills-sync"
+    note: the npm package name of the published sync tool; not a plugin or app
+  - token: "/play:<name>"
+    note: the plugin form of a playground skill; a pattern, not one skill
+  - token: /play-<name>
+    note: the name pattern of every playground skill, not one skill
+  - token: /play-unslop
+    note: an example of a playground skill's name; it exists only once Justin copies unslop to the playground
+agents:
+  max: 0
+steps:
+  - id: map-request
+    does: match Justin's words to a plain run of the script (none for sync, my skills are missing or nothing; status; unlink; branches; --plan), or to change (update, upgrade, downgrade, all or one source, --to a version, previous
+      or latest; versions <source> in a checkout, or dispatch-run from a cloud thread), add (owner/repo or a link to one skill) or playground (copy, create, remove, promote); or route source
+      development/global block or explicit creator/management action by current host
+    outcome:
+      done: arguments chosen, or change, add or playground
+  - id: run-script
+    after: map-request
+    if: a plain run
+    does: run the canonical platform script (the latest published tool, or a reviewed SKILLS_SYNC_CLI); a machine command reads the latest release from GitHub, writes the global block, the one hook entry and the harness plugins, and verifies its readback
+    needs:
+    - npx
+    outcome:
+      done: the tool's output on screen (nothing when a quiet sync changed nothing)
+  - id: clone
+    after: map-request
+    if: change, add or playground
+    does: inspect existing rollout and dirty work; use isolated dev/review checkout for source development, or land/<topic>
+        only for a normal change in authorized publication scope; then run refresh --frozen --repo . before any build
+        so uncommitted third-party snapshots exist without moving pins
+    needs:
+    - git
+    - npx
+    outcome:
+        done: an isolated checkout on the appropriate review or authorized land branch with its frozen snapshots
+  - id: change-sources
+    after: clone
+    if: change
+    does: run the script with update [<source>] [--to <version>|previous|latest] --json --repo . and keep the report; apply its config entries to skills-sync.json (set sources.<id>.version, or remove it for null)
+    needs: [npx, git]
+    outcome:
+      done: the lock and snapshots moved, the hold written or cleared
+      fail: refused (not a release) → the versions it names, stop
+  - id: add-source
+    after: clone
+    if: add
+    does: name the source (owner/repo, or owner/repo#ref with --root and --skills for a link to one skill; an already declared source gets its skills list edited and update <source> instead); run the script with add <source> --repo .
+    needs: [npx, git]
+    outcome:
+      done: the source and its plugin declared
+      fail: the tool refuses the source → its error line, stop
+  - id: remove-source
+    after: clone
+    if: remove
+    does: name the source (its id, or the owner/repo of exactly one source); run the script with remove <source> --repo .
+    needs: [npx, git]
+    outcome:
+      done: the source, its lock entries, snapshot and plugin gone
+      fail: the tool refuses (unknown, ambiguous, still referenced) → its error line, stop
+  - id: playground
+    after: clone
+    if: playground
+    does: copy (a skill folder from its repo into skills/play/play-<name>, frontmatter name set, origin-repo, origin-path and origin-commit in metadata, the upstream LICENSE beside it), create (a new play-<name> skill with flow.yaml), remove (delete skills/play/play-<name>) or promote (git mv to skills/oneezy/oneezy-<name> or skills/trident/trident-<name> unless Justin names it, rename frontmatter, flow and tokens, add it to the plugin description)
+    needs: [git]
+    outcome:
+      done: the skill folder written, removed or moved
+  - id: dispatch-run
+    after: map-request
+    if: update, add, remove or versions from a session that cannot clone or push oneezy/skills (a cloud thread)
+    does: dispatch the library's run workflow over gh api REST with the command and its arguments as one string, then
+      watch the run; a changed update, add or remove pushes land/<command>-<args>-<run id>, versions only prints in the log
+    needs:
+    - gh
+    outcome:
+      done: the run completed; its land branch, or that nothing changed, known
+      fail: the run is red → its failing step, stop (nothing pushed)
+  - id: build-check
+    after:
+    - change-sources
+    - add-source
+    - remove-source
+    - playground
+    does: for authored Oneezy/capability changes, generate packaged capability references and run source tests; run canonical
+      build then check; retain exact source/tool artifact for a held desktop handoff
+    needs:
+    - npx
+    outcome:
+      done: check exits 0
+      fail: nothing changed in the clone → report there is nothing to land, stop
+  - id: land-release
+    after: [build-check, dispatch-run]
+    does: commit and push land/<topic> (after dispatch-run, the branch the run pushed); the land workflow checks it,
+      squashes it into dev, promotes main and starts the release, so the session merges nothing; watch its run and the
+      release run over gh api REST
+    needs:
+    - git
+    - gh
+    outcome:
+      done: releases/latest is a new release-<n>
+      fail: the land run is red → its failing step, stop (nothing landed); push refused for lack of access to oneezy/skills
+        → one line naming a session that has it, stop
+    if: normal change whose scope authorizes landing/release; skip for review/no-publication/source handoff
+  - id: link-new
+    after: land-release
+    does: run the script with no arguments, so this machine takes the new release now, then delete the temporary folder
+    needs:
+    - npx
+    outcome:
+      done: the new release taken on this machine
+    if: normal change whose scope authorizes landing/release; skip for review/no-publication/source handoff
+  - id: migrate
+    after: link-new
+    calls:
+      skill: oneezy-migrate
+    does: run oneezy-migrate with the update report (or none after an add or a playground change)
+    outcome:
+      done: its report, usually nothing to migrate
+    if: normal change whose scope authorizes landing/release; skip for review/no-publication/source handoff
+  - id: report
+    after: [run-script, migrate]
+    calls:
+      skill: oneezy-status
+    does: run the script with status --json, then invoke Oneezy Status Skills Sync mode with canonical actions, exit code, that status output and before/after readbacks; distinguish verified success, failure and every skipped or unreachable destination, separate source/generated/installed versions and SHAs
+    needs:
+    - npx
+    returns: the change lines, versions, release tag and migrate report
+    outcome:
+      done: report on screen
+      fail: a skill Justin asked for is still missing after the sync → say which, show the per-harness invocation table and stop; the fix belongs in the library
+  - id: manual-steps
+    after: report
+    does: end the message with every manualSteps entry of status --json, each as its title and its numbered steps in the tool's words; none open ends with "No manual steps open."
+    returns: the open manual steps, step by step
+    outcome:
+      done: the list is the last thing on screen
+  - id: chatgpt-update
+    after: map-request
+    if: inside ChatGPT, a sync or update request (update my skills, update my ChatGPT plugins); a library change there is dispatched first (references/requests.md, ChatGPT rows)
+    does: follow references/chatgpt-update.md; Plugin Creator brings each library plugin's personal copy to the latest release's files, creates a missing one, reads each back and reports; no script, no status --json
+    outcome:
+      done: one report line per release plugin, every write read back
+      fail: Plugin Creator not exposed → name the missing tool and tell Justin to type the line in a ChatGPT chat
+  - id: management
+    after: map-request
+    if: explicit authoring/packaging/install/connect/update/audit request
+    does: read management reference and host adapter; load actual creator/management skill, inspect current help/API and
+      exact destination; perform supported native API or local CLI action only within authorized scope; an absent technical
+      route may use next documented route once, never around approval or access denial
+    outcome:
+      done: action performed and identity/version/source/readback verified, or source-only artifact prepared with delivery
+        held
+      fail: report blocked destination while independent destinations continue
+  - id: block-development
+    after: map-request
+    if: source development, global block audit or desktop handoff
+    does: follow global block reference with reviewed source/tool; plan, apply only in accessible authorized environment,
+      status/readback and idempotence; no hand edits and no default main substitution
+    outcome:
+      done: verified code/artifact and exact commands/prerequisites; actual execution distinguished from handoff
+      fail: exact inaccessible environment or conflict recorded

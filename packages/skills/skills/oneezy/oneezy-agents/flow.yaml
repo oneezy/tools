@@ -1,0 +1,65 @@
+skill: oneezy-agents
+purpose: Load Justin's global rules for every harness (AGENTS-GLOBAL.md) from the copy installed with this plugin and follow them for the rest of the session.
+runtime: [file read, shell]
+refs:
+  - token: references/AGENTS-GLOBAL.md
+    kind: file
+    id: skills/oneezy/oneezy-agents/references/AGENTS-GLOBAL.md
+    need: required
+    when: load, the only source
+  - token: docs/agents/release.md
+    kind: file
+    id: docs/agents/release.md
+    need: conditional
+    when: Justin asks to change a rule
+  - token: references/capabilities/contract.md
+    kind: file
+    id: skills/oneezy/oneezy-agents/references/capabilities/contract.md
+    need: required
+    when: before any dependency call
+  - token: references/capabilities/chatgpt.md
+    kind: file
+    id: skills/oneezy/oneezy-agents/references/capabilities/chatgpt.md
+    need: conditional
+    when: ChatGPT host
+  - token: references/capabilities/claude.md
+    kind: file
+    id: skills/oneezy/oneezy-agents/references/capabilities/claude.md
+    need: conditional
+    when: Claude host
+  - token: references/capabilities/codex.md
+    kind: file
+    id: skills/oneezy/oneezy-agents/references/capabilities/codex.md
+    need: conditional
+    when: Codex host
+  - token: references/capabilities/catalog.json
+    kind: file
+    id: skills/oneezy/oneezy-agents/references/capabilities/catalog.json
+    need: conditional
+    when: inventory, management or missing dependency
+unresolved: []
+agents:
+  max: 0
+steps:
+  - id: load
+    does: read the installed references/AGENTS-GLOBAL.md beside SKILL.md; when the reported base directory lacks it, find the installed copy under the harness's plugin folders; never fetch a remote copy
+    needs: [file read, shell]
+    outcome:
+      done: the installed copy's full text held
+      fail: no installed copy found; Justin told where you searched
+  - id: follow
+    after: load
+    does: treat the text as standing instructions for the session; load a skill it routes to when the work reaches it
+    outcome:
+      done: the rules are in force
+  - id: name-copy
+    after: load
+    does: open the reply with one line saying AGENTS-GLOBAL.md was loaded from the installed plugin, with the plugin version when readable
+    returns: the copy line, then the answer to Justin's message
+    outcome:
+      done: copy line printed
+  - id: change-rule
+    if: Justin asks to change a rule
+    does: give him the new wording; on his yes, edit references/AGENTS-GLOBAL.md in place and land it on a land/* branch with a patch bump, so it ships in the next release
+    outcome:
+      done: wording given, or the land/* branch pushed after his yes

@@ -14,7 +14,8 @@ export interface Mention {
   type: EdgeType;
 }
 
-const NAME = "[a-z](?:[a-z0-9-]*[a-z0-9])?";
+const SIMPLE_NAME = "[a-z](?:[a-z0-9-]*[a-z0-9])?";
+const NAME = `${SIMPLE_NAME}(?::${SIMPLE_NAME})?`;
 const STOP = new Set([
   "the",
   "a",
@@ -74,6 +75,10 @@ const RANK: Record<EdgeType, number> = { calls: 3, prerequisite: 2, suggests: 1,
 export type Doc = Pick<ParsedSkill, "id" | "name" | "body" | "bodyStart"> & {
   /** a plugin part: its name resolves only when no skill already has it */
   part?: boolean;
+  scope?: string;
+  alias?: string;
+  /** Supporting documents may refer to skills but are not skill aliases themselves. */
+  resolvable?: boolean;
 };
 
 export interface DetectResult {
@@ -84,30 +89,33 @@ export interface DetectResult {
 }
 
 export function detect(skills: Doc[], modes: Map<string, Mode>): DetectResult {
-  const byName = new Map<string, string>();
-  for (const s of skills) {
-    if (s.part) continue;
-    byName.set(s.id.toLowerCase(), s.id);
-    byName.set(s.name.toLowerCase(), s.id);
-  }
-  for (const s of skills) if (s.part && !byName.has(s.name.toLowerCase())) byName.set(s.name.toLowerCase(), s.id);
-  // bare hyphenated names: a skill by its id (as before), a part by its name
-  const hyphenated: Array<[string, string]> = [
-    ...skills.filter((s) => !s.part && s.id.includes("-")).map((s): [string, string] => [s.id, s.id]),
-    ...skills
-      .filter(
-        (s) =>
-          s.part &&
-          s.name.includes("-") &&
-          new RegExp(`^${NAME}$`).test(s.name) &&
-          byName.get(s.name.toLowerCase()) === s.id,
-      )
-      .map((s): [string, string] => [s.name, s.id]),
-  ];
+  const candidates = new Map<string, Doc[]>();
+  for (const s of skills.filter((s) => s.resolvable !== false))
+    for (const name of new Set([
+      s.id,
+      s.name,
+      s.alias,
+      ...(s.scope ? [`${s.scope}:${s.alias ?? s.name}`, `${s.scope}:${s.name}`] : []),
+    ])) {
+      if (!name) continue;
+      const key = name.toLowerCase();
+      const entries = candidates.get(key) ?? [];
+      if (!entries.some((entry) => entry.id === s.id)) candidates.set(key, [...entries, s]);
+    }
 
   const mentions: Mention[] = [];
   const flows: Flow[] = [];
   for (const s of skills) {
+    const byName = new Map<string, string>();
+    for (const [name, all] of candidates) {
+      const preferred = all.some((x) => !x.part) ? all.filter((x) => !x.part) : all;
+      const sameScope = s.scope ? preferred.filter((x) => x.scope === s.scope) : [];
+      const matches = sameScope.length ? sameScope : preferred;
+      if (matches.length === 1) byName.set(name, matches[0].id);
+    }
+    const hyphenated: Array<[string, string]> = [...byName].filter(
+      ([name]) => name.includes("-") && new RegExp(`^${NAME}$`).test(name),
+    );
     const ms = mentionsIn(s, byName, hyphenated);
     mentions.push(...ms);
     flows.push(...flowsIn(s, ms));
@@ -190,7 +198,7 @@ function mentionsIn(s: Doc, byName: Map<string, string>, hyphenated: Array<[stri
       while ((m = d.re.exec(text))) {
         if (d.pattern === "skill-tool") {
           const span = m[0];
-          const q = /"([a-z][a-z0-9-]*)"|`([a-z][a-z0-9-]*)`/g;
+          const q = new RegExp(`"(${NAME})"|\`(${NAME})\``, "g");
           let qm: RegExpExecArray | null;
           while ((qm = q.exec(span))) {
             const raw = qm[1] ?? qm[2];

@@ -1,0 +1,98 @@
+# land: a branch named land/<topic> lands on its own, with no pull request and no review (Justin's call, 2026-10-05,
+# oneezy/skills#48): an agent that adds or changes a skill pushes such a branch and stops, and run.yml pushes one
+# (land/<command>-<args>-<run id>) when a library command, the daily update included, changed anything. Pushing is all
+# they do; merging and releasing happen here.
+#
+#   1. Squash the branch onto dev, as one commit carrying the branch tip's message. A branch that changes .github/
+#      is refused: workflow changes go through a pull request.
+#   2. Check the result exactly as library.yml's `check` does: `refresh --frozen`, `build --check`, `check`, the
+#      release script's tests. A red check, or a squash that does not apply, pushes nothing: dev and main stay as
+#      they were and the branch stays for a look.
+#   3. Push dev, then merge dev into main with a merge commit (dev stays an ancestor of main) and push main.
+#   4. Start library.yml's `release` on main. A push made with GITHUB_TOKEN starts no workflow, so the push to
+#      main alone would cut no release; workflow_dispatch is the one event that token may start.
+#   5. Delete the branch.
+#
+# Only people and agents with write access to this repository can push a branch, so the gate is who can push.
+name: land
+
+on:
+  push:
+    branches: ['land/**']
+
+permissions: {}
+
+jobs:
+  land:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      actions: write
+    concurrency:
+      group: library-land
+      cancel-in-progress: false
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+      BRANCH: ${{ github.ref_name }}
+    steps:
+      - name: Check out dev
+        uses: actions/checkout@v5
+        with:
+          ref: dev
+          path: library
+          fetch-depth: 0
+
+      - name: Squash the branch onto dev
+        id: squash
+        working-directory: library
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git fetch --quiet origin "$BRANCH" main
+          git merge --squash "origin/$BRANCH"
+          if git diff --cached --quiet; then
+            echo "::notice title=land::$BRANCH changes nothing on dev; nothing to land"
+            echo "empty=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          touched=$(git diff --cached --name-only -- .github)
+          if [[ -n "$touched" ]]; then
+            echo "::error title=land refused::$BRANCH changes .github/ ($touched); workflow changes go through a pull request"
+            exit 1
+          fi
+          git log -1 --format=%B "origin/$BRANCH" > "$RUNNER_TEMP/message"
+          printf '\nLanded from %s by the land workflow.\n' "$BRANCH" >> "$RUNNER_TEMP/message"
+          git commit --quiet -F "$RUNNER_TEMP/message"
+
+      - name: Install the latest published @oneezy/skills-sync
+        if: steps.squash.outputs.empty != 'true'
+        id: tool
+        uses: ./library/.github/actions/skills-sync-cli
+
+      - name: Check the result (as library.yml check does)
+        if: steps.squash.outputs.empty != 'true'
+        env:
+          CLI: ${{ steps.tool.outputs.cli }}
+        run: |
+          node "$CLI" refresh --frozen --repo library
+          node "$CLI" build --check --repo library
+          node "$CLI" check --repo library
+          node --test library/.github/scripts/*.test.mjs
+
+      - name: Push dev, promote main
+        if: steps.squash.outputs.empty != 'true'
+        working-directory: library
+        run: |
+          git push --quiet origin HEAD:dev
+          git checkout --quiet -B main origin/main
+          git merge --no-ff --quiet -m "release: promote dev to main ($BRANCH)" dev
+          git push --quiet origin HEAD:main
+          echo "::notice title=landed::$BRANCH is on dev $(git rev-parse --short dev) and main $(git rev-parse --short HEAD)"
+
+      - name: Start the release on main
+        if: steps.squash.outputs.empty != 'true'
+        run: gh workflow run library.yml --ref main -f job=release
+
+      - name: Delete the branch
+        run: git -C library push --quiet origin --delete "$BRANCH"

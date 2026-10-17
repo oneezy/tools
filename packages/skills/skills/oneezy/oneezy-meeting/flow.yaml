@@ -1,0 +1,200 @@
+skill: oneezy-meeting
+purpose: Choose one of seven meeting workflows, gather relevant authorized evidence, and return its plain-language report
+  without changing the separate status workflow.
+runtime:
+- skill reader
+- authorized source tools when evidence beyond a supplied update is needed
+refs:
+- token: references/daily-standup.md
+  kind: file
+  id: skills/oneezy/oneezy-meeting/references/daily-standup.md
+  need: conditional
+  when: the selected meeting is daily-standup
+- token: references/backlog-refinement.md
+  kind: file
+  id: skills/oneezy/oneezy-meeting/references/backlog-refinement.md
+  need: conditional
+  when: the selected meeting is backlog-refinement
+- token: references/sprint-planning.md
+  kind: file
+  id: skills/oneezy/oneezy-meeting/references/sprint-planning.md
+  need: conditional
+  when: the selected meeting is sprint-planning
+- token: references/sprint-review.md
+  kind: file
+  id: skills/oneezy/oneezy-meeting/references/sprint-review.md
+  need: conditional
+  when: the selected meeting is sprint-review
+- token: references/sprint-retrospective.md
+  kind: file
+  id: skills/oneezy/oneezy-meeting/references/sprint-retrospective.md
+  need: conditional
+  when: the selected meeting is sprint-retrospective
+- token: references/quarterly-review.md
+  kind: file
+  id: skills/oneezy/oneezy-meeting/references/quarterly-review.md
+  need: conditional
+  when: the selected meeting is quarterly-review
+- token: references/yearly-review.md
+  kind: file
+  id: skills/oneezy/oneezy-meeting/references/yearly-review.md
+  need: conditional
+  when: the selected meeting is yearly-review
+- token: references/shared-rules.md
+  kind: file
+  id: skills/oneezy/oneezy-meeting/references/shared-rules.md
+  need: required
+  when: prepare and verify the selected report
+- token: references/source-routing.md
+  kind: file
+  id: skills/oneezy/oneezy-meeting/references/source-routing.md
+  need: conditional
+  when: gather evidence beyond a user-supplied update
+- token: references/capability-inventory.md
+  kind: file
+  id: skills/oneezy/oneezy-meeting/references/capability-inventory.md
+  need: conditional
+  when: a requested source is missing or the user asks about available capabilities
+- token: references/source-notes.md
+  kind: file
+  id: skills/oneezy/oneezy-meeting/references/source-notes.md
+  need: conditional
+  when: the user asks about template provenance
+- token: /oneezy-brain
+  kind: skill
+  id: oneezy-brain
+  need: conditional
+  when: Brain evidence is requested; resolve the current Drive skill route, or report the exact gap and continue only
+    independent sources
+- token: /oneezy-status
+  kind: skill
+  id: oneezy-status
+  need: mention
+  when: preserve the separate status workflow; a meeting request does not invoke it
+- token: skills/oneezy/oneezy-brain/SKILL.md
+  kind: file
+  id: skills/oneezy/oneezy-brain/SKILL.md
+  need: conditional
+  when: resolve the current Brain workflow when that source is requested
+- token: references/evidence.md
+  kind: file
+  id: skills/oneezy/oneezy-meeting/references/evidence.md
+  need: conditional
+  when: the named operation/reference branch in SKILL.md
+- token: references/selection.md
+  kind: file
+  id: skills/oneezy/oneezy-meeting/references/selection.md
+  need: conditional
+  when: the named operation/reference branch in SKILL.md
+- token: references/capabilities/contract.md
+  kind: file
+  id: skills/oneezy/oneezy-meeting/references/capabilities/contract.md
+  need: required
+  when: before any dependency call
+- token: references/capabilities/chatgpt.md
+  kind: file
+  id: skills/oneezy/oneezy-meeting/references/capabilities/chatgpt.md
+  need: conditional
+  when: ChatGPT host
+- token: references/capabilities/claude.md
+  kind: file
+  id: skills/oneezy/oneezy-meeting/references/capabilities/claude.md
+  need: conditional
+  when: Claude host
+- token: references/capabilities/codex.md
+  kind: file
+  id: skills/oneezy/oneezy-meeting/references/capabilities/codex.md
+  need: conditional
+  when: Codex host
+- token: references/capabilities/catalog.json
+  kind: file
+  id: skills/oneezy/oneezy-meeting/references/capabilities/catalog.json
+  need: conditional
+  when: inventory, management or missing dependency
+unresolved:
+- token: /review
+  note: May name this meeting selection or a separate sprint-review skill; resolve the user request and current catalog without
+    assuming installation.
+- token: '@GitHub'
+  note: Resolve the current host plugin and intended account; source access needs a successful authorized read.
+- token: '@Figma'
+  note: Optional source-routing dependency; discover the current host selector, tools and authorized source access when the
+    requested meeting needs it.
+- token: '@Gmail'
+  note: Optional source-routing dependency; discover the current host selector, tools and authorized source access when the
+    requested meeting needs it.
+- token: '@Google Calendar'
+  note: Optional source-routing dependency; discover the current host selector, tools and authorized source access when the
+    requested meeting needs it.
+- token: '@Google Drive'
+  note: Optional source-routing dependency; discover the current host selector, tools and authorized source access when the
+    requested meeting needs it.
+- token: '@OpenAI Library'
+  note: Optional source-routing dependency; discover the current host selector, tools and authorized source access when the
+    requested meeting needs it.
+- token: '@Outlook Calendar'
+  note: Optional source-routing dependency; discover the current host selector, tools and authorized source access when the
+    requested meeting needs it.
+- token: '@Outlook Email'
+  note: Optional source-routing dependency; discover the current host selector, tools and authorized source access when the
+    requested meeting needs it.
+- token: '@Pages'
+  note: Optional source-routing dependency; discover the current host selector, tools and authorized source access when the
+    requested meeting needs it.
+- token: '@Trello'
+  note: Optional source-routing dependency; discover the current host selector, tools and authorized source access when the
+    requested meeting needs it.
+- token: '@Vercel'
+  note: Optional source-routing dependency; discover the current host selector, tools and authorized source access when the
+    requested meeting needs it.
+- token: '@Write Like Me'
+  note: Optional source-routing dependency; discover the current host selector, tools and authorized source access when the
+    requested meeting needs it.
+- token: '@monday.com'
+  note: Optional source-routing dependency; discover the current host selector, tools and authorized source access when the
+    requested meeting needs it.
+agents:
+  max: 0
+steps:
+- id: select-meeting
+  does: Keep the requested scope and period; use the explicit meeting choice, otherwise show the seven-item menu and wait.
+  outcome:
+    done: one meeting type selected
+    input: the user chooses a valid meeting type or clarifies an ambiguous selection
+- id: read-template
+  after: select-meeting
+  does: Read shared rules and only the selected meeting template.
+  needs:
+  - references/shared-rules.md
+  - selected meeting template
+  outcome:
+    done: the selected template and its evidence and period rules are known
+- id: resolve-sources
+  after: read-template
+  does: Honor supplied-update-only requests; otherwise discover relevant dependencies, invocation policy, tools and authorized
+    source access.
+  needs:
+  - references/source-routing.md
+  outcome:
+    done: relevant usable evidence sources identified
+    input: a source identity or necessary connection cannot be resolved
+- id: gather-evidence
+  after: resolve-sources
+  does: Read relevant evidence for the selected period and source scope; preserve conflicts and coverage limits without unauthorized
+    writes.
+  outcome:
+    done: enough evidence exists to draft a supported report
+    input: ask only the selected template questions or missing choices that materially affect the report
+- id: prepare-report
+  after: gather-evidence
+  does: Fill the selected template with verified outcomes, actual status, source links and concrete next steps; mark unknowns
+    and suggestions.
+  outcome:
+    done: a complete draft follows the unchanged meeting layout
+- id: verify-and-return
+  after: prepare-report
+  does: Check timezone, covered period, readiness claims, attribution, evidence coverage and authorization; correct mismatches
+    and return the meeting.
+  returns: the selected meeting report
+  outcome:
+    done: the factual report is on screen with its numbered lists, supported statuses and Next Steps

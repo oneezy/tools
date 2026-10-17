@@ -1,0 +1,129 @@
+skill: oneezy-status
+purpose: Render the status report for the working tree, branch, PR or merged PR in the fixed shape of STATUS.md, ending with Next Up and the next session's prompt. Read-only.
+runtime: [git, gh, Vercel commit statuses and bot comments]
+refs:
+  - token: references/skills-sync.md
+    kind: file
+    id: skills/oneezy/oneezy-status/references/skills-sync.md
+    need: conditional
+    when: canonical Skills Sync results
+  - token: references/brain-daily.md
+    kind: file
+    id: skills/oneezy/oneezy-status/references/brain-daily.md
+    need: conditional
+    when: Brain agenda or status
+  - token: /oneezy-brain
+    kind: skill
+    id: oneezy-brain
+    need: conditional
+    when: Brain agenda or status
+  - token: STATUS.md
+    kind: file
+    id: skills/oneezy/oneezy-status/STATUS.md
+    need: required
+    when: render
+  - token: /oneezy-merge
+    kind: skill
+    id: oneezy-merge
+    need: mention
+    when: never called; named as the skill that runs this one last, and in the closing code block
+  - token: /wayfinder
+    kind: skill
+    id: wayfinder
+    need: example
+    when: Next Up item 1 is a wayfinder map ticket; the code block opens with it
+  - token: /implement
+    kind: skill
+    id: implement
+    need: example
+    when: Next Up item 1 is an issue labelled ready-for-agent; the code block opens with it
+  - token: /grill-with-docs
+    kind: skill
+    id: grill-with-docs
+    need: example
+    when: Next Up item 1 is an idea or decision with no ticket; the code block opens with it
+  - token: /diagnosing-bugs
+    kind: skill
+    id: diagnosing-bugs
+    need: example
+    when: Next Up item 1 is something broken; the code block opens with it
+  - token: /wizard
+    kind: skill
+    id: wizard
+    need: example
+    when: Next Up item 1 is a task only Justin can do; the code block opens with it
+  - token: /ask-matt
+    kind: skill
+    id: ask-matt
+    need: example
+    when: none of the other openings fit; the code block opens with it
+  - token: references/repository.md
+    kind: file
+    id: skills/oneezy/oneezy-status/references/repository.md
+    need: conditional
+    when: the named operation/reference branch in SKILL.md
+  - token: references/capabilities/contract.md
+    kind: file
+    id: skills/oneezy/oneezy-status/references/capabilities/contract.md
+    need: required
+    when: before any dependency call
+  - token: references/capabilities/chatgpt.md
+    kind: file
+    id: skills/oneezy/oneezy-status/references/capabilities/chatgpt.md
+    need: conditional
+    when: ChatGPT host
+  - token: references/capabilities/claude.md
+    kind: file
+    id: skills/oneezy/oneezy-status/references/capabilities/claude.md
+    need: conditional
+    when: Claude host
+  - token: references/capabilities/codex.md
+    kind: file
+    id: skills/oneezy/oneezy-status/references/capabilities/codex.md
+    need: conditional
+    when: Codex host
+  - token: references/capabilities/catalog.json
+    kind: file
+    id: skills/oneezy/oneezy-status/references/capabilities/catalog.json
+    need: conditional
+    when: inventory, management or missing dependency
+unresolved: []
+agents:
+  max: 0
+steps:
+  - id: skills-sync
+    if: request is canonical Skills Sync results
+    does: read Skills Sync reference, read status --json (read-only) and render a green or red line per harness, the definition of done (ok true and no manual step), the verified canonical command output and before/after snapshots, then the open manual steps; no mutation or installation
+    needs: [npx]
+    outcome:
+      done: per-harness green/red lines, successes, failures and all skipped destinations reported with exact paths and source/generated/installed versions, closing with every open manual step or none
+  - id: brain
+    if: request is Brain agenda or Brain status
+    does: load Brain daily reference and consume oneezy-brain's verified Drive snapshot
+    needs: [references/brain-daily.md, /oneezy-brain]
+    outcome:
+      done: compact Drive agenda and coverage; no repo merge prompt
+      fail: missing Drive route reported without historical fallback
+  - id: state
+    if: request is a repository status report
+    does: read one of closeout, blocked, open, branch, in that order, first match wins
+    outcome:
+      done: state chosen
+  - id: sources
+    after: state
+    does: at most five calls (the PR read, the combined status, the Vercel bot comment, the map read, one shell call for git facts); a missing source is skipped and its slot filled from the next source or omitted
+    needs: [gh, git]
+    outcome:
+      done: every slot has a source or an omission rule
+  - id: next-up
+    after: sources
+    does: rank the queue (the map's frontier, the board's Next Up column, ready-for-agent issues, what this branch leaves unfinished) by critical path, what blocks the most and the milestone date; item 1 picks the opening skill of the code block
+    outcome:
+      done: three items chosen, or a recommendation that says the queue is empty
+  - id: render
+    after: next-up
+    does: fill the STATUS.md template, apply its rules, print it as the whole message
+    needs: [STATUS.md]
+    returns: the status report
+    outcome:
+      done: report on screen within the line cap, every slot filled from a source or omitted by its rule, every link a real URL, Next Up with its code block

@@ -1,0 +1,48 @@
+skill: play-agents
+purpose: Load Justin's workflow instructions from his Google Doc through the Google Drive or Google Docs connector, apply them and acknowledge.
+runtime: [Google Drive or Google Docs connector]
+refs:
+  - token: '@Google Drive'
+    kind: plugin
+    id: Google Drive
+    need: required
+    when: read, the only route; either this or Google Docs
+  - token: '@Google Docs'
+    kind: plugin
+    id: Google Docs
+    need: conditional
+    when: read, when the host exposes Docs tools instead of Drive
+  - token: https://docs.google.com/document/d/1-zc8U-qySKlULknKZYR-wKarkmG2y0RQpC2YrSijSNQ/view
+    kind: url
+    id: https://docs.google.com/document/d/1-zc8U-qySKlULknKZYR-wKarkmG2y0RQpC2YrSijSNQ/view
+    need: required
+    when: read, the Google Doc, by its id through the connector
+unresolved:
+  - token: /oneezy-agents
+    note: Justin's real agents-rules skill, added in oneezy/skills#88; named only to say this test does not replace it.
+agents:
+  max: 0
+steps:
+  - id: read
+    does: find the host's Google Drive or Google Docs tool and read the whole Doc by id through it
+    needs: [Google Drive or Google Docs connector]
+    outcome:
+      done: the Doc's complete text held
+      fail: connector missing, refused or erroring; reason kept for the acknowledgment
+  - id: apply
+    after: read
+    if: the Doc was read
+    does: treat the Doc's text as workflow instructions for the session, under the host's hierarchy and Justin's later messages
+    outcome:
+      done: the instructions are in force
+  - id: acknowledge
+    after: [read, apply]
+    does: open the reply with one line, loaded with the Doc's title and line count, or couldn't read with the reason
+    returns: the acknowledgment, then the answer to Justin's message
+    outcome:
+      done: acknowledgment printed
+  - id: reload
+    if: Justin asks to reload
+    does: run read, apply and acknowledge again; the new text replaces the old
+    outcome:
+      done: new acknowledgment printed

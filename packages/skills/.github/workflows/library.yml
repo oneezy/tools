@@ -1,0 +1,190 @@
+# library: CI for the skills library. It checks every change, and cuts a release for every `main` commit that changes
+# a package. It never pushes to dev or main (land.yml does, for land/* branches), and nothing here is a git hook (oneezy/skills#27, decisions 5 and A; ticket
+# #30; releases: #48). Before committing, run `npx @oneezy/skills-sync check` yourself; this workflow is what catches a
+# skipped one.
+#
+#   check    every pull request, and every push to dev and main. Installs the latest published @oneezy/skills-sync
+#            from npm (.github/actions/skills-sync-cli; ADR-0008, every caller runs @latest) and runs it
+#            against this checkout: `refresh --frozen` (every third-party skill at the commit skills-sync.lock.json
+#            records), `build --check` (the committed plugins/ and catalogs match what the config, the lock and
+#            skills/ produce), `check` (frontmatter, flow.yaml, generated-file drift), then `claude plugin
+#            validate` on every committed package and on the catalog when the Claude Code CLI installs, and the release
+#            script's own tests. The default shallow checkout is enough: none of them needs the library's history.
+#   release  every push to main, after check passes on that commit; and a workflow_dispatch with job=release on
+#            main, which is how land.yml starts it (a GITHUB_TOKEN push to main starts no workflow). `build --artifacts` makes one archive per plugin,
+#            .github/scripts/release.mjs writes release.json (source commit and tree, digests of the config and the
+#            lock, the tool's npm version, per plugin its version, archive sha256 and every file's sha256) against the previous
+#            release, and a GitHub release `release-<n>` is published with the archives and release.json. A commit
+#            that changes no package (a promotion merge, a replay of the job) releases nothing; a plugin whose version
+#            would go backwards fails the job and releases nothing. The release is created as a draft and published
+#            once every asset is up, so a failed upload leaves no half release; a leftover draft is deleted and redone.
+#            A published release is never edited or deleted here; the repository's release immutability setting
+#            locks its assets and tag.
+#
+# Moving the third-party sources is run.yml's job (ADR-0009, ADR-0014): every day over every source not held at a
+# `version`, and on demand for one library command (update, add, versions, rename), landing any change through a land/*
+# branch that land.yml squashes into dev, promotes and releases. The release tags are the only refs this workflow
+# writes. Authored versions come from library.version and upstream versions from the lock; no job bumps a plugin
+# version or needs the library's history.
+#
+# Every job runs the latest published @oneezy/skills-sync, installed from npm by .github/actions/skills-sync-cli
+# (ADR-0008); nothing here checks out or builds oneezy/tools. land.yml and run.yml use the same action.
+name: library
+
+on:
+  pull_request:
+  push:
+    branches: [dev, main]
+  workflow_dispatch:
+    inputs:
+      job:
+        description: release (cut a release from main; started by land.yml after it promotes main). Source updates run in run.yml.
+        type: choice
+        options: [release]
+        default: release
+
+permissions: {}
+
+jobs:
+  check:
+    if: github.event_name != 'workflow_dispatch' || inputs.job == 'release'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    concurrency:
+      group: library-check-${{ github.ref }}
+      cancel-in-progress: true
+    steps:
+      - name: Check out the library
+        uses: actions/checkout@v5
+        with:
+          path: library
+          persist-credentials: false
+
+      - name: Authored Oneezy routing and capability preservation
+        run: node --test library/scripts/oneezy-capabilities.test.mjs
+
+      - name: Install the latest published @oneezy/skills-sync
+        id: tool
+        uses: ./library/.github/actions/skills-sync-cli
+
+      - name: refresh --frozen
+        env:
+          CLI: ${{ steps.tool.outputs.cli }}
+        run: node "$CLI" refresh --frozen --repo library
+
+      - name: build --check
+        env:
+          CLI: ${{ steps.tool.outputs.cli }}
+        run: node "$CLI" build --check --repo library
+
+      - name: check
+        env:
+          CLI: ${{ steps.tool.outputs.cli }}
+        run: node "$CLI" check --repo library
+
+      - name: Brain guarded native planner and provider contract
+        run: |
+          node library/tests/brain-drive.test.mjs
+          node --test library/tests/provider-capture.test.mjs
+
+      - name: oneezy-debug transcript parser
+        run: node --test library/tests/oneezy-debug-trace.test.mjs
+
+      - name: release script tests
+        run: node --test library/.github/scripts/*.test.mjs
+
+      - name: claude plugin validate
+        env:
+          # No account on the runner: validate reads files only, and a fresh config dir keeps it that way.
+          CLAUDE_CONFIG_DIR: ${{ runner.temp }}/claude
+        run: |
+          shopt -s nullglob
+          targets=(library/plugins/*/)
+          if [[ -f library/.claude-plugin/marketplace.json ]]; then
+            targets+=(library)
+          fi
+          if (( ${#targets[@]} == 0 )); then
+            echo "::notice title=claude plugin validate::no committed packages under plugins/ and no catalog yet; nothing to validate"
+            exit 0
+          fi
+          if ! npm install -g @anthropic-ai/claude-code > /dev/null 2>&1 || ! claude --version; then
+            echo "::warning title=claude plugin validate skipped::the Claude Code CLI did not install on this runner"
+            exit 0
+          fi
+          status=0
+          for t in "${targets[@]}"; do
+            t=${t%/}
+            echo "::group::claude plugin validate $t"
+            claude plugin validate "$t" || status=1
+            echo "::endgroup::"
+          done
+          exit $status
+
+  release:
+    needs: check
+    if: github.ref == 'refs/heads/main' && (github.event_name == 'push' || inputs.job == 'release')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    concurrency:
+      group: library-release
+      cancel-in-progress: false
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+    steps:
+      - name: Check out main at the pushed commit
+        uses: actions/checkout@v5
+        with:
+          path: library
+          persist-credentials: false
+
+      - name: Install the latest published @oneezy/skills-sync
+        id: tool
+        uses: ./library/.github/actions/skills-sync-cli
+
+      - name: refresh --frozen, then the archives
+        env:
+          CLI: ${{ steps.tool.outputs.cli }}
+        run: |
+          node "$CLI" refresh --frozen --repo library --quiet > /dev/null
+          node "$CLI" build --artifacts --repo library --quiet
+
+      - name: The previous release
+        id: previous
+        run: |
+          mkdir -p "$RUNNER_TEMP/previous"
+          tag=$(gh api "repos/$GH_REPO/releases/latest" --jq .tag_name 2>/dev/null || true)
+          if [[ -n "$tag" ]] && gh release download "$tag" --pattern release.json --dir "$RUNNER_TEMP/previous"; then
+            echo "file=$RUNNER_TEMP/previous/release.json" >> "$GITHUB_OUTPUT"
+            echo "previous release: $tag"
+          else
+            echo "no previous release"
+          fi
+
+      - name: The release record
+        id: plan
+        env:
+          TOOL_VERSION: ${{ steps.tool.outputs.version }}
+        run: node library/.github/scripts/release.mjs library ${{ steps.previous.outputs.file && format('--previous "{0}"', steps.previous.outputs.file) || '' }} --tool-version "$TOOL_VERSION" --repo "$GH_REPO"
+
+      - name: Publish the release
+        if: steps.plan.outputs.release == 'true'
+        env:
+          TAG: ${{ steps.plan.outputs.tag }}
+        working-directory: library
+        run: |
+          # a draft left by a failed run is not a release yet: delete it and start again
+          if gh release view "$TAG" --json isDraft --jq .isDraft 2>/dev/null | grep -qx true; then
+            gh release delete "$TAG" --yes
+          fi
+          gh release create "$TAG" --draft --target "$GITHUB_SHA" --title "$TAG" --notes-file artifacts/release-notes.md artifacts/*.zip artifacts/release.json
+          gh release edit "$TAG" --draft=false --latest
+          echo "::notice title=released::$TAG at $GITHUB_SHA, $(gh release view "$TAG" --json url --jq .url)"
+
+      - name: Nothing to release
+        if: steps.plan.outputs.release != 'true'
+        env:
+          REASON: ${{ steps.plan.outputs.reason }}
+        run: echo "::notice title=no release::$REASON"

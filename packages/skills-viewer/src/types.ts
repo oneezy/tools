@@ -43,6 +43,8 @@ export interface SkillNode {
   frontmatter: Record<string, unknown>;
   /** plugin id when the skill ships inside a plugin */
   plugin?: string;
+  /** Library ownership, including live source skills that are not built plugins. */
+  library?: string;
   /** other SKILL.md paths with the same id (e.g. a built plugins/x/skills copy); the node is built from `file` */
   copies?: string[];
 }
@@ -133,6 +135,8 @@ export interface UnresolvedMention {
 }
 
 export interface Graph {
+  /** Static, source-backed document workflows. Optional for older exported graphs. */
+  workflows?: WorkflowDocument[];
   meta: {
     generatedAt: string;
     roots: string[];
@@ -157,4 +161,44 @@ export interface Graph {
   links: Edge<LinkType>[];
   flows: Flow[];
   unresolved: UnresolvedMention[];
+}
+
+export interface WorkflowEvidence {
+  file: string;
+  line: number;
+  snippet: string;
+  rule: string;
+}
+
+export interface WorkflowReference {
+  target: string;
+  kind: "calls" | "prerequisite" | "suggests" | "reference" | "file" | "directory";
+  evidence: WorkflowEvidence;
+}
+
+export interface WorkflowStep {
+  id: string;
+  number: string;
+  label: string;
+  evidence: WorkflowEvidence;
+  references: WorkflowReference[];
+  branches?: WorkflowStep[];
+  branchKind?: "parallel" | "choice";
+  /** Only present when the instructions explicitly wait for all branches. */
+  join?: boolean;
+  joinEvidence?: WorkflowEvidence;
+  /** Explicit repetition of this step; the text includes any stated exit condition. */
+  repeat?: string;
+}
+
+export interface WorkflowDocument {
+  id: string;
+  owner: string;
+  file: string;
+  label: string;
+  kind: "skill" | "file" | "directory";
+  references: WorkflowReference[];
+  sequences: WorkflowStep[][];
+  /** Available contents, not execution edges. */
+  children: string[];
 }

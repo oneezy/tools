@@ -1,0 +1,407 @@
+{
+  "version": 1,
+  "verifiedAt": "2026-10-07",
+  "scope": "Oneezy dependencies and management routes; not account-wide installed inventory",
+  "evidence": {
+    "chatgpt": "223 paginated session skills; actual skill reads/tool schema discovery and read-only native source checks",
+    "claude": "current CLI help 2.1.293 plus official docs; no desktop execution",
+    "codex": "current CLI help 0.161.0 plus official docs; no desktop execution"
+  },
+  "skills": {
+    "oneezy-agents": {
+      "path": "skills/oneezy/oneezy-agents",
+      "invocation": "follow installed host policy",
+      "dependencies": [
+        {
+          "id": "github",
+          "need": "conditional",
+          "when": "a rule change Justin approved, landed on a land/* branch"
+        },
+        {
+          "id": "shell",
+          "need": "optional",
+          "when": "finding the installed copy when the reported base directory lacks it"
+        }
+      ]
+    },
+    "oneezy-brain": {
+      "path": "skills/oneezy/oneezy-brain",
+      "invocation": "follow installed host policy",
+      "dependencies": [
+        {
+          "id": "google-drive",
+          "need": "required",
+          "when": "registry and location resolution"
+        },
+        {
+          "id": "google-sheets",
+          "need": "required",
+          "when": "live List/Schema and task records"
+        },
+        {
+          "id": "google-docs",
+          "need": "conditional",
+          "when": "context Docs"
+        },
+        {
+          "id": "pages",
+          "need": "conditional",
+          "when": "explicit historical read or separately authorized page write"
+        },
+        {
+          "id": "oneezy-status",
+          "need": "conditional",
+          "when": "requested Brain brief"
+        },
+        {
+          "id": "oneezy-meeting",
+          "need": "conditional",
+          "when": "requested meeting format"
+        }
+      ]
+    },
+    "oneezy-debug": {
+      "path": "skills/oneezy/oneezy-debug",
+      "invocation": "follow installed host policy",
+      "dependencies": [
+        {
+          "id": "shell",
+          "need": "conditional",
+          "when": "trace.mjs reads the harness transcript, or a clock read before each step"
+        }
+      ]
+    },
+    "oneezy-estimate": {
+      "path": "skills/oneezy/oneezy-estimate",
+      "invocation": "explicit-only",
+      "dependencies": [
+        {
+          "id": "github",
+          "need": "required",
+          "when": "project scripts with project token"
+        },
+        {
+          "id": "shell",
+          "need": "required",
+          "when": "backlog.sh and guarded set.sh"
+        }
+      ]
+    },
+    "oneezy-meeting": {
+      "path": "skills/oneezy/oneezy-meeting",
+      "invocation": "follow installed host policy",
+      "dependencies": [
+        {
+          "id": "oneezy-brain",
+          "need": "conditional",
+          "when": "Brain evidence"
+        },
+        {
+          "id": "github",
+          "need": "conditional",
+          "when": "client repository evidence"
+        },
+        {
+          "id": "meeting-sources",
+          "need": "conditional",
+          "when": "only requested relevant evidence"
+        }
+      ]
+    },
+    "oneezy-merge": {
+      "path": "skills/oneezy/oneezy-merge",
+      "invocation": "explicit-only",
+      "dependencies": [
+        {
+          "id": "github",
+          "need": "required",
+          "when": "PR/check/merge route"
+        },
+        {
+          "id": "shell",
+          "need": "required",
+          "when": "git session files"
+        },
+        {
+          "id": "oneezy-status",
+          "need": "required",
+          "when": "one final report"
+        }
+      ]
+    },
+    "oneezy-migrate": {
+      "path": "skills/oneezy/oneezy-migrate",
+      "invocation": "follow installed host policy",
+      "dependencies": [
+        {
+          "id": "github",
+          "need": "required",
+          "when": "reachable repositories and authorized landing"
+        },
+        {
+          "id": "shell",
+          "need": "required",
+          "when": "fresh clones and native checks"
+        }
+      ]
+    },
+    "oneezy-naming": {
+      "path": "skills/oneezy/oneezy-naming",
+      "invocation": "follow installed host policy",
+      "dependencies": [
+        {
+          "id": "github",
+          "need": "conditional",
+          "when": "creating or renaming issues, labels, branches or PRs"
+        }
+      ]
+    },
+    "oneezy-remote": {
+      "path": "skills/oneezy/oneezy-remote",
+      "invocation": "explicit-only",
+      "dependencies": [
+        {
+          "id": "shell",
+          "need": "required",
+          "when": "main-checkout Python launcher"
+        },
+        {
+          "id": "claude-code",
+          "need": "required",
+          "when": "requested remote sessions"
+        }
+      ]
+    },
+    "oneezy-skills": {
+      "path": "skills/oneezy/oneezy-skills",
+      "invocation": "follow installed host policy",
+      "dependencies": [
+        {
+          "id": "oneezy-status",
+          "need": "required",
+          "when": "every canonical sync attempt and verified result"
+        },
+        {
+          "id": "shell",
+          "need": "conditional",
+          "when": "canonical local sync/build"
+        },
+        {
+          "id": "skill-creator",
+          "need": "conditional",
+          "when": "skill authoring under current runtime"
+        },
+        {
+          "id": "plugin-management",
+          "need": "conditional",
+          "when": "cloud dependency discovery/connect/permission inspection"
+        },
+        {
+          "id": "plugin-creator",
+          "need": "conditional",
+          "when": "eligible cloud create/update"
+        },
+        {
+          "id": "host-plugin-cli",
+          "need": "conditional",
+          "when": "authorized local plugin install/update"
+        },
+        {
+          "id": "writing-for-agents",
+          "need": "required",
+          "when": "authored agent instructions"
+        },
+        {
+          "id": "oneezy-migrate",
+          "need": "conditional",
+          "when": "normal landed upstream change"
+        }
+      ]
+    },
+    "oneezy-status": {
+      "path": "skills/oneezy/oneezy-status",
+      "invocation": "follow installed host policy",
+      "dependencies": [
+        {
+          "id": "oneezy-brain",
+          "need": "conditional",
+          "when": "Brain mode"
+        },
+        {
+          "id": "github",
+          "need": "conditional",
+          "when": "repo mode"
+        },
+        {
+          "id": "vercel",
+          "need": "conditional",
+          "when": "authorized deployment evidence"
+        }
+      ]
+    }
+  },
+  "capabilities": {
+    "google-drive": {
+      "instructions": [
+        "google-drive:google-drive"
+      ],
+      "provider": "Google Drive",
+      "observedTools": [
+        "fetch",
+        "search"
+      ],
+      "state": "read-verified-in-current-chatgpt-session"
+    },
+    "google-sheets": {
+      "instructions": [
+        "google-drive:google-sheets"
+      ],
+      "provider": "Google Drive",
+      "dependsOn": [
+        "google-drive"
+      ],
+      "observedTools": [
+        "get_spreadsheet_metadata",
+        "get_spreadsheet_range",
+        "get_spreadsheet_cells"
+      ],
+      "state": "bounded-read-verified-in-current-chatgpt-session"
+    },
+    "google-docs": {
+      "instructions": [
+        "google-drive:google-docs"
+      ],
+      "provider": "Google Drive",
+      "dependsOn": [
+        "google-drive"
+      ],
+      "observedTools": [
+        "get_document",
+        "get_document_text"
+      ],
+      "state": "read-verified-in-current-chatgpt-session"
+    },
+    "pages": {
+      "instructions": [
+        "pages:write-page",
+        "pages:maintain-space",
+        "pages:organize-space"
+      ],
+      "state": "historical-only-for-brain; source read verified; writes unexecuted"
+    },
+    "github": {
+      "provider": "GitHub",
+      "state": "source-read-verified",
+      "routes": [
+        "connected GitHub REST tools",
+        "gh api REST when authenticated; repository policy excludes gh issue/GraphQL for issue tracking"
+      ]
+    },
+    "vercel": {
+      "instructions": [
+        "vercel:deployments-cicd"
+      ],
+      "state": "instructions exposed; destination access unverified"
+    },
+    "shell": {
+      "state": "Linux scratch available; actual desktop unavailable",
+      "requires": [
+        "runtime required by selected script",
+        "authorized target filesystem"
+      ]
+    },
+    "claude-code": {
+      "state": "CLI help verified; actual signed-in desktop session unknown"
+    },
+    "host-plugin-cli": {
+      "state": "Claude 2.1.293/Codex 0.161.0 command help verified; installs not performed",
+      "adapters": [
+        "claude.md",
+        "codex.md"
+      ]
+    },
+    "skill-creator": {
+      "instructions": [
+        "skill-creator"
+      ],
+      "state": "actual instructions read",
+      "action": "source authoring; use current skill instructions, not invented install tool names"
+    },
+    "writing-for-agents": {
+      "instructions": [
+        "matt-pocock:writing-for-agents"
+      ],
+      "state": "actual installed 0.25.0+05c4d1dd0761 and pinned source read",
+      "source": "mattpocock/skills@321658273cb1d20b76026717d027d505790106d4/skills/productivity/writing-for-agents"
+    },
+    "plugin-management": {
+      "instructions": [
+        "plugin-management:plugin-management"
+      ],
+      "observedTools": [
+        "search_plugins",
+        "suggest_plugins",
+        "get_app_permissions",
+        "get_plugin_dependencies",
+        "update_app_permissions",
+        "uninstall_app"
+      ],
+      "state": "schemas and public-dependency limit verified; no install/permission change",
+      "limit": "private Oneezy returned plugin_not_found on public lookup"
+    },
+    "plugin-creator": {
+      "instructions": [
+        "plugin-creator:create-plugin",
+        "plugin-creator:update-plugin"
+      ],
+      "observedTools": [
+        "get_plugin_metadata",
+        "get_plugin_files",
+        "get_owned_plugin_archive",
+        "list_owned_personal_plugins",
+        "list_plugin_releases",
+        "create_plugin",
+        "update_plugin"
+      ],
+      "state": "current schemas and actual update instructions read; publication held"
+    },
+    "meeting-sources": {
+      "providers": [
+        "Gmail",
+        "Outlook Email",
+        "Google Calendar",
+        "Outlook Calendar",
+        "Trello",
+        "monday.com",
+        "Figma",
+        "OpenAI Library",
+        "Write Like Me"
+      ],
+      "state": "conditional discovery only; no blanket installation or account access claim"
+    }
+  },
+  "deliveries": [
+    {
+      "name": "oneezy:oneezy-meeting",
+      "kind": "bundled cloud",
+      "version": "0.37.0+ae30f295de4f",
+      "issue": "Drive prose/source-routing but flow.yaml permits GitHub fallback",
+      "remediation": "focused source correction then authorized publish/readback; currently held"
+    },
+    {
+      "name": "oneezy-meeting",
+      "kind": "standalone cloud skill",
+      "source": "skill-6abd4e4f25b08191acd8a13b62f68df6",
+      "issue": "source-routing and capability inventory still define GitHub Brain fallback",
+      "remediation": "refresh this exact standalone skill from reviewed Meeting source through its actual skill-creator delivery route, or explicitly retire it only if Justin authorizes; plugin refresh alone does not repair it",
+      "state": "read-verified stale; unchanged"
+    }
+  ],
+  "unknowns": [
+    "Actual desktop Windows/WSL filesystem and harness inventory",
+    "Claude web/Desktop connector writer/instruction routes",
+    "ChatGPT terminal route to cloud plugin upload",
+    "same-version Codex plugin cache refresh",
+    "standalone skill source/update API availability in destination host"
+  ]
+}

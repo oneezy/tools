@@ -1,0 +1,6 @@
+interface:
+  display_name: "Oneezy Brain"
+  short_description: "Manage Justin's Google Drive Brain and read the agenda"
+  default_prompt: "What's on my agenda today?"
+policy:
+  allow_implicit_invocation: true

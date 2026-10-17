@@ -1,0 +1,111 @@
+skill: oneezy-migrate
+purpose: Apply the breaking and migration notes of third-party skill updates across Justin's repos through each repo's own landing path, or report in one line that none applies.
+runtime: [git, gh, npx (Node 20+)]
+refs:
+  - token: MIGRATIONS.md
+    kind: file
+    id: skills/oneezy/oneezy-migrate/MIGRATIONS.md
+    need: required
+    when: match-recipe; every worked-out migration, and where a new one is written
+  - token: /oneezy-skills
+    kind: skill
+    id: oneezy-skills
+    need: mention
+    when: the skill that runs this one after every update, upgrade, downgrade or add
+  - token: /setup-matt-pocock-skills
+    kind: skill
+    id: setup-matt-pocock-skills
+    need: mention
+    when: boundary; never re-run to apply a rename
+  - token: skills-sync.json
+    kind: file
+    id: skills-sync.json
+    need: conditional
+    when: a range Justin names; the source's repo and root come from the config
+  - token: .github/workflows/land.yml
+    kind: file
+    id: .github/workflows/land.yml
+    need: conditional
+    when: a change to oneezy/skills; it lands a pushed land/* branch
+  - token: docs/agents/domain.md
+    kind: file
+    id: docs/agents/domain.md
+    need: example
+    when: the file the GLOSSARY.md migration changes in each repo
+  - token: docs/agents/issue-tracker.md
+    kind: file
+    id: docs/agents/issue-tracker.md
+    need: mention
+    when: boundary; the REST-only issue-tracker doc a setup re-run would undo
+  - token: references/workflow.md
+    kind: file
+    id: skills/oneezy/oneezy-migrate/references/workflow.md
+    need: conditional
+    when: the named operation/reference branch in SKILL.md
+  - token: references/capabilities/contract.md
+    kind: file
+    id: skills/oneezy/oneezy-migrate/references/capabilities/contract.md
+    need: required
+    when: before any dependency call
+  - token: references/capabilities/chatgpt.md
+    kind: file
+    id: skills/oneezy/oneezy-migrate/references/capabilities/chatgpt.md
+    need: conditional
+    when: ChatGPT host
+  - token: references/capabilities/claude.md
+    kind: file
+    id: skills/oneezy/oneezy-migrate/references/capabilities/claude.md
+    need: conditional
+    when: Claude host
+  - token: references/capabilities/codex.md
+    kind: file
+    id: skills/oneezy/oneezy-migrate/references/capabilities/codex.md
+    need: conditional
+    when: Codex host
+  - token: references/capabilities/catalog.json
+    kind: file
+    id: skills/oneezy/oneezy-migrate/references/capabilities/catalog.json
+    need: conditional
+    when: inventory, management or missing dependency
+unresolved:
+  - token: "@oneezy/skills-sync"
+    note: the npm package name of the published sync tool; not a plugin or app
+agents:
+  max: 0
+steps:
+  - id: read-input
+    does: take the update report (skills-sync update --json, its updated array with from, to, direction and changelog per source) or the source and versions Justin names, reading that range's CHANGELOG.md sections from a blobless clone of the source repo
+    needs: [git]
+    outcome:
+      done: the changelog text per source and range
+  - id: extract-notes
+    after: read-input
+    does: keep only entries that ask something of a consumer (breaking, migration, rename, removed, a file convention the skills read or write)
+    outcome:
+      done: one or more notes
+      fail: 'no notes → report "<source> <from> → <to>: nothing to migrate" and stop'
+  - id: match-recipe
+    after: extract-notes
+    does: find each note's recipe in MIGRATIONS.md (find, change, leave); write a new one there in the same shape when none exists
+    outcome:
+      done: a recipe per note
+  - id: check-repos
+    after: match-recipe
+    does: in a fresh clone of each repo's base branch (oneezy/skills, oneezy/brain, oneezy/tools, oneezy/ai-workflow, layerdbiz/tridentcubed) look for the recipe's old convention
+    needs: [git]
+    outcome:
+      done: per repo, matches or no change
+      fail: a repo cannot be cloned or is out of scope → not reached, with the change it needs
+  - id: apply-land
+    after: check-repos
+    if: a repo matches
+    does: apply the recipe on one branch, run the repo's fast checks, commit, then land it the repo's way (skills, land/migrate-<slug> after refresh --frozen, build and check; brain, tools and ai-workflow, a ready pull request their automerge merges; Trident, a ready pull request to its base); a .github/ change is a pull request that waits on Justin
+    needs: [git, gh, npx]
+    outcome:
+      done: a land branch pushed or a pull request open per matching repo
+      fail: push refused → not reached
+  - id: report
+    after: [check-repos, apply-land]
+    returns: one line per repo (changed with its link, no change, or not reached with the change it needs), or the single nothing-to-migrate line, then any note left unapplied
+    outcome:
+      done: report on screen

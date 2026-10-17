@@ -1,0 +1,43 @@
+# Install the published @oneezy/skills-sync from npm, for the jobs in .github/workflows/library.yml and land.yml.
+# Every caller runs the latest published version (ADR-0008); nothing here checks out or builds oneezy/tools. The CLI
+# entry comes from the installed package's bin field, never from a hard-coded folder, so every `node "$CLI" …` step
+# keeps working when the package moves it.
+name: skills-sync CLI
+description: Install the latest @oneezy/skills-sync from npm and locate its CLI entry.
+
+outputs:
+  cli:
+    description: The installed CLI entry (the package's bin, dist/src/cli.js today), run with node
+    value: ${{ steps.install.outputs.cli }}
+  version:
+    description: The version npm installed (what latest resolved to)
+    value: ${{ steps.install.outputs.version }}
+
+runs:
+  using: composite
+  steps:
+    - name: Set up Node
+      uses: actions/setup-node@v5
+      with:
+        node-version: 24
+
+    - name: Install @oneezy/skills-sync@latest from npm
+      id: install
+      shell: bash
+      run: |
+        prefix="$RUNNER_TEMP/skills-sync"
+        mkdir -p "$prefix"
+        # --prefer-online resolves the dist-tag against the registry, never a cached packument
+        npm install --prefix "$prefix" --prefer-online --no-audit --no-fund @oneezy/skills-sync@latest
+        pkg="$prefix/node_modules/@oneezy/skills-sync/package.json"
+        version=$(node -p 'require(process.argv[1]).version' "$pkg")
+        bin=$(node -p 'const b = require(process.argv[1]).bin; typeof b === "string" ? b : Object.values(b ?? {})[0] ?? ""' "$pkg")
+        if [[ -z "$bin" ]]; then
+          echo "::error title=skills-sync CLI::@oneezy/skills-sync@$version has no bin entry"
+          exit 1
+        fi
+        cli="$(dirname "$pkg")/$bin"
+        node "$cli" --help | head -n 1
+        echo "cli=$cli" >> "$GITHUB_OUTPUT"
+        echo "version=$version" >> "$GITHUB_OUTPUT"
+        echo "::notice title=skills-sync CLI::@oneezy/skills-sync@$version from npm (latest)"

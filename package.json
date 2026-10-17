@@ -1,12 +1,15 @@
 {
-  "name": "@oneezy/tools",
+  "name": "tools",
   "private": true,
   "description": "Justin's tools as one pnpm workspace: Vite Plus runs build, test, check and dev across packages and serves the app that has a dev server.",
   "scripts": {
-    "build": "vp run -r build",
+    "skills": "vp run --cache @oneezy/skills-sync#build && pnpm --filter @oneezy/skills dev",
+    "skills:watch": "pnpm skills",
+    "skills:dev": "vp run --cache @oneezy/skills-sync#build && pnpm --filter @oneezy/skills restore && pnpm --filter @oneezy/skills develop",
+    "build": "vp run --cache -r build",
     "test": "vp run -r test",
     "check": "vp run --filter \"skills-viewer-web^...\" build && vp check && vp run -r check",
-    "dev": "vp dev"
+    "dev": "vp run --cache --filter @oneezy/skills-sync --filter skills-viewer build && vp run --parallel --filter @oneezy/skills --filter skills-viewer-web dev"
   },
   "devDependencies": {
     "vite-plus": "1.0.0"

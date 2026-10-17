@@ -1,0 +1,63 @@
+skill: oneezy-app-route
+purpose: Author a new route, feature module or app-only component in apps/app or apps/site of the Trident monorepo, with remote functions as the data layer.
+runtime: [a layerdbiz/tridentcubed checkout, pnpm]
+refs:
+  - token: /oneezy-ui-component
+    kind: skill
+    id: oneezy-ui-component
+    need: conditional
+    when: the thing to author is a library component; it is authored there, not here
+unresolved:
+  - token: "@layerd/ui"
+    note: the Trident UI package name, written as an import source; not a plugin or app
+agents:
+  max: 0
+steps:
+  - id: read-rules
+    does: read the app's AGENTS.md (apps/app/AGENTS.md for layout and data rules, apps/site/AGENTS.md for what the site does differently) and the root AGENTS.md authoring conventions; the working reference is apps/app/src/routes/simple/ and the panel component
+    outcome:
+      done: the rules read
+  - id: place
+    after: read-rules
+    does: pick the home (a route in src/routes/<group>/<route>/, code a second route needs in src/lib/<feature>/, an app-only component in src/lib/components/<name>/, server-only code in src/lib/server/ or <folder>.<role>.server.ts) and a one-word kebab name
+    outcome:
+      done: folder and name chosen
+  - id: split-files
+    after: place
+    does: +page.svelte imports and renders the same-folder <route>.svelte and nothing else; support modules are <folder>.<role>.ts with the roles remote, types, utils, schema, state, constants
+    outcome:
+      done: the files exist with those names
+  - id: guard
+    after: split-files
+    does: every .remote.ts has a named guard reading getRequestEvent().locals that errors 401 or redirects, and every exported remote function calls guard() before its first await; the check is one line for the auth ticket to fill
+    outcome:
+      done: guard written and called first in every export
+  - id: data-layer
+    after: guard
+    does: name remote functions fetchX (query), getXData (prerender), submitX (form); validate arguments with a schema from <folder>.schema.ts; the route component reads them at the top of its script
+    outcome:
+      done: every export is fetchX, getXData or submitX
+  - id: types
+    after: data-layer
+    does: route-local types in <folder>.types.ts ending in Type; props as <Name>Props extending ComponentProps when built on Component
+    outcome:
+      done: types named per the rule
+  - id: imports
+    after: types
+    does: import from the barrels (bare @layerd/ui, bare $lib, ./ only within the route folder); named imports; named function declarations for exports
+    outcome:
+      done: imports per the rule
+  - id: barrel
+    after: imports
+    if: a file was added under src/lib
+    does: run pnpm barrels at the root twice
+    needs: [pnpm]
+    outcome:
+      done: the second run leaves git status unchanged
+  - id: check-build
+    after: [imports, barrel]
+    does: pnpm --filter <app> check, then pnpm --filter <app> build
+    needs: [pnpm]
+    returns: both commands and their last line, and a note that Vitest is not yet in the workspace when a test file is owed
+    outcome:
+      done: 0 errors and 0 warnings and the build passes

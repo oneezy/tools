@@ -1,0 +1,76 @@
+# run: one library command (update, add, remove, versions, rename) run here with the latest published @oneezy/skills-sync, so
+# any session can ask for it, a cloud thread with no library checkout included (ADR-0014), and the daily upstream check
+# of every source (ADR-0009). Both end the same way: a change becomes a land/* branch and land.yml takes it from there.
+#
+#   workflow_dispatch  command (update | add | remove | versions | rename) and args (the command's arguments as one string, split
+#                      on spaces; may be empty). From a session:
+#                        gh api repos/oneezy/skills/actions/workflows/run.yml/dispatches -f ref=dev \
+#                          -f 'inputs[command]=update' -f 'inputs[args]=matt-pocock'
+#   schedule           every day at 08:23 UTC: `update` with no args. Every source skills-sync.json does not hold at a
+#                      `version` moves to the tip of its ref (a pinned skill stays at its pin, a held source stays held).
+#
+# The command runs against a checkout of dev. When it changed anything (skills-sync.lock.json, skills-sync.json, the
+# packages under plugins/, the catalogs) the result is committed with the tool's report as the message (each moved
+# source's old and new version and commit, the upstream changelog between them, its breaking or migration lines flagged
+# for /oneezy-migrate) and pushed as land/<command>-<args>-<run id>; land.yml squashes it into dev, promotes main and
+# starts the release, with no review. An unchanged run pushes nothing. `versions` only prints. Bad input (a source the
+# config does not know, a missing argument, a command this tool version does not have, a tool error) fails the run with
+# one ::error line and pushes nothing. The shell is .github/scripts/run.sh and the message .github/scripts/run-report.mjs;
+# both run locally against a bare repository, which is how they are tested.
+#
+# Secret: PROJECT_PAT, the classic PAT task-manager.yml already uses. The checkout holds it, so the push to land/* is
+# made with it and starts land.yml; a push made with GITHUB_TOKEN starts no workflow. Without the secret, a run that
+# could push fails before running anything, and `versions` still prints. No step prints or writes the token.
+name: run
+
+on:
+  schedule:
+    - cron: '23 8 * * *'
+  workflow_dispatch:
+    inputs:
+      command:
+        description: The library command to run against dev
+        type: choice
+        options: [update, add, remove, versions, rename]
+        default: update
+      args:
+        description: Its arguments as one string, split on spaces (update <source> --to <version>; add owner/repo --id x --skills a,b; versions <source>); empty updates every unheld source
+        type: string
+        required: false
+        default: ''
+
+permissions: {}
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    concurrency:
+      group: library-run
+      cancel-in-progress: false
+    steps:
+      - name: Check out dev
+        uses: actions/checkout@v5
+        with:
+          ref: dev
+          path: library
+          # the push to land/* must start land.yml, which only a push made with a PAT does
+          token: ${{ secrets.PROJECT_PAT || github.token }}
+
+      - name: Install the latest published @oneezy/skills-sync
+        id: tool
+        uses: ./library/.github/actions/skills-sync-cli
+
+      - name: ${{ inputs.command || 'update' }} ${{ inputs.args }}
+        env:
+          CLI: ${{ steps.tool.outputs.cli }}
+          TOOL_VERSION: ${{ steps.tool.outputs.version }}
+          COMMAND: ${{ inputs.command || 'update' }}
+          ARGS: ${{ inputs.args }}
+          LIBRARY: library
+          RUN_ID: ${{ github.run_id }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          HAS_PUSH_TOKEN: ${{ secrets.PROJECT_PAT != '' }}
+        run: bash library/.github/scripts/run.sh

@@ -1,0 +1,67 @@
+skill: oneezy-naming
+purpose: Name anything with a title in Justin's repos (issues, phases, maps, specs, labels, branches, commits, PR titles, releases, chat titles, worktrees) with one emoji, a name, a colon and plain words, chat titles led by a verified origin marker, leaving Matt Pocock's skills and labels untouched.
+runtime: []
+refs:
+  - token: references/capabilities/contract.md
+    kind: file
+    id: skills/oneezy/oneezy-naming/references/capabilities/contract.md
+    need: required
+    when: before any dependency call
+  - token: references/capabilities/chatgpt.md
+    kind: file
+    id: skills/oneezy/oneezy-naming/references/capabilities/chatgpt.md
+    need: conditional
+    when: ChatGPT host
+  - token: references/capabilities/claude.md
+    kind: file
+    id: skills/oneezy/oneezy-naming/references/capabilities/claude.md
+    need: conditional
+    when: Claude host
+  - token: references/capabilities/codex.md
+    kind: file
+    id: skills/oneezy/oneezy-naming/references/capabilities/codex.md
+    need: conditional
+    when: Codex host
+  - token: references/capabilities/catalog.json
+    kind: file
+    id: skills/oneezy/oneezy-naming/references/capabilities/catalog.json
+    need: conditional
+    when: inventory, management or missing dependency
+  - token: references/titles.md
+    kind: file
+    id: skills/oneezy/oneezy-naming/references/titles.md
+    need: conditional
+    when: setting or changing a chat title
+  - token: /wayfinder
+    kind: skill
+    id: wayfinder
+    need: example
+    when: its maps and tickets take these titles
+  - token: /to-spec
+    kind: skill
+    id: to-spec
+    need: example
+    when: its spec takes the spec title
+  - token: /to-tickets
+    kind: skill
+    id: to-tickets
+    need: example
+    when: its tickets take the ticket titles
+unresolved: []
+agents:
+  max: 0
+steps:
+  - id: pick-kind
+    does: decide what is being named (phase, map, spec, ticket, label, branch, commit or PR title, release, chat, worktree) and read its section
+    outcome:
+      done: the section for that kind is read
+  - id: name-it
+    after: pick-kind
+    does: write the title in that section's shape; for a ticket pick the emoji (decision kind under a map, else app, package or repo) and the area folder name; add the kind label on build tickets beside Matt's labels
+    outcome:
+      done: the title matches the shape and every label Matt's skill set is still there
+  - id: title-chat
+    after: name-it
+    does: for a chat, verify each origin marker with the checks in references/titles.md, then set the title through the session's rename route, or propose a Title line when there is none
+    outcome:
+      done: the chat carries the title, or its first reply line proposes it

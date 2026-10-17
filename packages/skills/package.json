@@ -1,0 +1,18 @@
+{
+  "name": "@oneezy/skills",
+  "version": "0.50.3",
+  "private": true,
+  "type": "module",
+  "description": "Authored skills and locked third-party sources for the tools monorepo.",
+  "scripts": {
+    "dev": "skills-sync refresh --frozen --repo . && skills-sync develop --repo . --root ../.. --watch",
+    "restore": "skills-sync refresh --frozen --repo .",
+    "build": "skills-sync refresh --frozen --repo . && vp run package-plugins",
+    "develop": "skills-sync develop --repo . --root ../..",
+    "test": "node --test tests/*.test.mjs scripts/oneezy-capabilities.test.mjs",
+    "check": "node scripts/oneezy-capabilities.mjs"
+  },
+  "devDependencies": {
+    "@oneezy/skills-sync": "workspace:*"
+  }
+}

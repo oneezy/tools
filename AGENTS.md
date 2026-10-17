@@ -6,7 +6,7 @@
 
 - **Node** is the version in `.node-version` (the newest 24.x LTS). `vp env` installs and switches to it on its own.
 - **pnpm** is the version in `packageManager` in the root `package.json`, also through `vp env`. It installs dependencies: `pnpm install` (or `vp install`) once at the root.
-- **Vite Plus** (`vite-plus`, the `vp` CLI; docs in `node_modules/vite-plus/docs`) does everything else. At the root, `pnpm build`, `pnpm test` and `pnpm check` run `vp run -r <name>`: every package's script of that name, in workspace dependency order. `pnpm dev` runs `vp dev`, which serves `apps/skills-viewer-web` (`defaultPackage` in the root `vite.config.ts`). A package whose task needs another package built first says so in its own `vite.config.ts` (`run.tasks`, `dependsOn`), as `apps/skills-viewer-web` does for `test` and `check`. `pnpm check` builds the packages the website imports, then runs `vp check`: Oxfmt formatting, Oxlint and type checks for every package's JS/TS, configured once in the root `vite.config.ts` (`fmt`, `lint`; markdown, fixtures and `.github/` are left alone). Run `vp fmt` before committing. Tests in the TypeScript packages use `vp test` (Vitest, imported from `vite-plus/test`). The `vite`/`vitest` overrides in `pnpm-workspace.yaml` keep every package on the copies Vite Plus bundles; bump them with `vite-plus`.
+- **Vite Plus** (`vite-plus`, the `vp` CLI; docs in `node_modules/vite-plus/docs`) does everything else. At the root, `pnpm build`, `pnpm test` and `pnpm check` run `vp run -r <name>`: every package's script of that name, in workspace dependency order. `pnpm dev` uses cached prerequisite builds, then runs the skills watcher and `apps/skills-viewer-web` together through `vp run --parallel`. Root `pnpm build` enables Vite Plus task caching. A package whose task needs another package built first says so in its own `vite.config.ts` (`run.tasks`, `dependsOn`), as `apps/skills-viewer-web` does for `test` and `check`. `pnpm check` builds the packages the website imports, then runs `vp check`: Oxfmt formatting, Oxlint and type checks for every package's JS/TS, configured once in the root `vite.config.ts` (`fmt`, `lint`; markdown, fixtures and `.github/` are left alone). Run `vp fmt` before committing. Tests in the TypeScript packages use `vp test` (Vitest, imported from `vite-plus/test`). The `vite`/`vitest` overrides in `pnpm-workspace.yaml` keep every package on the copies Vite Plus bundles; bump them with `vite-plus`.
 
 Windows 11 with PowerShell 7 is the primary host: every script is run there first. Linux is a future target, so nothing in a `package.json` may be Windows-only: `scripts/python.mjs` runs Python (`py -3` on Windows, `python3` elsewhere) and `scripts/syntax-check.ps1` runs under pwsh on either.
 
@@ -14,15 +14,17 @@ Each package keeps its language. `packages/skills-sync` (TypeScript, published a
 
 ## Agent skills
 
-Skills are not committed here. They come from the skills library `oneezy/skills`: Claude Code gets them as the claude.ai account plugins, Codex and Hermes as plugins from GitHub, kept in line by `npx @oneezy/skills-sync` (source: `packages/skills-sync`).
+Skill source lives in the private workspace package `packages/skills`. Edit authored skills under `packages/skills/skills/<group>/<name>`. Skills Sync (`packages/skills-sync`) owns restoring dependencies and installing the local development links. Run `pnpm dev` for the viewer plus watcher, `pnpm skills` for the watcher alone, or `pnpm skills:dev` for one-time installation after `pnpm install`; see `packages/skills/DEVELOPMENT.md`.
 
-A cloud session (`CLAUDE_CODE_REMOTE=true`) gets the skills from the account plugins switched on at claude.ai/customize/plugins; its setup script runs the line below, which writes only the global instructions block. If `/grilling`, `/oneezy-brain` or another library skill is not in your skill list, run this and report the red lines and manual steps it prints; never fetch a SKILL.md from GitHub to run it:
+For local development, prefer the repository's `.agents/skills/<name>` (Codex) or `.claude/skills/<name>` (Claude) entry over a globally installed plugin copy. These are generated links, not source to commit. Authored edits are immediately visible through the links; start a fresh chat if the harness retains an older skill catalog. The watcher reconciles new, removed, and renamed skill folders automatically. Config/lock changes restore pinned dependencies; unchanged content saves do nothing. Changed external plugin installations still require another `pnpm skills:dev`. This command writes repo-scoped Codex skill exclusions; it does not uninstall global plugins or change their tools. Keep local installation work on this command instead of the published machine-wide `sync`.
+
+A cloud session (`CLAUDE_CODE_REMOTE=true`) without the local development installation still gets the skills from account plugins. The existing cloud setup/status command remains:
 
 ```
 npx --yes @oneezy/skills-sync@latest status
 ```
 
-A message that starts with `/<name>` runs that skill, even in a project thread, where it reaches you as plain text rather than a command. If the skill is in your list, invoke it. If it is not, which is always the case for skills marked `disable-model-invocation` (`/wayfinder`, `/grill-me`, `/to-tickets`, `/oneezy-merge` and others), Read `~/.claude/skills/<name>/SKILL.md` (with the account plugins, it is `~/.claude/plugins/synced/<org>_<id>/<plugin>/skills/<name>/SKILL.md`) and follow it, with the rest of the message as its arguments.
+A message starting with `/<name>` explicitly requests that skill. Resolve it through the harness's local skill picker or installed repo skill root. Skills marked `disable-model-invocation` remain explicit-only. If the current chat has not discovered the repository installation, report that and start a fresh chat; do not silently substitute an external plugin copy.
 
 ### Issue tracker
 

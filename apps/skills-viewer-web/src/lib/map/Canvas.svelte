@@ -5,7 +5,7 @@
 -->
 <script lang="ts">
   import { Background, BackgroundVariant, MiniMap, SvelteFlow, useSvelteFlow, type Edge } from "@xyflow/svelte";
-  import { onMount } from "svelte";
+  import { onMount, untrack } from "svelte";
   import type { MapData } from "./data.ts";
   import Detail from "./Detail.svelte";
   import EdgeSwatch from "./EdgeSwatch.svelte";
@@ -15,8 +15,25 @@
   import { CARD_H, CARD_W, LAYOUTS, layout, type LayoutKey, type MapFlowNode } from "./layouts.ts";
   import Search from "./Search.svelte";
   import SkillCard from "./SkillCard.svelte";
+  import { filterMap, parseVisibility, type Visibility } from "./visibility.ts";
 
-  let { data, title, blobBase }: { data: MapData; title: string; blobBase: string } = $props();
+  let { data: allData, title, blobBase, preferenceKey, onworkflow }: { data: MapData; title: string; blobBase: string; preferenceKey: string; onworkflow: (id: string) => void } = $props();
+  let visibility = $state<Visibility>(readVisibility());
+  const visibleLibraries = $derived(filterMap(allData, { ...visibility, crossLibrary: true }));
+  const data = $derived(filterMap(allData, visibility));
+
+  function readVisibility(): Visibility {
+    try { return parseVisibility(localStorage.getItem(preferenceKey)); }
+    catch { return parseVisibility(null); }
+  }
+  function saveVisibility(next: Visibility) {
+    visibility = next;
+    try { localStorage.setItem(preferenceKey, JSON.stringify(next)); } catch { /* storage blocked */ }
+  }
+  function toggleLibrary(key: string) {
+    saveVisibility({ ...visibility, hidden: visibility.hidden.includes(key)
+      ? visibility.hidden.filter(k => k !== key) : [...visibility.hidden, key] });
+  }
 
   const flow = useSvelteFlow();
   const nodeTypes = { skill: SkillCard, group: GroupBox };
@@ -38,6 +55,12 @@
   const colors = $derived(new Map(data.groups.map((g) => [g.key, g.color])));
   const current = $derived(LAYOUTS.find((l) => l.key === layoutKey)!);
   const counts = $derived(Object.fromEntries(EDGE_TYPES.map((t) => [t.key, data.edges.filter((e) => e.type === t.key).length])));
+  const layoutShape = $derived(JSON.stringify([
+    data.nodes.map((n) => [n.id, n.group, n.entry]),
+    data.edges.map((e) => [e.source, e.target, e.type]),
+    data.groups,
+    data.families,
+  ]));
 
   function readLayout(): LayoutKey {
     try {
@@ -59,10 +82,11 @@
   // re-lay out when the layout or the data changes; the viewport's shape is read once per run
   $effect(() => {
     const key = layoutKey;
-    const d = data;
+    if (!layoutShape) return;
+    const d = untrack(() => data);
     let live = true;
     busy = true;
-    selected = null;
+    untrack(() => { if (selected && !d.nodes.some((n) => n.id === selected)) selected = null; });
     layout(key, d, window.innerWidth / window.innerHeight, fine)
       .then((ns) => {
         if (!live) return;
@@ -94,9 +118,14 @@
     return s;
   });
 
-  const viewNodes = $derived(
-    near ? nodes.map((n) => (n.type === "group" ? n : { ...n, class: n.id === selected ? "focus" : near.has(n.id) ? "" : "dim" })) : nodes,
-  );
+  const viewNodes = $derived.by(() => {
+    const latest = new Map(data.nodes.map((n) => [n.id, n]));
+    return nodes.map((n) => n.type === "group" ? n : {
+      ...n,
+      data: { ...n.data, skill: latest.get(n.id) ?? n.data.skill },
+      class: near ? (n.id === selected ? "focus" : near.has(n.id) ? "" : "dim") : "",
+    });
+  });
 
   const viewEdges = $derived<Edge[]>(
     data.edges.map((e) => {
@@ -228,17 +257,30 @@
     <div class="panel brand">
       <div class="brand-title"><a href="/" class="home" aria-label="Map another repo">←</a>{title}</div>
       <div class="brand-sub">
-        {data.nodes.length} skills · {data.edges.length} links · {data.flows.length} flows{data.duplicates
+        {data.nodes.length}{data.nodes.length !== allData.nodes.length ? ` of ${allData.nodes.length}` : ""} skills · {data.edges.length} links · {data.flows.length} flows{data.duplicates
           ? ` · ${data.duplicates} ${data.duplicates === 1 ? "copy" : "copies"} merged`
           : ""}
       </div>
     </div>
-    <button class="keybtn" onclick={() => (keyOpen = !keyOpen)} aria-expanded={keyOpen}>{keyOpen ? "Hide key" : "Key"}</button>
+    <button class="keybtn" onclick={() => (keyOpen = !keyOpen)} aria-expanded={keyOpen}>{keyOpen ? "Hide filters" : "Filters"}</button>
     <Search {data} {colors} onpick={focusOn} />
   </div>
 
   {#if keyOpen}
     <div class="chrome panel key">
+      <h3>Show libraries</h3>
+      <div class="library-actions">
+        <button onclick={() => saveVisibility({ ...visibility, hidden: [] })}>Show all</button>
+        <button onclick={() => saveVisibility({ ...visibility, hidden: allData.groups.map(g => g.key) })}>Hide all</button>
+      </div>
+      {#each allData.groups as g (g.key)}
+        <div class="key-row g{g.color}">
+          <label><input type="checkbox" checked={!visibility.hidden.includes(g.key)} onchange={() => toggleLibrary(g.key)} aria-label={`Show ${g.label}`} /><span class="dot"></span>{g.label}<span class="n">{g.count}</span></label>
+        </div>
+      {/each}
+      <div class="key-row">
+        <label><input type="checkbox" checked={visibility.crossLibrary} onchange={() => saveVisibility({ ...visibility, crossLibrary: !visibility.crossLibrary })} />Links between libraries</label>
+      </div>
       <h3>Links</h3>
       {#each EDGE_TYPES as t (t.key)}
         <div class="key-row">
@@ -247,10 +289,6 @@
             <EdgeSwatch kind={t.key} />{t.label}<span class="n">{counts[t.key]}</span>
           </label>
         </div>
-      {/each}
-      <h3>Libraries</h3>
-      {#each data.groups as g (g.key)}
-        <div class="key-row g{g.color}"><span class="dot"></span>{g.label}<span class="n">{g.count}</span></div>
       {/each}
       <div class="hint">
         {#if fine}
@@ -276,8 +314,9 @@
     <button onclick={() => cycle(1)} aria-label="Next layout">›</button>
   </div>
 
-  {#if busy}<div class="chrome panel busy">Laying out {data.nodes.length} skills…</div>{/if}
-  {#if selected}
-    <Detail id={selected} {data} {blobBase} {colors} onpick={focusOn} onclose={() => (selected = null)} />
+  {#if !data.nodes.length}<div class="chrome panel busy">All libraries are hidden. <button onclick={() => saveVisibility({ ...visibility, hidden: [] })}>Show all</button></div>
+  {:else if busy}<div class="chrome panel busy">Laying out {data.nodes.length} skills…</div>{/if}
+  {#if selected && data.nodes.some((n) => n.id === selected)}
+    <Detail id={selected} data={visibleLibraries} {blobBase} {colors} {onworkflow} onpick={focusOn} onclose={() => (selected = null)} />
   {/if}
 </div>

@@ -1,0 +1,500 @@
+{
+  "version": 1,
+  "library": {
+    "name": "skills",
+    "owner": "oneezy",
+    "homepage": "https://github.com/oneezy/skills",
+    "version": "0.50.3"
+  },
+  "generate": {
+    "skills": true,
+    "plugins": true
+  },
+  "renderings": {
+    "hermes": "dist/hermes"
+  },
+  "sources": {
+    "matt-pocock": {
+      "repo": "mattpocock/skills",
+      "ref": "main",
+      "root": "skills",
+      "skills": [
+        "ask-matt",
+        "chief-of-staff",
+        "claude-handoff",
+        "code-review",
+        "codebase-design",
+        "diagnosing-bugs",
+        "domain-modeling",
+        "git-guardrails-claude-code",
+        "grill-me",
+        "grill-with-docs",
+        "grilling",
+        "handoff",
+        "implement",
+        "implement-spec",
+        "improve-codebase-architecture",
+        "loop-me",
+        "migrate-to-shoehorn",
+        "pr",
+        "prototype",
+        "research",
+        "retro",
+        "scaffold-exercises",
+        "setup-matt-pocock-skills",
+        "setup-pre-commit",
+        "setup-ts-deep-modules",
+        "tdd",
+        "teach",
+        "to-questionnaire",
+        "to-spec",
+        "to-tickets",
+        "triage",
+        "wait-what",
+        "wayfinder",
+        "wizard",
+        "writing-beats",
+        "writing-for-agents",
+        "writing-fragments",
+        "writing-shape"
+      ],
+      "pins": {
+        "writing-for-agents": "321658273cb1d20b76026717d027d505790106d4"
+      },
+      "attribution": [
+        "LICENSE",
+        "README.md"
+      ]
+    },
+    "pstack": {
+      "repo": "cursor/plugins",
+      "ref": "main",
+      "root": "pstack/skills",
+      "skills": "*",
+      "rename": {
+        "tdd": "pstack-tdd",
+        "teach": "pstack-teach"
+      },
+      "pins": {},
+      "attribution": [
+        "pstack/LICENSE",
+        "pstack/README.md"
+      ],
+      "adapt": {
+        "rules": [
+          {
+            "find": "writes an always-applied rule that overrides",
+            "replace": "writes a settings file that overrides"
+          },
+          {
+            "find": "`~/\\.cursor/rules/pstack-models\\.mdc`, an always-applied rule that sets",
+            "replace": "the pstack settings file (`~/.agents/pstack-models.md`), which sets"
+          },
+          {
+            "find": "Write `~/\\.cursor/rules/pstack-models\\.mdc` with `alwaysApply: true`, a",
+            "replace": "Write the pstack settings file (`~/.agents/pstack-models.md`) with a"
+          },
+          {
+            "find": "```\\n---\\ndescription: pstack per-role model choices \\(overrides skill defaults\\)\\nalwaysApply: true\\n---\\n",
+            "replace": "```\n"
+          },
+          {
+            "find": "No `~/\\.cursor/rules/pstack-models\\.mdc` means",
+            "replace": "No `~/.agents/pstack-models.md` means"
+          },
+          {
+            "find": "`~/\\.cursor/rules/pstack-models\\.mdc`",
+            "replace": "the pstack settings file (`~/.agents/pstack-models.md`)"
+          },
+          {
+            "find": "the `pstack-models\\.mdc` rule",
+            "replace": "the pstack settings file (`~/.agents/pstack-models.md`)"
+          },
+          {
+            "find": "the `/setup-pstack` rule",
+            "replace": "the pstack settings file (`~/.agents/pstack-models.md`)"
+          },
+          {
+            "find": "\\b([Ii]f) the rule or (that|the) line is missing",
+            "replace": "$1 the file or $2 line is missing"
+          },
+          {
+            "find": "the model rule is missing",
+            "replace": "the settings file is missing"
+          },
+          {
+            "find": "the rule shape shown in step 5",
+            "replace": "the file shape shown in step 5"
+          },
+          {
+            "find": "when the rule records one\\. With no rule,",
+            "replace": "when the file records one. With no file,"
+          },
+          {
+            "find": "### 5\\. Write the rule",
+            "replace": "### 5. Write the file"
+          },
+          {
+            "find": "Tell the user the rule was written and that it applies to new sessions\\.",
+            "replace": "Tell the user the file was written and that pstack skills read it when they pick a model."
+          },
+          {
+            "find": "and writes a rule\\. The rule applies to new chats\\.",
+            "replace": "and writes the pstack settings file (`~/.agents/pstack-models.md`), which pstack skills read when they pick a model."
+          },
+          {
+            "find": "If Cursor also exposes a models API or CLI",
+            "replace": "If your harness also has a models API or CLI"
+          },
+          {
+            "find": "(default to one each on|choose from) `claude-opus-5-5-xhigh` and `grok-4\\.7-xhigh-fast`\\.",
+            "replace": "$1 `claude-opus-5-5-xhigh` and `grok-4.7-xhigh-fast`, or the closest models your harness has."
+          },
+          {
+            "find": "Spawn `Task` with `subagent_type: \\\"Comment Sicko\\\"`\\.",
+            "replace": "Spawn the Comment Sicko subagent. Where your harness has no subagent by that name, spawn a general one that first reads pstack's [`agents/comment-sicko.md`](https://github.com/cursor/plugins/blob/main/pstack/agents/comment-sicko.md)."
+          },
+          {
+            "find": "\\*\\*Use `subagent_type: \\\"poteto-agent\\\"` for any subagent you spawn inside a playbook step\\*\\* \\(code-writing delegates, ad-hoc helpers\\)\\.",
+            "replace": "**Use the `poteto-agent` subagent for any subagent you spawn inside a playbook step** (code-writing delegates, ad-hoc helpers). Where your harness has no subagent by that name, spawn a general one that first reads the poteto-mode skill in full."
+          },
+          {
+            "find": "with `subagent_type: \\\"poteto-agent\\\"`",
+            "replace": "as the `poteto-agent` subagent"
+          },
+          {
+            "find": "set their own `subagent_type`",
+            "replace": "set their own subagent type"
+          },
+          {
+            "find": "Every spawn is a Task subagent with `subagent_type: generalPurpose` and",
+            "replace": "Every spawn is a general-purpose subagent with"
+          },
+          {
+            "find": "`Task` (calls?), `subagent_type: generalPurpose`,",
+            "replace": "general-purpose subagent $1,"
+          },
+          {
+            "find": "gets `subagent_type: generalPurpose`, `readonly: true`, and",
+            "replace": "is a general-purpose subagent with `readonly: true` and"
+          },
+          {
+            "find": "with `subagent_type: generalPurpose`, ",
+            "replace": "as general-purpose subagents with "
+          },
+          {
+            "find": "Every spawn is `generalPurpose` with",
+            "replace": "Every spawn is a general-purpose subagent with"
+          },
+          {
+            "find": "\\bthe (?:`Task`|Task) tool\\b",
+            "replace": "your subagent tool"
+          },
+          {
+            "find": "`Task` (calls?|prompt)",
+            "replace": "subagent $1"
+          },
+          {
+            "find": "in the `Task` response body",
+            "replace": "in the subagent's response"
+          },
+          {
+            "find": "a `Task` subagent",
+            "replace": "a subagent"
+          },
+          {
+            "find": "\\(omit Task `model`\\)",
+            "replace": "(omit the subagent's `model`)"
+          },
+          {
+            "find": "About to `AskQuestion` on",
+            "replace": "About to ask the user about"
+          },
+          {
+            "find": "the `AskQuestion` tool",
+            "replace": "your question tool"
+          },
+          {
+            "find": "`AskQuestion`|\\bAskQuestion\\b",
+            "replace": "your question tool"
+          },
+          {
+            "find": "the \\*\\*create-skill\\*\\* skill \\(Cursor's built-in for authoring SKILL\\.md files\\)",
+            "replace": "your skill-authoring skill"
+          },
+          {
+            "find": "Cursor's built-in `create-skill` skill",
+            "replace": "your skill-authoring skill"
+          },
+          {
+            "find": "Cursor's built-in `create-skill` \\(authoring\\)",
+            "replace": "your skill-authoring skill"
+          },
+          {
+            "find": "via create-skill \\+ unslop",
+            "replace": "via your skill-authoring skill and unslop"
+          },
+          {
+            "find": "new skill via create-skill",
+            "replace": "new skill"
+          },
+          {
+            "find": "A `create-skill`-style test/iterate benchmark loop",
+            "replace": "A test/iterate benchmark loop like your skill-authoring skill's"
+          },
+          {
+            "find": "`create-skill`'s",
+            "replace": "your skill-authoring skill's"
+          },
+          {
+            "find": "- `/loop` and `/create-skill` are Cursor built-ins\\.",
+            "replace": "- `/loop` (or your harness's scheduler) and a skill-authoring skill come with your harness."
+          },
+          {
+            "find": "`create-skill` alone",
+            "replace": "Your skill-authoring skill alone"
+          },
+          {
+            "find": "`create-skill`",
+            "replace": "your skill-authoring skill"
+          },
+          {
+            "find": "the `deslop` skill from the `cursor-team-kit` plugin \\(`/deslop`\\)",
+            "replace": "the `deslop` skill, `/deslop`, when installed"
+          },
+          {
+            "find": "`cursor-team-kit` publishes `control-cli`",
+            "replace": "The control skills are `control-cli`"
+          },
+          {
+            "find": "\\(browser / Electron / web UIs\\)\\. For bug fixes",
+            "replace": "(browser / Electron / web UIs), when installed. For bug fixes"
+          },
+          {
+            "find": "- `/deslop`, `control-cli`, and `control-ui` ship in the `cursor-team-kit` plugin\\.",
+            "replace": "- `/deslop`, `control-cli`, and `control-ui` are separate skills, installed on their own."
+          },
+          {
+            "find": " \\(from `cursor-team-kit`\\)",
+            "replace": ""
+          },
+          {
+            "find": " from `cursor-team-kit`",
+            "replace": ""
+          },
+          {
+            "find": "Transcripts live at (`~/\\.cursor/projects/<slug>/agent-transcripts/<uuid>/<uuid>\\.jsonl`), where",
+            "replace": "Transcripts live in your harness's transcript folder (in Cursor: $1), where"
+          },
+          {
+            "find": "A local transcript under the active workspace's `agent-transcripts/` directory \\(the system prompt names the path\\. Do not glob across `~/\\.cursor/projects/\\*/`, that crosses",
+            "replace": "A local transcript among this workspace's chat transcripts (never another workspace's, that crosses"
+          },
+          {
+            "find": "under the active workspace's `agent-transcripts/` directory \\(the system prompt names (?:this|the) path\\)",
+            "replace": "among this workspace's chat transcripts"
+          },
+          {
+            "find": "in the `agent-transcripts/` directory the system prompt names",
+            "replace": "among this workspace's chat transcripts"
+          },
+          {
+            "find": "The system prompt names the workspace's `agent-transcripts/` directory\\. Use only that path\\.",
+            "replace": "Use only this workspace's chat transcripts."
+          },
+          {
+            "find": "local transcripts under `agent-transcripts/`",
+            "replace": "this workspace's chat transcripts"
+          },
+          {
+            "find": "(Do not|Don't) glob across `~/\\.cursor/projects/\\*/`",
+            "replace": "$1 read other workspaces' transcripts"
+          },
+          {
+            "find": "<agent-transcripts>",
+            "replace": "<transcripts>"
+          },
+          {
+            "find": "\\(`\\.cursor/skills/verify-<app>/`\\)",
+            "replace": "(`<project-skills>/verify-<app>/`, where `<project-skills>` is your harness's project skills folder)"
+          },
+          {
+            "find": "\\(usually `\\.cursor/skills/verify-\\*/`\\)",
+            "replace": "(usually `verify-*/` in your project skills folder)"
+          },
+          {
+            "find": "\\.cursor/skills/verify-",
+            "replace": "<project-skills>/verify-"
+          },
+          {
+            "find": "\\(under `\\.cursor/skills/`, `~/\\.cursor/skills/`, or `~/\\.cursor/plugins/`\\)",
+            "replace": "(under your project or user skills folder, or a plugin's folder)"
+          },
+          {
+            "find": "for `\\.cursor/skills/\\*\\*/\\*-mode/SKILL\\.md` and `~/\\.cursor/skills/\\*-mode/SKILL\\.md` matching",
+            "replace": "for `*-mode/SKILL.md` at any depth in your project and user skills folders matching"
+          },
+          {
+            "find": "`\\.cursor/skills/<handle>-mode/SKILL\\.md` in the project",
+            "replace": "`<handle>-mode/SKILL.md` in your project skills folder"
+          },
+          {
+            "find": "`~/\\.cursor/skills/([^`]*)`",
+            "replace": "`$1` in your user skills folder"
+          },
+          {
+            "find": "`\\.cursor/skills/([^`]*)`",
+            "replace": "`$1` in your project skills folder"
+          },
+          {
+            "find": "misses one that lives at `\\.cursor/worktrees/myrepo/x`",
+            "replace": "misses one a harness keeps in its own worktree folder"
+          },
+          {
+            "find": "using Cursor's `/loop` command \\(a built-in, not a pstack skill\\)",
+            "replace": "using the `/loop` command or your harness's scheduler (a built-in, not a pstack skill)"
+          },
+          {
+            "find": "Cursor's `/loop` command",
+            "replace": "the `/loop` command (or your harness's scheduler)"
+          },
+          {
+            "find": "Cursor's built-in babysit skill",
+            "replace": "a built-in babysit skill your harness may have"
+          },
+          {
+            "find": "Cursor's own skill for the same job",
+            "replace": "your harness's own skill for the same job"
+          },
+          {
+            "find": "Cursor's Plan Mode works alongside it\\.",
+            "replace": "Your harness's plan mode works alongside it."
+          },
+          {
+            "find": "Link \\[Cursor's skills docs\\]\\(https://cursor\\.com/docs/skills\\)",
+            "replace": "Link your harness's skills docs"
+          },
+          {
+            "find": "1\\. Install with `/add-plugin pstack` in chat, or from Customize in the sidebar\\.",
+            "replace": "1. Install the pstack plugin the way your harness installs plugins."
+          },
+          {
+            "find": "pstack is built for Cursor\\. Its skills use the Agent Skills format, so other tools can read them\\. But most workflow skills, including `/poteto-mode`, `/how`, `/why`, and `/teach`, spawn Cursor subagents with per-role models, and Custom Modes and `/loop` are Cursor features, so those parts may not work there\\.",
+            "replace": "pstack was written for one harness, and this copy is worded for any. Most workflow skills, including `/poteto-mode`, `/how`, `/why`, and `/teach`, spawn subagents with per-role models; where your harness cannot pick a model per subagent, they run on the parent model."
+          },
+          {
+            "find": "Cursor cloud agent",
+            "replace": "cloud agent"
+          },
+          {
+            "find": "the Cursor dashboard",
+            "replace": "your harness's dashboard"
+          },
+          {
+            "find": "a Cursor restart",
+            "replace": "a restart"
+          },
+          {
+            "find": "from the Cursor environment",
+            "replace": "from your harness"
+          },
+          {
+            "find": "the `mcps/` directory Cursor exposes for enabled MCP servers",
+            "replace": "your harness's MCP settings for enabled servers"
+          },
+          {
+            "find": "^name: Poteto Mode$",
+            "replace": "name: poteto-mode",
+            "flags": "m"
+          },
+          {
+            "find": "^name: Make Bot UI$",
+            "replace": "name: make-bot-ui",
+            "flags": "m"
+          }
+        ],
+        "forbid": [
+          "subagent_type",
+          "generalPurpose",
+          "`Task`",
+          "\\bTask (?:tool|subagent|calls?|prompt|response)\\b",
+          "Task `model`",
+          "\\bAskQuestion\\b",
+          "create-skill",
+          "cursor-team-kit",
+          "agent-transcripts",
+          "\\.cursor/",
+          "pstack-models\\.mdc",
+          "alwaysApply",
+          "/add-plugin",
+          "Cursor"
+        ],
+        "allow": [
+          "^Transcripts live in your harness's transcript folder \\(in Cursor: `~/\\.cursor/projects/",
+          "^- Cursor's docs list Custom Modes in the Agents Window and the CLI\\.",
+          "`~/Library/Application Support/Cursor` \\(`state\\.vscdb\\.backup`"
+        ]
+      }
+    },
+    "anthropic": {
+      "repo": "anthropics/skills",
+      "ref": "main",
+      "root": "skills",
+      "skills": [
+        "frontend-design"
+      ],
+      "attribution": [
+        "README.md"
+      ]
+    },
+    "diagram-design": {
+      "repo": "cathrynlavery/diagram-design",
+      "ref": "main",
+      "root": "skills",
+      "skills": [
+        "diagram-design"
+      ],
+      "attribution": [
+        "LICENSE",
+        "README.md"
+      ]
+    }
+  },
+  "plugins": {
+    "oneezy": {
+      "displayName": "Oneezy",
+      "description": "Justin's own skills: agents, brain, debug, estimate, meeting, merge, migrate, naming, remote, skills, status.",
+      "group": "oneezy"
+    },
+    "trident": {
+      "displayName": "Trident",
+      "description": "Skills for the Trident monorepo (layerdbiz/tridentcubed): app routes and @layerd/ui components.",
+      "group": "trident"
+    },
+    "play": {
+      "displayName": "Play",
+      "description": "Justin's playground: skills he is trying out, each named play-<name>, before they move into oneezy or trident.",
+      "group": "play"
+    },
+    "matt-pocock": {
+      "displayName": "Matt Pocock",
+      "description": "Matt Pocock's skills from mattpocock/skills, following main; writing-for-agents pinned.",
+      "source": "matt-pocock"
+    },
+    "pstack": {
+      "displayName": "PStack",
+      "description": "Lauren Tan's PStack skills from cursor/plugins (pstack/), with tdd and teach as pstack-tdd and pstack-teach.",
+      "source": "pstack"
+    },
+    "diagram-design": {
+      "displayName": "Diagram Design",
+      "description": "Cathryn Lavery's diagram-design skill from cathrynlavery/diagram-design: 42 editorial diagram types as HTML/SVG.",
+      "source": "diagram-design"
+    },
+    "frontend-design": {
+      "displayName": "Frontend Design",
+      "description": "Anthropic's frontend-design skill from anthropics/skills: distinctive UI that avoids the generic AI look.",
+      "source": "anthropic"
+    }
+  }
+}

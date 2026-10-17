@@ -1,0 +1,80 @@
+skill: oneezy-debug
+purpose: Wrapper for debugging what an agent did. The default target, this chat, reports the harness, model, session, loaded instructions, context and skills, the answer, then a nested four-column table of every step and the outcomes, every value tagged verified, selected, reported or unknown.
+runtime: [node]
+refs:
+  - token: references/capabilities/contract.md
+    kind: file
+    id: skills/oneezy/oneezy-debug/references/capabilities/contract.md
+    need: required
+    when: before any dependency call
+  - token: references/capabilities/chatgpt.md
+    kind: file
+    id: skills/oneezy/oneezy-debug/references/capabilities/chatgpt.md
+    need: conditional
+    when: ChatGPT host
+  - token: references/capabilities/claude.md
+    kind: file
+    id: skills/oneezy/oneezy-debug/references/capabilities/claude.md
+    need: conditional
+    when: Claude host
+  - token: references/capabilities/codex.md
+    kind: file
+    id: skills/oneezy/oneezy-debug/references/capabilities/codex.md
+    need: conditional
+    when: Codex host
+  - token: references/capabilities/catalog.json
+    kind: file
+    id: skills/oneezy/oneezy-debug/references/capabilities/catalog.json
+    need: conditional
+    when: inventory, management or missing dependency
+  - token: references/chat.md
+    kind: file
+    id: skills/oneezy/oneezy-debug/references/chat.md
+    need: conditional
+    when: target is this chat, or a skill or request run under the wrapper
+  - token: scripts/trace.mjs
+    kind: file
+    id: skills/oneezy/oneezy-debug/scripts/trace.mjs
+    need: conditional
+    when: the harness has a shell
+  - token: references/harnesses.md
+    kind: file
+    id: skills/oneezy/oneezy-debug/references/harnesses.md
+    need: conditional
+    when: the script prints Transcript not available, or there is no shell
+  - token: /show-me-your-work
+    kind: skill
+    id: show-me-your-work
+    need: mention
+    when: its decision trail exists in the working folder; linked, never run or rewritten
+unresolved: []
+agents:
+  max: 0
+steps:
+  - id: target
+    does: read the words after /oneezy-debug and pick the target from the SKILL.md table; an unbuilt target is named in one line and the chat target runs
+    outcome:
+      done: one target chosen
+  - id: run
+    after: target
+    if: a skill or request follows the wrapper
+    does: run it exactly as without this skill
+    outcome:
+      done: its work finished and the answer not yet written
+  - id: trace
+    after: run
+    does: run scripts/trace.mjs with --scope chat or turn and --tz, or build the report by hand from references/harnesses.md
+    needs: [node]
+    outcome:
+      done: header with every line valued or unknown and tagged, and the table
+  - id: complete
+    after: trace
+    does: add [reported] header values from the agent's own context, write the answer in place of <<ANSWER>>, write Outcomes with their evidence
+    outcome:
+      done: no known value missing; every outcome names its evidence
+  - id: report
+    after: complete
+    does: print header, answer, table, legend and Outcomes in that order
+    returns: the debug report
+    outcome:
+      done: report on screen in that order

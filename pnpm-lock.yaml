@@ -224,6 +224,12 @@ importers:
 
   packages/remote-sessions: {}
 
+  packages/skills:
+    devDependencies:
+      '@oneezy/skills-sync':
+        specifier: workspace:*
+        version: link:../skills-sync
+
   packages/skills-sync:
     dependencies:
       yaml:

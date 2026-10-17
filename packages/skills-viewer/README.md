@@ -25,7 +25,7 @@ node dist/src/cli.js --watch --host             # scans the default roots below
   - `tarball` (the CLI default): `repos/o/r/tarball/<ref>`, unpacked in memory. Its redirect target, `codeload.github.com`, does not allow browser origins, so use it from Node or a server function.
 - **Plugins**: a folder with `.claude-plugin/plugin.json` or `.codex-plugin/plugin.json` (plus the neutral `plugin.json` beside them), or one listed by a `.claude-plugin/marketplace.json` or `.agents/plugins/marketplace.json`. Each plugin's `commands/*.md`, `agents/*.md`, `hooks/hooks.json`, `.mcp.json`, `scripts/` and `bin/`, plus the `commands`, `agents`, `hooks` and `mcpServers` fields of its manifest (paths or inline). Outside plugins: `.claude/commands`, `.claude/agents`, hooks in `.claude/settings.json`, and `.mcp.json`. MCP `env` and `headers` keep their key names only, never values.
 - **Skill files**: everything in a skill's folder besides `SKILL.md` and `agents/*.yaml` is a part of that skill: a **script** (`scripts/`, `bin/` or a script extension), a **reference** (`references/` or markdown/text, the context it loads) or an **asset**.
-- **Duplicates**: a skill id found twice (a library that ships `skills/x` and a built `plugins/p/skills/x`) is one node. The copy outside any plugin wins, as the authored source, else the shortest path; the others are listed in `copies`. Built copies usually differ in content, so this goes by id, not by hash.
+- **Duplicates**: source and generated copies of a skill within one library are one node. The copy outside any plugin wins, else the shortest path; the others are listed in `copies`. Matching folder names belonging to different libraries remain separate, with ids such as `play:review` and `oneezy:review`. The `skillLibraries` analysis option maps live source directories to their library. References prefer a unique match within the caller's library; qualified names such as `/oneezy:review` resolve explicitly. Ambiguous names remain unresolved instead of choosing a file by order.
 - **Frontmatter**: `name`, `description`, `user-invocable`, `disable-model-invocation`, `allowed-tools`, `context`, `model`, `argument-hint`. Codex's `agents/openai.yaml` (`allow_implicit_invocation: false`) is read as manual-only for Codex.
 - **Body**: every line, with the line number kept for evidence.
 
@@ -57,7 +57,9 @@ A menu entry with a bold title first (`- **Fix Root Causes** (**principle-fix-ro
 
 Commands and agents are read with the same detectors, so `/deploy` in a command body links the command to the skill. A slash or bare name resolves to a skill first, then to a command or agent of that name. A skill also **runs** a script or **reads** a reference when its body names the file (`scripts/check.sh`, `PHASE-BOUNDARIES.md`), and a hook or MCP server **runs** a plugin script its command line names.
 
-Layer 2 (an optional LLM pass that classifies sequential / parallel / loop relationships as dashed edges) is not built yet.
+Workflow analysis is entirely static; no model or AI service is used. `workflows` inventories owned files with neutral file/directory roles, resolves explicit Markdown links, inline-code paths and unquoted paths against the referring document and owning skill, and follows skill references in supporting Markdown/text documents. Directory names carry no execution semantics. Links outside the supplied file set are not fetched, and scripts are never executed.
+
+Each workflow document includes references, available contents and detected step lists. Steps preserve individual occurrences, including repeated invocations. Ordered action lists and numbered action headings establish candidate sequences. Explicit parallel/choose-one cues establish branches; a join requires an explicit wait-for-all instruction. A repeat instruction establishes a return edge. Every relationship and step retains its source file, line, snippet and detector rule. Fences, blockquotes, HTML comments and explicitly labeled example sections are excluded. This is conservative pattern matching, not proof of runtime behavior: unsupported prose, HTML structures and custom YAML schemas are not interpreted as control flow. Existing `flows` remain the older heuristic summary; the focused web workflow view uses `workflows` instead.
 
 ## Outputs
 
@@ -70,6 +72,7 @@ Layer 2 (an optional LLM pass that classifies sequential / parallel / loop relat
   - `parts`: everything else, `{ id: "<kind>:<scope>/<name>", kind, name, description, plugin?, skill?, file, details }`, kind one of `command`, `agent`, `hook`, `mcp`, `script`, `reference`, `asset`. Scope is the plugin name, the skill id, or `project`.
   - `links`: every relation with a part at one end, same shape as `edges` plus the types `runs` and `reads`.
   - `flows`: sequential / parallel / loop, owned by a skill or a command; `unresolved`: names mentioned but not in the library.
+  - `workflows`: document inventory, explicit references and structured steps with source evidence, used by the focused web view. Optional when consuming older graph exports.
   - Paths are as the source reports them: repo-relative for GitHub, absolute (posix slashes) for local folders.
 - `graph.mmd`: Mermaid flowchart, portable (no HTML labels, no click handlers).
 - `graph.html`: the viewer, with `graph.json` and the Mermaid generator embedded. Loads Mermaid 11 from jsDelivr.

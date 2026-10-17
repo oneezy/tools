@@ -1,6 +1,7 @@
 <script lang="ts">
   import { goto } from "$app/navigation";
   import { page } from "$app/state";
+  import { onMount } from "svelte";
   import SkillMap from "#lib/map/SkillMap.svelte";
   import { formatRepo, parseRepoInput } from "#lib/repo.ts";
   import type { AnalyzeResult, ApiError } from "#lib/types.ts";
@@ -12,25 +13,86 @@
   let status = $state<"idle" | "loading" | "done" | "error">("idle");
   let result = $state<AnalyzeResult | null>(null);
   let error = $state<ApiError | null>(null);
+  let updating = $state(false);
+  let connected = $state(true);
+  let mounted = $state(false);
+  let request = 0;
+  let controller: AbortController | undefined;
 
   const repoParam = $derived(page.url.searchParams.get("repo"));
+  const localAvailable = import.meta.env.DEV;
+  const mode = $derived(localAvailable && page.url.searchParams.get("source") !== "web" && !repoParam ? "local" : "web");
   const src = $derived(result?.graph.meta.source.kind === "github" ? result.graph.meta.source : null);
-  const mapTitle = $derived(src ? `${src.owner}/${src.repo}${src.subpath ? `/${src.subpath}` : ""}` : "");
+  const mapTitle = $derived(mode === "local" ? "Local skills" : src ? `${src.owner}/${src.repo}${src.subpath ? `/${src.subpath}` : ""}` : "");
 
   // the URL is the source of truth, so a pasted ?repo= link or Back loads that repo
   $effect(() => {
-    if (repoParam) load(repoParam);
-    else status = "idle";
+    if (!mounted) return;
+    const source = mode;
+    const repo = repoParam;
+    if (source === "local") loadLocal();
+    else if (repo) load(repo);
+    else {
+      controller?.abort();
+      request++;
+      result = null;
+      error = null;
+      status = "idle";
+    }
   });
 
+  onMount(() => {
+    mounted = true;
+    const changed = () => { if (mode === "local") void loadLocal(true); };
+    const disconnected = () => { connected = false; };
+    const reconnected = () => { connected = true; changed(); };
+    import.meta.hot?.on("skills:changed", changed);
+    import.meta.hot?.on("vite:ws:disconnect", disconnected);
+    import.meta.hot?.on("vite:ws:connect", reconnected);
+    return () => {
+      mounted = false;
+      request++;
+      controller?.abort();
+      import.meta.hot?.off("skills:changed", changed);
+      import.meta.hot?.off("vite:ws:disconnect", disconnected);
+      import.meta.hot?.off("vite:ws:connect", reconnected);
+    };
+  });
+
+  async function loadLocal(background = false) {
+    const id = ++request;
+    controller?.abort();
+    controller = new AbortController();
+    if (!background) status = "loading";
+    updating = true;
+    error = null;
+    try {
+      const res = await fetch("/api/local-skills", { signal: controller.signal });
+      const body = await res.json();
+      if (id !== request) return;
+      if (!res.ok) throw new Error((body as ApiError).error);
+      result = body as AnalyzeResult;
+      status = "done";
+    } catch (err) {
+      if (id !== request) return;
+      error = { error: err instanceof Error ? err.message : "Could not read local skills." };
+      status = "error";
+    } finally {
+      if (id === request) updating = false;
+    }
+  }
+
   async function load(repo: string) {
+    const id = ++request;
+    controller?.abort();
+    controller = new AbortController();
     input = repo;
     status = "loading";
     error = null;
     try {
-      const res = await fetch(`/api/graph?repo=${encodeURIComponent(repo)}`);
+      const res = await fetch(`/api/graph?repo=${encodeURIComponent(repo)}&analysis=workflow-v1`, { signal: controller.signal });
       const body = await res.json();
-      if (repoParam !== repo) return; // a newer search started
+      if (id !== request) return;
       if (!res.ok) {
         error = body as ApiError;
         status = "error";
@@ -39,6 +101,7 @@
       result = body as AnalyzeResult;
       status = "done";
     } catch {
+      if (id !== request) return;
       error = { error: "Could not reach the server." };
       status = "error";
     }
@@ -74,19 +137,34 @@
   <meta name="description" content="Paste a GitHub repo of agent skills and see how they connect." />
 </svelte:head>
 
-{#if status === "done" && result && src && result.graph.nodes.length}
+{#if localAvailable}
+  <nav class="source-bar" aria-label="Skill source">
+    <div class="source-options">
+      <a href="?source=local" aria-current={mode === "local" ? "page" : undefined}>Local</a>
+      <a href="?source=web" aria-current={mode === "web" ? "page" : undefined}>Web</a>
+    </div>
+    {#if mode === "local"}
+      <span class="folder">packages/skills</span>
+      <span class="live" role="status">{!connected ? "Disconnected" : status === "error" ? "Needs attention" : updating ? "Updating…" : "Watching"}</span>
+    {/if}
+  </nav>
+{/if}
+
+<div class:with-source={localAvailable}>
+{#if status === "done" && result && result.graph.nodes.length}
   <SkillMap
     graph={result.graph}
     title={mapTitle}
-    repoName={src.repo}
-    blobBase={src.blobBase}
+    repoName={src?.repo ?? "skills"}
+    blobBase={src?.blobBase ?? ""}
   />
 {:else}
   <main>
     <header class:compact={status !== "idle"}>
       <h1>Skills map</h1>
-      <p class="lede">Paste a GitHub repo of agent skills or a plugin. See where to start and what calls what.</p>
+      <p class="lede">{mode === "local" ? "Your local skills, updated as you save." : "Paste a GitHub repo of agent skills or a plugin. See where to start and what calls what."}</p>
 
+      {#if mode === "web"}
       <form method="GET" onsubmit={submit}>
         <input
           name="repo"
@@ -112,10 +190,11 @@
           {/each}
         </p>
       {/if}
+      {/if}
     </header>
 
     {#if status === "loading"}
-      <p class="state">Fetching and reading the repo…</p>
+      <p class="state">{mode === "local" ? "Reading local skills…" : "Fetching and reading the repo…"}</p>
     {:else if status === "error" && error}
       <div class="state error-box">
         <p>{error.error}</p>
@@ -129,8 +208,18 @@
     {/if}
   </main>
 {/if}
+</div>
 
 <style>
+  .source-bar { position: fixed; inset: 0 0 auto; height: 56px; display: flex; align-items: center; gap: 16px; padding: 0 16px; background: var(--surface); border-bottom: 1px solid var(--line); z-index: 50; }
+  .source-options { display: flex; gap: 4px; }
+  .source-options a { padding: 7px 14px; border-radius: var(--radius); color: var(--muted); text-decoration: none; }
+  .source-options a[aria-current] { background: var(--ink); color: var(--bg); }
+  .folder, .live { font-size: 0.85rem; color: var(--muted); }
+  .live { margin-left: auto; }
+  .with-source { padding-top: 56px; }
+  .with-source :global(.board) { top: 56px; height: calc(100dvh - 56px); }
+  @media (max-width: 480px) { .source-bar { gap: 8px; padding: 0 8px; } .folder { font-size: 0.75rem; } }
   main {
     max-width: 1200px;
     margin: 0 auto;
