@@ -21,7 +21,7 @@ An agent in the thread reads the evidence and closes tickets. Nobody closes them
 
 ## 0. Shell prelude
 
-Paste this block into every PowerShell 7 window used in this run, watcher windows included. `$env:SKILLS_SYNC_TEST_UNVERIFIED_ADAPTERS` switches on the two adapters that are `verified: false` until this run passes (`src/develop-project.ts`, `testSwitch`). It is a comma-separated list of Harness ids with no spaces, and it lasts for this window only. Setup, status and remove need it in the window they run in: without it, setup prints `<harness>: not activated: its adapter is not verified`, and remove refuses a project that setup activated. Never put it in a profile.
+Paste this block into every PowerShell 7 window used in this run, watcher windows included. `$env:SKILLS_SYNC_TEST_UNVERIFIED_ADAPTERS` switches on the two adapters that are `verified: false` until this run passes (`src/develop-record.ts`, `testSwitch`). It is a comma-separated list of Harness ids with no spaces, and it lasts for this window only. Setup, status and remove need it in the window they run in. Without it, setup prints `<harness>: not activated: its adapter is not verified` in a project it never activated. In a project it did activate, setup and status print `<harness>: activated, adapter unverified` and name the switch, and remove refuses. Never put it in a profile.
 
 ```powershell
 $Main       = "V:\dev\tools"                          # your normal tools checkout
@@ -81,7 +81,7 @@ Also read the versions from each app's About screen: the ChatGPT desktop app, an
 
 **Expect:** research used Claude Code 2.1.302, codex-cli 0.163.0 and, in Desktop on 2026-10-15, bundled Codex 0.162.0-alpha.17.2. Other versions are fine.
 
-**Record:** `Note "1.1" "claude <v>, codex <v>, ChatGPT app <v>, Claude Code Desktop <v>, Windows <build>, pwsh <v>, global skills-sync before: <none or path>"`
+**Record:** `Note "1.1" "claude <v>, codex <v>, ChatGPT app <v>, Claude Code Desktop <v>, Windows <build>, pwsh <v>, global skills-sync before: <none, or its version and path>"`. Step 14.3 puts that global install back.
 
 ### 1.2 Account state, before
 
@@ -756,7 +756,9 @@ Start a new Claude Code session in P1 (the hook runs its sync), then in it:
 
 and in a second window `Set-Location $P1; claude plugin details play`. Do the same in N. Restart the ChatGPT desktop app and open new chats in P1 and N, each running `$play:hi`.
 
-**Expect:** P1 shows `Source: play@oneezy-skills-development` and the marker; N shows the released copy and no marker, in both Harnesses. If the published version is older than `0.17.0`, the hook is not running the code under test: a pass says the old hook did no harm, and a failure is expected to be fixed by publishing.
+**Expect:** P1 shows `Source: play@oneezy-skills-development` and the marker; N shows the released copy and no marker, in both Harnesses.
+
+The published `0.17.0` has this branch's version number but not its code: it predates #215 (sync leaves the development selection alone), and this branch does not bump the version. So until a later version is published, the hook runs the old sync, whatever `npm view` prints. A pass says the old hook did no harm. A failure is the old code's, which publishing a bumped version fixes: record it as `unproven until published`, not as a fail of this branch.
 
 **Record:** `Note "10.2" "published <v>; P1 claude <...>; N claude <...>; P1 codex <...>; N codex <...>"`
 
@@ -984,6 +986,16 @@ Run this only while `dist\development` exists (rebuild with `pnpm skills:dev:bui
 
 **Expect:** record whether a marketplace named `proof-217-repo` appears. If it does, that is a candidate route without the re-enable window (ADR-0007). Remove the copy afterwards: `Remove-Item $P3 -Recurse -Force`.
 
+**After both questions**, take back the setup Question 7 made in P1, in this window (the switch is still set):
+
+```powershell
+Set-Location $P1
+skills-sync develop remove; "exit $LASTEXITCODE"
+skills-sync develop status --repo $Lib
+```
+
+**Expect:** exit 0, and status prints `not a Development project` for P1 with no `connected` line under `Projects connected to`.
+
 **Record:** `Note "13" "Q7 <...>; Q8 <...>; answers for the other questions are in their steps"`
 
 ## 14. Evidence checklist and hand-back
@@ -1021,11 +1033,27 @@ On a full pass, the agent sets `verified: true` for the passing Harness in `ADAP
 
 Skip any line whose result you want to keep for a re-run.
 
+First check that no project is still connected. Any `connected` line names a project to remove first (`Set-Location <it>; skills-sync develop remove`, in a window with the switch set). The marketplace removal below uninstalls the development copies from every project still using them.
+
+```powershell
+skills-sync develop status --repo $Lib
+```
+
+**Expect:** no `connected` line under `Projects connected to`. Then:
+
 ```powershell
 Remove-Item Env:\SKILLS_SYNC_TEST_UNVERIFIED_ADAPTERS
 claude plugin marketplace remove oneezy-skills-development     # only now: no project is set up (ADR-0008)
 Remove-Item "$Lib\dist\development" -Recurse -Force
-npm uninstall --global @oneezy/skills-sync                     # only if step 1.1 showed none before
+npm uninstall --global @oneezy/skills-sync                     # the link to $Tools, which the next line deletes
 git -C $Main worktree remove $Tools --force
 Remove-Item $Root -Recurse -Force
 ```
+
+If step 1.1 recorded a global `@oneezy/skills-sync` from npm, put that version back (`<v>` is the version step 1.1 recorded):
+
+```powershell
+npm install --global @oneezy/skills-sync@<v>
+```
+
+If step 1.1 recorded a link to your own checkout instead, run `pnpm skills:dev:launcher` in `$Main` again.
