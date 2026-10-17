@@ -651,3 +651,58 @@ test("an adapter's excludes keep its project files out of git until remove takes
   assert.deepEqual(removeProject(a, { plan: false, adapters: [adapter] }).conflicts(), []);
   assert.equal(fs.readFileSync(exclude, "utf8"), original);
 });
+
+test("when a later adapter's commands fail, setup takes back the earlier ones; one it cannot is recorded for remove", () => {
+  const { lib, a } = machineWithProjectsSync();
+  const calls: string[] = [];
+  const named = (harness: string, fail: { setup?: boolean; remove?: boolean } = {}): HarnessAdapter => ({
+    ...commandAdapter(calls),
+    harness,
+    setup: (ctx) => ({
+      report: new Report(),
+      owned: { plugins: ctx.plugins },
+      commands: () => {
+        calls.push(`${harness} setup`);
+        const r = new Report();
+        if (fail.setup) r.add({ kind: "conflict", path: harness, note: `${harness} refused`, failed: true });
+        return r;
+      },
+    }),
+    remove: () => ({
+      report: new Report(),
+      commands: () => {
+        calls.push(`${harness} remove`);
+        const r = new Report();
+        if (fail.remove) r.add({ kind: "conflict", path: harness, note: `${harness} undo refused`, failed: true });
+        return r;
+      },
+    }),
+  });
+
+  const undone = setupProject(a, new Library(lib), ["play"], {
+    plan: false,
+    adapters: [named("first"), named("second"), named("third", { setup: true })],
+  });
+
+  assert.match(
+    undone
+      .conflicts()
+      .map((x) => x.note)
+      .join("\n"),
+    /third refused/,
+  );
+  assert.deepEqual(calls, ["first setup", "second setup", "third setup", "second remove", "first remove"]);
+  assert.equal(fs.existsSync(record(a)), false, "nothing activated, so no record");
+
+  calls.length = 0;
+  setupProject(a, new Library(lib), ["play"], {
+    plan: false,
+    adapters: [named("first", { remove: true }), named("second", { setup: true })],
+  });
+  assert.deepEqual(calls, ["first setup", "second setup", "first remove"]);
+  assert.deepEqual(
+    JSON.parse(fs.readFileSync(record(a), "utf8")).harnesses,
+    { first: { plugins: ["play"] } },
+    "the record holds only what is still activated, so develop remove can take it back",
+  );
+});

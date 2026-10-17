@@ -55,10 +55,12 @@ export interface AdapterContext {
  * (install and uninstall actions in it are only shown: apply() never runs them). `commands` is the adapter's Harness
  * CLI work (claude plugin ..., codex plugin ...): core calls it at most once, never on plan, and merges the Report it
  * returns; an action in it marked failed stops the run. In setup it runs after every planned action is applied and
- * before the record is written, so a failure leaves no record and the next setup tries again; in remove it runs before
- * any planned action, so a failure keeps the whole setup, record included, for a retry. On a failure the adapter undoes
- * what its own commands did in that call. Reading Harness state while planning (a plugin listing) is allowed; writing
- * it is not.
+ * before the record is written. On a failure the adapter undoes what its own commands did in that call, and core takes
+ * back the earlier adapters' activations through their remove, so the record names only what could not be taken back
+ * (none: no record, and the next setup tries again). In remove it runs before any planned action, so a failure keeps the
+ * whole setup, record included, for a retry. With no record (ctx.owned null), an adapter counts what an interrupted
+ * setup of its own left as its own. Reading Harness state while planning (a plugin listing) is allowed; writing it is
+ * not.
  */
 export interface AdapterResult {
   report: Report;

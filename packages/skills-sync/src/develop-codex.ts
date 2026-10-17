@@ -395,15 +395,19 @@ function setup(o: Resolved, ctx: AdapterContext): AdapterResult & { owned: unkno
   if (report.conflicts().length) return { report, owned: ctx.owned ?? null };
 
   const next = withBlock(text, PLUGINS_START, PLUGINS_END, block);
+  // without a record, a file holding nothing but this block is what an interrupted setup left: setup made it (and its
+  // .codex, when nothing else is in there)
+  const leftover = !previous && ours !== null && !withoutBlock(text, PLUGINS_START, PLUGINS_END).trim();
+  const fileCreated = previous?.created.file ?? (!before || leftover);
+  const dirCreated =
+    !isDir(path.dirname(config)) ||
+    (leftover && fs.readdirSync(path.dirname(config)).every((n) => n === path.basename(config)));
   const owned: CodexOwned = {
     version: 1,
     marketplace: dev,
     config,
     block,
-    created: {
-      file: previous?.created.file ?? !before,
-      dir: previous?.created.dir ?? !isDir(path.dirname(config)),
-    },
+    created: { file: fileCreated, dir: previous?.created.dir ?? dirCreated },
     plugins: [...ctx.plugins],
     disabled,
     covered,

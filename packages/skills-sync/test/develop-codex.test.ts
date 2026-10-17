@@ -495,3 +495,17 @@ test("the CLI: unverified, Codex is left alone; switched on for tests, two proje
   assert.equal(fs.readFileSync(userConfig, "utf8"), userBefore);
   assert.equal(fs.existsSync(path.join(a, ".codex")), false);
 });
+
+test("a setup over the block an interrupted run left without a record counts it as its own, so remove takes .codex back", () => {
+  const { a, plain, adapter, loaded, library } = codexMachine();
+  const released = loaded(plain);
+  setupProject(a, library, ["play"], { plan: false, adapters: [adapter()] });
+  // a run that stopped after Codex's commands and before the record
+  fs.rmSync(path.join(a, ".agents", "skills-sync-project.json"));
+
+  assert.deepEqual(setupProject(a, library, ["play"], { plan: false, adapters: [adapter()] }).conflicts(), []);
+  assert.deepEqual(removeProject(a, { plan: false, adapters: [adapter()] }).conflicts(), []);
+
+  assert.equal(fs.existsSync(path.join(a, ".codex")), false);
+  assert.deepEqual(loaded(a), released);
+});

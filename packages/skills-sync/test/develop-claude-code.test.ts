@@ -340,3 +340,49 @@ test("a refused uninstall keeps the whole setup for a retry, and the retry resto
   assert.equal(retry.status, 0, retry.stdout + retry.stderr);
   assert.deepEqual(snapshot(a), before);
 });
+
+test("when a later Harness's commands fail, setup takes back what Claude Code's commands did and activates nothing", async () => {
+  const { m, lib, a, develop, loads } = machine();
+  const before = snapshot(a);
+  const state = fs.readFileSync(path.join(m.claudeHome, "fake-harness.json"), "utf8");
+  const both = { SKILLS_SYNC_TEST_UNVERIFIED_ADAPTERS: "claude-code,codex", FAKE_HARNESS_CODEX_CONFIG: "1" };
+
+  const failed = await develop(a, ["setup", "play", "--repo", lib], {
+    ...both,
+    FAKE_HARNESS_FAIL_ADD: "play@oneezy-skills-dev",
+  });
+
+  assert.equal(failed.status, 1);
+  assert.match(failed.stdout, /codex plugin add play@oneezy-skills-dev refused; nothing activated/);
+  assert.equal(fs.existsSync(path.join(a, ".agents", "skills-sync-project.json")), false);
+  assert.equal(fs.existsSync(settings(a)), false, "Claude Code's declaration and keys were taken back");
+  assert.equal(loads(a), "play@oneezy-skills play-released");
+  assert.deepEqual(
+    JSON.parse(fs.readFileSync(path.join(m.claudeHome, "fake-harness.json"), "utf8")).plugins,
+    JSON.parse(state).plugins,
+  );
+
+  const retry = await develop(a, ["setup", "play", "--repo", lib], both);
+  assert.equal(retry.status, 0, retry.stdout + retry.stderr);
+  assert.equal(loads(a), `play@${DEV} play-hi`);
+  const removed = await develop(a, ["remove"], both);
+  assert.equal(removed.status, 0, removed.stdout + removed.stderr);
+  assert.equal(loads(a), "play@oneezy-skills play-released");
+  assert.deepEqual(snapshot(a), before);
+});
+
+test("a setup over Claude Code state an interrupted run left without a record counts it as its own", async () => {
+  const { lib, a, develop, loads } = machine();
+  const before = snapshot(a);
+  await develop(a, ["setup", "play", "--repo", lib]);
+  // a run that stopped after Claude Code's commands and before the record
+  fs.rmSync(path.join(a, ".agents", "skills-sync-project.json"));
+
+  const again = await develop(a, ["setup", "play", "--repo", lib]);
+  const removed = await develop(a, ["remove"]);
+
+  assert.equal(again.status, 0, again.stdout + again.stderr);
+  assert.equal(removed.status, 0, removed.stdout + removed.stderr);
+  assert.equal(loads(a), "play@oneezy-skills play-released");
+  assert.deepEqual(snapshot(a), before);
+});

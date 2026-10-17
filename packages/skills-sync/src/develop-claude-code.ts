@@ -177,6 +177,33 @@ function tracked(project: string): boolean {
   return r.status === 0;
 }
 
+/**
+ * settings.local.json's object without what setup writes there: the development marketplace's declaration, its
+ * Plugins' keys and the released copies' false keys; a key left empty goes too.
+ */
+function withoutOwn(
+  data: Record<string, unknown>,
+  development: string,
+  root: string,
+  released: (id: string) => boolean,
+): Record<string, unknown> {
+  const next = { ...data };
+  const keys = { ...obj(next.enabledPlugins) };
+  for (const [id, v] of Object.entries(keys))
+    if (splitId(id).origin === development || (released(id) && v === false)) delete keys[id];
+  const markets = { ...obj(next.extraKnownMarketplaces) };
+  if (declaredAs(markets[development], root)) delete markets[development];
+  for (const [key, v] of [
+    ["enabledPlugins", keys],
+    ["extraKnownMarketplaces", markets],
+  ] as const)
+    if (key in next) {
+      if (Object.keys(v).length) next[key] = v;
+      else delete next[key];
+    }
+  return next;
+}
+
 /** The text settings.local.json gets from `data`; null when the file should go (setup made it and nothing is left). */
 function settingsText(data: Record<string, unknown>, owned: ClaudeOwned): string | null {
   const next = { ...data };
@@ -276,15 +303,28 @@ export function claudeCodeAdapter(options: ClaudeCodeOptions = {}): HarnessAdapt
       if (before?.toString("utf8") === text) report.add({ kind: "skip", path: catalog });
       else report.add({ kind: "write", path: catalog, payload: text, expectedHash: before ? toHash(before) : null });
 
+      // Without a record, this marketplace's declaration and local installs of its Plugins are what an interrupted
+      // setup left (nothing else names a marketplace <release>-development reading this Library): they count as setup's
+      // own, and so does a released copy's false key beside them, so remove takes them back.
+      const leftover =
+        prev === null &&
+        (declaredAs(declared, root) ||
+          rows.some((r) => r.origin === development && !!localHere(rows, r.id, ctx.project)));
+      const isReleased = (id: string) =>
+        ctx.plugins.includes(splitId(id).name) && [release, SYNCED].includes(splitId(id).origin);
+      const theirs = leftover ? withoutOwn(settings.data, development, root, isReleased) : settings.data;
+      const folder = path.join(ctx.project, ".claude");
+      const created = !settings.bytes || (leftover && !Object.keys(theirs).length);
       const owned: ClaudeOwned = {
         version: 1,
         marketplace: development,
         root,
-        declared: prev?.declared ?? declared === undefined,
+        declared: prev?.declared ?? (declared === undefined || (leftover && declaredAs(declared, root))),
         settings: prev?.settings ?? {
-          created: !settings.bytes,
-          folder: !isDir(path.join(ctx.project, ".claude")),
-          keys: Object.keys(settings.data),
+          created,
+          folder:
+            !isDir(folder) || (created && fs.readdirSync(folder).every((n) => n === path.basename(LOCAL_SETTINGS))),
+          keys: Object.keys(theirs),
         },
         plugins: {},
       };
@@ -298,12 +338,12 @@ export function claudeCodeAdapter(options: ClaudeCodeOptions = {}): HarnessAdapt
         const dev = `${id}@${development}`;
         const mine = localHere(rows, dev, ctx.project);
         const was = prev?.plugins[id];
-        const entry = { id: dev, installed: was?.installed ?? !mine, off: [...(was?.off ?? [])] };
+        const entry = { id: dev, installed: was?.installed ?? (!mine || leftover), off: [...(was?.off ?? [])] };
         if (!mine) preview("install", `claude plugin install ${dev} --scope local`);
         for (const r of rows.filter((x) => x.name === id && x.origin !== development)) {
           if (entry.off.some((x) => x.id === r.id)) continue;
           if (r.origin === release || r.origin === SYNCED) {
-            const prior = local[r.id];
+            const prior = leftover && local[r.id] === false ? null : local[r.id];
             entry.off.push({ id: r.id, prior: typeof prior === "boolean" ? prior : null });
           } else if (r.origin === "skills-dir")
             report.add({

@@ -155,7 +155,16 @@ export function setupProject(project: string, lib: Library, plugins: string[], o
     if (hasLinkedParent(path.dirname(file))) conflict(file, "A parent folder is a link; left untouched");
   if (report.conflicts().length) return report;
 
-  const created = previous?.created ?? (isDir(path.join(project, ".agents")) ? [] : [".agents"]);
+  // without a record, a .agents holding nothing but this Library's alias is what an interrupted setup left: its own
+  const agents = path.join(project, ".agents");
+  const leftover =
+    isDir(agents) &&
+    !isLink(agents) &&
+    fs.readdirSync(agents).length > 0 &&
+    fs.readdirSync(agents).every((n) => n === path.basename(ALIAS_PATH)) &&
+    isLink(aliasPath) &&
+    samePath(real(aliasPath), library);
+  const created = previous?.created ?? (isDir(agents) && !leftover ? [] : [".agents"]);
   if (!lexists(aliasPath)) report.add({ kind: "link", path: aliasPath, target: library });
   else if (isLink(aliasPath) && samePath(real(aliasPath), library)) report.add({ kind: "skip", path: aliasPath });
   else conflict(aliasPath, "Something else is at the Source alias; left untouched");
@@ -205,12 +214,12 @@ export function setupProject(project: string, lib: Library, plugins: string[], o
       });
   }
   if (report.conflicts().length) return report;
-  const commands: (() => Report)[] = [];
+  const commands: { adapter: HarnessAdapter; run: () => Report }[] = [];
   for (const adapter of activating) {
     const ctx = { project, library: lib, plugins: next.plugins, owned: previous?.harnesses[adapter.harness] ?? null };
     const planned = adapter.setup({ ...ctx, plan: options.plan, build });
     report.merge(planned.report);
-    if (planned.commands) commands.push(planned.commands);
+    if (planned.commands) commands.push({ adapter, run: planned.commands });
     if (planned.owned === null || planned.owned === undefined) delete next.harnesses[adapter.harness];
     else next.harnesses[adapter.harness] = planned.owned;
   }
@@ -220,7 +229,18 @@ export function setupProject(project: string, lib: Library, plugins: string[], o
   if (report.conflicts().length) return report;
   apply(report, options.plan);
   if (report.actions.some((a) => a.failed)) return report;
-  if (!options.plan && !runCommands(report, commands)) return report;
+  if (!options.plan) {
+    const failed = runCommands(
+      report,
+      commands.map((c) => c.run),
+    );
+    if (failed >= 0) {
+      // nothing activated on a failure: the adapters whose commands finished are taken back, and a record is written
+      // only for what could not be (so develop remove can), or for state the previous setup owned already
+      const stays = undoActivations(report, project, lib, next, previous, commands.slice(0, failed));
+      if (!stays) return report;
+    }
+  }
   const last = new Report();
   const before = lexists(recordPath) ? fs.readFileSync(recordPath) : null;
   write(last, recordPath, JSON.stringify(next, null, 2) + "\n", before);
@@ -353,14 +373,71 @@ export function removeProject(project: string, options: ProjectOptions): Report 
   return report;
 }
 
-/** Run each adapter's commands in turn, merging what they did; false (and the rest not run) once an action failed. */
-function runCommands(report: Report, commands: (() => Report)[]): boolean {
-  for (const run of commands) {
+/**
+ * Run each adapter's commands in turn, merging what they did; the index of the one whose action failed (the rest not
+ * run), or -1 when all finished.
+ */
+function runCommands(report: Report, commands: (() => Report)[]): number {
+  for (const [i, run] of commands.entries()) {
     const done = run();
     report.merge(done);
-    if (done.actions.some((a) => a.failed)) return false;
+    if (done.actions.some((a) => a.failed)) return i;
   }
-  return true;
+  return -1;
+}
+
+/**
+ * After a later adapter's commands failed in setup, take back what the earlier adapters' commands did: each one this
+ * setup activated for the first time runs its own remove against what it just returned as owned, newest first. One the
+ * previous record owned already keeps its new state (remove cannot return it to the old selection), and so does one
+ * whose remove refuses or fails. `next.harnesses` is left holding exactly the state that stays: those, plus the
+ * previous record's state of every adapter that did not finish. True when the record must be written to describe it.
+ */
+function undoActivations(
+  report: Report,
+  project: string,
+  lib: Library,
+  next: ProjectRecord,
+  previous: ProjectRecord | null,
+  finished: { adapter: HarnessAdapter; run: () => Report }[],
+): boolean {
+  const done = new Set(finished.map((f) => f.adapter.harness));
+  for (const harness of Object.keys(next.harnesses))
+    if (!done.has(harness)) {
+      if (previous?.harnesses[harness] === undefined) delete next.harnesses[harness];
+      else next.harnesses[harness] = previous.harnesses[harness];
+    }
+  let stays = false;
+  for (const { adapter } of [...finished].reverse()) {
+    const h = adapter.harness;
+    const owned = next.harnesses[h];
+    if (owned === undefined) continue;
+    const note = (text: string) => report.add({ kind: "note", path: project, loud: true, note: `${h}: ${text}` });
+    if (previous?.harnesses[h] !== undefined) {
+      note("its new state stays, since it was activated here before; develop setup tries the rest again");
+      stays = true;
+      continue;
+    }
+    const planned = adapter.remove({ project, library: lib, plugins: next.plugins, owned, plan: false, build: null });
+    const plan = planned instanceof Report ? planned : planned.report;
+    const ran = new Report();
+    let ok = !plan.conflicts().length;
+    // as in remove: the Harness's commands first, then the planned file actions
+    if (ok && !(planned instanceof Report) && planned.commands) ran.merge(planned.commands());
+    ok &&= !ran.actions.some((a) => a.failed);
+    if (ok) apply(plan, false);
+    report.merge(ran);
+    if (ok && !plan.actions.some((a) => a.failed)) {
+      delete next.harnesses[h];
+      note("taken back, since a later Harness failed; nothing activated");
+    } else {
+      for (const a of plan.actions)
+        if (a.kind === "conflict" || a.failed) report.add({ ...a, kind: "note", loud: true });
+      note("still activated: taking it back failed; develop remove takes it back");
+      stays = true;
+    }
+  }
+  return stays;
 }
 
 /** The other worktrees of the repository sharing this exclude file that are Development projects too. */
