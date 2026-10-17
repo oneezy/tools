@@ -4,7 +4,9 @@
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
-import { afterEach, test } from "vite-plus/test";
+import { afterEach, test, vi } from "vite-plus/test";
+import { buildDevelopment } from "../src/develop-build.js";
+import { Library } from "../src/library.js";
 import { makeLink } from "../src/fs.js";
 import { cli, destroy, pretendMachine, snapshot, write, type PretendMachine } from "./machine.js";
 
@@ -261,4 +263,42 @@ test("--plan reports what would be built and writes nothing", async () => {
   assert.match(r.stdout, /^would build\s+oneezy\s+/m);
   assert.match(r.stdout, /^plan: develop build: 2 to build, 0 unchanged, 0 stale, 0 failed$/m);
   assert.equal(fs.existsSync(path.join(lib, "dist")), false);
+});
+
+test("a build waits out a moment when Windows refuses to rename the output (EPERM, EACCES, EBUSY)", () => {
+  const { lib, out } = machineWithLibrary();
+  buildDevelopment(new Library(lib), { plugins: ["play"], plan: false });
+  write(path.join(lib, "skills", "play", "play-hi", "SKILL.md"), skill("play-hi", "edited"));
+  const rename = fs.renameSync;
+  const refused: string[] = [];
+  // a scanner holding the old output open, then the new one: each rename is refused twice before it goes through
+  const spy = vi.spyOn(fs, "renameSync").mockImplementation((from, to) => {
+    const key = `${String(from)} -> ${String(to)}`;
+    if (refused.filter((r) => r.endsWith(key)).length < 2) {
+      const code = ["EPERM", "EACCES", "EBUSY"][refused.length % 3];
+      refused.push(`${code} ${key}`);
+      throw Object.assign(new Error(`${code}: rename refused`), { code });
+    }
+    return rename(from, to);
+  });
+  try {
+    const r = buildDevelopment(new Library(lib), { plugins: ["play"], plan: false });
+    assert.equal(r.plugins[0].state, "built", r.plugins[0].errors.join("; "));
+  } finally {
+    spy.mockRestore();
+  }
+  const target = (r: string) => r.slice(r.indexOf(" -> ") + 4);
+  assert.ok(
+    refused.some((r) => target(r) === path.join(out, "play")),
+    "the new output into place was refused",
+  );
+  assert.ok(
+    refused.some((r) => r.includes(`${path.join(out, "play")} -> `)),
+    "the old output aside was refused",
+  );
+  assert.ok(
+    refused.some((r) => target(r).endsWith("status.json")),
+    "the status file was refused",
+  );
+  assert.match(fs.readFileSync(path.join(out, "play", "skills", "play-hi", "SKILL.md"), "utf8"), /edited/);
 });

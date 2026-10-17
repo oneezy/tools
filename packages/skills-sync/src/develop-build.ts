@@ -10,7 +10,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { DEVELOPMENT_PATH, developmentPackage, folderFiles as packageFiles, renderingOverlap } from "./build.js";
 import { frontmatterProblems } from "./check.js";
-import { isDir, isLink, lexists, under } from "./fs.js";
+import { isDir, isLink, lexists, renameRetrying, under } from "./fs.js";
 import { Library } from "./library.js";
 import { cmp, readConfig, type Config } from "./sources.js";
 
@@ -246,11 +246,11 @@ function publish(dest: string, work: string, files: Map<string, Buffer>, disk: M
     }
     if (digest(folderFiles(stage)) !== digest(files)) throw new Error("the staged output does not read back as built");
     fs.mkdirSync(path.dirname(dest), { recursive: true });
-    if (lexists(dest)) fs.renameSync(dest, old);
+    if (lexists(dest)) renameRetrying(dest, old);
     try {
-      fs.renameSync(stage, dest);
+      renameRetrying(stage, dest);
     } catch (error) {
-      if (lexists(old)) fs.renameSync(old, dest);
+      if (lexists(old)) renameRetrying(old, dest);
       throw error;
     }
   } finally {
@@ -277,7 +277,7 @@ function recover(work: string, pluginsDir: string): void {
     const m = /^(.+)\.\d+\.[0-9a-f]{8}\.(new|old)$/.exec(name);
     if (!m) continue;
     const dest = path.join(pluginsDir, m[1]);
-    if (m[2] === "old" && !lexists(dest)) fs.renameSync(path.join(work, name), dest);
+    if (m[2] === "old" && !lexists(dest)) renameRetrying(path.join(work, name), dest);
     else fs.rmSync(path.join(work, name), { recursive: true, force: true, maxRetries: 3 });
   }
 }
@@ -298,7 +298,7 @@ function writeStatus(file: string, before: StatusFile | null, records: Record<st
   fs.mkdirSync(path.dirname(file), { recursive: true });
   const tmp = `${file}.${process.pid}.${randomBytes(4).toString("hex")}.tmp`;
   fs.writeFileSync(tmp, text);
-  fs.renameSync(tmp, file);
+  renameRetrying(tmp, file);
 }
 
 /** The build's lock: created exclusively; one left by a process that is gone is taken over. false when another build holds it. */

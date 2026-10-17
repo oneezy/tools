@@ -156,3 +156,20 @@ export function hasLinkedParent(file: string): boolean {
   const dir = path.resolve(file);
   return isLink(dir) || (path.dirname(dir) !== dir && hasLinkedParent(path.dirname(dir)));
 }
+
+/**
+ * fs.renameSync, tried again for a moment (20 tries, 25 ms apart) while it is refused with EPERM, EACCES or EBUSY:
+ * Windows refuses to rename or replace a file or folder another process (a scanner, an indexer, a reader) has open.
+ */
+export function renameRetrying(from: string, to: string): void {
+  for (let attempt = 0; ; attempt++) {
+    try {
+      fs.renameSync(from, to);
+      return;
+    } catch (error) {
+      const code = (error as NodeJS.ErrnoException).code ?? "";
+      if (attempt >= 20 || !["EPERM", "EACCES", "EBUSY"].includes(code)) throw error;
+      Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 25);
+    }
+  }
+}
