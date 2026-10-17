@@ -216,7 +216,11 @@ const codexInstall = (p, enabled) => {
 // an untrusted project's file is ignored. A table named twice makes Codex refuse the file, and so does this fake.
 const codexConfig = host === "codex" && !!process.env.FAKE_HARNESS_CODEX_CONFIG;
 const userToml = () => path.join(home, "config.toml");
-const unquote = (k) => k.trim().replace(/^"(.*)"$/, "$1").replace(/^'(.*)'$/, "$1");
+// a basic string's escapes as TOML reads them (JSON's, for what a config holds: "D:\\a" is D:\a); a literal one as is
+const unquote = (k) => {
+  const t = k.trim();
+  return /^".*"$/.test(t) ? JSON.parse(t) : t.replace(/^'(.*)'$/, "$1");
+};
 const readToml = (file) => {
   const text = fs.existsSync(file) ? fs.readFileSync(file, "utf8") : "";
   const plugins = {};
