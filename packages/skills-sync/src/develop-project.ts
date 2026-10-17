@@ -8,7 +8,7 @@ import path from "node:path";
 import { hasLinkedParent, isDir, isLink, lexists, linkTarget, real, samePath, toHash, under } from "./fs.js";
 import { developmentDirs, readDevelopmentStatus } from "./develop-build.js";
 import { Library } from "./library.js";
-import { apply, Report, type Action } from "./plan.js";
+import { apply, Report } from "./plan.js";
 import { cmp, readConfig } from "./sources.js";
 
 /** The project record, / separators, relative to the project. */
@@ -92,9 +92,14 @@ export function readRecord(project: string): { record: ProjectRecord | null; err
     if (
       r.version !== 1 ||
       typeof r.library !== "string" ||
+      !path.isAbsolute(r.library) ||
       !Array.isArray(r.plugins) ||
+      !r.plugins.every((p) => typeof p === "string") ||
       r.alias !== ALIAS_PATH ||
+      // setup only ever makes .agents; anything else here would point remove outside what setup made
       !Array.isArray(r.created) ||
+      !r.created.every((d) => d === ".agents") ||
+      (r.exclude !== null && (typeof r.exclude?.file !== "string" || typeof r.exclude.created !== "boolean")) ||
       typeof r.harnesses !== "object" ||
       r.harnesses === null
     )
@@ -464,11 +469,8 @@ export function projectStatus(project: string, lib: Library | null, adapters = A
   return s;
 }
 
-/** A write action when the file's text differs, planned against its current bytes. */
-function write(report: Report, file: string, content: string, before: Buffer | null): Action | null {
-  if (before?.toString("utf8") === content) {
-    report.add({ kind: "skip", path: file });
-    return null;
-  }
-  return report.add({ kind: "write", path: file, payload: content, expectedHash: before ? toHash(before) : null });
+/** A write action when the file's text differs, planned against its current bytes; a skip when it is already right. */
+function write(report: Report, file: string, content: string, before: Buffer | null): void {
+  if (before?.toString("utf8") === content) report.add({ kind: "skip", path: file });
+  else report.add({ kind: "write", path: file, payload: content, expectedHash: before ? toHash(before) : null });
 }

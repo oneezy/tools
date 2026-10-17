@@ -451,3 +451,21 @@ test("a global install's launcher connects only the project it is run in", async
   assert.deepEqual(snapshot(plain), untouched);
   assert.deepEqual(snapshot(m.home), home, "nothing in the user's home or any Harness folder");
 });
+
+test("remove refuses a record edited to own something setup never makes", async () => {
+  const { lib, a, m, develop } = machineWithProjects();
+  await develop(a, "setup", "play", "--repo", lib);
+  const kept = JSON.parse(fs.readFileSync(record(a), "utf8"));
+  const outside = path.join(m.base, "empty-outside");
+  fs.mkdirSync(outside);
+  kept.created = [".agents", path.relative(a, outside).split(path.sep).join("/")];
+  fs.writeFileSync(record(a), JSON.stringify(kept));
+  const before = snapshot(a);
+
+  const r = await develop(a, "remove");
+
+  assert.equal(r.status, 1);
+  assert.match(r.stdout, /not a version 1 project record; nothing removed/);
+  assert.deepEqual(snapshot(a), before);
+  assert.ok(fs.existsSync(outside));
+});
