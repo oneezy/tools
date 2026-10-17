@@ -36,9 +36,12 @@ function codexMachine(options: { trust?: ("a" | "b")[]; libraryInA?: boolean } =
   const m = pretendMachine();
   machines.push(m);
   const env = { ...m.env, FAKE_HARNESS_CODEX_CONFIG: "1" };
-  const codexFile = path.join(m.bin, "codex");
+  const win = process.platform === "win32";
+  const codexFile = path.join(m.bin, win ? "codex.cmd" : "codex");
+  // Windows runs the .cmd shim through the shell, which needs every path quoted
+  const q = (x: string) => (win ? `"${x}"` : x);
   const codex = (...args: string[]) => {
-    const r = spawnSync(codexFile, args, { env: { ...process.env, ...env }, encoding: "utf8" });
+    const r = spawnSync(q(codexFile), args.map(q), { env: { ...process.env, ...env }, encoding: "utf8", shell: win });
     assert.equal(r.status, 0, `codex ${args.join(" ")}: ${r.stderr}`);
     return r.stdout;
   };
@@ -95,7 +98,10 @@ function codexMachine(options: { trust?: ("a" | "b")[]; libraryInA?: boolean } =
     codexAdapter({ codex: codexFile, env: { ...env, ...extra }, verified: true });
   /** what Codex loads in `project`: <plugin>:<skill> from <marketplace>, sorted */
   const loaded = (project: string): string[] => {
-    const out = codex("-C", project, "debug", "prompt-input");
+    // the inventory is JSON, so read its text before splitting paths: escaped Windows backslashes come doubled
+    const out = (JSON.parse(codex("-C", project, "debug", "prompt-input")) as { content: { text: string }[] }[])
+      .flatMap((x) => x.content.map((c) => c.text))
+      .join("\n");
     const lines = [...out.matchAll(/- ([\w-]+):([\w-]+): [^\n]*?\(file: ([^)]+)\)/g)];
     return lines
       .map(([, plugin, s, file]) => {
@@ -388,7 +394,7 @@ test("status reads what Codex loads: an untrusted project keeps the released cop
   assert.deepEqual(untrusted.conflicts(), []);
   assert.match(
     untrusted.actions.map((x) => x.note ?? "").join("\n"),
-    /only in a trusted project: trust .*\/a in Codex/,
+    /only in a trusted project: trust .*[\\/]a in Codex/,
   );
   assert.ok(loaded(a).includes("play:play-hi from oneezy-skills"));
   assert.equal(codexStatus(a).state, "released copy loaded");
