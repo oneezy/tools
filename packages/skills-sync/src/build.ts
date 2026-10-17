@@ -117,7 +117,8 @@ export function hermesDir(root: string, rendering: string, id: string): string {
   return path.join(hermesRoot(root, rendering), id);
 }
 /** What the ChatGPT interface and the Codex catalog say every package is; the hosts enumerate neither value in their docs. */
-const CATEGORY = "Developer Tools";
+/** The category every Codex catalog entry of the Library carries. */
+export const CATEGORY = "Developer Tools";
 const CAPABILITIES = ["Interactive"];
 /** Legacy generated versions are checked against NOTICE during migration, never assigned to new packages. */
 const VERSION_RE = /^0\.(\d+)\.0\+([0-9a-f]{12,40})$/;
@@ -689,11 +690,18 @@ function notice(pkg: Package, config: Config, head: Head, commitOverride?: strin
   ].join("\n");
 }
 
+/** The marketplace name both root catalogs carry: <owner>-<name> (oneezy-skills), or the name without an owner. */
+export function marketplaceName(config: Config, lib: Library): string {
+  const l = config.library ?? {};
+  const name = l.name ?? path.basename(lib.root);
+  return l.owner ? `${l.owner}-${name}` : name;
+}
+
 /** The two root catalogs, file -> bytes: Claude Code's and Codex's, each entry pointing at ./plugins/<id> for every plugin built. */
 function catalogs(config: Config, lib: Library, ids: string[]): Map<string, Buffer> {
   const l = config.library ?? {};
   const name = l.name ?? path.basename(lib.root);
-  const marketplace = l.owner ? `${l.owner}-${name}` : name;
+  const marketplace = marketplaceName(config, lib);
   const description = (id: string) => config.plugins[id].description;
   const claude = {
     name: marketplace,

@@ -22,7 +22,7 @@ import { spawnSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { folderFiles } from "./build.js";
+import { CATEGORY, folderFiles, marketplaceName } from "./build.js";
 import { isAccountMarketplace } from "./chatgpt.js";
 import {
   PLUGINS_END,
@@ -136,9 +136,7 @@ function resolve(options: CodexAdapterOptions): Resolved {
 
 /** The development marketplace's name: the release marketplace's (as build names it) with -dev. */
 export function developmentMarketplace(lib: Library): string {
-  const l = readConfig(lib.configFile).library ?? {};
-  const name = l.name ?? path.basename(lib.root);
-  return `${l.owner ? `${l.owner}-${name}` : name}-dev`;
+  return `${marketplaceName(readConfig(lib.configFile), lib)}-dev`;
 }
 
 /** The development marketplace's Codex catalog, inside the Development output. */
@@ -318,7 +316,7 @@ function setup(o: Resolved, ctx: AdapterContext): AdapterResult & { owned: unkno
           source: `./plugins/${id}`,
           ...(configured[id].description ? { description: configured[id].description } : {}),
           policy: { installation: "AVAILABLE", authentication: "ON_USE" },
-          category: "Developer Tools",
+          category: CATEGORY,
         })),
       },
       null,
