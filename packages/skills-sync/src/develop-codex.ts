@@ -18,7 +18,6 @@
 // cannot override a workspace-managed plugin, so setup refuses activation while one is on. The adapter stays unverified
 // until Codex in the ChatGPT desktop app on Windows proves it (tools#217); a test switches it on. The decision and the
 // open question are docs/adr/0007.
-import { spawnSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -40,6 +39,7 @@ import {
 import { developmentDirs, digest, readDevelopmentStatus } from "./develop-build.js";
 import {
   projectsFile,
+  gitTracks,
   readProjectsIndex,
   readRecord,
   type AdapterContext,
@@ -185,17 +185,6 @@ function inProject(run: Run, project: string): Run {
 /** Is the project, or a folder above it, trusted in the user's config.toml. */
 function trusted(project: string, userToml: string): boolean {
   return trustedProjects(userToml).some((t) => under(real(project), real(t)));
-}
-
-/** Does git track the file: true, false, or null when git cannot say (no git, not a repository). */
-function tracked(project: string, relative: string, env: NodeJS.ProcessEnv): boolean | null {
-  const r = spawnSync("git", ["-C", project, "ls-files", "--error-unmatch", "--", relative], {
-    encoding: "utf8",
-    env: { ...process.env, ...env },
-    windowsHide: true,
-  });
-  if (r.status === 0) return true;
-  return r.status === 1 && !r.error && /did not match/.test(r.stderr) ? false : null;
 }
 
 /** Text with CRLF line breaks read as LF: an editor that rewrote the line endings changed nothing of a block. */
@@ -399,10 +388,16 @@ function setup(o: Resolved, ctx: AdapterContext): AdapterResult & { owned: unkno
   const block = blockText(on, disabled);
   if (ours !== null && lf(ours) !== block && lf(ours) !== previous?.block)
     conflict(config, "develop setup's block was changed since setup; left untouched (develop remove keeps it too)");
-  if (tracked(ctx.project, ".codex/config.toml", o.env))
+  const tracked = gitTracks(ctx.project, ".codex/config.toml", o.env);
+  if (tracked)
     conflict(
       config,
       "git tracks .codex/config.toml: the development switches would be committed and reach cloud sessions; not activated",
+    );
+  if (tracked === null)
+    conflict(
+      config,
+      "git cannot say whether .codex/config.toml is tracked: the development switches might be committed; not activated",
     );
   if (report.conflicts().length) return { report, owned: ctx.owned ?? null };
 

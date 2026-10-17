@@ -1,7 +1,8 @@
 // What a Development project's modules share, kept apart so none of them imports another to reach it: the project
 // record and the Library's projects.json (their paths, shapes and readers), the Harness adapter interface, the test
-// switch for unverified adapters. develop-project.ts (core),
+// switch for unverified adapters, and the one question both adapters ask git. develop-project.ts (core),
 // develop-claude-code.ts, develop-codex.ts and develop-watcher.ts all import from here; this file imports none of them.
+import { spawnSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import { developmentDirs, type DevelopmentBuild } from "./develop-build.js";
@@ -157,4 +158,27 @@ export function readProjectsIndex(lib: Library): ProjectsIndex | null {
 /** The Library's projects.json; empty when there is none or it does not parse (setup writes it again). */
 export function readProjects(lib: Library): ProjectsIndex {
   return readProjectsIndex(lib) ?? { version: 1, projects: {} };
+}
+
+/**
+ * Does git track this file of the project: true or false as git says. A project in no repository (no .git at or above
+ * it) and a file that does not exist are untracked: nothing of them can be committed. null when git cannot say (no git,
+ * an error) about a file that exists in a repository, so a caller refuses instead of guessing.
+ */
+export function gitTracks(project: string, relative: string, env: NodeJS.ProcessEnv = {}): boolean | null {
+  if (!lexists(at(project, relative)) || !inRepository(project)) return false;
+  const r = spawnSync("git", ["-C", project, "ls-files", "--error-unmatch", "--", relative], {
+    encoding: "utf8",
+    env: { ...process.env, ...env },
+    windowsHide: true,
+  });
+  if (r.status === 0) return true;
+  return r.status === 1 && !r.error && /did not match/.test(r.stderr) ? false : null;
+}
+
+function inRepository(project: string): boolean {
+  for (let dir = path.resolve(project); ; dir = path.dirname(dir)) {
+    if (lexists(path.join(dir, ".git"))) return true;
+    if (path.dirname(dir) === dir) return false;
+  }
 }

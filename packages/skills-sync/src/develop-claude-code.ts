@@ -15,13 +15,12 @@
 // the marketplace for every project and uninstalls its Plugins there. A running chat keeps the copy it loaded until the
 // person types /reload-plugins in it or starts a new one; nothing here can reload a chat, so it says so.
 // The decision is ADR-0006; the evidence is in docs/research/2026-10-17-harness-plugin-loading.md.
-import { spawnSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import { marketplaceName } from "./build.js";
 import { developmentMarketplaceOf } from "./desired.js";
 import { developmentDirs } from "./develop-build.js";
-import type { AdapterContext, HarnessAdapter } from "./develop-record.js";
+import { gitTracks, type AdapterContext, type HarnessAdapter } from "./develop-record.js";
 import { hasLinkedParent, isDir, isLink, lexists, real, samePath, toHash } from "./fs.js";
 import { json, refused, runner, which, type Run } from "./install.js";
 import type { Library } from "./library.js";
@@ -169,14 +168,6 @@ function repositoryRoot(project: string): string | null {
   }
 }
 
-function tracked(project: string): boolean {
-  if (!lexists(path.join(project, ".git"))) return false;
-  const r = spawnSync("git", ["-C", project, "ls-files", "--error-unmatch", "--", LOCAL_SETTINGS], {
-    encoding: "utf8",
-  });
-  return r.status === 0;
-}
-
 /**
  * settings.local.json's object without what setup writes there: the development marketplace's declaration, its
  * Plugins' keys and the released copies' false keys; a key left empty goes too.
@@ -261,8 +252,14 @@ export function claudeCodeAdapter(options: ClaudeCodeOptions = {}): HarnessAdapt
         conflict("this claude has no local plugin scope (claude plugin install --scope local); update Claude Code");
       const settings = readSettings(ctx.project);
       if (settings.error) conflict(`${LOCAL_SETTINGS} is ${settings.error}`);
-      else if (tracked(ctx.project))
-        conflict(`${LOCAL_SETTINGS} is tracked by git, so its development entries would be committed`);
+      else {
+        const tracked = gitTracks(ctx.project, LOCAL_SETTINGS);
+        if (tracked) conflict(`${LOCAL_SETTINGS} is tracked by git, so its development entries would be committed`);
+        if (tracked === null)
+          conflict(
+            `git cannot say whether ${LOCAL_SETTINGS} is tracked, so its development entries might be committed`,
+          );
+      }
       if (report.conflicts().length) return { report, owned: prev };
 
       const { release, development } = marketplaceNames(ctx.library);

@@ -560,3 +560,19 @@ test("a block whose only change is CRLF line endings is still setup's: remove ta
   assert.deepEqual(loaded(a), released);
   assert.ok(calls(m).includes("plugin marketplace remove oneezy-skills-dev --json"));
 });
+
+test("when git cannot say whether .codex/config.toml is tracked, setup refuses instead of guessing", () => {
+  const { m, a, adapter, library } = codexMachine();
+  write(path.join(a, ".codex", "config.toml"), 'model = "gpt-5"\n');
+  const before = snapshot(a);
+  fs.rmSync(m.log, { force: true });
+
+  const r = setupProject(a, library, ["play"], {
+    plan: false,
+    adapters: [adapter({ GIT_DIR: path.join(m.base, "no-such-repository") })],
+  });
+
+  assert.match(conflictNotes(r), /git cannot say whether \.codex\/config\.toml is tracked/);
+  assert.deepEqual(calls(m), []);
+  assert.deepEqual(snapshot(a), before);
+});

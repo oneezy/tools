@@ -386,3 +386,17 @@ test("a setup over Claude Code state an interrupted run left without a record co
   assert.equal(loads(a), "play@oneezy-skills play-released");
   assert.deepEqual(snapshot(a), before);
 });
+
+test("when git cannot say whether settings.local.json is tracked, setup refuses instead of guessing", async () => {
+  const { m, lib, a, develop } = machine();
+  write(settings(a), "{}\n");
+
+  const r = await develop(a, ["setup", "play", "--repo", lib], {
+    ...ON,
+    GIT_DIR: path.join(m.base, "no-such-repository"),
+  });
+
+  assert.equal(r.status, 1);
+  assert.match(r.stdout, /git cannot say whether \.claude\/settings\.local\.json is tracked/);
+  assert.deepEqual(writes(r.calls), []);
+});
