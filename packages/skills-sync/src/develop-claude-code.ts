@@ -21,7 +21,7 @@ import path from "node:path";
 import { marketplaceName } from "./build.js";
 import { developmentMarketplaceOf } from "./desired.js";
 import { developmentDirs } from "./develop-build.js";
-import type { AdapterContext, HarnessAdapter } from "./develop-project.js";
+import type { AdapterContext, HarnessAdapter } from "./develop-record.js";
 import { hasLinkedParent, isDir, isLink, lexists, real, samePath, toHash } from "./fs.js";
 import { json, refused, runner, which, type Run } from "./install.js";
 import type { Library } from "./library.js";

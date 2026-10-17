@@ -44,7 +44,7 @@ import {
   type AdapterContext,
   type AdapterResult,
   type HarnessAdapter,
-} from "./develop-project.js";
+} from "./develop-record.js";
 import { hasLinkedParent, isDir, isLink, lexists, real, samePath, toHash, under } from "./fs.js";
 import { harnessTable, type Harness } from "./harnesses.js";
 import {

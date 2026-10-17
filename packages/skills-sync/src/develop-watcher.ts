@@ -13,7 +13,7 @@ import { randomBytes } from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 import { alive, buildDevelopment, developmentDirs, type DevelopmentBuild } from "./develop-build.js";
-import { readProjects, readRecord } from "./develop-project.js";
+import { readProjects, readRecord } from "./develop-record.js";
 import { BuildInputs, isBuildInput, watchSource } from "./develop-watch.js";
 import { real, samePath } from "./fs.js";
 import { Library } from "./library.js";

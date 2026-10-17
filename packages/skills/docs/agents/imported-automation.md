@@ -99,4 +99,4 @@ These stay as they are until Justin decides. Each one is blocked on the release-
 5. **Action consolidation.** Merge the nested `skills-sync-cli` action into the root one, which keeps `package-manager-cache: false`, only when the workflows move.
 6. **Skill instruction adaptation.** Retarget the files in *Skill instructions that target the standalone workflows*, and the off-limits `oneezy-merge/references/modes.md` and `oneezy-status`, after items 1 and 2.
 7. **The `land.yml` check gap** in the *Finding* above. Fix it in `oneezy/skills`, or as part of the migration.
-8. **Development state storage** (ADR-0020). The format for a Development project's ownership and previous-state records is not chosen yet.
+8. **Development state storage** (ADR-0020). Settled: skills-sync ADR-0002 (`packages/skills-sync/docs/adr/0002-project-record-in-the-project.md`) keeps the record in `<project>/.agents/skills-sync-project.json` and the Library's list in `dist/development/projects.json`.

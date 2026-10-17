@@ -12,98 +12,38 @@ import { hasLinkedParent, isDir, isLink, lexists, linkTarget, real, samePath, to
 import { claudeCodeAdapter } from "./develop-claude-code.js";
 import { buildDevelopment, developmentDirs, readDevelopmentStatus, type DevelopmentBuild } from "./develop-build.js";
 import { codexAdapter } from "./develop-codex.js";
+import {
+  ALIAS_PATH,
+  projectsFile,
+  readProjects,
+  readRecord,
+  RECORD_PATH,
+  testSwitch,
+  type HarnessAdapter,
+  type ProjectRecord,
+} from "./develop-record.js";
 import { watcherStatus, type WatcherStatus } from "./develop-watcher.js";
 import { Library } from "./library.js";
 import { apply, Report } from "./plan.js";
 import { cmp, readConfig } from "./sources.js";
 
-/** The project record, / separators, relative to the project. */
-export const RECORD_PATH = ".agents/skills-sync-project.json";
-/** The Source alias: a link to the Library root, relative to the project. */
-export const ALIAS_PATH = ".agents/skills-library";
+export {
+  ALIAS_PATH,
+  PROJECTS_FILE,
+  projectsFile,
+  readProjects,
+  readRecord,
+  RECORD_PATH,
+  testSwitch,
+  type AdapterContext,
+  type AdapterResult,
+  type HarnessAdapter,
+  type ProjectRecord,
+  type ProjectsIndex,
+} from "./develop-record.js";
 
 const START = "# skills-sync:development-project:start";
 const END = "# skills-sync:development-project:end";
-
-export interface ProjectRecord {
-  version: 1;
-  /** the Library root this project is connected to (its real path) */
-  library: string;
-  /** the selected Plugins, by their exact Library ids, sorted */
-  plugins: string[];
-  /** the Source alias, relative to the project */
-  alias: string;
-  /** folders setup made, relative to the project: removed by remove when they are empty again */
-  created: string[];
-  /**
-   * the git exclude file holding this setup's block, whether setup made the file, and the entries the block lists (its
-   * own two and the verified adapters' excludes; absent in a record written before adapters could add any); null
-   * outside git
-   */
-  exclude: { file: string; created: boolean; entries?: string[] } | null;
-  /** what each Harness adapter owns in this project, by Harness id; empty while no adapter is verified */
-  harnesses: Record<string, unknown>;
-}
-
-/** What a Harness adapter is handed: the project, its Library, the selected Plugins, and what it owned before. */
-export interface AdapterContext {
-  project: string;
-  library: Library;
-  plugins: string[];
-  /** what this adapter's last setup returned as owned (record.harnesses[harness]); null the first time */
-  owned: unknown;
-  plan: boolean;
-  /**
-   * setup: the Development build of the selection, made before any adapter is asked (on plan: previewed, nothing
-   * written). No selected Plugin in it is failed: setup refuses that before it calls an adapter. A stale one keeps its
-   * last successful output. null in remove and status.
-   */
-  build: DevelopmentBuild | null;
-}
-
-/**
- * What an adapter's setup or remove gives back. `report` holds the file actions core applies with its own, all or none
- * (install and uninstall actions in it are only shown: apply() never runs them). `commands` is the adapter's Harness
- * CLI work (claude plugin ..., codex plugin ...): core calls it at most once, never on plan, and merges the Report it
- * returns; an action in it marked failed stops the run. In setup it runs after every planned action is applied and
- * before the record is written, so a failure leaves no record and the next setup tries again; in remove it runs before
- * any planned action, so a failure keeps the whole setup, record included, for a retry. On a failure the adapter undoes
- * what its own commands did in that call. Reading Harness state while planning (a plugin listing) is allowed; writing
- * it is not.
- */
-export interface AdapterResult {
-  report: Report;
-  commands?: () => Report;
-}
-
-/**
- * The one place a Harness plugs in. setup plans the project's activation for the selection as actions (applied with
- * setup's own, all or none) and returns what it now owns, kept in the record; remove plans taking exactly that back,
- * checking each entry first. Neither runs a command on plan. An adapter stays unverified, and is never run, until the
- * Harness's runtime proof exists.
- */
-export interface HarnessAdapter {
-  harness: string;
-  verified: boolean;
-  /**
-   * project files this adapter's setup or commands may create, as exclude patterns anchored at the project root
-   * (`/.claude/settings.local.json`): setup lists them in the exclude block, so git never sees them
-   */
-  excludes?: string[];
-  /** `owned` is kept as record.harnesses[harness]; null or undefined keeps nothing for this Harness */
-  setup(ctx: AdapterContext): AdapterResult & { owned: unknown };
-  remove(ctx: AdapterContext): AdapterResult | Report;
-  status?(ctx: AdapterContext): { state: string; note: string };
-}
-
-/**
- * Is this Harness's unverified adapter switched on for a test? SKILLS_SYNC_TEST_UNVERIFIED_ADAPTERS lists Harness ids
- * (claude-code,codex) whose adapters the CLI then runs as if verified. It exists for the tests, which run the built CLI
- * against fake Harness CLIs; nothing else sets it, and a real Harness must not be driven by an unproven adapter.
- */
-export function testSwitch(harness: string): boolean {
-  return (process.env.SKILLS_SYNC_TEST_UNVERIFIED_ADAPTERS ?? "").split(",").includes(harness);
-}
 
 /**
  * The adapters this version has. None is verified yet: Claude Code waits on its Windows proof (#213), Codex on its proof
@@ -133,37 +73,6 @@ export function findProject(cwd: string): string {
     }
   };
   return up((d) => lexists(at(d, RECORD_PATH))) ?? up((d) => lexists(path.join(d, ".git"))) ?? path.resolve(cwd);
-}
-
-/** The project's record: null without one; an error when it is there but is not a record this tool wrote. */
-export function readRecord(project: string): { record: ProjectRecord | null; error: string | null } {
-  const file = at(project, RECORD_PATH);
-  if (!lexists(file)) return { record: null, error: null };
-  try {
-    const r = JSON.parse(fs.readFileSync(file, "utf8")) as ProjectRecord;
-    if (
-      r.version !== 1 ||
-      typeof r.library !== "string" ||
-      !path.isAbsolute(r.library) ||
-      !Array.isArray(r.plugins) ||
-      !r.plugins.every((p) => typeof p === "string") ||
-      r.alias !== ALIAS_PATH ||
-      // setup only ever makes .agents; anything else here would point remove outside what setup made
-      !Array.isArray(r.created) ||
-      !r.created.every((d) => d === ".agents") ||
-      (r.exclude !== null &&
-        (typeof r.exclude?.file !== "string" ||
-          typeof r.exclude.created !== "boolean" ||
-          (r.exclude.entries !== undefined &&
-            (!Array.isArray(r.exclude.entries) || !r.exclude.entries.every((e) => typeof e === "string"))))) ||
-      typeof r.harnesses !== "object" ||
-      r.harnesses === null
-    )
-      throw new Error("not a version 1 project record");
-    return { record: r, error: null };
-  } catch (error) {
-    return { record: null, error: `${RECORD_PATH}: ${error instanceof Error ? error.message : String(error)}` };
-  }
 }
 
 /** The info/exclude file git reads for this project (a linked worktree's is its repository's); null outside git. */
@@ -468,28 +377,6 @@ function connectedWorktrees(project: string, excludeFile: string): string[] {
       }
     }
   return trees.filter((t) => !samePath(real(t), real(project)) && lexists(at(t, RECORD_PATH)));
-}
-
-/** The Library's list of connected projects, beside its Development builds. */
-export const PROJECTS_FILE = "projects.json";
-
-/** projects.json: every project setup connected to this Library and its selection, by the project's real path. */
-export interface ProjectsIndex {
-  version: 1;
-  projects: Record<string, { plugins: string[] }>;
-}
-
-export const projectsFile = (lib: Library) => path.join(developmentDirs(lib).output, PROJECTS_FILE);
-
-/** The Library's projects.json; empty when there is none or it does not parse (setup writes it again). */
-export function readProjects(lib: Library): ProjectsIndex {
-  try {
-    const i = JSON.parse(fs.readFileSync(projectsFile(lib), "utf8")) as ProjectsIndex;
-    if (i.version === 1 && i.projects && typeof i.projects === "object") return i;
-  } catch {
-    // none yet
-  }
-  return { version: 1, projects: {} };
 }
 
 /** Plan projects.json with this project's entry set (a selection) or taken out (null). */
