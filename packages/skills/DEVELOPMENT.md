@@ -31,6 +31,12 @@ The development command writes ignored `.codex/config.toml` switches disabling c
 
 Desktop may supply account skills differently from the CLI. Verify the actual selected skill's path in a fresh Desktop chat; it should resolve inside this monorepo. CLI discovery alone is not proof that an already-running Desktop chat reloaded. Claude receives repo links, but its account plugin settings are unchanged by this command.
 
+## Development plugin builds
+
+`pnpm skills:dev:build [<plugin>...]` restores the locked Sources and runs `skills-sync develop build`. It builds Development builds of the named Plugins (all of them when none is named) into `dist/development/plugins/<id>`. They keep their normal names and are the same packages as the release build's `plugins/<id>`, except that NOTICE names the working Library instead of a commit. Release output and the source are untouched.
+
+Each run rewrites only Plugins whose output differs. It stages them whole and swaps them in. A Plugin that fails validation is `failed` when it has no output yet, and nothing is written. It is `stale` when an earlier output exists, and that complete output stays in place. `dist/development/status.json` records the last outcome per Plugin. Exit 1 means at least one Plugin is stale or failed. This command does not install or activate anything in Claude Code, Codex or a project; project setup and the shared watcher build on it.
+
 ## Generated output and validation
 
 Never commit `.git` from another repository, `.agents`, `.claude-plugin`, `plugins`, `dist`, `upstream`, `artifacts`, or local install receipts/configuration. Skills Sync recreates those outputs. The imported nested `.github` files are inactive in tools; their live copies run in `oneezy/skills`. Before moving, deleting or activating any of them, read `docs/agents/imported-automation.md`.

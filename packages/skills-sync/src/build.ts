@@ -317,6 +317,38 @@ export function build(lib: Library, opts: BuildOptions): BuildResult {
   return result;
 }
 
+/** One package rendered for a Development build: its files, or why it cannot be built. */
+export type DevelopmentPackage =
+  | { ok: true; id: string; own: boolean; files: Map<string, Buffer>; notes: string[] }
+  | { ok: false; id: string; errors: string[]; notes: string[] };
+
+/**
+ * The files of one plugin as the release build renders them (same manifests, normal identity, same skill copies), from
+ * the working Library and never from disk output: an own Group's NOTICE names the working tree instead of a library
+ * commit, so a commit that changes no input changes no file. Writes nothing; a package the release build would refuse
+ * (a missing snapshot, an unversioned own Group, an empty Group) comes back with its reasons.
+ */
+export function developmentPackage(lib: Library, config: Config, id: string): DevelopmentPackage {
+  const report = new Report();
+  // a note about the package as a whole names the plugin, never the release folder plugins/<id>
+  const where = (p: string) =>
+    p === path.join(lib.plugins, id) ? id : path.relative(lib.root, p).split("\\").join("/");
+  const notes = () => report.actions.filter((a) => a.kind === "note").map((a) => `${where(a.path)}: ${a.note}`);
+  const errors = () => report.conflicts().map((a) => a.note ?? "cannot be built");
+  if (!config.plugins[id]) return { ok: false, id, errors: [`${id} is not a plugin in skills-sync.json`], notes: [] };
+  const empty = emptyGroups(lib, config).get(id);
+  if (empty) return { ok: false, id, errors: [empty], notes: [] };
+  const pkg = resolvePackage(lib, config, id, report);
+  if (!pkg) return { ok: false, id, errors: errors(), notes: notes() };
+  const own = pkg.origin.kind === "own";
+  const version = pkg.origin.kind === "source" ? pkg.origin.version : (config.library?.version ?? null);
+  if (own && version === null)
+    return { ok: false, id, errors: ["set library.version to an explicit semantic version"], notes: notes() };
+  const head: Head = { version, commit: null, date: null, checkout: false, shallow: false };
+  const files = render(pkg, config, head, "the working Library (a development build, not a release)");
+  return { ok: true, id, own, files, notes: notes() };
+}
+
 /** Plugin id -> its note, for every plugin of an own group that holds no skill yet: nothing to package or catalog. */
 function emptyGroups(lib: Library, config: Config): Map<string, string> {
   const own = lib.scanOwn().skills;
@@ -519,7 +551,7 @@ export function renderHermes(files: Map<string, Buffer>): Map<string, Buffer> {
 }
 
 /** Every file of the package, relative path (/ separators) -> bytes, for the given version and library commit. */
-function render(pkg: Package, config: Config, head: Head): Map<string, Buffer> {
+function render(pkg: Package, config: Config, head: Head, commitLine?: string): Map<string, Buffer> {
   const out = new Map<string, Buffer>();
   const text = (s: string) => Buffer.from(s, "utf8");
   const { portable, legacy, claude } = manifests(pkg, config, head.version);
@@ -527,7 +559,7 @@ function render(pkg: Package, config: Config, head: Head): Map<string, Buffer> {
   out.set(".codex-plugin/plugin.json", text(jsonText(legacy)));
   out.set(".claude-plugin/plugin.json", text(jsonText(claude)));
   if (pkg.license) out.set("LICENSE", pkg.license);
-  out.set("NOTICE.md", text(notice(pkg, config, head)));
+  out.set("NOTICE.md", text(notice(pkg, config, head, commitLine)));
   for (const [name, files] of pkg.skills) for (const [rel, bytes] of files) out.set(`skills/${name}/${rel}`, bytes);
   return out;
 }
@@ -598,19 +630,21 @@ function manifests(
 }
 
 /** NOTICE.md: where the files came from, at which commit, under which license, and why every copy is marked internal. */
-function notice(pkg: Package, config: Config, head: Head): string {
+function notice(pkg: Package, config: Config, head: Head, commitOverride?: string): string {
   const lib = config.library ?? {};
   const rendering = hermesPath(config);
   const o = pkg.origin;
   const libraryName = lib.owner && lib.name ? `${lib.owner}/${lib.name}` : (lib.name ?? "the skills library");
   const commitLine =
-    o.kind === "source"
-      ? `${o.commit} (${isoDate(o.date)})`
-      : head.commit
-        ? `${head.commit} (${isoDate(head.date)})`
-        : head.checkout
-          ? "a git checkout without a commit yet"
-          : "not a git checkout";
+    o.kind === "own" && commitOverride
+      ? commitOverride
+      : o.kind === "source"
+        ? `${o.commit} (${isoDate(o.date)})`
+        : head.commit
+          ? `${head.commit} (${isoDate(head.date)})`
+          : head.checkout
+            ? "a git checkout without a commit yet"
+            : "not a git checkout";
   const source =
     o.kind === "own"
       ? `\`skills/${o.group}\` of ${libraryName}${lib.homepage ? ` (${lib.homepage})` : ""}`
@@ -971,7 +1005,7 @@ function readSnapshot(snapDir: string): Snapshot | null {
 }
 
 /** The files under a folder, relative path with / separators -> bytes, and the links at any depth: listed, never followed. */
-function folderFiles(dir: string): { files: Map<string, Buffer>; links: string[] } {
+export function folderFiles(dir: string): { files: Map<string, Buffer>; links: string[] } {
   const files = new Map<string, Buffer>();
   const links: string[] = [];
   const rel = (p: string) => path.relative(dir, p).split("\\").join("/");
