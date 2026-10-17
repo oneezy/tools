@@ -209,7 +209,7 @@ function usedElsewhere(lib: Library, project: string): Set<string> | null {
   return used;
 }
 
-const UNKNOWN_PROJECTS = (lib: Library) =>
+const unreadableIndexNote = (lib: Library) =>
   `codex: ${projectsFile(lib)} is missing or does not parse, so other projects may still use them; the development copies stay installed in Codex, switched off for every project`;
 
 /** The copy Codex runs of an installed plugin: its cache folder for the version it lists. */
@@ -444,7 +444,7 @@ function setup(o: Resolved, ctx: AdapterContext): AdapterResult & { owned: unkno
       installed.some((p) => p.name === id && p.marketplace === dev),
   );
   if (!others && (previous?.plugins ?? []).some((id) => !ctx.plugins.includes(id)))
-    report.add({ kind: "note", path: ctx.project, loud: true, note: UNKNOWN_PROJECTS(lib) });
+    report.add({ kind: "note", path: ctx.project, loud: true, note: unreadableIndexNote(lib) });
   if (!devMarket) report.add({ kind: "install", path: dirs.output, note: `codex plugin marketplace add (${dev})` });
   for (const id of toAdd)
     report.add({
@@ -589,7 +589,7 @@ function remove(o: Resolved, ctx: AdapterContext): AdapterResult {
       loud: true,
       note: `codex: ${run ? "codex cannot list its plugins" : "no codex CLI on PATH"}; the development copies stay installed in Codex, switched off for every project`,
     });
-  if (!others) report.add({ kind: "note", path: ctx.project, loud: true, note: UNKNOWN_PROJECTS(lib) });
+  if (!others) report.add({ kind: "note", path: ctx.project, loud: true, note: unreadableIndexNote(lib) });
   const drop = owned.plugins.filter(
     (id) =>
       !keptBlock &&

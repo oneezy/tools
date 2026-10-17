@@ -10,7 +10,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { hasLinkedParent, isDir, isLink, lexists, linkTarget, real, samePath, toHash, under } from "./fs.js";
 import { claudeCodeAdapter } from "./develop-claude-code.js";
-import { buildDevelopment, developmentDirs, readDevelopmentStatus, type DevelopmentBuild } from "./develop-build.js";
+import { buildDevelopment, developmentDirs, readDevelopmentStatus } from "./develop-build.js";
 import { codexAdapter } from "./develop-codex.js";
 import {
   ALIAS_PATH,
@@ -104,7 +104,7 @@ function excludeEntries(adapters: HarnessAdapter[], previous: ProjectRecord | nu
 }
 
 /** What a Harness is when the record holds its state but this shell has no verified adapter to manage it. */
-export const UNVERIFIED_STATE = "activated, adapter unverified";
+const UNVERIFIED_STATE = "activated, adapter unverified";
 const unverifiedNote = (harness: string) =>
   `the record holds its state, and this shell has no verified adapter for it: run with ${TEST_SWITCH}=${harness} to manage it`;
 
@@ -169,11 +169,10 @@ export function setupProject(project: string, lib: Library, plugins: string[], o
 
   // without a record, a .agents holding nothing but this Library's alias is what an interrupted setup left: its own
   const agents = path.join(project, ".agents");
+  const inAgents = isDir(agents) && !isLink(agents) ? fs.readdirSync(agents) : [];
   const leftover =
-    isDir(agents) &&
-    !isLink(agents) &&
-    fs.readdirSync(agents).length > 0 &&
-    fs.readdirSync(agents).every((n) => n === path.basename(ALIAS_PATH)) &&
+    inAgents.length > 0 &&
+    inAgents.every((n) => n === path.basename(ALIAS_PATH)) &&
     isLink(aliasPath) &&
     samePath(real(aliasPath), library);
   const created = previous?.created ?? (isDir(agents) && !leftover ? [] : [".agents"]);
@@ -373,7 +372,7 @@ export function removeProject(project: string, options: ProjectOptions): Report 
   report.add({ kind: "delete", path: recordPath });
   // the Harnesses first: when one refuses, nothing of the setup is taken away and the record stays for a retry
   const ran = new Report();
-  if (!options.plan && !runCommands(ran, commands)) {
+  if (!options.plan && runCommands(ran, commands) >= 0) {
     report.actions = report.actions.filter((a) => a.kind === "conflict" || a.kind === "note");
     report.merge(ran);
     return report;

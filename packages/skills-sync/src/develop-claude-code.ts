@@ -20,7 +20,7 @@ import path from "node:path";
 import { marketplaceName } from "./build.js";
 import { developmentMarketplaceOf } from "./desired.js";
 import { developmentDirs } from "./develop-build.js";
-import { gitTracks, type AdapterContext, type HarnessAdapter } from "./develop-record.js";
+import { gitTracks, repositoryRoot, type AdapterContext, type HarnessAdapter } from "./develop-record.js";
 import { hasLinkedParent, isDir, isLink, lexists, real, samePath, toHash } from "./fs.js";
 import { json, refused, runner, which, type Run } from "./install.js";
 import type { Library } from "./library.js";
@@ -160,14 +160,6 @@ const declaredAs = (v: unknown, root: string) => {
   return src.source === "directory" && typeof src.path === "string" && samePath(real(src.path), real(root));
 };
 
-/** The nearest folder at or above `project` holding .git: Claude Code keeps --scope local settings there. */
-function repositoryRoot(project: string): string | null {
-  for (let dir = path.resolve(project); ; dir = path.dirname(dir)) {
-    if (lexists(path.join(dir, ".git"))) return dir;
-    if (path.dirname(dir) === dir) return null;
-  }
-}
-
 /**
  * settings.local.json's object without what setup writes there: the development marketplace's declaration, its
  * Plugins' keys and the released copies' false keys; a key left empty goes too.
@@ -243,6 +235,7 @@ export function claudeCodeAdapter(options: ClaudeCodeOptions = {}): HarnessAdapt
         else report.add({ kind: "note", path: ctx.project, note: "claude-code: not activated: no claude CLI on PATH" });
         return { report, owned: prev };
       }
+      // Claude Code keeps --scope local settings at the repository root
       const repo = repositoryRoot(ctx.project);
       if (repo && !samePath(real(repo), real(ctx.project)))
         conflict(`Claude Code keeps this project's local settings at its repository root ${repo}; set up that folder`);

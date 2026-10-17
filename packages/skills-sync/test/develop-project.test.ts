@@ -751,3 +751,22 @@ test("status and setup name a Harness the record holds state for but this shell 
   assert.match(notes, /claude-code: activated, adapter unverified: .*SKILLS_SYNC_TEST_UNVERIFIED_ADAPTERS=claude-code/);
   assert.doesNotMatch(notes, /claude-code: not activated/);
 });
+
+test("remove keeps the whole setup when a later adapter's commands fail, not only the first one's", () => {
+  const { lib, a } = machineWithProjectsSync();
+  const calls: string[] = [];
+  const second = (fail?: "remove"): HarnessAdapter => ({ ...commandAdapter(calls, { fail }), harness: "second" });
+  setupProject(a, new Library(lib), ["play"], { plan: false, adapters: [commandAdapter(calls), second()] });
+  const connected = snapshot(a);
+
+  const failed = removeProject(a, { plan: false, adapters: [commandAdapter(calls), second("remove")] });
+
+  assert.match(
+    failed
+      .conflicts()
+      .map((x) => x.note)
+      .join("\n"),
+    /remove refused/,
+  );
+  assert.deepEqual(snapshot(a), connected, "alias, record and exclude block all stay for a retry");
+});

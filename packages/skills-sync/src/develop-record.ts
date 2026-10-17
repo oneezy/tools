@@ -166,7 +166,7 @@ export function readProjects(lib: Library): ProjectsIndex {
  * an error) about a file that exists in a repository, so a caller refuses instead of guessing.
  */
 export function gitTracks(project: string, relative: string, env: NodeJS.ProcessEnv = {}): boolean | null {
-  if (!lexists(at(project, relative)) || !inRepository(project)) return false;
+  if (!lexists(at(project, relative)) || !repositoryRoot(project)) return false;
   const r = spawnSync("git", ["-C", project, "ls-files", "--error-unmatch", "--", relative], {
     encoding: "utf8",
     env: { ...process.env, ...env },
@@ -176,9 +176,10 @@ export function gitTracks(project: string, relative: string, env: NodeJS.Process
   return r.status === 1 && !r.error && /did not match/.test(r.stderr) ? false : null;
 }
 
-function inRepository(project: string): boolean {
+/** The nearest folder at or above `project` holding .git; null outside a repository. */
+export function repositoryRoot(project: string): string | null {
   for (let dir = path.resolve(project); ; dir = path.dirname(dir)) {
-    if (lexists(path.join(dir, ".git"))) return true;
-    if (path.dirname(dir) === dir) return false;
+    if (lexists(path.join(dir, ".git"))) return dir;
+    if (path.dirname(dir) === dir) return null;
   }
 }
