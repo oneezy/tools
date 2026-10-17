@@ -33,15 +33,15 @@ Desktop may supply account skills differently from the CLI. Verify the actual se
 
 ## Generated output and validation
 
-Never commit `.git` from another repository, `.agents`, `.claude-plugin`, `plugins`, `dist`, `upstream`, `artifacts`, or local install receipts/configuration. Skills Sync recreates those outputs. The imported nested `.github` files and release docs are historical inputs; they are not active monorepo workflows.
+Never commit `.git` from another repository, `.agents`, `.claude-plugin`, `plugins`, `dist`, `upstream`, `artifacts`, or local install receipts/configuration. Skills Sync recreates those outputs. The imported nested `.github` files are inactive in tools; their live copies run in `oneezy/skills`. Before moving, deleting or activating any of them, read `docs/agents/imported-automation.md`.
 
 ```powershell
-pnpm --filter @oneezy/skills test
+vp run --filter @oneezy/skills test
 pnpm --filter @oneezy/skills check
 pnpm --filter @oneezy/skills build
 ```
 
-`pnpm build` uses Vite Plus's content-aware task cache to skip unchanged builds. On a cache miss, Skills Sync compares generated files with disk and writes only changed output. Development does not generate plugins on each save: local links and the viewer read the source directly. Build generates plugin packages/catalogs for review; it does not publish or install them globally. The standalone library's release metadata remains for compatibility; moving its release automation is separate work.
+`pnpm build` uses Vite Plus's content-aware task cache to skip unchanged builds. On a cache miss, Skills Sync compares generated files with disk and writes only changed output. Development does not generate plugins on each save: local links and the viewer read the source directly. Build generates plugin packages/catalogs for review; it does not publish or install them globally. The standalone library's release metadata remains for compatibility. Moving its release automation waits on the release-destination decision (`docs/agents/imported-automation.md`).
 
 Validation on the Windows checkout: 107 installed skills, 214 live links, no nested `.git`, and a repeated `pnpm skills:dev` reports zero changes. All 145 authored files were copied; the debug script has two Windows path fixes. The package's 21 Node tests and capability check pass. Skills Sync's full run passed 315 tests with one skipped; its sole failure was the command-list expectation, then corrected and verified with the focused 9-test rerun. `pnpm check` passes with 14 existing warnings in other code. Plugin generation passes.
 

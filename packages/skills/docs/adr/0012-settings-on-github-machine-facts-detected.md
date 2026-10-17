@@ -2,6 +2,8 @@
 
 Date: 2026-10-11. Status: accepted. Supersedes the local file `skills-sync.local.json` (ADR-0001's amendment). Decided in the Skills Sync repair grilling of 2026-10-10 (Q14, Q14b, Q14c).
 
+Amended 2026-10-17 by ADR-0020, for Development projects only: such a project keeps machine-local records needed to reverse it, which are not settings. The text below is unchanged and holds everywhere else.
+
 ## Context
 
 The local file lived inside the library clone, so it vanished or changed whenever `~/.skills-sync` was re-pointed, and each machine's answers drifted apart. Justin wants one settings file he can edit anywhere that changes every machine.
