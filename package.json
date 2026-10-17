@@ -7,6 +7,7 @@
     "skills:watch": "pnpm skills",
     "skills:dev": "vp run --cache @oneezy/skills-sync#build && pnpm --filter @oneezy/skills restore && pnpm --filter @oneezy/skills develop",
     "skills:dev:build": "vp run --cache @oneezy/skills-sync#build && pnpm --filter @oneezy/skills develop:build",
+    "skills:dev:launcher": "vp run --cache @oneezy/skills-sync#build && npm install --global --no-audit --no-fund ./packages/skills-sync",
     "build": "vp run --cache -r build",
     "test": "vp run -r test",
     "check": "vp run --filter \"skills-viewer-web^...\" build && vp check && vp run -r check",

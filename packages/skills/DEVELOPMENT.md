@@ -37,6 +37,19 @@ Desktop may supply account skills differently from the CLI. Verify the actual se
 
 Each run rewrites only Plugins whose output differs. It stages them whole and swaps them in. A Plugin that fails validation is `failed` when it has no output yet, and nothing is written. It is `stale` when an earlier output exists, and that complete output stays in place. `dist/development/status.json` records the last outcome per Plugin. Exit 1 means at least one Plugin is stale or failed. This command does not install or activate anything in Claude Code, Codex or a project; project setup and the shared watcher build on it.
 
+## Development projects
+
+Connect another local project to this Library with the launcher, from that project's folder:
+
+```powershell
+pnpm skills:dev:launcher                                   # once, from the tools root: a global skills-sync linked to this checkout
+skills-sync develop setup play --repo V:\dev\tools\packages\skills   # in the project: name the Plugins it uses, by id
+skills-sync develop status                                 # what is connected, built and active
+skills-sync develop remove                                 # take back exactly what setup made
+```
+
+Setup links `.agents/skills-library` to this package, so an edit made there is an edit here. It also writes the project record `.agents/skills-sync-project.json` and keeps both out of git through `.git/info/exclude`. It refuses any name that is not exactly one Plugin's id. It activates nothing in Claude Code or Codex yet: the Harness adapters (#213, #214) wait on runtime proof. `skills-sync --help` has the details. The decisions are in `packages/skills-sync/docs/adr`.
+
 ## Generated output and validation
 
 Never commit `.git` from another repository, `.agents`, `.claude-plugin`, `plugins`, `dist`, `upstream`, `artifacts`, or local install receipts/configuration. Skills Sync recreates those outputs. The imported nested `.github` files are inactive in tools; their live copies run in `oneezy/skills`. Before moving, deleting or activating any of them, read `docs/agents/imported-automation.md`.

@@ -21,6 +21,14 @@ import { runUnlink } from "./commands/unlink.js";
 import { develop } from "./develop.js";
 import { buildDevelopment, DEVELOPMENT_PATH, type DevelopmentBuild } from "./develop-build.js";
 import { watchDevelopment } from "./develop-watch.js";
+import {
+  findProject,
+  projectStatus,
+  readRecord,
+  removeProject,
+  setupProject,
+  type ProjectStatus,
+} from "./develop-project.js";
 import { harnessTable } from "./harnesses.js";
 import { findLibrary, Library, looksLikeLibrary, verifyLibraryRevision } from "./library.js";
 import { apply, line, Report } from "./plan.js";
@@ -56,6 +64,18 @@ Commands
                    staged whole and swapped in; a failed build keeps the last successful output (stale) or writes
                    none (failed). ${DEVELOPMENT_PATH}/status.json records each outcome. Touches no harness or
                    project configuration. --plan previews, --json prints the status; exit 1 when any is stale or failed.
+                   develop setup <plugin>... --repo <library>: make the project you are in (--root, else the nearest
+                   folder above with a project record or .git) a Development project of that Library: the link
+                   .agents/skills-library to the Library root, so edits through it reach the one source; the record
+                   .agents/skills-sync-project.json (Library, selected Plugins, what setup made); both kept out of git
+                   by a marked block in .git/info/exclude; the project listed in ${DEVELOPMENT_PATH}/projects.json.
+                   Each Plugin is named by its exact Library id; with none named, the recorded selection. Refuses,
+                   changing nothing, an unknown, Harness-qualified or ambiguous name, a path it did not make, another
+                   Library. Activates nothing in any Harness yet (no verified adapter). Repeated: no change.
+                   develop status: the project's Library, alias, each selected Plugin's development build and Harness
+                   activation, and the Library's connected projects (--json; exit 1 on a problem); writes nothing.
+                   develop remove: take back exactly what setup made, keeping anything changed since and the source.
+                   Run them from any project through a global install (npm install --global, pnpm skills:dev:launcher).
   sync (default)   bring every detected harness to its one form (ADR-0007): Claude Code the account plugins claude.ai
                    delivers, Codex the library's plugins from GitHub, Hermes its plugins; and the skills block in each
                    harness's global instructions file (~/.claude/CLAUDE.md, ~/.codex/AGENTS.md): the tool's pointer
@@ -197,6 +217,8 @@ Options
                          refuses one)
   --junctions            library commands, Windows: make junctions only
   --watch                develop: watch local skill changes; ignored by legacy machine commands
+                         develop setup, status, remove: --root <project> names the project; --repo <library> the Library
+                         (setup only, the first time; later the project record names it; $SKILLS_REPO is the default)
   -h, --help
 
 Older flags (-y, --agents, --global, --no-projects, --no-wsl, --links, --plugins, --no-pull, --no-remember, --watch,
@@ -472,6 +494,8 @@ async function libraryCommand(args: Args): Promise<void> {
   const log = (m: string) => (args.json ? undefined : process.stderr.write(m + "\n"));
   const setup = new Report();
   if (args.command === "develop" && args.positional[0] === "build") return runDevelopBuild(args);
+  if (args.command === "develop" && ["setup", "status", "remove"].includes(args.positional[0]))
+    return runDevelopProject(args);
   if (args.command === "develop") {
     if (!args.repo || !args.root) bail("develop requires --repo <library> and --root <workspace>");
     if (args.positional.length) bail("develop takes no positional arguments");
@@ -884,6 +908,59 @@ function runDevelopBuild(args: Args): void {
     return;
   }
   process.stdout.write(developBuildText(r, args.quiet));
+}
+
+/**
+ * develop setup, status and remove: the project is --root, else the nearest folder above here with a project record or
+ * .git; the Library is --repo, else the one the project record names, else $SKILLS_REPO.
+ */
+function runDevelopProject(args: Args): void {
+  const [verb, ...plugins] = args.positional;
+  if (args.watch) bail(`develop ${verb} takes no --watch`);
+  setLinkMode(args.links ?? "auto");
+  const project = args.root ? path.resolve(args.root) : findProject(process.cwd());
+  if (verb === "remove") {
+    if (plugins.length) bail("develop remove takes no Plugin: it removes the whole setup");
+    const report = removeProject(project, { plan: args.plan });
+    if (report.conflicts().length) process.exitCode = 1;
+    return printReport(report, args, { project });
+  }
+  const { record } = readRecord(project);
+  if (verb === "status") {
+    if (plugins.length) bail("develop status takes no Plugin");
+    const known = args.repo ?? process.env.SKILLS_REPO;
+    const s = projectStatus(project, known ? new Library(real(path.resolve(known))) : null);
+    if (s.problems.length) process.exitCode = 1;
+    process.stdout.write(args.json ? JSON.stringify(s, null, 2) + "\n" : projectStatusText(s));
+    return;
+  }
+  const repo = args.repo ?? record?.library ?? process.env.SKILLS_REPO;
+  if (!repo) bail(`develop ${verb} needs --repo <library> the first time`);
+  const lib = new Library(real(path.resolve(repo)));
+  const report = setupProject(project, lib, plugins, { plan: args.plan });
+  if (report.conflicts().length) process.exitCode = 1;
+  printReport(report, args, { project });
+}
+
+function projectStatusText(s: ProjectStatus): string {
+  const out: string[] = [];
+  if (!s.registered)
+    out.push(
+      `${s.project}: not a Development project: released Plugins only; develop setup <plugin>... --repo <library> connects it`,
+    );
+  else {
+    out.push(`${s.project}: Development project of ${s.library}`);
+    if (s.alias) out.push(`  source alias ${s.alias.path}: ${s.alias.state}`);
+    for (const p of s.plugins)
+      out.push(`  plugin ${p.id}: development build ${p.build}${p.output ? ` (${p.output})` : ""}`);
+    for (const h of s.harnesses) out.push(`  ${h.harness}: ${h.state} (${h.note})`);
+  }
+  if (s.projects.length) {
+    out.push(`Projects connected to ${s.library}:`);
+    for (const p of s.projects) out.push(`  ${p.state.padEnd(10)} ${p.path} (${p.plugins.join(", ")})`);
+  }
+  for (const p of s.problems) out.push(`! ${p}`);
+  return out.join("\n") + "\n";
 }
 
 function developBuildText(r: DevelopmentBuild, quiet: boolean): string {

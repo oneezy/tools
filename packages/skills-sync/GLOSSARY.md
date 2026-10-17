@@ -16,6 +16,14 @@ A project explicitly opted in to using the Library's development Plugins instead
 **Development build**:
 Generated Plugins made from the current working Library for local testing. The last successful Development build remains available when a later build fails.
 
+**Source alias**:
+The link `.agents/skills-library` in a Development project, to the Library root, through which the project edits the one source. Never a copy.
+_Avoid_: mirror, checkout
+
+**Project record**:
+`.agents/skills-sync-project.json` in a Development project: its Library, its selected Plugins, and what setup made and replaced, so that remove takes back exactly that.
+_Avoid_: receipt (the loose-skill `develop` keeps one), settings
+
 **Project plugin**:
 A Plugin installed for one project. In a local Development project, it takes precedence over its matching marketplace copy; unrelated external Plugins remain available.
 
