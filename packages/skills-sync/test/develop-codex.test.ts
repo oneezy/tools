@@ -509,3 +509,23 @@ test("a setup over the block an interrupted run left without a record counts it 
   assert.equal(fs.existsSync(path.join(a, ".codex")), false);
   assert.deepEqual(loaded(a), released);
 });
+
+test("with the Library's projects.json missing or unreadable, remove keeps the development copies in Codex", () => {
+  const { m, a, b, adapter, loaded, library, lib } = codexMachine();
+  setupProject(a, library, ["play"], { plan: false, adapters: [adapter()] });
+  setupProject(b, library, ["play"], { plan: false, adapters: [adapter()] });
+  const index = path.join(lib, "dist", "development", "projects.json");
+
+  fs.writeFileSync(index, "not json");
+  fs.rmSync(m.log, { force: true });
+  const unreadable = removeProject(a, { plan: false, adapters: [adapter()] });
+  fs.rmSync(index);
+  const missing = removeProject(b, { plan: false, adapters: [adapter()] });
+
+  assert.deepEqual(unreadable.conflicts(), []);
+  assert.deepEqual(missing.conflicts(), []);
+  assert.deepEqual(calls(m), [], "no plugin or marketplace is taken out of Codex");
+  for (const r of [unreadable, missing])
+    assert.match(r.actions.map((x) => x.note ?? "").join("\n"), /projects\.json .*; the development copies stay/);
+  assert.equal(loaded(a).filter((x) => x.endsWith("oneezy-skills-dev")).length, 0, "a is back on the released copy");
+});

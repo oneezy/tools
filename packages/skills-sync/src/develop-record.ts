@@ -143,13 +143,18 @@ export interface ProjectsIndex {
 
 export const projectsFile = (lib: Library) => path.join(developmentDirs(lib).output, PROJECTS_FILE);
 
-/** The Library's projects.json; empty when there is none or it does not parse (setup writes it again). */
-export function readProjects(lib: Library): ProjectsIndex {
+/** The Library's projects.json as it is: null when there is none or it does not parse. */
+export function readProjectsIndex(lib: Library): ProjectsIndex | null {
   try {
     const i = JSON.parse(fs.readFileSync(projectsFile(lib), "utf8")) as ProjectsIndex;
     if (i.version === 1 && i.projects && typeof i.projects === "object") return i;
   } catch {
-    // none yet
+    // none, or not JSON
   }
-  return { version: 1, projects: {} };
+  return null;
+}
+
+/** The Library's projects.json; empty when there is none or it does not parse (setup writes it again). */
+export function readProjects(lib: Library): ProjectsIndex {
+  return readProjectsIndex(lib) ?? { version: 1, projects: {} };
 }

@@ -39,7 +39,8 @@ import {
 } from "./codex-toml.js";
 import { developmentDirs, digest, readDevelopmentStatus } from "./develop-build.js";
 import {
-  readProjects,
+  projectsFile,
+  readProjectsIndex,
   readRecord,
   type AdapterContext,
   type AdapterResult,
@@ -199,10 +200,15 @@ function tracked(project: string, relative: string, env: NodeJS.ProcessEnv): boo
 
 const read = (file: string): Buffer | null => (lexists(file) ? fs.readFileSync(file) : null);
 
-/** The Plugins other connected projects of this Library load from the development marketplace in Codex. */
-function usedElsewhere(lib: Library, project: string): Set<string> {
+/**
+ * The Plugins other connected projects of this Library load from the development marketplace in Codex; null when the
+ * Library's projects.json is missing or does not parse, so no caller can tell this project is the last one.
+ */
+function usedElsewhere(lib: Library, project: string): Set<string> | null {
+  const index = readProjectsIndex(lib);
+  if (!index) return null;
   const used = new Set<string>();
-  for (const p of Object.keys(readProjects(lib).projects)) {
+  for (const p of Object.keys(index.projects)) {
     if (samePath(real(p), real(project))) continue;
     const { record } = readRecord(p);
     if (!record || !samePath(real(record.library), real(lib.root))) continue;
@@ -210,6 +216,9 @@ function usedElsewhere(lib: Library, project: string): Set<string> {
   }
   return used;
 }
+
+const UNKNOWN_PROJECTS = (lib: Library) =>
+  `codex: ${projectsFile(lib)} is missing or does not parse, so other projects may still use them; the development copies stay installed in Codex, switched off for every project`;
 
 /** The copy Codex runs of an installed plugin: its cache folder for the version it lists. */
 function cacheOf(h: Harness, market: string, row: Installed): string {
@@ -431,8 +440,13 @@ function setup(o: Resolved, ctx: AdapterContext): AdapterResult & { owned: unkno
   const others = usedElsewhere(lib, ctx.project);
   const dropped = (previous?.plugins ?? []).filter(
     (id) =>
-      !ctx.plugins.includes(id) && !others.has(id) && installed.some((p) => p.name === id && p.marketplace === dev),
+      !ctx.plugins.includes(id) &&
+      !!others &&
+      !others.has(id) &&
+      installed.some((p) => p.name === id && p.marketplace === dev),
   );
+  if (!others && (previous?.plugins ?? []).some((id) => !ctx.plugins.includes(id)))
+    report.add({ kind: "note", path: ctx.project, loud: true, note: UNKNOWN_PROJECTS(lib) });
   if (!devMarket) report.add({ kind: "install", path: dirs.output, note: `codex plugin marketplace add (${dev})` });
   for (const id of toAdd)
     report.add({
@@ -572,10 +586,14 @@ function remove(o: Resolved, ctx: AdapterContext): AdapterResult {
       loud: true,
       note: `codex: ${run ? "codex cannot list its plugins" : "no codex CLI on PATH"}; the development copies stay installed in Codex, switched off for every project`,
     });
+  if (!others) report.add({ kind: "note", path: ctx.project, loud: true, note: UNKNOWN_PROJECTS(lib) });
   const drop = owned.plugins.filter(
-    (id) => !others.has(id) && !!listed?.some((p) => p.name === id && p.marketplace === dev && p.installed !== false),
+    (id) =>
+      !!others &&
+      !others.has(id) &&
+      !!listed?.some((p) => p.name === id && p.marketplace === dev && p.installed !== false),
   );
-  const dropMarket = !!markets?.some((m) => m.name === dev) && !others.size && !!run;
+  const dropMarket = !!markets?.some((m) => m.name === dev) && !!others && !others.size && !!run;
   if (next !== undefined && ctx.plan)
     report.add(
       next === null
