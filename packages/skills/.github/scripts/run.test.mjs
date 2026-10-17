@@ -11,7 +11,7 @@ import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 import { branches, findBash, git, remote, tags } from "./dry-run.mjs";
 
-const RUN_SH = fileURLToPath(new URL("./run.sh", import.meta.url));
+const SCRIPTS = fileURLToPath(new URL("./", import.meta.url));
 const BASH = findBash();
 const skip = BASH ? false : "bash is not available (run.sh runs on the ubuntu runner)";
 
@@ -66,13 +66,17 @@ function runSh(env) {
     "skills-sync.lock.json": JSON.stringify(LOCK, null, 2) + "\n",
     ".github/workflows/land.yml": "name: land\n",
   });
+  // run.sh and the run-report.mjs beside it, copied with LF endings: a Windows checkout may carry CRLF, the runner never does
+  const scripts = path.join(r.base, "scripts");
+  fs.mkdirSync(scripts);
+  for (const f of ["run.sh", "run-report.mjs"]) fs.writeFileSync(path.join(scripts, f), fs.readFileSync(path.join(SCRIPTS, f), "utf8").replace(/\r\n/g, "\n"));
   const cli = path.join(r.base, "fake-cli.cjs");
   const log = path.join(r.base, "cli.log");
   const output = path.join(r.base, "github-output");
   fs.writeFileSync(cli, FAKE_CLI);
   fs.writeFileSync(log, "");
   fs.writeFileSync(output, "");
-  const res = spawnSync(BASH, [RUN_SH], {
+  const res = spawnSync(BASH, [path.join(scripts, "run.sh")], {
     cwd: r.base,
     encoding: "utf8",
     env: {

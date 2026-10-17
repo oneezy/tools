@@ -18,8 +18,9 @@ const BASH = findBash();
 const skip = BASH ? false : "bash is not available (land.yml runs on the ubuntu runner)";
 
 /** The steps of a workflow file: name, if, working-directory and run, read by indentation (no YAML library needed). */
-export function steps(file) {
-  const lines = fs.readFileSync(path.join(WORKFLOWS, file), "utf8").split("\n");
+function steps(file) {
+  // a Windows checkout may carry CRLF; the runner gets LF
+  const lines = fs.readFileSync(path.join(WORKFLOWS, file), "utf8").split(/\r?\n/);
   const out = [];
   for (let i = 0; i < lines.length; i++) {
     const m = /^(\s*)- name: (.+)$/.exec(lines[i]);
