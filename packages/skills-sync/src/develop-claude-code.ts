@@ -14,7 +14,7 @@
 // to what they were, the marketplace's local declaration. It never runs `claude plugin marketplace remove`: that drops
 // the marketplace for every project and uninstalls its Plugins there. A running chat keeps the copy it loaded until the
 // person types /reload-plugins in it or starts a new one; nothing here can reload a chat, so it says so.
-// See docs/research/2026-10-17-harness-plugin-loading.md.
+// The decision is ADR-0006; the evidence is in docs/research/2026-10-17-harness-plugin-loading.md.
 import { spawnSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
