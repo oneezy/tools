@@ -4,10 +4,12 @@
 // selected Plugins, and what setup made, so that remove takes away exactly that and nothing a person changed since.
 // Activating a Plugin in a Harness is a Harness adapter's job: setup builds the selection first when a verified adapter
 // will run, hands it the build, applies the actions it planned with its own, runs its Harness CLI commands, and only then
-// writes the record. No adapter is verified yet.
+// writes the record. The Claude Code adapter (develop-claude-code.ts) is here but not verified: until the Windows runtime
+// proof exists, setup names it and never runs it.
 import fs from "node:fs";
 import path from "node:path";
 import { hasLinkedParent, isDir, isLink, lexists, linkTarget, real, samePath, toHash, under } from "./fs.js";
+import { claudeCodeAdapter } from "./develop-claude-code.js";
 import { buildDevelopment, developmentDirs, readDevelopmentStatus, type DevelopmentBuild } from "./develop-build.js";
 import { Library } from "./library.js";
 import { apply, Report } from "./plan.js";
@@ -92,8 +94,17 @@ export interface HarnessAdapter {
   status?(ctx: AdapterContext): { state: string; note: string };
 }
 
-/** The adapters this version has: none is verified yet (Claude Code is #213, Codex #214). */
-export const ADAPTERS: HarnessAdapter[] = [];
+/**
+ * Is this Harness's unverified adapter switched on for a test? SKILLS_SYNC_TEST_UNVERIFIED_ADAPTERS lists Harness ids
+ * (claude-code,codex) whose adapters the CLI then runs as if verified. It exists for the tests, which run the built CLI
+ * against fake Harness CLIs; nothing else sets it, and a real Harness must not be driven by an unproven adapter.
+ */
+export function testSwitch(harness: string): boolean {
+  return (process.env.SKILLS_SYNC_TEST_UNVERIFIED_ADAPTERS ?? "").split(",").includes(harness);
+}
+
+/** The adapters this version has. None is verified yet: Claude Code waits on its Windows proof (#213), Codex is #214. */
+export const ADAPTERS: HarnessAdapter[] = [claudeCodeAdapter({ verified: testSwitch("claude-code") })];
 
 export interface ProjectOptions {
   plan: boolean;
@@ -403,11 +414,15 @@ export function removeProject(project: string, options: ProjectOptions): Report 
   if (isDir(lib.root) && !hasLinkedParent(path.dirname(projectsFile(lib)))) planProjects(report, lib, project, null);
   report.add({ kind: "delete", path: recordPath });
   // the Harnesses first: when one refuses, nothing of the setup is taken away and the record stays for a retry
-  if (!options.plan && !runCommands(report, commands)) {
-    report.actions = report.actions.filter((a) => a.kind === "conflict" || a.kind === "note" || a.failed);
+  const ran = new Report();
+  if (!options.plan && !runCommands(ran, commands)) {
+    report.actions = report.actions.filter((a) => a.kind === "conflict" || a.kind === "note");
+    report.merge(ran);
     return report;
   }
   apply(report, options.plan);
+  // what the commands did, after: apply() must not run their actions again
+  report.merge(ran);
   if (report.actions.some((a) => a.failed)) return report;
   const leaving = new Set(report.changes().map((a) => path.resolve(a.path)));
   for (const dir of [...record.created].sort((x, y) => y.length - x.length).map((d) => at(project, d))) {
