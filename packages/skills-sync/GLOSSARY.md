@@ -16,6 +16,10 @@ A project explicitly opted in to using the Library's development Plugins instead
 **Development build**:
 Generated Plugins made from the current working Library for local testing. The last successful Development build remains available when a later build fails.
 
+**Development watcher**:
+The one process per Library that rebuilds the Development builds its Development projects select as the source changes (`develop watch`). The terminal that starts it owns it and stops it by closing. A later launch names the owner and starts nothing (ADR-0005).
+_Avoid_: daemon, service, the loose-skill watcher (`develop --watch`, which only keeps links in step)
+
 **Source alias**:
 The link `.agents/skills-library` in a Development project, to the Library root, through which the project edits the one source. Never a copy.
 _Avoid_: mirror, checkout

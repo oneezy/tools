@@ -170,16 +170,8 @@ export function destroy(m: PretendMachine): void {
   fs.rmSync(m.base, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 });
 }
 
-/**
- * Run the built CLI on the pretend machine. PATH holds only the fake CLIs, so the session's real ones are never seen.
- * The child runs asynchronously: the fake GitHub lives in this process, and a blocking spawn would never let it answer.
- */
-export async function cli(
-  m: PretendMachine,
-  args: string[],
-  extra: Record<string, string> = {},
-  cwd: string = m.home,
-): Promise<Run> {
+/** The environment a run of the built CLI gets on the pretend machine: the session's own, less what would reach the real machine. */
+export function cliEnv(m: PretendMachine, extra: Record<string, string> = {}): NodeJS.ProcessEnv {
   const env: NodeJS.ProcessEnv = { ...process.env };
   const pathKey = Object.keys(env).find((k) => k.toUpperCase() === "PATH") ?? "PATH";
   for (const k of [
@@ -200,6 +192,20 @@ export async function cli(
   // only the fake CLIs (and git when asked); on Windows the .cmd shims still run, because the shell comes from ComSpec
   env[pathKey] = [m.bin, ...m.extraPath].join(path.delimiter);
   Object.assign(env, m.env, extra);
+  return env;
+}
+
+/**
+ * Run the built CLI on the pretend machine. PATH holds only the fake CLIs, so the session's real ones are never seen.
+ * The child runs asynchronously: the fake GitHub lives in this process, and a blocking spawn would never let it answer.
+ */
+export async function cli(
+  m: PretendMachine,
+  args: string[],
+  extra: Record<string, string> = {},
+  cwd: string = m.home,
+): Promise<Run> {
+  const env = cliEnv(m, extra);
   for (const log of [m.log, m.wslLog]) if (fs.existsSync(log)) fs.rmSync(log);
   const before = m.github?.requests.length ?? 0;
   const r = await spawnCli(args, env, cwd);
