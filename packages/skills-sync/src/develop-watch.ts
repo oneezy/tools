@@ -1,7 +1,12 @@
+// Watching the Library's source: one recursive watch on the Library root, events for generated folders dropped by
+// name, a quiet period (debounce) before anything runs, and digests of the source that tell an edit apart from a save
+// that changed nothing. Two watchers use it: `develop --watch`, which keeps the loose-skill links in step, and the
+// Development watcher (develop-watcher.ts), which rebuilds the Development builds.
 import fs from "node:fs";
 import path from "node:path";
 import { createHash } from "node:crypto";
 
+/** Folders under the Library that are never source: git, tooling, and generated output (dist/ holds the Development builds). */
 const ignored = new Set([".git", "node_modules", "dist", "__pycache__"]);
 
 export function developmentSnapshot(root: string) {
@@ -30,6 +35,32 @@ export function developmentSnapshot(root: string) {
   return { content: content.digest("hex"), structure: JSON.stringify(structure), config: config.digest("hex") };
 }
 
+/**
+ * Watch `root` recursively and call `settled` once events stop for `delay` ms. An event whose path (relative, /
+ * separators) `accept` turns down never starts the wait; one without a path (the platform did not say) always does.
+ * Returns the function that stops watching.
+ */
+export function watchSource(
+  root: string,
+  accept: (name: string) => boolean,
+  settled: () => void,
+  error: (error: unknown) => void,
+  delay = 200,
+): () => void {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const watcher = fs.watch(root, { recursive: true }, (_event, filename) => {
+    const name = filename?.toString().replaceAll("\\", "/");
+    if (name && !accept(name)) return;
+    clearTimeout(timer);
+    timer = setTimeout(settled, delay);
+  });
+  watcher.on("error", error);
+  return () => {
+    clearTimeout(timer);
+    watcher.close();
+  };
+}
+
 export function watchDevelopment(
   root: string,
   callbacks: {
@@ -41,12 +72,10 @@ export function watchDevelopment(
   delay = 200,
 ): () => void {
   let previous = developmentSnapshot(root);
-  let timer: ReturnType<typeof setTimeout> | undefined;
-  const watcher = fs.watch(root, { recursive: true }, (_event, filename) => {
-    const name = filename?.toString().replaceAll("\\", "/");
-    if (name && !/^(skills(?:\/|$)|\.agents\/skills(?:\/|$)|skills-sync(?:\.lock)?\.json$)/.test(name)) return;
-    clearTimeout(timer);
-    timer = setTimeout(() => {
+  return watchSource(
+    root,
+    (name) => /^(skills(?:\/|$)|\.agents\/skills(?:\/|$)|skills-sync(?:\.lock)?\.json$)/.test(name),
+    () => {
       try {
         const next = developmentSnapshot(root);
         if (next.config !== previous.config) {
@@ -63,11 +92,70 @@ export function watchDevelopment(
       } catch (error) {
         callbacks.error(error);
       }
-    }, delay);
-  });
-  watcher.on("error", callbacks.error);
-  return () => {
-    clearTimeout(timer);
-    watcher.close();
-  };
+    },
+    callbacks.error,
+    delay,
+  );
+}
+
+/**
+ * What a Development build reads, relative to the Library root: own skills, the third-party working set, the upstream
+ * snapshots, the config and its lock, and the LICENSE. Everything else (plugins/, artifacts/, the catalogs, dist/) is
+ * generated or never packaged, and an event there is not an edit.
+ */
+export function isBuildInput(name: string): boolean {
+  return (
+    /^(?:skills|\.agents\/skills|upstream)(?:\/|$)/.test(name) ||
+    /^(?:skills-sync(?:\.lock)?\.json|LICENSE(?:\.md|\.txt)?)$/.test(name)
+  );
+}
+
+/**
+ * The digest of everything a Development build reads, so a save that left every byte as it was does no work. A file is
+ * read again only when its size, times or inode changed since the last digest.
+ */
+export class BuildInputs {
+  private seen = new Map<string, { size: number; mtimeMs: number; ctimeMs: number; ino: number; hash: string }>();
+
+  constructor(private root: string) {}
+
+  digest(): string {
+    const total = createHash("sha256");
+    const next = new Map<string, { size: number; mtimeMs: number; ctimeMs: number; ino: number; hash: string }>();
+    const add = (file: string) => {
+      const rel = path.relative(this.root, file).replaceAll("\\", "/");
+      let st: fs.Stats;
+      try {
+        st = fs.statSync(file);
+      } catch {
+        return; // removed while being read: the next event says so
+      }
+      const was = this.seen.get(rel);
+      const hash =
+        was && was.size === st.size && was.mtimeMs === st.mtimeMs && was.ctimeMs === st.ctimeMs && was.ino === st.ino
+          ? was.hash
+          : createHash("sha256").update(fs.readFileSync(file)).digest("hex");
+      next.set(rel, { size: st.size, mtimeMs: st.mtimeMs, ctimeMs: st.ctimeMs, ino: st.ino, hash });
+      total.update(rel).update("\0").update(hash).update("\0");
+    };
+    const walk = (dir: string) => {
+      let entries: fs.Dirent[];
+      try {
+        entries = fs.readdirSync(dir, { withFileTypes: true });
+      } catch {
+        return;
+      }
+      for (const entry of entries.sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0))) {
+        if (ignored.has(entry.name) || entry.isSymbolicLink()) continue;
+        const file = path.join(dir, entry.name);
+        if (entry.isDirectory()) walk(file);
+        else if (entry.isFile()) add(file);
+      }
+    };
+    for (const dir of ["skills", ".agents/skills", "upstream"]) walk(path.join(this.root, ...dir.split("/")));
+    for (const name of ["skills-sync.json", "skills-sync.lock.json", "LICENSE", "LICENSE.md", "LICENSE.txt"])
+      add(path.join(this.root, name));
+    this.seen = next;
+    return total.digest("hex");
+  }
 }

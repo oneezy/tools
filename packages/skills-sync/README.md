@@ -439,6 +439,7 @@ remove <source>: --plan  --json  --quiet
 build: --plugins  --catalogs  --artifacts  --check
 check: --json  --quiet
 develop setup [<plugin>...] | status | remove: --repo <library>  --root <project>  --plan  --json  --quiet
+develop watch: --repo <library>  --root <project>
 every library command: --repo <path>  --symlinks | --junctions  --expect-revision <sha>  --remote-ref <ref>
 migrate-aliases, rollback-aliases: --alias-file <json>  --receipt <path>
 ```

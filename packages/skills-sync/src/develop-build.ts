@@ -326,7 +326,8 @@ function takeLock(work: string): string | false {
   return false;
 }
 
-function alive(pid: number): boolean {
+/** A process with this pid exists (one we may not signal counts). */
+export function alive(pid: number): boolean {
   try {
     process.kill(pid, 0);
     return true;

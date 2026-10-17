@@ -50,6 +50,20 @@ skills-sync develop remove                                 # take back exactly w
 
 Setup links `.agents/skills-library` to this package, so an edit made there is an edit here. It also writes the project record `.agents/skills-sync-project.json` and keeps both out of git through `.git/info/exclude`. It refuses any name that is not exactly one Plugin's id. It activates nothing in Claude Code or Codex yet: the Harness adapters (#213, #214) wait on runtime proof. `skills-sync --help` has the details. The decisions are in `packages/skills-sync/docs/adr`.
 
+## Development watcher
+
+Start the watcher from a Development project (or `pnpm skills:dev:watch` from the tools root, which restores the locked Sources first):
+
+```powershell
+skills-sync develop watch     # this terminal now owns the Library's one watcher
+skills-sync develop status    # elsewhere: "Development watcher: running (pid ...)" or "stopped", and the builds behind
+```
+
+- It builds the Plugins the connected projects select, once as it starts (catching up on edits made while none ran) and again after each edit settles. An edit through any project's `.agents/skills-library` is one edit of this package.
+- A second launch, from any project, prints the owner's pid, project and start time, then exits. It starts nothing.
+- Ctrl+C or closing the owning terminal stops it. Nothing keeps running and nothing restarts it. The last successful builds stay in `dist/development/plugins`, and a failed build keeps the previous one (`stale`).
+- The owner record is `dist/development/watcher.json`. The decision is ADR-0005 in `packages/skills-sync/docs/adr`.
+
 ## Generated output and validation
 
 Never commit `.git` from another repository, `.agents`, `.claude-plugin`, `plugins`, `dist`, `upstream`, `artifacts`, or local install receipts/configuration. Skills Sync recreates those outputs. The imported nested `.github` files are inactive in tools; their live copies run in `oneezy/skills`. Before moving, deleting or activating any of them, read `docs/agents/imported-automation.md`.
