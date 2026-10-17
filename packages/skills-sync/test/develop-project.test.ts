@@ -505,20 +505,24 @@ function commandAdapter(calls: string[], options: { fail?: "setup" | "remove"; e
 test("an adapter's commands run after setup's planned actions and before the record, never on plan", () => {
   const { lib, a } = machineWithProjectsSync();
   const calls: string[] = [];
-  const adapters = [commandAdapter(calls)];
+  const base = commandAdapter(calls);
   const seen: boolean[] = [];
-  adapters[0].setup = ((inner) => (ctx) => {
-    const r = inner(ctx);
-    const commands = r.commands!;
-    return {
-      ...r,
-      commands: () => {
-        // the alias (applied by core) is in place, the record is not written yet
-        seen.push(isLink(alias(a)), fs.existsSync(record(a)));
-        return commands();
-      },
-    };
-  })(adapters[0].setup);
+  const watched: HarnessAdapter = {
+    ...base,
+    setup: (ctx) => {
+      const r = base.setup(ctx);
+      const commands = r.commands!;
+      return {
+        ...r,
+        commands: () => {
+          // the alias (applied by core) is in place, the record is not written yet
+          seen.push(isLink(alias(a)), fs.existsSync(record(a)));
+          return commands();
+        },
+      };
+    },
+  };
+  const adapters = [watched];
 
   const planned = setupProject(a, new Library(lib), ["play"], { plan: true, adapters });
   assert.deepEqual(calls, [], "plan runs no Harness command");

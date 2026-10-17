@@ -88,7 +88,7 @@ export interface CodexAdapterOptions {
   codex?: string | null;
   /** the environment codex runs with, over this process's (CODEX_HOME among it) */
   env?: NodeJS.ProcessEnv;
-  /** default: false, unless SKILLS_SYNC_TEST_UNVERIFIED_ADAPTERS names codex (tests only) */
+  /** default false: ADAPTERS passes testSwitch("codex"), which only a test turns on */
   verified?: boolean;
 }
 
@@ -99,20 +99,12 @@ export interface CodexAdapterOptions {
 export function codexAdapter(options: CodexAdapterOptions = {}): HarnessAdapter {
   return {
     harness: "codex",
-    verified: options.verified ?? testSwitch("codex"),
+    verified: options.verified ?? false,
     excludes: ["/.codex/config.toml"],
     setup: (ctx) => setup(resolve(options), ctx),
     remove: (ctx) => remove(resolve(options), ctx),
     status: (ctx) => status(resolve(options), ctx),
   };
-}
-
-/** SKILLS_SYNC_TEST_UNVERIFIED_ADAPTERS=<harness,...>: tests run an adapter whose runtime proof does not exist yet. */
-function testSwitch(harness: string, env: NodeJS.ProcessEnv = process.env): boolean {
-  return (env.SKILLS_SYNC_TEST_UNVERIFIED_ADAPTERS ?? "")
-    .split(",")
-    .map((s) => s.trim())
-    .includes(harness);
 }
 
 interface Resolved {

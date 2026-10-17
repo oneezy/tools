@@ -690,7 +690,7 @@ function notice(pkg: Package, config: Config, head: Head, commitOverride?: strin
   ].join("\n");
 }
 
-/** The marketplace name both root catalogs carry: <owner>-<name> (oneezy-skills), or the name without an owner. */
+/** The name both root catalogs give the Library's marketplace: <owner>-<name>, or the name alone without an owner. */
 export function marketplaceName(config: Config, lib: Library): string {
   const l = config.library ?? {};
   const name = l.name ?? path.basename(lib.root);
