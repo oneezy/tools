@@ -36,9 +36,12 @@ function codexMachine(options: { trust?: ("a" | "b")[]; libraryInA?: boolean } =
   const m = pretendMachine();
   machines.push(m);
   const env = { ...m.env, FAKE_HARNESS_CODEX_CONFIG: "1" };
-  const codexFile = path.join(m.bin, "codex");
+  const win = process.platform === "win32";
+  const codexFile = path.join(m.bin, win ? "codex.cmd" : "codex");
+  // Windows runs the .cmd shim through the shell, which needs every path quoted
+  const q = (x: string) => (win ? `"${x}"` : x);
   const codex = (...args: string[]) => {
-    const r = spawnSync(codexFile, args, { env: { ...process.env, ...env }, encoding: "utf8" });
+    const r = spawnSync(q(codexFile), args.map(q), { env: { ...process.env, ...env }, encoding: "utf8", shell: win });
     assert.equal(r.status, 0, `codex ${args.join(" ")}: ${r.stderr}`);
     return r.stdout;
   };
