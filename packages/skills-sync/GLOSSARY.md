@@ -27,6 +27,10 @@ _Avoid_: receipt (the loose-skill `develop` keeps one), settings
 **Project plugin**:
 A Plugin installed for one project. In a local Development project, it takes precedence over its matching marketplace copy; unrelated external Plugins remain available.
 
+**Development marketplace**:
+The Codex marketplace of the Library's Development builds, `<release marketplace>-dev` (`oneezy-skills-dev`), read from `dist/development`. Its copies are switched off for every project and on in each Development project's `.codex/config.toml` (`docs/adr/0007`).
+_Avoid_: dev catalog (the Catalog is its file)
+
 **Own skill**:
 A skill written in the Library itself, flat or inside a Group.
 _Avoid_: local skill, custom skill

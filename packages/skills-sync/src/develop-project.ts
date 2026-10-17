@@ -9,6 +9,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { hasLinkedParent, isDir, isLink, lexists, linkTarget, real, samePath, toHash, under } from "./fs.js";
 import { buildDevelopment, developmentDirs, readDevelopmentStatus, type DevelopmentBuild } from "./develop-build.js";
+import { codexAdapter } from "./develop-codex.js";
 import { Library } from "./library.js";
 import { apply, Report } from "./plan.js";
 import { cmp, readConfig } from "./sources.js";
@@ -92,8 +93,11 @@ export interface HarnessAdapter {
   status?(ctx: AdapterContext): { state: string; note: string };
 }
 
-/** The adapters this version has: none is verified yet (Claude Code is #213, Codex #214). */
-export const ADAPTERS: HarnessAdapter[] = [];
+/**
+ * The adapters this version has: none is verified yet (Claude Code is #213; Codex, #214, waits on its proof in the
+ * ChatGPT desktop app on Windows, #217).
+ */
+export const ADAPTERS: HarnessAdapter[] = [codexAdapter()];
 
 export interface ProjectOptions {
   plan: boolean;
@@ -402,12 +406,16 @@ export function removeProject(project: string, options: ProjectOptions): Report 
   }
   if (isDir(lib.root) && !hasLinkedParent(path.dirname(projectsFile(lib)))) planProjects(report, lib, project, null);
   report.add({ kind: "delete", path: recordPath });
-  // the Harnesses first: when one refuses, nothing of the setup is taken away and the record stays for a retry
-  if (!options.plan && !runCommands(report, commands)) {
+  // the Harnesses first: when one refuses, nothing of the setup is taken away and the record stays for a retry. What
+  // the commands did is merged after apply, so a file they already wrote is never applied a second time
+  const ran = new Report();
+  if (!options.plan && !runCommands(ran, commands)) {
+    report.merge(ran);
     report.actions = report.actions.filter((a) => a.kind === "conflict" || a.kind === "note" || a.failed);
     return report;
   }
   apply(report, options.plan);
+  report.merge(ran);
   if (report.actions.some((a) => a.failed)) return report;
   const leaving = new Set(report.changes().map((a) => path.resolve(a.path)));
   for (const dir of [...record.created].sort((x, y) => y.length - x.length).map((d) => at(project, d))) {
