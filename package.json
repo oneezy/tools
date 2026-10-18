@@ -8,7 +8,7 @@
     "skills:dev": "vp run --cache @oneezy/skills-sync#build && pnpm --filter @oneezy/skills restore && pnpm --filter @oneezy/skills develop",
     "build": "vp run --cache -r build",
     "test": "vp run -r test",
-    "check": "vp run --filter \"skills-viewer-web^...\" build && vp check && vp run -r check",
+    "check": "vp run --filter \"skills-viewer-web^...\" build && pnpm --filter skills-viewer-web exec svelte-kit sync && vp check && vp run -r check",
     "dev": "vp run --cache --filter @oneezy/skills-sync --filter skills-viewer build && vp run --parallel --filter @oneezy/skills --filter skills-viewer-web dev"
   },
   "devDependencies": {
