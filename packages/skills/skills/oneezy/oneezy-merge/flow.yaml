@@ -64,13 +64,13 @@ steps:
   - id: wait-checks
     after: open-pr
     if: not a promotion-only release
-    does: read the head commit's check runs (every Actions job and app check) and commit statuses (Vercel and other status apps)
+    does: one background shell call that reads the head commit's check runs (every Actions job and app check) and commit statuses (Vercel and other status apps), first 15 seconds after the push, and gives up after 10 minutes
     needs: [gh]
     loop:
-      until: no check run is queued or in progress and no status is pending
-      every: 90s
+      until: two reads in a row show no check run queued or in progress and no status pending
+      every: 10s
     outcome:
-      done: every check run success, skipped or neutral and every status success; none at all after the first wait counts as green with nothing checked
+      done: every check run success, skipped or neutral and every status success; none at all when the loop exits counts as green with nothing checked
       fail: any other conclusion or status → skip land and promote
   - id: land
     after: wait-checks
