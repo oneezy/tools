@@ -5,7 +5,11 @@ What the Library brought from the standalone `oneezy/skills` repository, who cal
 ## Ground rules
 
 - **Two routes, kept apart.** *Git merge and promotion* moves commits: a `land/*` branch onto `dev`, then `dev` into `main`. *Plugin publication* turns a `main` commit into a GitHub release `release-<n>` that every machine's sync reads. A green merge is no proof that a release happened.
+<<<<<<< HEAD
 - **The live route is the standalone repository.** GitHub runs only workflows under a repository's root `.github/workflows/`. The copies under `packages/skills/.github/` are inert in tools. `oneezy/skills` still has its own registered `land`, `library`, `run` and `task-manager` workflows, and still cuts the releases that machines read (`DEFAULT_REPO` in `packages/skills-sync/src/release.ts`). That route stays live: oneezy/tools#240 chose to keep it as the release mirror (ADR-0021), fed by `scripts/publish-mirror.mjs`. Its `run.yml` is disabled there, because a daily update would land into the mirror behind tools' back.
+=======
+- **The live route is the standalone repository.** GitHub runs only workflows under a repository's root `.github/workflows/`. The copies under `packages/skills/.github/` are inert in tools. `oneezy/skills` still has its own registered `land`, `library`, `run` and `task-manager` workflows, and still cuts the releases that machines read (`DEFAULT_REPO` in `packages/skills-sync/src/release.ts`). That route stays as it is until the release destination is decided.
+>>>>>>> origin/dev
 - **Activation is a migration.** Moving a nested workflow to the root `.github/` would make it run against tools: `land.yml` would promote all of tools' `dev` to `main`. Keep nested workflows nested until a tested migration says otherwise. Root `.github/` changes go through a person's merge.
 
 Callers in the standalone repository were traced from the imported copy. A read of `oneezy/skills` over `gh api` was refused (HTTP 403) on 2026-10-17. The list of registered workflows above comes from the read-only audit in `packages/skills-sync/docs/skills-import-audit.md`.

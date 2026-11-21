@@ -1,6 +1,10 @@
 # AGENTS.md
 
+<<<<<<< HEAD
 This is the permanent skills source package in `oneezy/tools`; oneezy/skills is its generated release mirror (ADR-0021), never edited by hand. Read `DEVELOPMENT.md` before installation or build work. The monorepo's root AGENTS.md owns workflow and branch rules. Imported docs about the former standalone skills repository describe the release system; they do not require cloning, publishing, or global installation for local development. Before you move, delete or activate anything under `.github/`, or change a skill that drives a merge, promotion or release, read `docs/agents/imported-automation.md`. For dependency discovery, read `docs/agents/capabilities.md`. For Brain work, load `/oneezy-brain`; it owns routing and locations.
+=======
+This is the permanent skills source package in `oneezy/tools`. Read `DEVELOPMENT.md` before installation or build work. The monorepo's root AGENTS.md owns workflow and branch rules. Imported docs about the former standalone skills repository describe the release system; they do not require cloning, publishing, or global installation for local development. Before you move, delete or activate anything under `.github/`, or change a skill that drives a merge, promotion or release, read `docs/agents/imported-automation.md`. For dependency discovery, read `docs/agents/capabilities.md`. For Brain work, load `/oneezy-brain`; it owns routing and locations.
+>>>>>>> origin/dev
 
 ### Issue tracker
 
