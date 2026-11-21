@@ -1,6 +1,6 @@
 #Requires -Version 7.0
 # Runs a shell script with bash from a package's npm script, on either host: Git for Windows' bash on
-# Windows (System32\bash.exe would start WSL), plain bash elsewhere. Same finder as syntax-check.ps1.
+# Windows (its bin launcher puts the Unix utilities on PATH), plain bash elsewhere.
 # Usage from a package: pwsh -NoProfile -File ../../scripts/run-sh.ps1 <script.sh> [args...]
 param(
   [Parameter(Mandatory)][string]$Script,
@@ -13,7 +13,7 @@ function Find-Bash {
     $git = (Get-Command git -ErrorAction SilentlyContinue).Source
     if ($git) {
         $root = Split-Path (Split-Path $git)
-        foreach ($candidate in @((Join-Path $root 'usr\bin\bash.exe'), (Join-Path (Split-Path $root) 'usr\bin\bash.exe'))) {
+        foreach ($candidate in @((Join-Path $root 'bin\bash.exe'), (Join-Path (Split-Path $root) 'bin\bash.exe'))) {
             if (Test-Path -LiteralPath $candidate) { return $candidate }
         }
     }

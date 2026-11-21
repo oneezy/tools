@@ -8,14 +8,20 @@ import { bundle, root } from './oneezy-capabilities.mjs';
 const read = (name) => fs.readFileSync(path.join(root, name), 'utf8');
 const catalog = JSON.parse(read('docs/agents/capabilities/catalog.json'));
 
-test('every authored Oneezy skill packages the current contract and host adapters; no unresolved or user-only automatic dependency', () => {
+test('routed skills package current adapters; standalone scripts need none; no unresolved or user-only automatic dependency', () => {
   const authored = fs.readdirSync(path.join(root, 'skills/oneezy')).filter(name => fs.existsSync(path.join(root, 'skills/oneezy', name, 'SKILL.md'))).sort();
   assert.deepEqual(Object.keys(catalog.skills).sort(), authored);
   assert.deepEqual(bundle(), []);
   for (const name of authored) {
     const entry = read(`skills/oneezy/${name}/SKILL.md`);
-    assert.match(entry, /references\/capabilities\/contract.md/);
     const flow = read(`skills/oneezy/${name}/flow.yaml`);
+    if (catalog.skills[name].capabilityReferences === false) {
+      assert.deepEqual(catalog.skills[name].dependencies, []);
+      assert.equal(fs.existsSync(path.join(root, `skills/oneezy/${name}/references/capabilities`)), false);
+      assert.doesNotMatch(entry + flow, /references\/capabilities\//);
+      continue;
+    }
+    assert.match(entry, /references\/capabilities\/contract.md/);
     assert.match(flow, /references\/capabilities\/contract.md/);
   }
 });
@@ -34,6 +40,7 @@ test('generator detects stale packaged routing and preserves unrelated and upstr
     assert.ok(bundle(repo).length > 0);
     assert.deepEqual(bundle(repo, true), []);
     assert.deepEqual(bundle(repo), []);
+    assert.equal(fs.existsSync(path.join(repo, 'skills/oneezy/oneezy-task-manager/references/capabilities')), false);
     assert.equal(fs.readFileSync(pinned,'utf8'), 'pinned, unchanged');
     const target=path.join(repo,'skills/oneezy/oneezy-brain/references/capabilities/contract.md');
     fs.writeFileSync(target, 'stale GitHub capture');

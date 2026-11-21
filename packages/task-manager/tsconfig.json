@@ -1,0 +1,4 @@
+{
+  "extends": "../skills/skills/oneezy/oneezy-task-manager/tsconfig.json",
+  "include": ["../skills/skills/oneezy/oneezy-task-manager/scripts/**/*.ts", "test/**/*.ts", "vite.config.ts"]
+}

@@ -10,7 +10,9 @@
 
 Windows 11 with PowerShell 7 is the primary host: every script is run there first. Linux is a future target, so nothing in a `package.json` may be Windows-only: `scripts/python.mjs` runs Python (`py -3` on Windows, `python3` elsewhere) and `scripts/syntax-check.ps1` runs under pwsh on either.
 
-Each package keeps its language. `packages/skills-sync` (TypeScript, published as `@oneezy/skills-sync`), `packages/skills-viewer` (TypeScript), `packages/remote-sessions` (Python), `packages/task-manager` (PowerShell + bash), `packages/apps-sync` (PowerShell + Python), `apps/skills-viewer-web` (SvelteKit, deployed to Vercel). A Python or PowerShell package has a minimal `package.json` whose `test` and `check` scripts run what the package already had, so `vp run -r` can run them. Every tool lives in its package; there is no `clis/` folder (the compatibility shims were removed), so shortcuts and docs point into `packages/`.
+Each package keeps its language. `packages/skills-sync` (TypeScript, published as `@oneezy/skills-sync`), `packages/skills-viewer` (TypeScript), `packages/remote-sessions` (Python), `packages/task-manager` (TypeScript, with legacy PowerShell + bash compatibility tools), `packages/apps-sync` (PowerShell + Python), `apps/skills-viewer-web` (SvelteKit, deployed to Vercel). A Python or PowerShell package has a minimal `package.json` whose `test` and `check` scripts run what the package already had, so `vp run -r` can run them. Every tool lives in its package; there is no `clis/` folder (the compatibility shims were removed), so shortcuts and docs point into `packages/`.
+
+Task Manager's authoritative TypeScript lives directly in `packages/skills/skills/oneezy/oneezy-task-manager/scripts`: `main.ts` runs the three modules in `steps/`. Node 24.12+ executes it without a build or generated runtime. `packages/task-manager` owns its tests, type checks and legacy compatibility tools. The installed skill needs Node and GitHub credentials, not this checkout or a package manager. `pnpm task-manager` is the local development command.
 
 ## Agent skills
 
@@ -18,13 +20,13 @@ Skill source lives in the private workspace package `packages/skills`. Edit auth
 
 For local development, prefer the repository's `.agents/skills/<name>` (Codex) or `.claude/skills/<name>` (Claude) entry over a globally installed plugin copy. These are generated links, not source to commit. Authored edits are immediately visible through the links; start a fresh chat if the harness retains an older skill catalog. The watcher reconciles new, removed, and renamed skill folders automatically. Config/lock changes restore pinned dependencies; unchanged content saves do nothing. Changed external plugin installations still require another `pnpm skills:dev`. This command writes repo-scoped Codex skill exclusions; it does not uninstall global plugins or change their tools. Keep local installation work on this command instead of the published machine-wide `sync`.
 
-A cloud session (`CLAUDE_CODE_REMOTE=true`) without the local development installation still gets the skills from account plugins. The existing cloud setup/status command remains:
+Cloud sessions, Claude and Codex alike, have no repo links: they call skills from the installed plugins (`/<plugin>:<skill>` in Claude Code, `$<plugin>:<skill>` in Codex). Claude's cloud setup runs:
 
 ```
 npx --yes @oneezy/skills-sync@latest status
 ```
 
-A message starting with `/<name>` explicitly requests that skill. Resolve it through the harness's local skill picker or installed repo skill root. Skills marked `disable-model-invocation` remain explicit-only. If the current chat has not discovered the repository installation, report that and start a fresh chat; do not silently substitute an external plugin copy.
+A message starting with `/<name>` requests that skill: resolve it to the repo link when this chat lists one, otherwise to the installed plugin's copy. Skills marked `disable-model-invocation` stay explicit-only. When the repo links exist but this chat has not discovered them, say so and suggest a fresh chat; meanwhile load the plugin copy only for Play Agents and Oneezy Agents, and name the copy you loaded.
 
 ### Issue tracker
 

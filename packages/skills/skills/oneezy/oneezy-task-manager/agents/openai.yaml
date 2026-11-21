@@ -1,0 +1,6 @@
+interface:
+  display_name: "Oneezy Task Manager"
+  short_description: "Set up and repair GitHub backlogs, boards and roadmaps"
+  default_prompt: "Use oneezy-task-manager to inspect or manage this repository's GitHub project."
+policy:
+  allow_implicit_invocation: false

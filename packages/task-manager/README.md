@@ -1,5 +1,48 @@
 # task-manager
 
+The portable runtime is authored directly in the
+[`oneezy-task-manager` skill](../skills/skills/oneezy/oneezy-task-manager/SKILL.md).
+Its `scripts/main.ts` runs `steps/backlog.ts`, `steps/board.ts`, and
+`steps/roadmap.ts` sequentially. Three shared files hold GitHub transport,
+project operations/spec and TypeScript types. There is one source copy, no
+transpilation, and no generated JavaScript.
+
+```text
+pnpm task-manager --help
+pnpm task-manager run --repo owner/name --plan
+```
+
+After Skills Sync installs the skill, run it directly:
+
+```text
+node <skill>/scripts/main.ts run --repo owner/name --plan
+```
+
+Node **24.12+** and GitHub credentials are required. With a token and `--repo`,
+there is no dependency on Tools, gh, git, pnpm, npx or another skill. The small
+skill `package.json` declares ES modules; it has no npm dependencies. Node's
+[native TypeScript support](https://nodejs.org/docs/latest-v24.x/api/typescript.html)
+strips types without checking them. It deliberately refuses raw TypeScript inside
+`node_modules`; install this as a skill, not an npm dependency.
+
+This private workspace package owns the tests and development checks:
+
+- `pnpm --filter @oneezy/task-manager test`: type checks and mocked behavior tests,
+  including help and a complete workflow from an isolated skill copy with empty PATH.
+- `pnpm --filter @oneezy/task-manager check`: TypeScript checking with
+  `erasableSyntaxOnly`; nothing is emitted. `build` also checks without emitting.
+- `pnpm --filter @oneezy/task-manager test:legacy`: the retained Bash scenarios.
+
+`--plan` enforces read-only HTTP. Setup/repair still needs GitHub Projects GraphQL
+access; restricted hosts must report that limit. Auto-add, roadmap marker settings
+and repository secrets may need manual setup. The code never retries uncertain
+writes automatically or estimates tickets during setup.
+
+The old PowerShell picker, secrets helper and hosted Bash workflow below are
+retained compatibility tools. Their deployment has not changed.
+
+## Legacy commands and hosted automation
+
 Zero-touch bootstrap and repair of one GitHub project per repo, and the repo's roadmap from a markdown file. Double-click `task-manager.cmd`, check the repos, press enter. Everything a GitHub project needs is created or repaired from the spec in `task-manager.ps1`; the only hand step GitHub leaves is turning on **Auto-add to project**, and the tool opens that page and waits until it sees the switch flipped.
 
 Decisions behind the spec: [Task-manager model](https://github.com/oneezy/tools/issues/7) (fields, statuses, labels, views), [How much of a GitHub Project can be set up by automation?](https://github.com/oneezy/tools/issues/5) (what the API can and cannot do) and [#77](https://github.com/oneezy/tools/issues/77) (phases and milestones, view pruning, the In Progress rules). Glossary in [`GLOSSARY.md`](GLOSSARY.md); ADRs in [`docs/adr/`](docs/adr/).
@@ -46,7 +89,7 @@ Once a repo is bootstrapped, its board moves by itself. The workflow is [`.githu
 
 - **Status moves** (`scripts/status.sh`). Every event but "issue opened" moves the issue's Status: assigned to Next Up; a branch named `<type>/<n>-<slug>` created on GitHub to In Progress, and so does a draft PR for its linked issues; a PR opened ready or marked ready to Review for its linked issues (closing references plus the branch's issue when that number is an issue of this repository; `wayfinder:research` never goes to Review); a PR converted to draft or a changes-requested review back to In Progress; a PR merged into `dev` closes its linked issues (and drops `needs-changes`), then Done; a push to `main` moves every Done item to Complete; reopening or labelling `needs-changes` puts a ticket back In Progress; unassigning the last assignee returns a ticket to Todo. Closed issues are only ever moved to Done or Complete; maps and phases are never moved. "Opened to Todo" is the built-in "Item added", so it is not here.
 - **How work shows up In Progress.** Three ways, all from Todo, Next Up or no Status: a branch named `<type>/<n>-<slug>` appears on GitHub (`gh issue develop <n> --base dev` names it so); a draft PR that references the ticket is opened; or, for work begun without a numbered branch, the agent runs the start line, `REPO=owner/name EVENT=start ISSUE=<n> packages/task-manager/scripts/status.sh` by hand or `gh workflow run task-manager.yml -R owner/name -f start=<n>` through the workflow. Review and Done are never pulled back by any of these. Assigned alone stays Next Up.
-- **Tests.** `pnpm test` runs `scripts/status.test.sh`: every rule above as a `DRY_RUN` scenario against a fake `gh` that answers from fixtures and refuses writes, so nothing reaches GitHub. Add a scenario before changing a rule.
+- **Legacy tests.** `pnpm --filter @oneezy/task-manager test:legacy` runs `scripts/status.test.sh`: every rule above as a `DRY_RUN` scenario against a fake `gh` that answers from fixtures and refuses writes, so nothing reaches GitHub. Add a scenario before changing a rule.
 - **Estimate agent.** "Issue opened" waits two minutes in a cancel-in-progress concurrency group per repo, so a burst of new issues collapses into one run, then runs `/oneezy-estimate` (checked out from the skills library's `skills/oneezy/oneezy-estimate` on main) under Claude Code with the subscription token; `gh` inside it holds `PROJECT_PAT`. The skill's `set.sh` enforces every write rule (Estimate write-once, Priority only in Todo and Next Up, one type label), so the agent decides and the script refuses.
 - **Backfill.** `workflow_dispatch` with `backfill=true` recomputes the whole board from git facts (closed: Done; open and assigned: Next Up from Todo or nothing; open and unassigned with no Status: Todo; everything else kept) and adds open issues missing from the board. `estimate=true` runs the estimate agent by hand; `start=<n>` is the start line above. The tool dispatches a backfill at the end of every bootstrap.
 
