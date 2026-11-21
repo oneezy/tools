@@ -5,7 +5,7 @@ description: Author a new @layerd/ui component in packages/ui, from the folder t
 
 Steps first; the rules behind them stay in their homes and are not repeated
 here. Before step 1 read `packages/ui/AGENTS.md` (conventions) and skim
-`packages/ui/CONTEXT.md` (vocabulary: tiers under "Organization", rails,
+`packages/ui/GLOSSARY.md` (vocabulary: tiers under "Organization", rails,
 base props). The model to copy is
 `packages/ui/src/lib/components/atoms/example/example.svelte`; the base
 component's API is `packages/ui/src/lib/base/component.svelte.ts`
