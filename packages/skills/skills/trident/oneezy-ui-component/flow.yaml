@@ -32,7 +32,7 @@ agents:
   max: 0
 steps:
   - id: read-rules
-    does: read packages/ui/AGENTS.md and skim packages/ui/CONTEXT.md (tiers, rails, base props); the model to copy is the example atom, and the base component's API is component.svelte.ts and component.svelte
+    does: read packages/ui/AGENTS.md and skim packages/ui/GLOSSARY.md (tiers, rails, base props); the model to copy is the example atom, and the base component's API is component.svelte.ts and component.svelte
     outcome:
       done: the rules read
   - id: place

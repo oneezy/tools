@@ -1,6 +1,6 @@
 {
   "name": "@oneezy/skills",
-  "version": "0.50.3",
+  "version": "0.50.5",
   "private": true,
   "type": "module",
   "description": "Authored skills and locked third-party sources for the tools monorepo.",
