@@ -31,6 +31,8 @@ const untouched = [
   "packages/task-manager/caller.yml",
   // SvelteKit's page shell, %sveltekit.*% placeholders and all
   "apps/skills-viewer-web/src/app.html",
+  // an editor's own settings on one PC: a global gitignore hides them from git, not from the formatter
+  ".vscode/**",
 ];
 
 export default defineConfig({
