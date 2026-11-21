@@ -1,0 +1,29 @@
+skill: oneezy-task-manager
+purpose: Manage a repository's GitHub backlog, board and roadmap with one bundled TypeScript entry.
+runtime: [Node 24.12+, GitHub credentials]
+refs:
+  - token: scripts/main.ts
+    kind: file
+    id: skills/oneezy/oneezy-task-manager/scripts/main.ts
+    need: required
+    when: run
+  - token: references/runtime.md
+    kind: file
+    id: skills/oneezy/oneezy-task-manager/references/runtime.md
+    need: conditional
+    when: event automation or troubleshooting
+unresolved: []
+agents:
+  max: 0
+steps:
+  - id: run
+    does: Verify the target repository and run the bundled main.ts; it awaits backlog, board and roadmap in order, then import, backfill and automation. Use plan for previews.
+    needs: [scripts/main.ts]
+    outcome:
+      done: The command reports its result and remaining manual settings.
+      fail: Report completed steps and the failure; do not bypass API restrictions or retry uncertain writes.
+  - id: report
+    after: run
+    does: Report changes, remaining settings and caller PR status.
+    outcome:
+      done: The user knows what completed and what remains.

@@ -170,6 +170,9 @@ importers:
 
   .:
     devDependencies:
+      '@types/node':
+        specifier: ^24.0.0
+        version: 24.19.0
       vite-plus:
         specifier: 1.0.0
         version: 1.0.0(@types/node@24.19.0)(@vitest/ui@5.0.1)(svelte@5.57.1)(typescript@6.0.3)(yaml@2.9.1)
@@ -262,7 +265,17 @@ importers:
         specifier: 1.0.0
         version: 1.0.0(@types/node@24.19.0)(@vitest/ui@5.0.1)(svelte@5.57.1)(typescript@5.9.3)(yaml@2.9.1)
 
-  packages/task-manager: {}
+  packages/task-manager:
+    devDependencies:
+      '@types/node':
+        specifier: ^24.0.0
+        version: 24.19.0
+      typescript:
+        specifier: ^5.9.0
+        version: 5.9.3
+      vite-plus:
+        specifier: 1.0.0
+        version: 1.0.0(@types/node@24.19.0)(@vitest/ui@5.0.1)(svelte@5.57.1)(typescript@5.9.3)(yaml@2.9.1)
 
 packages:
 

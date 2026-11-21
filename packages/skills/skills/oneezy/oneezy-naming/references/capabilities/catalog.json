@@ -8,6 +8,12 @@
     "codex": "current CLI help 0.161.0 plus official docs; no desktop execution"
   },
   "skills": {
+    "oneezy-task-manager": {
+      "path": "skills/oneezy/oneezy-task-manager",
+      "invocation": "explicit-only",
+      "capabilityReferences": false,
+      "dependencies": []
+    },
     "oneezy-agents": {
       "path": "skills/oneezy/oneezy-agents",
       "invocation": "follow installed host policy",

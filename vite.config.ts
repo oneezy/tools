@@ -18,6 +18,13 @@ const untouched = [
   "packages/skills-sync/test/fixtures/**",
   // Imported skill content keeps its formatting and its own Node behavior tests.
   "packages/skills/**",
+  // Task Manager's authored TypeScript runs directly from its portable skill.
+  "!packages/skills/skills",
+  "!packages/skills/skills/oneezy",
+  "!packages/skills/skills/oneezy/oneezy-task-manager",
+  "!packages/skills/skills/oneezy/oneezy-task-manager/scripts",
+  "!packages/skills/skills/oneezy/oneezy-task-manager/scripts/steps",
+  "!packages/skills/skills/oneezy/oneezy-task-manager/scripts/**/*.ts",
   "pnpm-lock.yaml",
   // workflow files change only through a person's merge (automerge skips .github/); caller.yml is their template
   ".github/**",
