@@ -11,7 +11,9 @@ export function bundle(repo = root, write = false) {
   for (const [name, entry] of Object.entries(catalog.skills)) {
     const skill = path.join(repo, entry.path);
     if (!fs.existsSync(path.join(skill, "SKILL.md"))) { errors.push(`${name}: missing source skill`); continue; }
-    for (const file of files) {
+    // A self-contained script skill has no connector/skill routing to bundle.
+    if (entry.capabilityReferences === false && entry.dependencies.length) errors.push(`${name}: standalone scripts cannot declare routed dependencies`);
+    for (const file of entry.capabilityReferences === false ? [] : files) {
       const target = path.join(skill, "references/capabilities", file);
       const bytes = fs.readFileSync(path.join(source, file));
       if (write) { fs.mkdirSync(path.dirname(target), { recursive: true }); fs.writeFileSync(target, bytes); }
