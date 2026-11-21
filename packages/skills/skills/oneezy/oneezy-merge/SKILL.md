@@ -11,7 +11,7 @@ An explicit invocation authorizes committing and pushing this session’s files 
 - A named branch other than `main`: land only into that target when checks are green.
 - Release/both/dev and main: land into dev, then promote main in every ready repo of the release scope (the repos this session landed, else every checkout in the working area); an already-landed branch only needs promotion.
 - Release all: list every repo Justin owns with what it would promote, and promote only after his yes.
-- `main` takes only promotions from `dev`, merged as a merge commit through a PR.
+- `main` takes only promotions from `dev`, merged as a merge commit through a PR; `dev` then fast-forwards to that merge commit through `scripts/fast-forward-dev.mjs`, or the report says why it was skipped.
 
 Before calling a dependency, read `references/capabilities/contract.md`, then the adapter for this host. Load its actual instructions and discover its tools; a name or mention does not execute it.
 

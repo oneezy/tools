@@ -9,7 +9,8 @@
     "restore": "skills-sync refresh --frozen --repo .",
     "build": "skills-sync refresh --frozen --repo . && vp run package-plugins",
     "develop": "skills-sync develop --repo . --root ../..",
-    "test": "node --test tests/*.test.mjs scripts/oneezy-capabilities.test.mjs",
+    "develop:build": "skills-sync refresh --frozen --repo . && skills-sync develop build --repo .",
+    "develop:watch": "skills-sync refresh --frozen --repo . && skills-sync develop watch --repo .",
     "check": "node scripts/oneezy-capabilities.mjs"
   },
   "devDependencies": {

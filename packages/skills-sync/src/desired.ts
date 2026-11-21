@@ -78,6 +78,16 @@ export function sameCatalog(name: string, catalog: string): boolean {
 }
 
 /**
+ * The name of the development marketplace a Harness adapter of `develop setup` registers beside the release catalog
+ * (develop-claude-code.ts, develop-codex.ts): its Plugins keep their normal names and are on only in the projects set
+ * up for development, so sync leaves them installed and never reads them as duplicates (tools#215). Null for a harness
+ * without such an adapter.
+ */
+export function developmentMarketplaceOf(catalog: string, harnessId: string): string | null {
+  return harnessId === "claude-code" ? `${catalog}-development` : harnessId === "codex" ? `${catalog}-dev` : null;
+}
+
+/**
  * The catalog name the library's plugins come from on Claude Code and Codex: the release's config names it, else the
  * release repo's <owner>-<name>; the constant only when no release was read at all.
  */

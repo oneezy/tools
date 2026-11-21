@@ -1,6 +1,6 @@
 # Skills import: workflow and release audit
 
-2026-10-17. Initial read-only inventory; not a completed migration or proof of end-to-end release behavior.
+2026-10-17. Initial read-only inventory; not a completed migration or proof of end-to-end release behavior. Superseded by the classified inventory in `packages/skills/docs/agents/imported-automation.md` (oneezy/tools#216); this record stays as written.
 
 ## Findings
 

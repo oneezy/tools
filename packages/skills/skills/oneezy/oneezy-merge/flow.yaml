@@ -1,6 +1,6 @@
 skill: oneezy-merge
 purpose: Land the current branch and end with one status report.
-runtime: [git, gh, GitHub check runs, commit statuses]
+runtime: [git, gh, node, GitHub check runs, commit statuses]
 refs:
   - token: /oneezy-status
     kind: skill
@@ -12,6 +12,11 @@ refs:
     id: skills/oneezy/oneezy-merge/references/modes.md
     need: conditional
     when: the named operation/reference branch in SKILL.md
+  - token: scripts/fast-forward-dev.mjs
+    kind: file
+    id: skills/oneezy/oneezy-merge/scripts/fast-forward-dev.mjs
+    need: conditional
+    when: release and release all, after main's checks on the promotion finish
   - token: references/capabilities/contract.md
     kind: file
     id: skills/oneezy/oneezy-merge/references/capabilities/contract.md
@@ -83,11 +88,11 @@ steps:
   - id: promote
     after: [mode, land]
     if: mode is release or release all
-    does: plan one line per repo in the release scope (ready when dev holds commits main lacks and dev's checks are green; else skipped with the reason); release all waits for Justin's yes before any write; then per ready repo open a release PR dev → main, merge it with a merge commit, verify origin/main contains it, fast-forward the local main ref, verify origin/dev is an ancestor of origin/main with an identical tree, and wait for the checks on main's new head (a release or publish job among them) as in wait-checks
-    needs: [git, gh]
+    does: plan one line per repo in the release scope (ready when dev holds commits main lacks and dev's checks are green; else skipped with the reason); release all waits for Justin's yes before any write; then per ready repo open a release PR dev → main, merge it with a merge commit, verify origin/main contains it, fast-forward the local main ref, verify origin/dev is an ancestor of origin/main with an identical tree, and wait for the checks on main's new head (a release or publish job among them) as in wait-checks; once they finish, green or red, run scripts/fast-forward-dev.mjs with the promoted dev SHA, the merge commit's SHA and the verdict, which fast-forwards origin/dev to that merge commit only while origin/dev is still the promoted SHA, the trees match and the checks are green, and otherwise leaves dev alone and says why
+    needs: [git, gh, node]
     outcome:
-      done: every ready repo's origin/main contains its origin/dev, the trees are identical, main's checks are green (a merge-commit promotion never makes the two commits equal)
-      fail: release all without a yes, promotion refused, containment or tree differs, or main's checks red → one line, stop
+      done: every ready repo's origin/main contains its origin/dev, the trees are identical, main's checks are green, and dev is fast-forwarded to the promotion commit (dev and main then point at the same commit) or skipped with the script's reason
+      fail: release all without a yes, promotion refused, or containment or tree differs → one line, stop; main's checks red → the script skips dev with that reason, one line, stop
   - id: report
     after: [wait-checks, land, promote]
     calls:

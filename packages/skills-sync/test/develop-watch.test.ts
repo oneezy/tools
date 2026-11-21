@@ -2,7 +2,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, expect, test } from "vite-plus/test";
-import { watchDevelopment } from "../src/develop-watch.js";
+import { BuildInputs, watchDevelopment } from "../src/develop-watch.js";
 import { develop } from "../src/develop.js";
 import { Library } from "../src/library.js";
 
@@ -88,4 +88,28 @@ test("watcher skips no-op saves and generated files, reconciles additions/rename
   await until(() => restores === 1);
   expect(reconciles).toBe(4);
   expect(errors).toEqual([]);
+});
+
+test("an edit inside a skill's own dist, node_modules or __pycache__ is a build input: packaging copies those folders", () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "skills-inputs-"));
+  cleanup.push(() => fs.rmSync(root, { recursive: true, force: true }));
+  const skill = path.join(root, "skills", "play", "hi");
+  for (const dir of ["dist", "node_modules", "__pycache__"]) {
+    fs.mkdirSync(path.join(skill, dir), { recursive: true });
+    fs.writeFileSync(path.join(skill, dir, "data.txt"), "one");
+  }
+  fs.writeFileSync(path.join(skill, "SKILL.md"), "---\nname: hi\ndescription: greeting\n---\nHi\n");
+  // the Library's own dist (the Development builds) stays out
+  fs.mkdirSync(path.join(root, "dist"), { recursive: true });
+  const inputs = new BuildInputs(root);
+  let last = inputs.digest();
+
+  fs.writeFileSync(path.join(root, "dist", "status.json"), "{}");
+  expect(inputs.digest()).toBe(last);
+  for (const dir of ["dist", "node_modules", "__pycache__"]) {
+    fs.writeFileSync(path.join(skill, dir, "data.txt"), "two, longer");
+    const next = inputs.digest();
+    expect(next, dir).not.toBe(last);
+    last = next;
+  }
 });

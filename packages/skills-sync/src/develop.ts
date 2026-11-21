@@ -5,9 +5,19 @@ import { hasLinkedParent, isDir, isLink, lexists, linkTarget, real, samePath, to
 import { Library } from "./library.js";
 import { apply, Report } from "./plan.js";
 import { readConfig } from "./sources.js";
+import {
+  PLUGINS_END,
+  PLUGINS_START,
+  SKILLS_DEV_END,
+  SKILLS_DEV_START,
+  blockIn,
+  pluginSwitches,
+  withoutBlock,
+} from "./codex-toml.js";
+import { developmentMarketplace } from "./develop-codex.js";
 
-const START = "# skills-sync:development:start";
-const END = "# skills-sync:development:end";
+const START = SKILLS_DEV_START;
+const END = SKILLS_DEV_END;
 interface Receipt {
   version: 1;
   library: string;
@@ -33,19 +43,27 @@ export function externalSkills(roots: string[], workspace: string): string[] {
   return [...files].sort();
 }
 
-/** Refuse an existing project skill policy rather than overwriting it. */
+/**
+ * Refuse an existing project skill policy rather than overwriting it. develop setup's block (a Development project's,
+ * develop-codex.ts) is skills-sync's too: it stays as it is, and the plugins it switches are left out of this block, so
+ * no key is set twice.
+ */
 export function developmentConfig(before: string, disabled: string[], plugins: string[] = []): string {
   const start = before.indexOf(START);
   const end = before.indexOf(END);
   if (start < 0 !== end < 0 || (start >= 0 && end < start)) throw new Error("Incomplete development config markers");
   const rest = start < 0 ? before : before.slice(0, start) + before.slice(end + END.length).replace(/^\r?\n/, "");
   if (rest.includes(START) || rest.includes(END)) throw new Error("Duplicate development config markers");
-  const rootSettings = rest.split(/^\s*\[/m)[0];
-  if (/^\s*\[\[?\s*["']?skills(?:["']|\.|\s|\])/m.test(rest) || /^\s*["']?skills["']?\s*[.=]/m.test(rootSettings))
+  const setup = blockIn(rest, PLUGINS_START, PLUGINS_END);
+  const theirs = setup ? pluginSwitches(setup) : new Map();
+  plugins = plugins.filter((id) => !theirs.has(id));
+  const scan = withoutBlock(rest, PLUGINS_START, PLUGINS_END);
+  const rootSettings = scan.split(/^\s*\[/m)[0];
+  if (/^\s*\[\[?\s*["']?skills(?:["']|\.|\s|\])/m.test(scan) || /^\s*["']?skills["']?\s*[.=]/m.test(rootSettings))
     throw new Error("Existing project skills configuration needs an explicit merge; left untouched");
   if (
     plugins.length &&
-    (/^\s*\[\[?\s*["']?plugins(?:["']|\.|\s|\])/m.test(rest) || /^\s*["']?plugins["']?\s*[.=]/m.test(rootSettings))
+    (/^\s*\[\[?\s*["']?plugins(?:["']|\.|\s|\])/m.test(scan) || /^\s*["']?plugins["']?\s*[.=]/m.test(rootSettings))
   )
     throw new Error("Existing project plugins configuration needs an explicit merge; left untouched");
   const entries = disabled.map((file) => `  { path = ${JSON.stringify(file.replace(/\\/g, "/"))}, enabled = false },`);
@@ -135,16 +153,22 @@ export function develop(
   const codexHome = options.codexHome ?? process.env.CODEX_HOME ?? path.join(home, ".codex");
   const cache = path.join(codexHome, "plugins", "cache");
   const pluginIds = Object.keys(readConfig(lib.configFile).plugins);
+  // the Library's development marketplace is develop setup's to switch, per Development project (develop-codex.ts)
+  const dev = developmentMarketplace(lib);
+  const markets = isDir(cache) ? fs.readdirSync(cache).filter((marketplace) => marketplace !== dev) : [];
   const plugins = isDir(cache)
-    ? fs
-        .readdirSync(cache)
+    ? markets
         .flatMap((marketplace) =>
           pluginIds.filter((id) => isDir(path.join(cache, marketplace, id))).map((id) => `${id}@${marketplace}`),
         )
         .sort()
     : [];
   const disabled = externalSkills(
-    [path.join(home, ".agents", "skills"), path.join(codexHome, "skills"), path.join(codexHome, "plugins", "cache")],
+    [
+      path.join(home, ".agents", "skills"),
+      path.join(codexHome, "skills"),
+      ...markets.map((mk) => path.join(cache, mk)),
+    ],
     workspace,
   );
   const write = (file: string, content: string) => {

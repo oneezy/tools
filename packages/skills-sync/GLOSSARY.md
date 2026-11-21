@@ -16,8 +16,24 @@ A project explicitly opted in to using the Library's development Plugins instead
 **Development build**:
 Generated Plugins made from the current working Library for local testing. The last successful Development build remains available when a later build fails.
 
+**Development watcher**:
+The one process per Library that rebuilds the Development builds its Development projects select as the source changes (`develop watch`). The terminal that starts it owns it and stops it by closing. A later launch names the owner and starts nothing (ADR-0005).
+_Avoid_: daemon, service, the loose-skill watcher (`develop --watch`, which only keeps links in step)
+
+**Source alias**:
+The link `.agents/skills-library` in a Development project, to the Library root, through which the project edits the one source. Never a copy.
+_Avoid_: mirror, checkout
+
+**Project record**:
+`.agents/skills-sync-project.json` in a Development project: its Library, its selected Plugins, and what setup made and replaced, so that remove takes back exactly that.
+_Avoid_: receipt (the loose-skill `develop` keeps one), settings
+
 **Project plugin**:
 A Plugin installed for one project. In a local Development project, it takes precedence over its matching marketplace copy; unrelated external Plugins remain available.
+
+**Development marketplace**:
+The marketplace of the Library's Development builds, read from `dist/development`: on Codex `<release marketplace>-dev` (`oneezy-skills-dev`), switched off for every project and on in each Development project's `.codex/config.toml` (`docs/adr/0007`); on Claude Code `<release marketplace>-development`, declared and installed per project (`docs/adr/0006`). Sync and the release build never touch it (`docs/adr/0008`).
+_Avoid_: dev catalog (the Catalog is its file)
 
 **Own skill**:
 A skill written in the Library itself, flat or inside a Group.
