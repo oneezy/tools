@@ -1,6 +1,6 @@
 # Releases
 
-Every commit on `main` that changes a package is a release, cut by the `release` job in `.github/workflows/library.yml` after `check` passes on that commit (oneezy/skills#48). Nobody tags or uploads by hand.
+The library is edited in oneezy/tools `packages/skills` and released from oneezy/skills, its generated mirror (ADR-0021). Every commit on the mirror's `main` that changes a package is a release, cut by the `release` job in its `.github/workflows/library.yml` after `check` passes on that commit (oneezy/skills#48). Nobody tags or uploads by hand.
 
 ## What a release is
 
@@ -15,11 +15,11 @@ An authored plugin with changed files under the same version, or a lower semanti
 
 ## How a change gets there
 
-1. Edit an own skill under `skills/<plugin>/<skill>/`, or add a library with `npx @oneezy/skills-sync add owner/repo` (it declares the source and its plugin).
-2. For authored changes, set `library.version` to the planned semantic release version, run `node scripts/oneezy-capabilities.mjs --write`, then `npx @oneezy/skills-sync build` and `check`. Any change under `skills/oneezy/`, `skills/play/` or `skills/trident/` (or to the generator output) changes a package, and the release refuses a package whose files changed at an unchanged version: before pushing, compare `skills-sync.json` `library.version` with the version in the latest release's `release.json` (`gh api repos/oneezy/skills/releases/latest`, its `release.json` asset) and, when they are equal, bump one patch (a `📝 docs` title does not bump by itself). Commit on a branch, PR to `dev`.
-3. `/oneezy-merge release` lands it in `dev` on green checks and promotes `dev` to `main` with a merge commit. The push to `main` runs `check`, then `release`.
+1. In oneezy/tools, on a branch cut from `dev`: edit an own skill under `packages/skills/skills/<plugin>/<skill>/`, or add a library with `npx @oneezy/skills-sync add owner/repo --repo packages/skills` (it declares the source and its plugin).
+2. For authored changes, set `library.version` to the planned semantic release version, run `node scripts/oneezy-capabilities.mjs --write`, then `npx @oneezy/skills-sync build` and `check`. Any change under `skills/oneezy/`, `skills/play/` or `skills/trident/` (or to the generator output) changes a package, and the release refuses a package whose files changed at an unchanged version: before pushing, compare `skills-sync.json` `library.version` with the version in the latest release's `release.json` (`gh api repos/oneezy/skills/releases/latest`, its `release.json` asset) and, when they are equal, bump one patch (a `📝 docs` title does not bump by itself). Open a ready pull request into tools `dev`; automerge lands it on green checks.
+3. Justin's `/oneezy-merge release` promotes tools `dev` to `main`, then runs `node packages/skills/scripts/publish-mirror.mjs --push` from tools `main`. That pushes `land/mirror-<sha>` to oneezy/skills, whose `land.yml` squashes it into its `dev`, promotes its `main` and starts the release. A hand edit in oneezy/skills is overwritten by the next mirror run; its `.github/` is the one part the mirror leaves alone.
 
-Or skip the PR: push a branch named `land/<topic>` and `.github/workflows/land.yml` checks it, squashes it into `dev`, promotes `main` and starts the release, with no review (Justin's call, #48). A branch that changes `.github/` is refused. Asking any agent to add a library or a skill, update, upgrade or downgrade a source, or add, remove or promote a playground skill (`/oneezy-skills`) does exactly this, takes the new release on that machine (a plain sync) and runs `/oneezy-migrate`.
+Asking any agent to add a library or a skill, update, upgrade or downgrade a source, or add, remove or promote a playground skill (`/oneezy-skills`) opens that pull request; the release follows the next `/oneezy-merge release`.
 
 ## Consuming a release
 

@@ -60,6 +60,6 @@ steps:
       done: copy line printed
   - id: change-rule
     if: Justin asks to change a rule
-    does: give him the new wording; on his yes, edit references/AGENTS-GLOBAL.md in place and land it on a land/* branch with a patch bump, so it ships in the next release
+    does: give him the new wording; on his yes, edit references/AGENTS-GLOBAL.md in place and open a ready pull request into oneezy/tools dev with a patch bump, so it ships in the next release
     outcome:
-      done: wording given, or the land/* branch pushed after his yes
+      done: wording given, or the pull request opened after his yes

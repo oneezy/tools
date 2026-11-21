@@ -10,15 +10,14 @@ A downgrade undoes notes: apply them in reverse only when Justin asked for the d
 ## Do
 
 1. **Extract the notes.** From the changelog text keep only what asks something of a consumer: sections or entries saying breaking, migration, rename, removed, "if you have an existing …", or a file or folder convention the skills read or write. Ignore entries that only change a skill's own wording. No such note: report `no migration notes for <source> <from> → <to>; nothing changed` and stop.
-2. **Match a recipe.** `../MIGRATIONS.md` in the skill folder holds every migration already worked out, keyed by source and version. A note with no recipe: write one there in the same shape (what to find, what to change, what to leave alone), then use it; it lands with the skills repo's change.
+2. **Match a recipe.** `../MIGRATIONS.md` in the skill folder holds every migration already worked out, keyed by source and version. A note with no recipe: write one there in the same shape (what to find, what to change, what to leave alone), then use it; it lands with the oneezy/tools change.
 3. **Check each repo.** For every repo in the table below, look for the recipe's old convention (its `find`). Work in a fresh clone of the repo's base branch in a temporary folder, never in a checkout someone is working in. A repo where nothing matches is `no change`.
 4. **Change and land.** In each repo that matches, apply the recipe on one branch, run the repo's own fast checks (its AGENTS.md names them), commit with a conventional subject naming the source and version (`docs: GLOSSARY.md replaces CONTEXT.md (matt-pocock 1.3.0)`), and land it the repo's way:
 
 | Repo | Base | Lands by |
 |---|---|---|
-| `oneezy/skills` | `dev` | push `land/migrate-<slug>`; `.github/workflows/land.yml` squashes it into `dev`, promotes `main` and releases (run `npx --yes @oneezy/skills-sync@latest refresh --frozen --repo .`, then `build --repo .` and `check --repo .` first) |
 | `oneezy/brain` | `dev` | a ready pull request; its automerge workflow merges it on green |
-| `oneezy/tools` | `dev` | a ready pull request; its automerge workflow merges it on green |
+| `oneezy/tools` | `dev` | a ready pull request; its automerge workflow merges it on green. Skills live in `packages/skills`; for a skill change, bump `library.version` and run `pnpm --filter @oneezy/skills check` first |
 | `oneezy/ai-workflow` | `main` | a ready pull request; its automerge workflow merges it on green |
 | `layerdbiz/tridentcubed` | its AGENTS.md says | a ready pull request to that base |
 

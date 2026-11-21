@@ -1,10 +1,10 @@
 # How Justin works
 
-Every repo, every session, every harness. Justin's Oneezy skills own the detail: when the work reaches one, load it. A repo's own AGENTS.md adds to these rules and wins where they disagree. `/oneezy-agents` loads this file from the installed oneezy plugin. Justin edits it in place, `skills/oneezy/oneezy-agents/references/AGENTS-GLOBAL.md` in oneezy/skills; a change reaches sessions with the next plugin release.
+Every repo, every session, every harness. Justin's Oneezy skills own the detail: when the work reaches one, load it. A repo's own AGENTS.md adds to these rules and wins where they disagree. `/oneezy-agents` loads this file from the installed oneezy plugin. Justin edits it in place, `packages/skills/skills/oneezy/oneezy-agents/references/AGENTS-GLOBAL.md` in oneezy/tools; a change reaches sessions with the next plugin release.
 
 ## Skills
 
-Skills come from the library oneezy/skills, installed into each harness in one form. Call one the way the harness you are in resolves it:
+Skills are authored in oneezy/tools `packages/skills` and released through oneezy/skills, a generated mirror nobody edits; each harness installs them in one form. Call one the way the harness you are in resolves it:
 
 | Harness | How to call a skill |
 | --- | --- |
@@ -20,9 +20,9 @@ Skills come from the library oneezy/skills, installed into each harness in one f
 
 ## Git
 
-- **Landing, merging, promoting `main`**: `/oneezy-merge`, when Justin asks ("oneezy merge to dev", "release", "dev and main"). `main` changes only through `/oneezy-merge` or a repo's own documented landing workflow (oneezy/skills: `land/*` branches).
+- **Landing, merging, promoting `main`**: `/oneezy-merge`, when Justin asks ("oneezy merge to dev", "release", "dev and main"). `main` changes only through `/oneezy-merge` or a repo's own documented landing workflow (the oneezy/skills mirror: `land/*` branches).
 - **`dev`** is the integration branch. Cut new branches and worktrees from an up-to-date `dev`; inside an autopilot run, from the autopilot branch; in a repo with no `dev`, from the default branch.
-- **Propose** every git write (commit, push, merge, rebase, reset, branch or tag change, any `--force`) and wait for Justin's yes in this session. Read-only git needs no proposal. A skill Justin runs carries the git permissions its `SKILL.md` states; an autopilot grant covers its run.
+- **Git writes by reach**: Justin's ask for the work covers its work branch and its landing in `dev`: commit, push, and open a ready pull request into `dev`, which lands once checks are green. Open it as a draft when he asked to see the work first. `main` and any `--force` wait for his typed yes in this session; branch and tag deletions follow **Branch deletion**. Read-only git runs freely. A skill Justin runs carries the git permissions its `SKILL.md` states; an autopilot grant covers its run.
 - **Branch deletion**: ask Justin every time, unless he already said yes: `/oneezy-merge into <branch>` deletes the branch it landed, an autopilot grant deletes landed ticket branches, and the daily cleanup workflow (ADR-0013) deletes merged ones. `main`, `dev`, `*-keep`, `research/*` and `prototype/*` branches are kept forever.
 - **Stash** only with a message (`git stash push -m "<why>"`), or make a WIP commit.
 - **Preview URLs**: after a push, give Justin the preview URLs it produced.
@@ -32,11 +32,18 @@ Skills come from the library oneezy/skills, installed into each harness in one f
 - An **autopilot run** builds one spec's tickets with no human in the loop, on an **autopilot branch** `feature/<spec>-<desc>` cut from `dev`. Ticket branches are cut from it and land back in it. It reaches `dev` only through Justin's own `/oneezy-merge into dev`.
 - An **autopilot grant** in the run's starting prompt, naming its autopilot branch, counts as Justin's ask for every agent in the run. Each may run `/implement` and `/oneezy-merge into <autopilot branch>` from the loaded plugin, commit, push, open pull requests, close the landed ticket and delete its ticket branch. Changes outside the repo wait until the autopilot branch lands in `dev`.
 
-## Names and worktrees
+## Names
 
 - **Titles and names** of issues, branches, commits, pull requests, releases, chats and worktrees: `/oneezy-naming`.
 - **Remote threads**: Justin runs `/oneezy-remote`.
-- **New worktree**: create it with the `workspace` command of oneezy/tools `packages/remote-sessions/remote_sessions.py` (preview with `--plan --json`), or with the harness's own worktree tool when that is absent.
+
+## Where work runs
+
+- **Cloud** by default: one thread and one pull request per piece of work, several at once.
+- **Look-and-feel rounds** run on Justin's PC: one feature branch off `dev`, a commit after each change so he sees it on his local server in seconds. A round starts with a line he types naming the branch, because the desktop app's push guard needs his own words.
+- **One writer on the PC**: an ask that would touch open local work goes to Justin first.
+
+Why: speed test 2026-11-21, `docs/research/2026-11-21-where-work-runs.md` in oneezy/tools.
 
 ## Work
 

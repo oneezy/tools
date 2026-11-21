@@ -1,6 +1,6 @@
 # ADR-0019: Justin's rules live only in the oneezy-agents skill, as references/AGENTS-GLOBAL.md
 
-Date: 2026-10-13. Status: accepted. Supersedes decision 3 of ADR-0017 (one source, outside every package) and decision 4 of ADR-0018 (the source stays outside the skill and is copied in).
+Date: 2026-10-13. Status: accepted; the file now lives in oneezy/tools `packages/skills` and decision 2 lands through a tools pull request (ADR-0021). Supersedes decision 3 of ADR-0017 (one source, outside every package) and decision 4 of ADR-0018 (the source stays outside the skill and is copied in).
 
 ## Context
 

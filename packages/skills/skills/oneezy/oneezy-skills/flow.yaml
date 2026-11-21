@@ -27,16 +27,6 @@ refs:
     id: skills-sync.json
     need: conditional
     when: change (a hold is written or cleared), add of a declared source, promote (the plugin description), a skill reported gone upstream
-  - token: .github/workflows/land.yml
-    kind: file
-    id: .github/workflows/land.yml
-    need: conditional
-    when: normal explicitly requested upstream/add/playground change; held for review/no-publication scope
-  - token: .github/workflows/run.yml
-    kind: file
-    id: .github/workflows/run.yml
-    need: conditional
-    when: update, add or versions from a session that cannot clone or push oneezy/skills (a cloud thread); the library's daily upstream check
   - token: docs/agents/references.md
     kind: file
     id: docs/agents/references.md
@@ -146,7 +136,7 @@ agents:
 steps:
   - id: map-request
     does: match Justin's words to a plain run of the script (none for sync, my skills are missing or nothing; status; unlink; branches; --plan), or to change (update, upgrade, downgrade, all or one source, --to a version, previous
-      or latest; versions <source> in a checkout, or dispatch-run from a cloud thread), add (owner/repo or a link to one skill) or playground (copy, create, remove, promote); or route source
+      or latest; versions <source> in a clone of oneezy/tools), add (owner/repo or a link to one skill) or playground (copy, create, remove, promote); or route source
       development/global block or explicit creator/management action by current host
     outcome:
       done: arguments chosen, or change, add or playground
@@ -161,14 +151,14 @@ steps:
   - id: clone
     after: map-request
     if: change, add or playground
-    does: inspect existing rollout and dirty work; use isolated dev/review checkout for source development, or land/<topic>
-        only for a normal change in authorized publication scope; then run refresh --frozen --repo . before any build
+    does: inspect existing rollout and dirty work; clone oneezy/tools at dev into a temporary folder on a work branch,
+        held as a review branch outside authorized publication scope; in packages/skills run refresh --frozen --repo . before any build
         so uncommitted third-party snapshots exist without moving pins
     needs:
     - git
     - npx
     outcome:
-        done: an isolated checkout on the appropriate review or authorized land branch with its frozen snapshots
+        done: an isolated oneezy/tools checkout on its work branch with its frozen snapshots
   - id: change-sources
     after: clone
     if: change
@@ -200,16 +190,6 @@ steps:
     needs: [git]
     outcome:
       done: the skill folder written, removed or moved
-  - id: dispatch-run
-    after: map-request
-    if: update, add, remove or versions from a session that cannot clone or push oneezy/skills (a cloud thread)
-    does: dispatch the library's run workflow over gh api REST with the command and its arguments as one string, then
-      watch the run; a changed update, add or remove pushes land/<command>-<args>-<run id>, versions only prints in the log
-    needs:
-    - gh
-    outcome:
-      done: the run completed; its land branch, or that nothing changed, known
-      fail: the run is red → its failing step, stop (nothing pushed)
   - id: build-check
     after:
     - change-sources
@@ -224,21 +204,20 @@ steps:
       done: check exits 0
       fail: nothing changed in the clone → report there is nothing to land, stop
   - id: land-release
-    after: [build-check, dispatch-run]
-    does: commit and push land/<topic> (after dispatch-run, the branch the run pushed); the land workflow checks it,
-      squashes it into dev, promotes main and starts the release, so the session merges nothing; watch its run and the
-      release run over gh api REST
+    after: build-check
+    does: commit, push and open a ready pull request into oneezy/tools dev; automerge lands it on green checks, so the
+      session merges nothing; watch it over gh api REST. The release follows Justin's next /oneezy-merge release in
+      oneezy/tools, which publishes release-<n> through the oneezy/skills mirror
     needs:
     - git
     - gh
     outcome:
-      done: releases/latest is a new release-<n>
-      fail: the land run is red → its failing step, stop (nothing landed); push refused for lack of access to oneezy/skills
-        → one line naming a session that has it, stop
+      done: the pull request merged into dev; the release line handed to Justin in a code block
+      fail: a check is red → its failing step, stop (nothing landed)
     if: normal change whose scope authorizes landing/release; skip for review/no-publication/source handoff
   - id: link-new
     after: land-release
-    does: run the script with no arguments, so this machine takes the new release now, then delete the temporary folder
+    does: once releases/latest of oneezy/skills is the new release-<n>, run the script with no arguments, so this machine takes it, then delete the temporary folder
     needs:
     - npx
     outcome:

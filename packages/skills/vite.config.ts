@@ -11,7 +11,7 @@ export default defineConfig({
       // tests. They make temp repositories, so the tests are not cached.
       test: {
         command:
-          "vp run --cache @oneezy/skills-sync#build && node --test tests/*.test.mjs scripts/oneezy-capabilities.test.mjs .github/scripts/*.test.mjs",
+          "vp run --cache @oneezy/skills-sync#build && node --test tests/*.test.mjs scripts/oneezy-capabilities.test.mjs scripts/publish-mirror.test.mjs .github/scripts/*.test.mjs",
         cache: false,
       },
       "package-plugins": {

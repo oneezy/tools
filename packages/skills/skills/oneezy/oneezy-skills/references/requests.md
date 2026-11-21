@@ -5,7 +5,7 @@
 | update / upgrade the Matt Pocock (or any source's) skills | **Change**: `update <source> --to latest` |
 | upgrade X to 1.4.0, downgrade X to 1.3.0 | **Change**: `update <source> --to <version>` |
 | downgrade X, go back to the previous release | **Change**: `update <source> --to previous` |
-| what version of X am I on, what versions does X have | in a library checkout, the script with `versions <source> --repo <checkout>`; without one (a cloud thread), **Dispatch** `versions` and read the `*` line in the run log |
+| what version of X am I on, what versions does X have | the script with `versions <source> --repo packages/skills` in a clone of oneezy/tools |
 | add `<owner/repo>`, add this skill (a link to one) | **Add** |
 | remove `<owner/repo>` skills, remove X (a third-party source) | **Change**: `remove <source>` (a source id, or the `owner/repo` of exactly one source); authored skills change through **Playground** or an edit |
 | add X to my playground, play with X, test this skill | **Playground**: copy |

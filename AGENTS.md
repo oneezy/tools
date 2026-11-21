@@ -16,7 +16,7 @@ Task Manager's authoritative TypeScript lives directly in `packages/skills/skill
 
 ## Agent skills
 
-Skill source lives in the private workspace package `packages/skills`. Edit authored skills under `packages/skills/skills/<group>/<name>`. Skills Sync (`packages/skills-sync`) owns restoring dependencies and installing the local development links. Run `pnpm dev` for the viewer plus watcher, `pnpm skills` for the watcher alone, or `pnpm skills:dev` for one-time installation after `pnpm install`; see `packages/skills/DEVELOPMENT.md`.
+Skill source lives in the private workspace package `packages/skills`, the only place a skill is edited. oneezy/skills is its generated release mirror: `/oneezy-merge release` publishes each release there with `packages/skills/scripts/publish-mirror.mjs` (`packages/skills/docs/adr/0021-tools-is-the-source-skills-is-the-release-mirror.md`). Edit authored skills under `packages/skills/skills/<group>/<name>`. Skills Sync (`packages/skills-sync`) owns restoring dependencies and installing the local development links. Run `pnpm dev` for the viewer plus watcher, `pnpm skills` for the watcher alone, or `pnpm skills:dev` for one-time installation after `pnpm install`; see `packages/skills/DEVELOPMENT.md`.
 
 For local development, prefer the repository's `.agents/skills/<name>` (Codex) or `.claude/skills/<name>` (Claude) entry over a globally installed plugin copy. These are generated links, not source to commit. Authored edits are immediately visible through the links; start a fresh chat if the harness retains an older skill catalog. The watcher reconciles new, removed, and renamed skill folders automatically. Config/lock changes restore pinned dependencies; unchanged content saves do nothing. Changed external plugin installations still require another `pnpm skills:dev`. This command writes repo-scoped Codex skill exclusions; it does not uninstall global plugins or change their tools. Keep local installation work on this command instead of the published machine-wide `sync`.
 
@@ -39,19 +39,3 @@ Default vocabulary: `needs-triage`, `needs-info`, `ready-for-agent`, `ready-for-
 ### Domain docs
 
 Multi-context: `GLOSSARY-MAP.md` at the root lists each package's `GLOSSARY.md` (and its `docs/adr/`); the root `GLOSSARY.md` holds the words every package shares. See `docs/agents/domain.md`.
-
-### Worktree names
-
-Claude and Codex use the same naming convention for new task worktrees:
-`<repo>-issue-<number>-<short-description>`, `<repo>-pr-<number>-<short-description>`,
-or `<repo>-<short-description>` when no ticket exists. Examples: `brain-issue-2-fix-login`,
-`tools-pr-20-session-continuity`. Use lowercase words separated by hyphens. Keep the
-repository and ticket number first; add a numeric suffix only for a collision.
-
-Use the shared `workspace` command in `packages/remote-sessions/remote_sessions.py`
-to prepare a named persistent worktree, then start either harness in its returned
-`WorkingDirectory`. Preview with `--plan --json` before creating it. See the
-[launcher guide](packages/remote-sessions/README.md).
-If using a native worktree tool instead, supply this readable name when its API allows it.
-Keep the task's display title descriptive too; changing a chat title does not rename its
-folder. Do not move existing worktrees or rewrite saved session paths just to rename them.
