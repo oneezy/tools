@@ -22,11 +22,6 @@ refs:
     id: skills-sync.json
     need: conditional
     when: a range Justin names; the source's repo and root come from the config
-  - token: .github/workflows/land.yml
-    kind: file
-    id: .github/workflows/land.yml
-    need: conditional
-    when: a change to oneezy/skills; it lands a pushed land/* branch
   - token: docs/agents/domain.md
     kind: file
     id: docs/agents/domain.md
@@ -91,7 +86,7 @@ steps:
       done: a recipe per note
   - id: check-repos
     after: match-recipe
-    does: in a fresh clone of each repo's base branch (oneezy/skills, oneezy/brain, oneezy/tools, oneezy/ai-workflow, layerdbiz/tridentcubed) look for the recipe's old convention
+    does: in a fresh clone of each repo's base branch (oneezy/brain, oneezy/tools, oneezy/ai-workflow, layerdbiz/tridentcubed) look for the recipe's old convention
     needs: [git]
     outcome:
       done: per repo, matches or no change
@@ -99,10 +94,10 @@ steps:
   - id: apply-land
     after: check-repos
     if: a repo matches
-    does: apply the recipe on one branch, run the repo's fast checks, commit, then land it the repo's way (skills, land/migrate-<slug> after refresh --frozen, build and check; brain, tools and ai-workflow, a ready pull request their automerge merges; Trident, a ready pull request to its base); a .github/ change is a pull request that waits on Justin
+    does: apply the recipe on one branch, run the repo's fast checks, commit, then land it the repo's way (brain, tools and ai-workflow, a ready pull request their automerge merges, a skill change in tools after a library.version bump and pnpm --filter @oneezy/skills check; Trident, a ready pull request to its base); a .github/ change is a pull request that waits on Justin
     needs: [git, gh, npx]
     outcome:
-      done: a land branch pushed or a pull request open per matching repo
+      done: a pull request open per matching repo
       fail: push refused → not reached
   - id: report
     after: [check-repos, apply-land]

@@ -1,9 +1,9 @@
 ---
-name: hi
+name: play-hi
 description: This shows a loop example.
 ---
 
-# Hi
+# Play Hi
 
 When this skill is used, begin the response with this exact line:
 

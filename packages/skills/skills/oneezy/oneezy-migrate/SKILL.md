@@ -15,6 +15,6 @@ No consumer migration note: report one line and stop. Inspect fresh clones; do n
 - Never re-run a third-party setup skill to apply a rename (`/setup-matt-pocock-skills` renames nothing, and its GitHub template writes `gh issue` commands, which undo the REST-only `docs/agents/issue-tracker.md` these repos keep).
 - Change what the repo reads today: its own files and live docs. Dated records (`docs/research/`, `.research/`, ADR history, changelogs) and test fixtures of other tools (the skills-viewer examples in `oneezy/tools`) say what was true when written and stay as they are.
 - Third-party skills are never edited, deselected or removed to fit a repo; the repo changes, or the note is reported.
-- Own skills that name another repo's file (`skills/trident/*` naming Trident's `packages/ui/CONTEXT.md`) change in the same skills-repo landing as that repo's rename, never before it.
+- Own skills that name another repo's file (`skills/trident/*` naming Trident's `packages/ui/CONTEXT.md`) change in the same oneezy/tools landing as that repo's rename, never before it.
 
 Done means every applicable repo is changed and verified, no change, or reported not reached; every unapplied note has a reason.
