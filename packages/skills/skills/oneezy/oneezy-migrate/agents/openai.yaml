@@ -1,0 +1,3 @@
+interface:
+  display_name: "Oneezy Migrate"
+  short_description: "Apply upstream skill migration notes across Justin's repos, or say nothing applies"

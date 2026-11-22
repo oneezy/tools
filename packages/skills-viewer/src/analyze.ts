@@ -1,6 +1,7 @@
 // The browser-safe core: a FileSet in, a Graph out. No node: imports here or below.
 
 import { detect, type Doc } from "./edges.js";
+import { analyzeWorkflows } from "./workflows.js";
 import { asStringArray, claudeMode, parseMarkdown, parseSkillFile, unionMode, type ParsedSkill } from "./parse.js";
 import type {
   Edge,
@@ -27,6 +28,8 @@ export interface AnalyzeOptions {
   source?: Source;
   /** shown in meta.roots; defaults to the source's roots or repo */
   roots?: string[];
+  /** Skill directory to library name, supplied by a workspace's source configuration. */
+  skillLibraries?: Record<string, string>;
 }
 
 interface Plugin {
@@ -155,14 +158,35 @@ export function analyze(fs: FileSet, opts: AnalyzeOptions = {}): Graph {
   for (const s of parsedAll) groups.set(s.id, [...(groups.get(s.id) ?? []), s]);
   const canonical: Array<{ skill: ParsedSkill; copies: ParsedSkill[] }> = [];
   for (const group of groups.values()) {
-    // the authored copy (outside any plugin) wins over a built plugin copy, then the shortest path
-    const ranked = [...group].sort(
-      (a, b) =>
-        Number(!!ownerPlugin(a.dir)) - Number(!!ownerPlugin(b.dir)) ||
-        a.file.length - b.file.length ||
-        a.file.localeCompare(b.file),
+    const known = new Set(
+      group.flatMap((s) => {
+        const owner = opts.skillLibraries?.[s.dir] ?? ownerPlugin(s.dir)?.node?.name;
+        return owner ? [owner] : [];
+      }),
     );
-    canonical.push({ skill: ranked[0], copies: ranked.slice(1) });
+    const scoped = new Map<string, ParsedSkill[]>();
+    for (const s of group) {
+      const authored = /(?:^|\/)skills\/([^/]+)\/[^/]+$/.exec(s.dir)?.[1];
+      const scope =
+        opts.skillLibraries?.[s.dir] ??
+        ownerPlugin(s.dir)?.node?.name ??
+        (authored && !authored.startsWith(".") ? authored : undefined) ??
+        (known.size === 1 ? [...known][0] : dirname(s.dir));
+      s.scope = scope;
+      s.alias = s.id;
+      scoped.set(scope, [...(scoped.get(scope) ?? []), s]);
+    }
+    for (const [scope, members] of scoped) {
+      if (scoped.size > 1) for (const s of members) s.id = `${scope}:${s.id}`;
+      // the authored copy (outside any plugin) wins over a built plugin copy, then the shortest path
+      const ranked = [...members].sort(
+        (a, b) =>
+          Number(!!ownerPlugin(a.dir)) - Number(!!ownerPlugin(b.dir)) ||
+          a.file.length - b.file.length ||
+          a.file.localeCompare(b.file),
+      );
+      canonical.push({ skill: ranked[0], copies: ranked.slice(1) });
+    }
   }
   canonical.sort((a, b) => a.skill.id.localeCompare(b.skill.id));
   const skillDirs = canonical.map((c) => c.skill.dir);
@@ -395,6 +419,7 @@ export function analyze(fs: FileSet, opts: AnalyzeOptions = {}): Graph {
       scripts: s.scripts,
       references: s.references,
       frontmatter: s.frontmatter,
+      library: s.scope,
     };
     if (typeof s.frontmatter["argument-hint"] === "string")
       node.argumentHint = s.frontmatter["argument-hint"] as string;
@@ -415,7 +440,10 @@ export function analyze(fs: FileSet, opts: AnalyzeOptions = {}): Graph {
 
   /* ---------- relations ---------- */
 
-  const docs: Doc[] = [...canonical.map((c) => c.skill), ...parts.flatMap((p) => (p.doc ? [p.doc] : []))];
+  const docs: Doc[] = [
+    ...canonical.map((c) => c.skill),
+    ...parts.flatMap((p) => (p.doc ? [{ ...p.doc, scope: p.part.plugin?.replace(/^plugin:/, "") }] : [])),
+  ];
   const { edges: all, flows, unresolved } = detect(docs, modes);
   const skillIds = new Set(nodes.map((n) => n.id));
   const edges: Edge[] = [];
@@ -492,6 +520,10 @@ export function analyze(fs: FileSet, opts: AnalyzeOptions = {}): Graph {
       warnings,
     },
     nodes,
+    workflows: analyzeWorkflows(
+      canonical.map((c) => c.skill),
+      { paths, read },
+    ),
     edges,
     flows,
     unresolved,

@@ -1,0 +1,4 @@
+interface:
+  display_name: "Play Agents"
+  short_description: "Load Justin's workflow instructions from his Google Doc"
+  default_prompt: "Use $play-agents to load my Google Doc instructions through Google Drive and follow them."

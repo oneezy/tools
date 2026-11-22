@@ -2,7 +2,7 @@ import { defineConfig } from "vite-plus";
 
 // Workspace root. `pnpm build|test|check` run every package's script of that name through
 // Vite Task (`vp run -r`), in dependency order; `pnpm check` runs `vp check` here first.
-// `pnpm dev` (`vp dev`) serves the one app with a dev server.
+// `pnpm dev` prepares the CLI/engine, then runs the skills watcher and viewer together.
 //
 // `vp check` = Oxfmt + Oxlint + type checks for the JS/TS in every package. Markdown, copied
 // fixtures, generated examples and the skills-viewer page templates are left as written.
@@ -16,12 +16,23 @@ const untouched = [
   "packages/skills-viewer/examples/**",
   "packages/skills-viewer/templates/**",
   "packages/skills-sync/test/fixtures/**",
+  // Imported skill content keeps its formatting and its own Node behavior tests.
+  "packages/skills/**",
+  // Task Manager's authored TypeScript runs directly from its portable skill.
+  "!packages/skills/skills",
+  "!packages/skills/skills/oneezy",
+  "!packages/skills/skills/oneezy/oneezy-task-manager",
+  "!packages/skills/skills/oneezy/oneezy-task-manager/scripts",
+  "!packages/skills/skills/oneezy/oneezy-task-manager/scripts/steps",
+  "!packages/skills/skills/oneezy/oneezy-task-manager/scripts/**/*.ts",
   "pnpm-lock.yaml",
   // workflow files change only through a person's merge (automerge skips .github/); caller.yml is their template
   ".github/**",
   "packages/task-manager/caller.yml",
   // SvelteKit's page shell, %sveltekit.*% placeholders and all
   "apps/skills-viewer-web/src/app.html",
+  // an editor's own settings on one PC: a global gitignore hides them from git, not from the formatter
+  ".vscode/**",
 ];
 
 export default defineConfig({

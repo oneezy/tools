@@ -1,0 +1,141 @@
+skill: oneezy-brain
+purpose: Resolve Justin's Drive Brain and capture, read, triage, update or ingest through its current contract.
+runtime: [Google Drive, Google Sheets, Google Docs, node]
+refs:
+  - token: references/location.md
+    kind: file
+    id: skills/oneezy/oneezy-brain/references/location.md
+    need: required
+    when: every request
+  - token: references/operations.md
+    kind: file
+    id: skills/oneezy/oneezy-brain/references/operations.md
+    need: conditional
+    when: reading an agenda or writing a record
+  - token: references/ingestion.md
+    kind: file
+    id: skills/oneezy/oneezy-brain/references/ingestion.md
+    need: conditional
+    when: source collection
+  - token: scripts/drive-plan.mjs
+    kind: file
+    id: skills/oneezy/oneezy-brain/scripts/drive-plan.mjs
+    need: conditional
+    when: planning native Sheets requests
+  - token: references/provider-capture.md
+    kind: file
+    id: skills/oneezy/oneezy-brain/references/provider-capture.md
+    need: conditional
+    when: configured email/calendar ingestion
+  - token: scripts/provider-capture.mjs
+    kind: file
+    id: skills/oneezy/oneezy-brain/scripts/provider-capture.mjs
+    need: conditional
+    when: validating provider envelopes, readback receipts and checkpoints
+  - token: scripts/brain.py
+    kind: file
+    id: skills/oneezy/oneezy-brain/scripts/brain.py
+    need: mention
+    when: explicit historical read only
+  - token: /oneezy-status
+    kind: skill
+    id: oneezy-status
+    need: conditional
+    when: Brain daily brief
+  - token: /oneezy-meeting
+    kind: skill
+    id: oneezy-meeting
+    need: conditional
+    when: requested meeting format
+  - token: references/classification.md
+    kind: file
+    id: skills/oneezy/oneezy-brain/references/classification.md
+    need: conditional
+    when: the named operation/reference branch in SKILL.md
+  - token: references/routing.md
+    kind: file
+    id: skills/oneezy/oneezy-brain/references/routing.md
+    need: conditional
+    when: the named operation/reference branch in SKILL.md
+  - token: references/capabilities/contract.md
+    kind: file
+    id: skills/oneezy/oneezy-brain/references/capabilities/contract.md
+    need: required
+    when: before any dependency call
+  - token: references/capabilities/chatgpt.md
+    kind: file
+    id: skills/oneezy/oneezy-brain/references/capabilities/chatgpt.md
+    need: conditional
+    when: ChatGPT host
+  - token: references/capabilities/claude.md
+    kind: file
+    id: skills/oneezy/oneezy-brain/references/capabilities/claude.md
+    need: conditional
+    when: Claude host
+  - token: references/capabilities/codex.md
+    kind: file
+    id: skills/oneezy/oneezy-brain/references/capabilities/codex.md
+    need: conditional
+    when: Codex host
+  - token: references/capabilities/catalog.json
+    kind: file
+    id: skills/oneezy/oneezy-brain/references/capabilities/catalog.json
+    need: conditional
+    when: inventory, management or missing dependency
+  - token: /google-drive
+    kind: skill
+    id: google-drive:google-drive
+    need: required
+    when: registry/file resolution; load actual instructions and required references, then discover/call supported tools
+  - token: /google-sheets
+    kind: skill
+    id: google-drive:google-sheets
+    need: required
+    when: live List/Schema and task ranges; load actual instructions and required references, then discover/call supported
+      tools
+  - token: /google-docs
+    kind: skill
+    id: google-drive:google-docs
+    need: conditional
+    when: context Docs; load actual instructions and required references, then discover/call supported tools
+  - token: '@Google Drive'
+    kind: plugin
+    id: Google Drive
+    need: required
+    when: current Brain authority, using this host adapter and the authorized account
+  - token: '@Pages'
+    kind: plugin
+    id: Pages
+    need: conditional
+    when: explicit relevant historical page read or separately authorized page write; not current Brain
+unresolved: []
+agents:
+  max: 0
+steps:
+  - id: load-connectors
+    does: read portable capability contract and current host adapter; load actual Google Drive and Google Sheets instructions
+      and route-required safety; discover current authorized native tools; load Google Docs instructions before context
+      work
+    outcome:
+      done: required instructions loaded and account/tool route verified for this operation
+      fail: report the exact blocked dependency; keep independent destinations moving
+  - id: resolve
+    does: read private registry, resolve account and verify live List and Schema
+    needs:
+    - references/location.md
+    outcome:
+      done: current Drive authority verified
+      fail: missing route or schema mismatch reported
+    after: load-connectors
+  - id: operate
+    after: resolve
+    does: exact-ID and source/meaning lookup; apply the authorized read or guarded write
+    needs: [references/operations.md]
+    outcome:
+      done: one canonical record or context subject
+      fail: conflict or missing evidence reported without overwrite
+  - id: verify
+    after: operate
+    does: read back by immutable ID and verify one writable location; report actual links and coverage
+    outcome:
+      done: verified result and rollout limits reported

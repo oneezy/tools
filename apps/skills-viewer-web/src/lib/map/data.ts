@@ -59,6 +59,23 @@ export interface MapData {
 }
 
 export const PALETTE_SIZE = 8;
+const LIBRARY_COLORS = [
+  "pstack",
+  "matt-pocock",
+  "oneezy",
+  "play",
+  "trident",
+  "diagram-design",
+  "frontend-design",
+  "dev",
+];
+export function libraryColor(key: string): number {
+  const known = LIBRARY_COLORS.indexOf(key);
+  if (known >= 0) return known;
+  let hash = 0;
+  for (const c of key) hash = (hash * 31 + c.charCodeAt(0)) >>> 0;
+  return hash % PALETTE_SIZE;
+}
 
 /** Turn the engine's graph into what the canvas needs: unique ids, groups, families, degrees. */
 export function toMapData(graph: Graph, repoName: string): MapData {
@@ -101,7 +118,7 @@ export function toMapData(graph: Graph, repoName: string): MapData {
 
   const nodes: MapNode[] = [...kept.values()].map((n) => ({
     id: n.id,
-    group: n.plugin ? n.plugin.replace(/^plugin:/, "") : groupOf(n.dir, repoName),
+    group: n.plugin ? n.plugin.replace(/^plugin:/, "") : (n.library ?? groupOf(n.dir, repoName)),
     description: n.description,
     short: shortDescription(n.description),
     manual: n.mode === "manual",
@@ -120,7 +137,7 @@ export function toMapData(graph: Graph, repoName: string): MapData {
   for (const n of nodes) counts.set(n.group, (counts.get(n.group) ?? 0) + 1);
   const groups: MapGroup[] = [...counts.entries()]
     .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
-    .map(([key, count], i) => ({ key, label: key, color: i % PALETTE_SIZE, count, parts: pluginParts.get(key) ?? {} }));
+    .map(([key, count]) => ({ key, label: key, color: libraryColor(key), count, parts: pluginParts.get(key) ?? {} }));
 
   return { nodes, edges, flows, groups, families: findFamilies(nodes), duplicates };
 }

@@ -10,6 +10,7 @@
     colors,
     onpick,
     onclose,
+    onworkflow,
   }: {
     id: string;
     data: MapData;
@@ -17,6 +18,7 @@
     colors: Map<string, number>;
     onpick: (id: string) => void;
     onclose: () => void;
+    onworkflow: (id: string) => void;
   } = $props();
 
   const n = $derived(data.nodes.find((x) => x.id === id)!);
@@ -48,6 +50,7 @@
   </div>
   <div class="d-body">
     <p class="d-desc">{n.description}</p>
+    <button onclick={() => onworkflow(id)}>Open workflow →</button>
     {#each sections as sec (sec.title)}
       {#if sec.list.length}
         <div class="d-sec">
@@ -84,13 +87,21 @@
         <h4>Files · {n.parts.length}</h4>
         <div class="lk">
           {#each n.parts as part (part.file)}
+            {#if blobBase}
             <a class="part" href={blobBase.replace(/\/$/, "") + "/" + part.file} target="_blank" rel="noreferrer">
               <span class="chip">{part.kind}</span><span class="nm">{part.name}</span>
             </a>
+            {:else}
+              <div class="part"><span class="chip">{part.kind}</span><span class="nm">{part.name}</span></div>
+            {/if}
           {/each}
         </div>
       </div>
     {/if}
-    <a class="path" href={blobBase.replace(/\/$/, "") + "/" + n.file} target="_blank" rel="noreferrer">{n.file}</a>
+    {#if blobBase}
+      <a class="path" href={blobBase.replace(/\/$/, "") + "/" + n.file} target="_blank" rel="noreferrer">{n.file}</a>
+    {:else}
+      <p class="path">{n.file}</p>
+    {/if}
   </div>
 </aside>

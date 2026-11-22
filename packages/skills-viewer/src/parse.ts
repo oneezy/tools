@@ -4,6 +4,8 @@ import { basename, dirname, join, type FileSet } from "./vfs.js";
 
 export interface ParsedSkill {
   id: string;
+  scope?: string;
+  alias?: string;
   name: string;
   description: string;
   dir: string;

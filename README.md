@@ -4,19 +4,22 @@ Justin's tools, one pnpm workspace on Vite Plus. Windows 11 with PowerShell 7 is
 
 ```
 pnpm install   # once, at the root
-pnpm build     # Vite Plus (vp run -r): every package's build, in dependency order
+pnpm skills    # restore local skills, install live links, and watch (without the website)
+pnpm skills:dev # one-time restore/link, then exit
+pnpm build     # Vite Plus cached workspace builds, in dependency order
 pnpm test      # every package's tests
 pnpm check     # vp check (format, lint, type check the JS/TS), then each package's checks (PowerShell parse, bash -n, py_compile, svelte-check)
 vp fmt         # format the JS/TS, JSON, CSS and YAML in place
-pnpm dev       # vp dev: the skills viewer website
+pnpm dev       # skills viewer website + local skill watcher; opens the browser
 ```
 
 | package | language | what it is |
 |---|---|---|
 | `packages/skills-sync` | TypeScript | `npx @oneezy/skills-sync`: one skills library linked into every harness |
+| `packages/skills` | Markdown + scripts | authored skills and locked dependencies; [local development](packages/skills/DEVELOPMENT.md) |
 | `packages/skills-viewer` | TypeScript | static map of a skills library (graph.json, graph.mmd, graph.html) |
 | `packages/remote-sessions` | Python | Claude session picker, Remote Control launcher, the shared `workspace` worktree command |
-| `packages/task-manager` | PowerShell + bash | one GitHub project per repo, and the `status.sh` behind `.github/workflows/task-manager.yml` |
+| `packages/task-manager` | TypeScript + Node | tests and checks for the portable `oneezy-task-manager` skill; legacy PowerShell picker and Bash workflow retained |
 | `packages/apps-sync` | PowerShell + Python | App Updater for Windows applications and Ubuntu CLI tools |
 | `apps/skills-viewer-web` | SvelteKit (Vite+) | paste a GitHub repo, see its skills map; deployed to Vercel |
 

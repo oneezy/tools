@@ -36,6 +36,7 @@ export async function layout(
   aspect: number,
   draggable: boolean,
 ): Promise<MapFlowNode[]> {
+  if (!data.nodes.length) return [];
   const a = Math.max(0.55, Math.min(2, aspect));
   const colors = new Map(data.groups.map((g) => [g.key, g.color]));
   const skill = (n: MapNode, x: number, y: number, parentId?: string): MapFlowNode => ({
@@ -59,7 +60,7 @@ type MakeSkill = (n: MapNode, x: number, y: number, parentId?: string) => MapFlo
 let elkPromise: Promise<Elk> | undefined;
 
 /** elkjs is 1.6 MB: load it on first use and run it in a worker so layout never blocks the page. */
-function getElk(): Promise<Elk> {
+export function getElk(): Promise<Elk> {
   elkPromise ??= Promise.all([import("elkjs/lib/elk-api.js"), import("elkjs/lib/elk-worker.min.js?worker")]).then(
     ([api, worker]) => new api.default({ workerFactory: () => new worker.default() }),
   );
@@ -115,6 +116,8 @@ async function layoutLibraries(
       layoutOptions: {
         "elk.algorithm": "layered",
         "elk.direction": "RIGHT",
+        "elk.nodeSize.constraints": "[MINIMUM_SIZE]",
+        "elk.nodeSize.minimum": `(${Math.ceil((g.label.length * 15 + String(g.count).length * 8 + 65) * 4.5 + 12)},0)`,
         "elk.padding": pad(28, 28),
         "elk.spacing.nodeNode": "22",
         "elk.layered.spacing.nodeNodeBetweenLayers": "64",

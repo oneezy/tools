@@ -7,6 +7,10 @@
 #     draft to hold it. Pull requests from forks never merge here.
 #   - Checks on the merged result, on Windows (the primary host, AGENTS.md): pnpm install, pnpm check, pnpm test.
 #     Red merges nothing.
+#   - The skills-sync suite is 7 of the 9 minutes one job took (#235: 316 tests that start git and the built CLI),
+#     so it runs beside the rest, in 4 parallel jobs, and only when the pull request touches
+#     packages/skills-sync/ or a file every package rests on (SHARED below). A pull request of skill wording
+#     merges after `check` alone. A new root file every package depends on is added to SHARED.
 #   - A pull request that changes .github/ is never merged here, so this workflow cannot widen itself: workflow
 #     changes take a person's merge. The run stays green and says so.
 #   - Squash merge with PROJECT_PAT, so task-manager sees the merge and closes the ticket (a merge made with
@@ -25,19 +29,53 @@ concurrency:
   group: automerge-${{ github.event.pull_request.number }}
   cancel-in-progress: true
 
+env:
+  PR: ${{ github.event.pull_request.number }}
+  HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+
 jobs:
-  automerge:
+  # What the pull request touches decides two things: whether the skills-sync suite runs, and whether a person
+  # merges (.github/). Read from the API, so no checkout.
+  scope:
     if: github.event.pull_request.draft == false && github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    permissions:
+      pull-requests: read
+    outputs:
+      merge: ${{ steps.scope.outputs.merge }}
+      sync: ${{ steps.scope.outputs.sync }}
+    steps:
+      - name: What does it change
+        id: scope
+        env:
+          GH_TOKEN: ${{ github.token }}
+          # files every package rests on: a change to one runs the skills-sync suite too
+          SHARED: '^(packages/skills-sync/|scripts/|\.github/|package\.json$|pnpm-lock\.yaml$|pnpm-workspace\.yaml$|vite\.config\.ts$|\.node-version$)'
+        run: |
+          files=$(gh api "repos/$GITHUB_REPOSITORY/pulls/$PR/files?per_page=100" --paginate --jq '.[].filename')
+          touched=$(echo "$files" | grep '^\.github/' || true)
+          if [[ -n "$touched" ]]; then
+            echo "::notice title=automerge skipped::#$PR changes .github/ ($(echo $touched)); a person merges workflow changes"
+            echo "merge=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "merge=true" >> "$GITHUB_OUTPUT"
+          fi
+          if echo "$files" | grep -Eq "$SHARED"; then
+            echo "sync=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "::notice title=skills-sync suite skipped::#$PR touches neither packages/skills-sync/ nor a shared root file"
+            echo "sync=false" >> "$GITHUB_OUTPUT"
+          fi
+
+  # pnpm check, and the tests of every package but skills-sync
+  check:
+    needs: scope
     runs-on: windows-latest
     permissions:
-      contents: write
-      pull-requests: write
+      contents: read
     defaults:
       run:
         shell: bash
-    env:
-      PR: ${{ github.event.pull_request.number }}
-      HEAD_SHA: ${{ github.event.pull_request.head.sha }}
     steps:
       # as in publish-skills-sync.yml: LF checkouts in the tests' temp repos, and a long-named temp folder
       - name: git keeps line endings, temp has a long name
@@ -63,23 +101,58 @@ jobs:
         run: |
           vp install --frozen-lockfile
           pnpm check
-          pnpm test
+          vp run --filter "./packages/*" --filter "./apps/*" --filter "!@oneezy/skills-sync" test
 
-      - name: Does it change .github
-        id: scope
-        env:
-          GH_TOKEN: ${{ github.token }}
+  # the skills-sync suite, one shard per job
+  sync:
+    needs: scope
+    if: needs.scope.outputs.sync == 'true'
+    name: sync (${{ matrix.shard }}/4)
+    runs-on: windows-latest
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3, 4]
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: git keeps line endings, temp has a long name
         run: |
-          touched=$(gh api "repos/$GITHUB_REPOSITORY/pulls/$PR/files" --paginate --jq '.[].filename' | grep '^\.github/' || true)
-          if [[ -n "$touched" ]]; then
-            echo "::notice title=automerge skipped::#$PR changes .github/ ($(echo $touched)); a person merges workflow changes"
-            echo "merge=false" >> "$GITHUB_OUTPUT"
-          else
-            echo "merge=true" >> "$GITHUB_OUTPUT"
-          fi
+          git config --system core.autocrlf false
+          git config --global core.autocrlf false
+          echo "TEMP=$RUNNER_TEMP" >> "$GITHUB_ENV"
+          echo "TMP=$RUNNER_TEMP" >> "$GITHUB_ENV"
 
+      - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+
+      - uses: voidzero-dev/setup-vp@v1.9.0
+        with:
+          version: 1.0.0
+          node-version-file: .node-version
+          cache: true
+          run-install: false
+
+      # the package's own test script (tsc, then vp test run), with the shard handed to Vitest
+      - name: Test skills-sync
+        run: |
+          vp install --frozen-lockfile
+          pnpm --filter @oneezy/skills-sync test --shard=${{ matrix.shard }}/4
+
+  # the job that merges: green check, and green shards unless the suite was skipped
+  automerge:
+    needs: [scope, check, sync]
+    if: always() && needs.scope.outputs.merge == 'true' && needs.check.result == 'success' && (needs.sync.result == 'success' || needs.sync.result == 'skipped')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+    steps:
       - name: Merge into dev
-        if: steps.scope.outputs.merge == 'true'
         env:
           GH_TOKEN: ${{ secrets.PROJECT_PAT || github.token }}
         run: gh pr merge "$PR" --squash --match-head-commit "$HEAD_SHA" --repo "$GITHUB_REPOSITORY"

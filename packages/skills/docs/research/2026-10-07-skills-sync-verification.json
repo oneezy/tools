@@ -1,0 +1,73 @@
+{
+  "scope": "source and Linux fixtures only; desktop execution pending",
+  "toolsCommit": "93fe8b37448186928c38580bcb79302f5d4133f1",
+  "skillsInputCommit": "fb2d968323dbdd3a5dcc0f294f184e80f64da42f",
+  "tests": {
+    "tools": {
+      "passed": 97,
+      "skipped": 2
+    },
+    "capabilities": 5,
+    "releaseScripts": 6,
+    "lintErrors": 0,
+    "existingLintWarnings": 5,
+    "statusExplicitTargets": "passed",
+    "archiveReproduction": "same sha256 after final tool commit"
+  },
+  "check": {
+    "check": true,
+    "problems": [],
+    "notes": [],
+    "skills": 11,
+    "flows": 10,
+    "generated": 649
+  },
+  "package": {
+    "archive": "artifacts/oneezy-0.40.0+fb2d968323db.zip",
+    "sha256": "2d97f7968d087193638d6efe1ce1d2a1f0ae7909c6f5afe18d2d577193c311d1",
+    "version": "0.40.0+fb2d968323db",
+    "commit": "fb2d968323dbdd3a5dcc0f294f184e80f64da42f"
+  },
+  "packageFileCount": 107,
+  "fixtureReadback": {
+    "scope": "Linux test fixture, not desktop execution",
+    "tool": "/workspace/scratch/edcbf3aedf22/tools-skills-sync-instructions/packages/skills-sync/dist/src/cli.js",
+    "repo": "/workspace/scratch/edcbf3aedf22/skills-sync-instructions",
+    "previewChanges": 4,
+    "appliedChanges": 4,
+    "secondInstructionWrites": 0,
+    "entrypoints": [
+      {
+        "path": "/workspace/scratch/edcbf3aedf22/entrypoint-verification/fixture/AGENTS.md",
+        "state": "current",
+        "text": "# Existing project\r\nPreserve pinned https://github.com/oneezy/brain as history.\r\nKeep unrelated instructions and dirty work.\r\n\r\n<!-- skills-sync:brain:start -->\r\n## Brain\r\n\r\nFor Brain capture, lookup, agenda, triage, task status or durable context, load `/oneezy-brain` and follow its current registry. The skill resolves the canonical Google Drive Brain and owns locations, schema, account selection and verification.\r\n\r\nThis delegation supersedes earlier Brain destinations in these instructions and their imports. Retain pinned sources, GitHub and Spaces as historical evidence. If the installed skill or its supported Drive route is unavailable, report that exact blocker and stop dependent Brain operations.\r\n<!-- skills-sync:brain:end -->\r\n"
+      },
+      {
+        "path": "/workspace/scratch/edcbf3aedf22/entrypoint-verification/fixture/AGENTS.override.md",
+        "state": "current",
+        "text": "# Existing override\n\n<!-- skills-sync:brain:start -->\n## Brain\n\nFor Brain capture, lookup, agenda, triage, task status or durable context, load `/oneezy-brain` and follow its current registry. The skill resolves the canonical Google Drive Brain and owns locations, schema, account selection and verification.\n\nThis delegation supersedes earlier Brain destinations in these instructions and their imports. Retain pinned sources, GitHub and Spaces as historical evidence. If the installed skill or its supported Drive route is unavailable, report that exact blocker and stop dependent Brain operations.\n<!-- skills-sync:brain:end -->\n"
+      },
+      {
+        "path": "/workspace/scratch/edcbf3aedf22/entrypoint-verification/fixture/CLAUDE.md",
+        "state": "current",
+        "text": "@AGENTS.md\n\n<!-- skills-sync:brain:start -->\n## Brain\n\nFor Brain capture, lookup, agenda, triage, task status or durable context, load `/oneezy-brain` and follow its current registry. The skill resolves the canonical Google Drive Brain and owns locations, schema, account selection and verification.\n\nThis delegation supersedes earlier Brain destinations in these instructions and their imports. Retain pinned sources, GitHub and Spaces as historical evidence. If the installed skill or its supported Drive route is unavailable, report that exact blocker and stop dependent Brain operations.\n<!-- skills-sync:brain:end -->\n"
+      },
+      {
+        "path": "/workspace/scratch/edcbf3aedf22/entrypoint-verification/fixture/src/CLAUDE.local.md",
+        "state": "current",
+        "text": "@pinned.md\n# Nested instructions\n\n<!-- skills-sync:brain:start -->\n## Brain\n\nFor Brain capture, lookup, agenda, triage, task status or durable context, load `/oneezy-brain` and follow its current registry. The skill resolves the canonical Google Drive Brain and owns locations, schema, account selection and verification.\n\nThis delegation supersedes earlier Brain destinations in these instructions and their imports. Retain pinned sources, GitHub and Spaces as historical evidence. If the installed skill or its supported Drive route is unavailable, report that exact blocker and stop dependent Brain operations.\n<!-- skills-sync:brain:end -->\n"
+      }
+    ]
+  },
+  "preservation": {
+    "skillsLockChanged": false,
+    "otherGeneratedPluginsChanged": false
+  },
+  "blockers": [
+    "No supported native/connected desktop execution API in this session; Windows/selected desktop projects/WSL unavailable.",
+    "PowerShell wrapper and fresh desktop agent/Drive access remain unverified.",
+    "Automatic approval review rejected Claude plugin validation; route stopped.",
+    "Standalone cloud Meeting delivery still stale; exact delivery refresh or separately approved retirement is held."
+  ],
+  "skillsRuntimeArtifactCommit": "cf0afbb8429f27033daa41830909bf943137f334"
+}

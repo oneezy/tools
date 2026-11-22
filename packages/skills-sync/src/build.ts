@@ -13,7 +13,7 @@ import path from "node:path";
 import YAML from "yaml";
 import { adaptFiles, compileAdapt, forbiddenInFiles, type Compiled, type Hit } from "./adapt.js";
 import { archives, type Built } from "./artifacts.js";
-import { isDir, isLink, isSkillDir, lexists } from "./fs.js";
+import { isDir, isLink, isSkillDir, lexists, under } from "./fs.js";
 import { hermesNamespace } from "./hermes.js";
 import { Library } from "./library.js";
 import { apply, Report } from "./plan.js";
@@ -101,6 +101,26 @@ export const PLUGIN_SCHEMA = "https://agent-plugins.org/schemas/1.0.0/plugin.sch
  */
 export const HERMES_PATH = "dist/hermes";
 const SKILL_MD = /^skills\/([^/]+)\/SKILL\.md$/;
+/**
+ * Where Development builds go inside the Library (develop-build.ts), / separators: under dist/, which git ignores and the
+ * skills CLI never scans. The release build never writes there.
+ */
+export const DEVELOPMENT_PATH = "dist/development";
+
+/**
+ * Why the config's Hermes rendering cannot be built: its folder holds the development output or lies inside it, so the
+ * release build would delete the Development builds as packages no longer in the config, or write release files among
+ * them (tools#215). Null when the two stay apart or the library has not opted in. Both builds refuse it.
+ */
+export function renderingOverlap(lib: Library, config: Config): string | null {
+  const hermes = hermesPath(config);
+  if (!hermes) return null;
+  const rendering = hermesRoot(lib.root, hermes);
+  const development = path.join(lib.root, ...DEVELOPMENT_PATH.split("/"));
+  return under(rendering, development) || under(development, rendering)
+    ? `renderings.hermes (${hermes}) overlaps ${DEVELOPMENT_PATH}; release and development output must stay apart`
+    : null;
+}
 
 /** The folder the config sends the Hermes rendering to, / separators; null when the library has not opted in. */
 export function hermesPath(config: Config): string | null {
@@ -117,7 +137,8 @@ export function hermesDir(root: string, rendering: string, id: string): string {
   return path.join(hermesRoot(root, rendering), id);
 }
 /** What the ChatGPT interface and the Codex catalog say every package is; the hosts enumerate neither value in their docs. */
-const CATEGORY = "Developer Tools";
+/** The category every Codex catalog entry of the Library carries. */
+export const CATEGORY = "Developer Tools";
 const CAPABILITIES = ["Interactive"];
 /** Legacy generated versions are checked against NOTICE during migration, never assigned to new packages. */
 const VERSION_RE = /^0\.(\d+)\.0\+([0-9a-f]{12,40})$/;
@@ -198,6 +219,14 @@ export function build(lib: Library, opts: BuildOptions): BuildResult {
     unusedRules: [],
   };
   if (result.off) return result;
+  const overlap = renderingOverlap(lib, config);
+  if (overlap) {
+    // nothing is built: the Hermes pass would delete or write inside the Development builds
+    const rendering = hermesRoot(lib.root, hermesPath(config)!);
+    report.add({ kind: "conflict", path: rendering, note: `${overlap}; nothing built` });
+    if (opts.check) result.drift = [path.relative(lib.root, rendering).split("\\").join("/")];
+    return result;
+  }
   const changes = new Report(); // what differs from disk, applied unless checking
   // a check never looks at artifacts/: the archives are upload material, generated and ignored by git
   const artifacts = opts.artifacts && !opts.check;
@@ -315,6 +344,38 @@ export function build(lib: Library, opts: BuildOptions): BuildResult {
       .map((a) => path.relative(lib.root, a.path).split("\\").join("/"));
   else apply(changes, opts.plan);
   return result;
+}
+
+/** One package rendered for a Development build: its files, or why it cannot be built. */
+export type DevelopmentPackage =
+  | { ok: true; id: string; own: boolean; files: Map<string, Buffer>; notes: string[] }
+  | { ok: false; id: string; errors: string[]; notes: string[] };
+
+/**
+ * The files of one plugin as the release build renders them (same manifests, normal identity, same skill copies), from
+ * the working Library and never from disk output: an own Group's NOTICE names the working tree instead of a library
+ * commit, so a commit that changes no input changes no file. Writes nothing; a package the release build would refuse
+ * (a missing snapshot, an unversioned own Group, an empty Group) comes back with its reasons.
+ */
+export function developmentPackage(lib: Library, config: Config, id: string): DevelopmentPackage {
+  const report = new Report();
+  // a note about the package as a whole names the plugin, never the release folder plugins/<id>
+  const where = (p: string) =>
+    p === path.join(lib.plugins, id) ? id : path.relative(lib.root, p).split("\\").join("/");
+  const notes = () => report.actions.filter((a) => a.kind === "note").map((a) => `${where(a.path)}: ${a.note}`);
+  const errors = () => report.conflicts().map((a) => a.note ?? "cannot be built");
+  if (!config.plugins[id]) return { ok: false, id, errors: [`${id} is not a plugin in skills-sync.json`], notes: [] };
+  const empty = emptyGroups(lib, config).get(id);
+  if (empty) return { ok: false, id, errors: [empty], notes: [] };
+  const pkg = resolvePackage(lib, config, id, report);
+  if (!pkg) return { ok: false, id, errors: errors(), notes: notes() };
+  const own = pkg.origin.kind === "own";
+  const version = pkg.origin.kind === "source" ? pkg.origin.version : (config.library?.version ?? null);
+  if (own && version === null)
+    return { ok: false, id, errors: ["set library.version to an explicit semantic version"], notes: notes() };
+  const head: Head = { version, commit: null, date: null, checkout: false, shallow: false };
+  const files = render(pkg, config, head, "the working Library (a development build, not a release)");
+  return { ok: true, id, own, files, notes: notes() };
 }
 
 /** Plugin id -> its note, for every plugin of an own group that holds no skill yet: nothing to package or catalog. */
@@ -519,7 +580,7 @@ export function renderHermes(files: Map<string, Buffer>): Map<string, Buffer> {
 }
 
 /** Every file of the package, relative path (/ separators) -> bytes, for the given version and library commit. */
-function render(pkg: Package, config: Config, head: Head): Map<string, Buffer> {
+function render(pkg: Package, config: Config, head: Head, commitLine?: string): Map<string, Buffer> {
   const out = new Map<string, Buffer>();
   const text = (s: string) => Buffer.from(s, "utf8");
   const { portable, legacy, claude } = manifests(pkg, config, head.version);
@@ -527,7 +588,7 @@ function render(pkg: Package, config: Config, head: Head): Map<string, Buffer> {
   out.set(".codex-plugin/plugin.json", text(jsonText(legacy)));
   out.set(".claude-plugin/plugin.json", text(jsonText(claude)));
   if (pkg.license) out.set("LICENSE", pkg.license);
-  out.set("NOTICE.md", text(notice(pkg, config, head)));
+  out.set("NOTICE.md", text(notice(pkg, config, head, commitLine)));
   for (const [name, files] of pkg.skills) for (const [rel, bytes] of files) out.set(`skills/${name}/${rel}`, bytes);
   return out;
 }
@@ -598,19 +659,21 @@ function manifests(
 }
 
 /** NOTICE.md: where the files came from, at which commit, under which license, and why every copy is marked internal. */
-function notice(pkg: Package, config: Config, head: Head): string {
+function notice(pkg: Package, config: Config, head: Head, commitOverride?: string): string {
   const lib = config.library ?? {};
   const rendering = hermesPath(config);
   const o = pkg.origin;
   const libraryName = lib.owner && lib.name ? `${lib.owner}/${lib.name}` : (lib.name ?? "the skills library");
   const commitLine =
-    o.kind === "source"
-      ? `${o.commit} (${isoDate(o.date)})`
-      : head.commit
-        ? `${head.commit} (${isoDate(head.date)})`
-        : head.checkout
-          ? "a git checkout without a commit yet"
-          : "not a git checkout";
+    o.kind === "own" && commitOverride
+      ? commitOverride
+      : o.kind === "source"
+        ? `${o.commit} (${isoDate(o.date)})`
+        : head.commit
+          ? `${head.commit} (${isoDate(head.date)})`
+          : head.checkout
+            ? "a git checkout without a commit yet"
+            : "not a git checkout";
   const source =
     o.kind === "own"
       ? `\`skills/${o.group}\` of ${libraryName}${lib.homepage ? ` (${lib.homepage})` : ""}`
@@ -655,11 +718,18 @@ function notice(pkg: Package, config: Config, head: Head): string {
   ].join("\n");
 }
 
+/** The name both root catalogs give the Library's marketplace: <owner>-<name>, or the name alone without an owner. */
+export function marketplaceName(config: Config, lib: Library): string {
+  const l = config.library ?? {};
+  const name = l.name ?? path.basename(lib.root);
+  return l.owner ? `${l.owner}-${name}` : name;
+}
+
 /** The two root catalogs, file -> bytes: Claude Code's and Codex's, each entry pointing at ./plugins/<id> for every plugin built. */
 function catalogs(config: Config, lib: Library, ids: string[]): Map<string, Buffer> {
   const l = config.library ?? {};
   const name = l.name ?? path.basename(lib.root);
-  const marketplace = l.owner ? `${l.owner}-${name}` : name;
+  const marketplace = marketplaceName(config, lib);
   const description = (id: string) => config.plugins[id].description;
   const claude = {
     name: marketplace,
@@ -971,7 +1041,7 @@ function readSnapshot(snapDir: string): Snapshot | null {
 }
 
 /** The files under a folder, relative path with / separators -> bytes, and the links at any depth: listed, never followed. */
-function folderFiles(dir: string): { files: Map<string, Buffer>; links: string[] } {
+export function folderFiles(dir: string): { files: Map<string, Buffer>; links: string[] } {
   const files = new Map<string, Buffer>();
   const links: string[] = [];
   const rel = (p: string) => path.relative(dir, p).split("\\").join("/");

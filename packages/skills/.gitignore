@@ -1,0 +1,20 @@
+# Authored skills, configuration and locks are source; generated outputs stay local.
+.agents/
+.claude-plugin/
+plugins/
+dist/
+node_modules/
+# The workspace Skills Sync CLI recreates these outputs from source and lock.
+.agents/skills/
+.claude/skills/
+.goose/
+.hermes/
+# A library command's memory of skills gone upstream in this checkout (never machine state).
+skills-sync.local.json
+
+# Written by refresh and build; never committed in this monorepo.
+upstream/
+artifacts/
+
+# Claude worktrees
+.claude/worktrees/

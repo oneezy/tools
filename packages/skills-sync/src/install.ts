@@ -96,7 +96,7 @@ interface Driver {
 }
 
 /** The JSON a harness printed: the whole output, else from the first line that opens an object or array. */
-function json(out: string): unknown {
+export function json(out: string): unknown {
   try {
     return JSON.parse(out);
   } catch {
@@ -732,12 +732,14 @@ export function which(bin: string, env: NodeJS.ProcessEnv = process.env): string
 /**
  * Run a harness CLI with no TTY: a .cmd shim (npm's, on Windows) through the shell, anything else directly. The shell
  * gets one command line, quoted here for cmd.exe, never an args array: Node warns on stderr (DEP0190) for that pair, and
- * a sync must print nothing it did not mean to.
+ * a sync must print nothing it did not mean to. It runs in the user's home unless `cwd` names a folder: a command that
+ * acts on the project it runs in (Claude Code's --scope local) gets the project.
  */
 export function runner(
   file: string,
   onFailure?: (diagnostic: NonNullable<Action["diagnostic"]>) => void,
   env?: NodeJS.ProcessEnv,
+  cwd: string = os.homedir(),
 ): Run {
   const shell = process.platform === "win32" && /\.(cmd|bat)$/i.test(file);
   const quote = (s: string) => (/[\s&|<>^()%!"]/.test(s) ? `"${s.replace(/"/g, "")}"` : s);
@@ -746,7 +748,7 @@ export function runner(
       ? spawnSync([file, ...args].map(quote).join(" "), {
           shell: true,
           encoding: "utf8",
-          cwd: os.homedir(),
+          cwd,
           input: "",
           timeout: 180_000,
           windowsHide: true,
@@ -754,7 +756,7 @@ export function runner(
         })
       : spawnSync(file, args, {
           encoding: "utf8",
-          cwd: os.homedir(),
+          cwd,
           input: "",
           timeout: 180_000,
           windowsHide: true,

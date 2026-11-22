@@ -1,0 +1,11 @@
+interface:
+  display_name: Oneezy meeting
+  short_description: Choose among seven meetings and get a plain-language report
+  default_prompt: Use $oneezy-meeting to show me the numbered meeting menu.
+  icon_small: assets/icon.svg
+  icon_large: assets/icon.svg
+policy:
+  products:
+  - CHAT
+  - CODEX
+  allow_implicit_invocation: true

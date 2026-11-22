@@ -6,6 +6,7 @@
 
 - [Tools workspace](./GLOSSARY.md): the shared words: Tool, CLI, Picker, Harness, Surface, Host
 - [Skills sync](./packages/skills-sync/GLOSSARY.md): one skills library linked into every Harness on every Host
+- [Skills library](./packages/skills/GLOSSARY.md): the authored skills and locked sources installed by Skills sync
 - [Skills viewer](./packages/skills-viewer/GLOSSARY.md): maps a skills library; covers the engine and `apps/skills-viewer-web`
 - [Task manager](./packages/task-manager/GLOSSARY.md): one GitHub project per repo, its board moved by git events, and the roadmap as phases
 - [Remote sessions](./packages/remote-sessions/GLOSSARY.md): background Claude Threads and the Worktrees Claude and Codex share

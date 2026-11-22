@@ -148,8 +148,12 @@ test("filesToRead asks for SKILL.md and manifests first, then what manifests poi
   assert.ok(first.includes("plugins/toolkit/commands/ship.md"));
   assert.ok(first.includes("plugins/toolkit/hooks/hooks.json"));
   assert.ok(
-    !first.some((p) => p.endsWith(".sh") || p.endsWith(".mjs") || p.endsWith("env.md")),
-    "scripts and references are listed, not read",
+    !first.some((p) => p.endsWith(".sh") || p.endsWith(".mjs")),
+    "executable files are listed, never read or executed by workflow analysis",
+  );
+  assert.ok(
+    first.some((p) => p.endsWith("env.md")),
+    "supporting Markdown is read for static document references",
   );
   const loaded = new Map(first.map((p) => [p, files.get(p) ?? ""]));
   assert.deepEqual(
@@ -159,7 +163,7 @@ test("filesToRead asks for SKILL.md and manifests first, then what manifests poi
 });
 
 test("browser-safe modules import nothing from node:", () => {
-  for (const f of ["analyze", "edges", "parse", "vfs", "github", "mermaid", "types", "index"]) {
+  for (const f of ["analyze", "edges", "parse", "vfs", "github", "mermaid", "types", "index", "workflows"]) {
     const src = fs.readFileSync(path.join(PKG, "src", `${f}.ts`), "utf8");
     assert.ok(!/from "node:/.test(src), `${f}.ts imports node:`);
   }

@@ -1,0 +1,3 @@
+interface:
+  display_name: "Oneezy Agents"
+  short_description: "Load Justin's global rules (AGENTS-GLOBAL.md) and follow them"

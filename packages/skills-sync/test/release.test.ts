@@ -39,6 +39,7 @@ test("--help lists the machine commands, the library commands and every flag; an
     .filter((l) => /^  [a-z]/.test(l))
     .map((l) => l.trim().split(/\s+/)[0]);
   assert.deepEqual(commands, [
+    "develop",
     "sync",
     "status",
     "branches",
@@ -79,6 +80,7 @@ test("--help lists the machine commands, the library commands and every flag; an
       "--remote-ref <ref>",
       "--symlinks",
       "--junctions",
+      "--watch",
       "-h, --help",
     ],
   ].flat();
@@ -117,7 +119,6 @@ test("--help lists the machine commands, the library commands and every flag; an
     "--agents <ids>",
     "--global / --no-global",
     "--no-pull",
-    "--watch",
     "-y, --yes",
     "--ask",
     "--adoption-file",

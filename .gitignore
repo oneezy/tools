@@ -10,6 +10,9 @@ __pycache__/
 # skills are linked by skills-sync, never committed
 .claude/skills/
 .agents/skills/
+.agents/skills-sync-development.json
+# Local skill exclusions contain this computer's cache paths.
+.codex/config.toml
 
 # pnpm workspace
 node_modules/

@@ -311,7 +311,7 @@
 
 /* ---------- chrome ---------- */
 .chrome {
-  position: fixed;
+  position: absolute;
   z-index: 10;
 }
 .panel {
@@ -454,6 +454,17 @@
   letter-spacing: 0.08em;
   text-transform: uppercase;
   color: var(--muted);
+}
+.library-actions {
+  display: flex;
+  gap: 12px;
+}
+.library-actions button {
+  border: 0;
+  background: none;
+  color: var(--accent);
+  padding: 0;
+  font: inherit;
 }
 .key-row {
   display: flex;
