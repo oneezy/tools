@@ -4,7 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { createHash } from 'node:crypto';
 import { test } from 'node:test';
-import { bundle, root } from './oneezy-capabilities.mjs';
+import { bundle, descriptionProblems, root } from './oneezy-capabilities.mjs';
 const read = (name) => fs.readFileSync(path.join(root, name), 'utf8');
 const catalog = JSON.parse(read('docs/agents/capabilities/catalog.json'));
 
@@ -110,4 +110,24 @@ test('management routing preserves destination and approval boundaries instead o
   const management=read('skills/oneezy/oneezy-skills/references/management.md');
   assert.match(management,/Make the actual structured tool call or shell command/);
   assert.match(management,/review\/no-publication request/);
+});
+
+test('every authored skill description is free of angle brackets, which claude.ai strips; a placeholder in one fails the check', () => {
+  assert.deepEqual(descriptionProblems(), []);
+  const repo = fs.mkdtempSync(path.join(os.tmpdir(), 'oneezy-descriptions-'));
+  try {
+    const skill = (group, name, frontmatter) => {
+      fs.mkdirSync(path.join(repo, 'skills', group, name), { recursive: true });
+      fs.writeFileSync(path.join(repo, 'skills', group, name, 'SKILL.md'), `---\n${frontmatter}\n---\nbody with <tags> is fine\n`);
+    };
+    skill('oneezy', 'quoted', `name: quoted\ndescription: "Use for 'into <branch>'."`);
+    skill('play', 'folded', 'name: folded\ndescription: >-\n  Use for\n  add <owner/repo> skills.\nargument-hint: "<x>"');
+    skill('oneezy', 'clean', 'name: clean\ndescription: >-\n  Use for into a branch.\nargument-hint: "into <branch>"');
+    assert.deepEqual(descriptionProblems(repo), [
+      'oneezy/quoted: description holds angle brackets, which claude.ai strips; write the placeholder as plain words',
+      'play/folded: description holds angle brackets, which claude.ai strips; write the placeholder as plain words',
+    ]);
+  } finally {
+    fs.rmSync(repo, { recursive: true, force: true });
+  }
 });

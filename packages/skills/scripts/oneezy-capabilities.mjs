@@ -26,9 +26,31 @@ export function bundle(repo = root, write = false) {
   }
   return errors;
 }
+/**
+ * Every authored skill (`skills/<group>/<skill>/SKILL.md`) whose frontmatter `description` holds `<` or `>`. claude.ai
+ * strips angle brackets from a plugin skill's description and warns on the marketplace sync ("cannot contain XML
+ * tags"), so a placeholder such as `<branch>` loses its word there. Write the placeholder as plain words instead.
+ */
+export function descriptionProblems(repo = root) {
+  const errors = [];
+  const skills = path.join(repo, "skills");
+  for (const group of fs.existsSync(skills) ? fs.readdirSync(skills).sort() : []) {
+    if (!fs.statSync(path.join(skills, group)).isDirectory()) continue;
+    for (const name of fs.readdirSync(path.join(skills, group)).sort()) {
+      const file = path.join(skills, group, name, "SKILL.md");
+      if (!fs.existsSync(file)) continue;
+      const frontmatter = /^---\r?\n([\s\S]*?)\r?\n---/.exec(fs.readFileSync(file, "utf8"))?.[1] ?? "";
+      // the description line and its indented continuation lines; a folded `>-` or `|` indicator is YAML, not text
+      const block = /^description:[ \t]*(.*(?:\r?\n[ \t]+.*)*)/m.exec(frontmatter)?.[1] ?? "";
+      const text = block.replace(/^[>|][-+]?[ \t]*(?=\r?\n|$)/, "");
+      if (/[<>]/.test(text)) errors.push(`${group}/${name}: description holds angle brackets, which claude.ai strips; write the placeholder as plain words`);
+    }
+  }
+  return errors;
+}
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   const write = process.argv.includes("--write");
-  const errors = bundle(root, write);
+  const errors = [...bundle(root, write), ...descriptionProblems(root)];
   if (errors.length) { process.stderr.write(errors.join("\n") + "\n"); process.exitCode = 1; }
-  else process.stdout.write("Oneezy capability references current\n");
+  else process.stdout.write("Oneezy capability references current; skill descriptions hold no angle brackets\n");
 }
