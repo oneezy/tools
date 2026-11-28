@@ -2,12 +2,14 @@ import { expect, it, describe } from "vite-plus/test";
 import {
   backfill,
   backfillStatus,
+  bodyIssues,
   branchIssue,
   runEvent,
   transition,
   type Ticket,
 } from "../../skills/skills/oneezy/oneezy-task-manager/scripts/steps/board.ts";
 import { FakeGitHub } from "./fixtures/github.js";
+import { GitHubError } from "../../skills/skills/oneezy/oneezy-task-manager/scripts/github.ts";
 import { run } from "../../skills/skills/oneezy/oneezy-task-manager/scripts/main.ts";
 import type { Context } from "../../skills/skills/oneezy/oneezy-task-manager/scripts/types.ts";
 
@@ -36,6 +38,7 @@ describe("status rules", () => {
     expect(branchIssue("feature/42-name")).toBe(42);
     expect(branchIssue("42-name")).toBeUndefined();
     expect(branchIssue("feature/no-number")).toBeUndefined();
+    expect(bodyIssues("Fixes: #3 and closes #4. RESOLVED #5, prefix#6, Closes other/repo#7")).toEqual([3, 4, 5]);
   });
 });
 async function fixture() {
@@ -112,4 +115,75 @@ it("research never enters Review; maps/phases stay untouched in promotion and ba
   api.issues[0].state = "closed";
   await backfill(ctx, api.project);
   expect(api.items[0].status?.name).toBe("Todo");
+});
+
+// A staging branch (next): pull requests merge into it, and it reaches dev by a fast-forward push (#251).
+function staged(api: FakeGitHub, compare: string[] | undefined) {
+  const list = api.pages.bind(api);
+  const read = api.rest.bind(api);
+  api.pages = async <T>(path: string): Promise<T[]> => {
+    if (path.includes("/pulls?state=closed&base=next"))
+      return [
+        { number: 5, merge_commit_sha: "c5", merged_at: "2026-11-27T12:00:00Z" },
+        { number: 6, merge_commit_sha: "c6", merged_at: "2026-11-27T12:00:00Z" },
+        { number: 7, merge_commit_sha: "c7", merged_at: null },
+      ] as T[];
+    return list(path);
+  };
+  api.rest = async <T>(method: string, path: string, body?: unknown): Promise<T> => {
+    if (path.includes("/compare/bbbb...aaaa")) {
+      api.calls.push({ kind: "rest", method, path });
+      if (!compare) throw new GitHubError("Not Found", 404);
+      const page = Number(/[?&]page=(\d+)/.exec(path)![1]);
+      return { total_commits: compare.length, commits: compare.slice(page - 1, page).map((sha) => ({ sha })) } as T;
+    }
+    return read(method, path, body);
+  };
+}
+const land = {
+  EVENT: "push",
+  PUSH_REF: "refs/heads/dev",
+  STAGING_BRANCH: "next",
+  PUSH_BEFORE: "bbbb",
+  PUSH_AFTER: "aaaa",
+};
+it("a push to dev closes the issues of PRs into next whose merge commits it brings, reading every compare page", async () => {
+  const { api, ctx } = await fixture();
+  staged(api, ["c1", "c5", "c7"]);
+  api.items[0].status = { name: "Review" };
+  await runEvent(ctx, api.project, land);
+  expect(api.issues[0].state).toBe("closed");
+  expect(api.items[0].status?.name).toBe("Done");
+  expect(api.calls.filter((c) => c.path?.includes("/compare/"))).toHaveLength(3);
+  const comment = api.calls.find((c) => c.path?.endsWith("/issues/1/comments"));
+  expect(comment?.body).toEqual({ body: "Merged into `dev` by #5." });
+});
+it("a merge commit already in dev, an unmerged PR, a new branch or no staging branch close nothing", async () => {
+  for (const [compare, event] of [
+    [["c9"], land],
+    [["c7"], land],
+    [undefined, land],
+    [["c5"], { ...land, PUSH_BEFORE: "0000000000000000000000000000000000000000" }],
+    [["c5"], { ...land, STAGING_BRANCH: "" }],
+  ] as [string[] | undefined, Record<string, string>][]) {
+    const { api, ctx } = await fixture();
+    staged(api, compare);
+    api.pull.headRefName = "feature/1-task";
+    await runEvent(ctx, api.project, event);
+    // PR 6 and PR 7 link the same issue 1, so a close here would mean a wrong rule fired.
+    expect(api.issues[0].state).toBe("open");
+  }
+});
+it("a PR with no closing references links the issues its body closes", async () => {
+  const { api, ctx } = await fixture();
+  api.pull.headRefName = "chore/tidy";
+  api.pull.closingIssuesReferences.nodes = [];
+  api.pull.body = "Tidy up. Fixes: #1, closes #99";
+  api.items[0].status = { name: "In Progress" };
+  await runEvent(ctx, api.project, { EVENT: "pull_request", ACTION: "opened", PR: "5" });
+  expect(api.items[0].status?.name).toBe("Review");
+  api.items[0].status = { name: "In Progress" };
+  api.pull.closingIssuesReferences.nodes = [{ number: 2, repository: { nameWithOwner: "other/widgets" } }];
+  await runEvent(ctx, api.project, { EVENT: "pull_request", ACTION: "opened", PR: "5" });
+  expect(api.items[0].status?.name).toBe("In Progress");
 });

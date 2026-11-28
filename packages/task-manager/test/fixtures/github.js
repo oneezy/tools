@@ -59,6 +59,7 @@ export class FakeGitHub {
     this.milestones = [];
     this.pull = {
       headRefName: "feature/1-task",
+      body: "",
       closingIssuesReferences: {
         nodes: [{ number: 1, repository: { nameWithOwner: "acme/widgets" } }],
         pageInfo: { hasNextPage: false, endCursor: null },

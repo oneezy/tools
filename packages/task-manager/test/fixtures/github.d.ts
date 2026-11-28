@@ -22,6 +22,7 @@ export class FakeGitHub implements Api {
   milestones: { number: number; title: string; description: string }[];
   pull: {
     headRefName: string;
+    body: string;
     closingIssuesReferences: {
       nodes: { number: number; repository: { nameWithOwner: string } }[];
       pageInfo: { hasNextPage: boolean; endCursor: string | null };
