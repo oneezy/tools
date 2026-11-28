@@ -45,6 +45,28 @@ it("opens a caller PR on a dedicated branch, never commits directly to dev/main"
   expect(writes[1].body?.branch).toBe("chore/task-manager-caller");
   expect(writes[2].body).toMatchObject({ head: "chore/task-manager-caller", base: "dev" });
 });
+it("a caller that names its own staging branch matches the template, and an update keeps that branch", async () => {
+  const { api, ctx } = fixture();
+  const template = "on:\n  push:\n    with:\n      staging-branch: ''\n";
+  api.caller = "on:\n  push:\n    with:\n      staging-branch: next\n";
+  expect(await ensureCaller(ctx, template)).toBe(true);
+  expect(api.calls.some((c) => c.method !== "GET")).toBe(false);
+  api.caller = "on:\n  pull:\n    with:\n      staging-branch: next\n";
+  const read = api.rest.bind(api);
+  api.rest = async <T>(method: string, route: string, body?: unknown): Promise<T> => {
+    if (method === "GET" && route.includes("heads/chore%2F")) throw new GitHubError("missing", 404);
+    if (method !== "GET") {
+      api.calls.push({ kind: "rest", method, path: route, body: body as Record<string, unknown> });
+      return { html_url: "https://github.com/acme/widgets/pull/8" } as T;
+    }
+    return read(method, route, body);
+  };
+  expect(await ensureCaller(ctx, template)).toBe(false);
+  const put = api.calls.find((c) => c.method === "PUT");
+  expect(Buffer.from(String(put?.body?.content), "base64").toString("utf8")).toBe(
+    "on:\n  push:\n    with:\n      staging-branch: next\n",
+  );
+});
 it("reuses a pending PR and never treats forbidden reads as missing files", async () => {
   const { api, ctx, logs } = fixture();
   api.caller = "old template";

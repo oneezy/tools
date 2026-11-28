@@ -505,6 +505,11 @@ function Ensure-Caller($owner, $repo) {
   if ($live) {
     $have = [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String(($live.content -replace '\s', ''))) -replace "`r`n", "`n"
     if ($have -match '(?m)^\s+workflow_call:') { Step 'ok' "$path is the host workflow itself"; return $true }
+    # A caller may name its own staging branch; every other line must match the template, and an update keeps it.
+    $own = [regex]::Match($have, '(?m)^[ \t]*staging-branch:.*$')
+    if ($own.Success -and $wanted -match '(?m)^[ \t]*staging-branch:') {
+      $wanted = $wanted -replace '(?m)^[ \t]*staging-branch:.*$', $own.Value.Replace('$', '$$')
+    }
     if ($have -eq $wanted) { Step 'ok' "$path on $base"; return $true }
   }
   $branch = 'chore/task-manager-caller'
