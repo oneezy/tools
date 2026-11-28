@@ -1,6 +1,6 @@
 ---
 name: oneezy-merge
-description: "Land the current branch and end with one status report. Bare, or 'this pr': commit, push, open the PR, wait for every check on it. 'into <branch>': the same, then squash-merge on green checks and delete the landed branch. 'release', 'both', 'dev and main': the same into dev, then promote every ready repo in scope to main. 'release all': promote every repo Justin owns, after his yes. In Trident, 'into dev' or 'next to dev' moves next to dev by fast-forward, highlights first."
+description: "Land the current branch and end with one status report. Bare, or 'this pr': commit, push, open the PR, wait for every check on it. 'into' a branch: the same, then squash-merge on green checks and delete the landed branch. 'release', 'both', 'dev and main': the same into dev, then promote every ready repo in scope to main. 'release all': promote every repo Justin owns, after his yes. In Trident, 'into dev' or 'next to dev' moves next to dev by fast-forward, highlights first."
 disable-model-invocation: true
 argument-hint: "empty or 'this pr' to open for review; 'into dev' to merge; 'release' (or 'both', 'dev and main') to merge into dev and promote to main; 'release all' to promote every repo after a yes"
 ---
