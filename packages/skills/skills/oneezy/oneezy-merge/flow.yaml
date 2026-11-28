@@ -12,6 +12,11 @@ refs:
     id: skills/oneezy/oneezy-merge/references/modes.md
     need: conditional
     when: the named operation/reference branch in SKILL.md
+  - token: references/trident.md
+    kind: file
+    id: skills/oneezy/oneezy-merge/references/trident.md
+    need: conditional
+    when: layerdbiz/tridentcubed, landing on next or the next move
   - token: scripts/fast-forward-dev.mjs
     kind: file
     id: skills/oneezy/oneezy-merge/scripts/fast-forward-dev.mjs
@@ -46,14 +51,27 @@ unresolved: []
 agents:
   max: 0
 steps:
+  - id: repo-rules
+    does: read the repo's AGENTS.md; its working rules on landing, merging and main win over this skill; in layerdbiz/tridentcubed also read references/trident.md and the two sections it points at (AGENTS.md "Where work lands", apps/app/AGENTS.md "Releases and What's New")
+    outcome:
+      done: the repo's landing rules known
   - id: mode
-    does: read the arguments into open (no branch named), land (one branch other than main named), release (release, both, dev and main, or main named) or release all, and pick the PR base; a release from dev itself, or from a branch already landed, and release all are promotion-only; release scope is the repos this session landed, else every checkout in the working area, and for release all every repo Justin owns
+    after: repo-rules
+    does: read the arguments into open (no branch named), next move (layerdbiz/tridentcubed with into dev, to dev, dev, move next to dev or next to dev), land (one branch other than main named), release (release, both, dev and main, or main named) or release all, and pick the PR base; a release from dev itself, or from a branch already landed, and release all are promotion-only; release scope is the repos this session landed, else every checkout in the working area, and for release all every repo Justin owns
     outcome:
       done: mode and base known
+  - id: next-move
+    after: mode
+    if: mode is next move
+    does: follow references/trident.md; land this session's own work on next first; dry-run node apps/app/scripts/release.ts --branch dev --head origin/next --dry-run and check its highlights against every What's New line in git log v<newest release>..origin/next; when the version has none or misses a line, land the highlights on next, tell Justin to read Coming to dev on next.app and stop for his yes; else merge origin/dev into next when dev holds a commit next lacks, then git push origin origin/next:dev, and wait for the checks on dev's new head; no PR into dev, main untouched
+    needs: [git, gh, node]
+    outcome:
+      done: origin/dev and origin/next name the same commit, the release workflow's tag and GitHub release known
+      fail: highlights missing or a line missing → highlights landed on next, one line asking Justin to read Coming to dev, stop
   - id: commit-push
     after: mode
-    if: not a promotion-only release (mode is release and the current branch is dev itself or already landed)
-    does: one shell call; stage the session's files, commit with a conventional subject carrying the ticket number and the attribution trailers, git push -u origin <branch>
+    if: not a promotion-only release and not the next move (mode is release and the current branch is dev itself or already landed)
+    does: one shell call; stage the session's files, commit with a conventional subject carrying the ticket number and the attribution trailers (in layerdbiz/tridentcubed a commit with a What's New line also updates highlights.ts for the version next leads to, references/trident.md), git push -u origin <branch>
     needs: [git]
     outcome:
       done: push accepted
@@ -80,7 +98,7 @@ steps:
   - id: land
     after: wait-checks
     if: mode is land or release, not a promotion-only release, and all checks green
-    does: squash-merge with the expected head SHA, title = PR title plus (#<pr>); then one shell call; fetch, verify origin/<base> contains the squash, check out the base, fast-forward, delete the remote and local branch once; another session's worktree is never touched
+    does: squash-merge with the expected head SHA, title = PR title plus (#<pr>), or the merge method and title the repo's AGENTS.md names for the base (Trident's next takes a merge commit, references/trident.md); then one shell call; fetch, verify origin/<base> contains the squash, check out the base, fast-forward, delete the remote and local branch once; another session's worktree is never touched
     needs: [gh, git]
     outcome:
       done: base fast-forwarded, branch deleted
@@ -88,13 +106,13 @@ steps:
   - id: promote
     after: [mode, land]
     if: mode is release or release all
-    does: plan one line per repo in the release scope (ready when dev holds commits main lacks and dev's checks are green; else skipped with the reason); release all waits for Justin's yes before any write; then per ready repo open a release PR dev → main, merge it with a merge commit, verify origin/main contains it, fast-forward the local main ref, verify origin/dev is an ancestor of origin/main with an identical tree, and wait for the checks on main's new head (a release or publish job among them) as in wait-checks; once they finish, green or red, run scripts/fast-forward-dev.mjs with the promoted dev SHA, the merge commit's SHA and the verdict, which fast-forwards origin/dev to that merge commit only while origin/dev is still the promoted SHA, the trees match and the checks are green, and otherwise leaves dev alone and says why
+    does: plan one line per repo in the release scope (ready when dev holds commits main lacks and dev's checks are green; else skipped with the reason; a repo whose AGENTS.md keeps main for Justin's own word, such as layerdbiz/tridentcubed, is ready only when his message names it); release all waits for Justin's yes before any write; then per ready repo open a release PR dev → main, merge it with a merge commit, verify origin/main contains it, fast-forward the local main ref, verify origin/dev is an ancestor of origin/main with an identical tree, and wait for the checks on main's new head (a release or publish job among them) as in wait-checks; once they finish, green or red, run scripts/fast-forward-dev.mjs with the promoted dev SHA, the merge commit's SHA and the verdict, which fast-forwards origin/dev to that merge commit only while origin/dev is still the promoted SHA, the trees match and the checks are green, and otherwise leaves dev alone and says why
     needs: [git, gh, node]
     outcome:
       done: every ready repo's origin/main contains its origin/dev, the trees are identical, main's checks are green, and dev is fast-forwarded to the promotion commit (dev and main then point at the same commit) or skipped with the script's reason
       fail: release all without a yes, promotion refused, or containment or tree differs → one line, stop; main's checks red → the script skips dev with that reason, one line, stop
   - id: report
-    after: [wait-checks, land, promote]
+    after: [wait-checks, land, promote, next-move]
     calls:
       skill: oneezy-status
     returns: the status report, the only message

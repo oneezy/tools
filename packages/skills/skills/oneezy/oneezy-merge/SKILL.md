@@ -1,15 +1,18 @@
 ---
 name: oneezy-merge
-description: "Land the current branch and end with one status report. Bare, or 'this pr': commit, push, open the PR, wait for every check on it. 'into <branch>': the same, then squash-merge on green checks and delete the landed branch. 'release', 'both', 'dev and main': the same into dev, then promote every ready repo in scope to main. 'release all': promote every repo Justin owns, after his yes."
+description: "Land the current branch and end with one status report. Bare, or 'this pr': commit, push, open the PR, wait for every check on it. 'into <branch>': the same, then squash-merge on green checks and delete the landed branch. 'release', 'both', 'dev and main': the same into dev, then promote every ready repo in scope to main. 'release all': promote every repo Justin owns, after his yes. In Trident, 'into dev' or 'next to dev' moves next to dev by fast-forward, highlights first."
 disable-model-invocation: true
 argument-hint: "empty or 'this pr' to open for review; 'into dev' to merge; 'release' (or 'both', 'dev and main') to merge into dev and promote to main; 'release all' to promote every repo after a yes"
 ---
 
 An explicit invocation authorizes committing and pushing this session’s files for the selected mode. Read `references/modes.md` before any action: it owns mode selection, base, calls, PR body, check polling, SHA-guarded merge, promotion and budgets.
 
+Read the repo’s `AGENTS.md` first: where its working rules on landing, merging or `main` differ from this skill, they win. In layerdbiz/tridentcubed, also read `references/trident.md`: it owns landing on `next` and the next move.
+
 - Bare or “this pr”: open for review; wait for all checks; do not merge or delete.
 - A named branch other than `main`: land only into that target when checks are green.
 - Release/both/dev and main: land into dev, then promote main in every ready repo of the release scope (the repos this session landed, else every checkout in the working area); an already-landed branch only needs promotion.
+- Next move (Trident’s `into dev`, “move next to dev”, “next to dev”): `dev` takes `next` by fast-forward once the release’s highlights are current; no PR into `dev`, and `main` is untouched.
 - Release all: list every repo Justin owns with what it would promote, and promote only after his yes.
 - `main` takes only promotions from `dev`, merged as a merge commit through a PR; `dev` then fast-forwards to that merge commit through `scripts/fast-forward-dev.mjs`, or the report says why it was skipped.
 
