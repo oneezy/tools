@@ -9,7 +9,10 @@
 # Two jobs, chosen by the event:
 #   status    every event but "issue opened": packages/task-manager/scripts/status.sh moves the
 #             issue's Status (assigned -> Next Up, branch or draft PR -> In Progress, PR ready ->
-#             Review, merged into dev -> closed and Done, push to main -> Complete, ...). A dispatch
+#             Review, merged into dev -> closed and Done, push to main -> Complete, ...). With
+#             staging-branch set (say next), pull requests merge into next first and next reaches dev by a
+#             push: that push closes, and moves to Done, the issues of every pull request into next whose
+#             merge commit it brings. A dispatch
 #             with start=<n> moves that one issue to In Progress (an agent beginning work without a
 #             numbered branch); backfill=true recomputes the whole board from git facts.
 #   estimate  "issue opened", debounced two minutes in a cancel-in-progress group so a burst of new
@@ -46,6 +49,12 @@ on:
         description: Pushing to this branch moves every Done item to Complete
         type: string
         default: main
+      staging-branch:
+        description: >-
+          Pull requests merge into this branch first; a push that brings their merge commits into the
+          integration branch closes their linked issues. Empty: no staging branch
+        type: string
+        default: ''
     secrets:
       PROJECT_PAT:
         required: true
@@ -83,9 +92,13 @@ permissions:
 
 jobs:
   status:
+    # A push runs only on the release branch, or on the integration branch when there is a staging branch.
     if: >-
       ${{ !(github.event_name == 'issues' && github.event.action == 'opened')
-          && !(github.event_name == 'workflow_dispatch' && !inputs.backfill && !inputs.start) }}
+          && !(github.event_name == 'workflow_dispatch' && !inputs.backfill && !inputs.start)
+          && !(github.event_name == 'push'
+               && github.ref != format('refs/heads/{0}', inputs.release-branch || 'main')
+               && !(inputs.staging-branch && github.ref == format('refs/heads/{0}', inputs.integration-branch || 'dev'))) }}
 
     runs-on: ubuntu-latest
     steps:
@@ -113,10 +126,13 @@ jobs:
           PR_MERGED: ${{ github.event.pull_request.merged }}
           REVIEW_STATE: ${{ github.event.review.state }}
           PUSH_REF: ${{ github.ref }}
+          PUSH_BEFORE: ${{ github.event.before }}
+          PUSH_AFTER: ${{ github.event.after }}
           START: ${{ inputs.start }}
           BACKFILL: ${{ inputs.backfill || false }}
           INTEGRATION_BRANCH: ${{ inputs.integration-branch || 'dev' }}
           RELEASE_BRANCH: ${{ inputs.release-branch || 'main' }}
+          STAGING_BRANCH: ${{ inputs.staging-branch || '' }}
 
   estimate:
     if: >-

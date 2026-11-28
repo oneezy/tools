@@ -59,12 +59,17 @@ export class FakeGitHub {
     this.milestones = [];
     this.pull = {
       headRefName: "feature/1-task",
+      body: "",
       closingIssuesReferences: {
         nodes: [{ number: 1, repository: { nameWithOwner: "acme/widgets" } }],
         pageInfo: { hasNextPage: false, endCursor: null },
       },
     };
     this.caller = "name: host\non:\n  workflow_call:\n";
+    // Backfill's git facts: every pull request, the branches, and which merge commits are in dev.
+    this.pulls = [];
+    this.branches = [];
+    this.inDev = new Set();
   }
   clone(value) {
     return value === undefined ? undefined : JSON.parse(JSON.stringify(value));
@@ -75,7 +80,8 @@ export class FakeGitHub {
       return this.clone(this.issues.filter((i) => !path.includes("state=open") || i.state === "open"));
     if (path.endsWith("/labels")) return this.clone(this.labels);
     if (path.includes("/milestones?")) return this.clone(this.milestones);
-    if (path.includes("/pulls?")) return [];
+    if (path.includes("/pulls?")) return path.includes("head=") ? [] : this.clone(this.pulls);
+    if (path.endsWith("/branches")) return this.branches.map((name) => ({ name }));
     if (path.endsWith("/fields")) return this.project.fields.nodes.map((f, i) => ({ name: f.name, id: i + 1 }));
     throw new Error(`Unmocked list ${path}`);
   }
@@ -86,6 +92,8 @@ export class FakeGitHub {
       if (path === "user") return { login: "acme" };
       if (path === root) return this.clone(this.repo);
       if (path.includes("/git/ref/heads/")) return { object: { sha: "abc" } };
+      const compare = /\/compare\/dev\.\.\.(\w+)$/.exec(path);
+      if (compare) return { status: this.inDev.has(compare[1]) ? "behind" : "diverged" };
       if (path.includes("/contents/")) return { content: Buffer.from(this.caller).toString("base64"), sha: "file" };
       if (/\/issues\/\d+$/.test(path))
         return this.clone(this.issues.find((i) => i.number === Number(path.split("/").at(-1))));

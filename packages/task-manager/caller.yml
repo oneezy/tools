@@ -5,6 +5,8 @@
 #
 # Status follows git: a branch named <type>/<n>-<slug> or a draft PR puts #n In Progress, a PR
 # marked ready puts it in Review, a merge into dev closes it (Done), a push to main makes it Complete.
+# A repo whose pull requests merge into a staging branch first (say next, which reaches dev by a push)
+# sets staging-branch below: the push into dev then closes what each of those pull requests links.
 # An agent that begins a ticket with no numbered branch dispatches this workflow with start=<n>.
 # Phases (issues labelled `phase`, from the repo's roadmap) are linked to tasks through Milestones:
 # a task joins a phase by taking the phase's Milestone (gh issue edit <n> --milestone "Phase 5 — ...").
@@ -20,7 +22,7 @@ on:
   pull_request_review:
     types: [submitted]
   push:
-    branches: [main]
+    branches: [main, dev]
   workflow_dispatch:
     inputs:
       backfill:
@@ -49,6 +51,7 @@ jobs:
       backfill: ${{ inputs.backfill || false }}
       estimate: ${{ inputs.estimate || false }}
       start: ${{ inputs.start || '' }}
+      staging-branch: ''
     secrets:
       PROJECT_PAT: ${{ secrets.PROJECT_PAT }}
       CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}

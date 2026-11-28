@@ -1,3 +1,4 @@
+import type { Pull } from "../../../skills/skills/oneezy/oneezy-task-manager/scripts/steps/board.ts";
 import type {
   Api,
   Repo,
@@ -22,12 +23,16 @@ export class FakeGitHub implements Api {
   milestones: { number: number; title: string; description: string }[];
   pull: {
     headRefName: string;
+    body: string;
     closingIssuesReferences: {
       nodes: { number: number; repository: { nameWithOwner: string } }[];
       pageInfo: { hasNextPage: boolean; endCursor: string | null };
     };
   };
   caller: string;
+  pulls: Pull[];
+  branches: string[];
+  inDev: Set<string>;
   rest<T>(method: string, path: string, body?: unknown): Promise<T>;
   pages<T>(path: string): Promise<T[]>;
   graphql<T>(query: string, variables?: Record<string, unknown>): Promise<T>;

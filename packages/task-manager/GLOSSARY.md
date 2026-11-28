@@ -15,8 +15,11 @@ Any issue on a repo that has a GitHub project. A **wayfinder ticket** carries a 
 _Avoid_: card, feature, bug, task, issue (context picks the Type, not the meaning)
 
 **Status**:
-Where a Ticket sits on the board: **Todo**, **Next Up** (assigned), **In Progress** (its branch exists on GitHub), **Review** (a pull request ready for a human), **Done** (merged into `dev`), **Complete** (promoted to `main`, live). A staging branch changes nothing here.
+Where a Ticket sits on the board: **Todo**, **Next Up** (assigned), **In Progress** (its branch exists on GitHub), **Review** (a pull request ready for a human), **Done** (merged into `dev`), **Complete** (promoted to `main`, live).
 _Avoid_: column, stage
+
+**Staging branch**:
+A long-lived branch every pull request merges into before a push carries it into `dev` (Trident's `next`). Its Tickets reach Done when that push brings their pull request's merge commit, so the Statuses stay the same.
 
 **Needs changes**:
 A Done Ticket the client or Justin sent back: a red label on the reopened issue. The Ticket returns to In Progress and the label drops when new work merges.
