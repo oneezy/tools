@@ -6,6 +6,7 @@ import {
   branchIssue,
   runEvent,
   transition,
+  type Pull,
   type Ticket,
 } from "../../skills/skills/oneezy/oneezy-task-manager/scripts/steps/board.ts";
 import { FakeGitHub } from "./fixtures/github.js";
@@ -186,4 +187,112 @@ it("a PR with no closing references links the issues its body closes", async () 
   api.pull.closingIssuesReferences.nodes = [{ number: 2, repository: { nameWithOwner: "other/widgets" } }];
   await runEvent(ctx, api.project, { EVENT: "pull_request", ACTION: "opened", PR: "5" });
   expect(api.items[0].status?.name).toBe("In Progress");
+});
+
+// Backfill from pull requests and branches (#253): every rule, strongest first.
+const pull = (number: number, head: string, base: string, extra: Partial<Pull> = {}): Pull => ({
+  number,
+  state: "closed",
+  draft: false,
+  merged_at: "2026-11-27T12:00:00Z",
+  merge_commit_sha: `m${number}`,
+  body: "",
+  head: { ref: head },
+  base: { ref: base },
+  ...extra,
+});
+async function board(setup: (api: FakeGitHub) => void, env: Record<string, string> = {}, plan = false) {
+  const { api, ctx } = await fixture();
+  const lines: string[] = [];
+  ctx.log = (line) => lines.push(line);
+  ctx.plan = plan;
+  api.items[0].status = { name: "Todo" };
+  setup(api);
+  await backfill(ctx, api.project, false, env);
+  return { api, lines };
+}
+describe("backfill reads pull requests and branches", () => {
+  it("closes a ticket whose merged pull request is in dev, then Done", async () => {
+    const { api } = await board((api) => {
+      api.pulls = [pull(5, "feat/1-task", "dev")];
+      api.inDev.add("m5");
+    });
+    expect(api.issues[0].state).toBe("closed");
+    expect(api.items[0].status?.name).toBe("Done");
+    const comment = api.calls.find((c) => c.path?.endsWith("/issues/1/comments"));
+    expect(comment?.body).toEqual({ body: "Merged into `dev` by #5." });
+  });
+  it("links a pull request by a body Closes line when its branch names no ticket", async () => {
+    const { api } = await board((api) => {
+      api.pulls = [pull(6, "chore/tidy", "next", { body: "Tidy.\n\nFixes: #1" })];
+      api.inDev.add("m6");
+    });
+    expect(api.issues[0].state).toBe("closed");
+  });
+  it("a Refs-only pull request closes nothing", async () => {
+    const { api } = await board((api) => {
+      api.pulls = [pull(7, "chore/tidy", "dev", { body: "Refs #1" })];
+      api.inDev.add("m7");
+    });
+    expect(api.issues[0].state).toBe("open");
+    expect(api.items[0].status?.name).toBe("Todo");
+  });
+  it("a pull request merged into next but not in dev yet is Review", async () => {
+    const { api } = await board((api) => (api.pulls = [pull(8, "feat/1-task", "next")]), { STAGING_BRANCH: "next" });
+    expect(api.issues[0].state).toBe("open");
+    expect(api.items[0].status?.name).toBe("Review");
+  });
+  it.each([
+    [false, "Review"],
+    [true, "In Progress"],
+  ])("an open pull request (draft %s) is %s", async (draft, expected) => {
+    const { api } = await board(
+      (api) => (api.pulls = [pull(9, "feat/1-task", "next", { state: "open", draft, merged_at: null })]),
+    );
+    expect(api.items[0].status?.name).toBe(expected);
+  });
+  it("a closed, unmerged pull request counts for nothing", async () => {
+    const { api } = await board((api) => (api.pulls = [pull(10, "feat/1-task", "dev", { merged_at: null })]));
+    expect(api.items[0].status?.name).toBe("Todo");
+  });
+  it("a pushed numbered branch is In Progress from Todo, and never pulls Review back", async () => {
+    const { api } = await board((api) => (api.branches = ["feature/1-work"]));
+    expect(api.items[0].status?.name).toBe("In Progress");
+    const again = await board((api) => {
+      api.branches = ["feature/1-work"];
+      api.items[0].status = { name: "Review" };
+    });
+    expect(again.api.items[0].status?.name).toBe("Review");
+  });
+  it("a reopened needs-changes ticket waits for new work, not the merged pull request", async () => {
+    const { api } = await board((api) => {
+      api.issues[0].labels = [{ name: "needs-changes" }];
+      api.pulls = [pull(11, "feat/1-task", "dev")];
+      api.inDev.add("m11");
+    });
+    expect(api.issues[0].state).toBe("open");
+  });
+  it("closed tickets keep today's rules", async () => {
+    const { api } = await board((api) => {
+      api.issues[0].state = "closed";
+      api.items[0].status = { name: "Review" };
+    });
+    expect(api.items[0].status?.name).toBe("Done");
+  });
+  it("--plan prints the close and the move and writes nothing", async () => {
+    const { api, lines } = await board(
+      (api) => {
+        api.pulls = [pull(5, "feat/1-task", "dev")];
+        api.inDev.add("m5");
+      },
+      {},
+      true,
+    );
+    expect(lines).toContain("would close #1 merged into dev by #5");
+    expect(lines).toContain("would move #1: Todo -> Done");
+    expect(api.issues[0].state).toBe("open");
+    expect(api.calls.some((c) => (c.kind === "rest" ? c.method !== "GET" : c.query?.startsWith("mutation")))).toBe(
+      false,
+    );
+  });
 });
