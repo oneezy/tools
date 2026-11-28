@@ -57,7 +57,7 @@ export async function run(ctx: Context, options: RunOptions): Promise<unknown> {
     await refresh();
     await pruneViews(ctx, project);
     await importIssues(ctx, project);
-    await backfill(ctx, project, true);
+    await backfill(ctx, project, true, options.event);
     if (source) await syncRoadmap(ctx, project, source);
     if (options.automation !== false) {
       const ready = await ensureCaller(ctx);
@@ -83,7 +83,7 @@ async function runOnProject(ctx: Context, project: Project, options: RunOptions)
     case "backlog":
       return readBacklog(ctx, project);
     case "backfill":
-      await backfill(ctx, project);
+      await backfill(ctx, project, false, options.event);
       break;
     case "event":
       await runEvent(ctx, project, options.event ?? {});

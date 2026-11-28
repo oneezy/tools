@@ -86,19 +86,116 @@ async function setStatus(ctx: Context, project: Project, item: string, to: strin
     { p: project.id, i: item, f: field.id, o: option },
   );
 }
-export async function backfill(ctx: Context, project: Project, bootstrap = false): Promise<void> {
+// Close an open issue whose work reached the integration branch: drop needs-changes, comment, then close.
+async function closeIssue(ctx: Context, n: number, pr: number | string, integration: string, labels: string[]) {
+  ctx.log(`${ctx.plan ? "would close" : "close"} #${n} merged into ${integration} by #${pr}`);
+  if (ctx.plan) return;
+  if (labels.includes("needs-changes"))
+    await ctx.api.rest("DELETE", `repos/${ctx.repo.full_name}/issues/${n}/labels/needs-changes`);
+  await ctx.api.rest("POST", `repos/${ctx.repo.full_name}/issues/${n}/comments`, {
+    body: `Merged into \`${integration}\` by #${pr}.`,
+  });
+  await ctx.api.rest("PATCH", `repos/${ctx.repo.full_name}/issues/${n}`, {
+    state: "closed",
+    state_reason: "completed",
+  });
+}
+
+export interface Pull {
+  number: number;
+  state: string;
+  draft?: boolean;
+  merged_at: string | null;
+  merge_commit_sha: string | null;
+  body: string | null;
+  head: { ref: string };
+  base: { ref: string };
+}
+// The tickets a pull request works on: its branch's number and the issues its body closes. "Refs #n" is not one.
+export function pullTickets(pull: Pull): number[] {
+  const branch = branchIssue(pull.head.ref);
+  return [...new Set([...(branch ? [branch] : []), ...bodyIssues(pull.body ?? "")])];
+}
+// What git says about one open ticket, strongest first: a merged pull request in the integration branch closes it;
+// one merged into the staging branch but not there yet is Review; an open pull request is Review (ready) or In
+// Progress (draft); a pushed numbered branch is In Progress, only from Todo, Next Up or no Status.
+export type Evidence = { close: number } | { to: string; from?: string[] };
+export async function evidence(
+  pulls: Pull[],
+  branch: boolean,
+  inIntegration: (sha: string) => Promise<boolean>,
+  staging: string,
+): Promise<Evidence | undefined> {
+  const merged = pulls.filter((p) => p.merged_at && p.merge_commit_sha);
+  for (const pull of merged) if (await inIntegration(pull.merge_commit_sha!)) return { close: pull.number };
+  if (staging && merged.some((p) => p.base.ref === staging)) return { to: "Review" };
+  const open = pulls.filter((p) => p.state === "open");
+  if (open.some((p) => !p.draft)) return { to: "Review" };
+  if (open.length) return { to: "In Progress" };
+  if (branch) return { to: "In Progress", from: ["", "Todo", "Next Up"] };
+}
+
+// Backfill reads git as well as issue state: env carries INTEGRATION_BRANCH (default dev) and STAGING_BRANCH.
+export async function backfill(ctx: Context, project: Project, bootstrap = false, env: Event = {}): Promise<void> {
+  const integration = env.INTEGRATION_BRANCH || "dev";
+  const staging = env.STAGING_BRANCH || "";
   const items = (await getItems(ctx, project)).filter((item) => belongs(ctx, item));
+  const pulls = await ctx.api.pages<Pull>(`repos/${ctx.repo.full_name}/pulls?state=all`);
+  const branches = new Set(
+    (await ctx.api.pages<{ name: string }>(`repos/${ctx.repo.full_name}/branches`))
+      .map((b) => branchIssue(b.name))
+      .filter((n) => n !== undefined),
+  );
+  const byTicket = new Map<number, Pull[]>();
+  for (const pull of pulls) for (const n of pullTickets(pull)) byTicket.set(n, [...(byTicket.get(n) ?? []), pull]);
+  const known = new Map<string, boolean>();
+  const inIntegration = async (sha: string) => {
+    if (!known.has(sha)) {
+      const compare = await optional(() =>
+        ctx.api.rest<{ status: string }>(
+          "GET",
+          `repos/${ctx.repo.full_name}/compare/${encodeURIComponent(integration)}...${sha}`,
+        ),
+      );
+      known.set(sha, compare?.status === "identical" || compare?.status === "behind");
+    }
+    return known.get(sha)!;
+  };
+  // fromGit <n> <ticket>: the Status git gives an open ticket, after closing it when its work is in integration;
+  // null when git found the ticket's work but it stays where it is; undefined when git knows nothing of it.
+  const fromGit = async (n: number, ticket: Ticket): Promise<string | null | undefined> => {
+    if (ticket.state.toUpperCase() !== "OPEN" || protectedIssue(ticket.labels)) return;
+    // A reopened ticket sent back with needs-changes waits for new work, not for the pull request already merged.
+    const found = await evidence(
+      (byTicket.get(n) ?? []).filter((p) => !(ticket.labels.includes("needs-changes") && p.merged_at)),
+      branches.has(n),
+      inIntegration,
+      staging,
+    );
+    if (!found) return;
+    if ("close" in found) {
+      await closeIssue(ctx, n, found.close, integration, ticket.labels);
+      return "Done";
+    }
+    if (found.to === "Review" && ticket.labels.includes("wayfinder:research")) return null;
+    if (found.from && !found.from.includes(ticket.status ?? "")) return null;
+    return found.to;
+  };
   for (const item of items) {
     const ticket = itemTicket(item);
-    const to = backfillStatus(ticket, bootstrap);
+    const n = item.content!.number!;
+    const git = await fromGit(n, ticket);
+    const to = git === undefined ? backfillStatus(ticket, bootstrap) : git;
     if (!to || !transition(ticket, to)) continue;
-    ctx.log(`${ctx.plan ? "would move" : "move"} #${item.content!.number}: ${ticket.status ?? "none"} -> ${to}`);
+    ctx.log(`${ctx.plan ? "would move" : "move"} #${n}: ${ticket.status ?? "none"} -> ${to}`);
     if (!ctx.plan) await setStatus(ctx, project, item.id, to);
   }
   const seen = new Set(items.map((item) => item.content!.number));
   for (const issue of await listIssues(ctx, "open")) {
-    if (seen.has(issue.number) || protectedIssue(issue.labels.map((l) => l.name))) continue;
-    const to = issue.assignees.length ? "Next Up" : "Todo";
+    const labels = issue.labels.map((l) => l.name);
+    if (seen.has(issue.number) || protectedIssue(labels)) continue;
+    const ticket = { state: issue.state, labels, assignees: issue.assignees.length };
+    const to = (await fromGit(issue.number, ticket)) || (issue.assignees.length ? "Next Up" : "Todo");
     ctx.log(`${ctx.plan ? "would add" : "add"} #${issue.number}: ${to}`);
     if (!ctx.plan) await setStatus(ctx, project, await addItem(ctx, project, issue.node_id), to);
   }
@@ -186,20 +283,14 @@ export async function runEvent(ctx: Context, project: Project, event: Event): Pr
   const closeMerged = async (n: number, pr: number | string) => {
     const issue = await getIssue(n);
     if (!issue || issue.pull_request || protectedIssue(issue.labels.map((l) => l.name))) return;
-    if (issue.state.toLowerCase() === "open") {
-      ctx.log(`${ctx.plan ? "would close" : "close"} #${n} merged into ${integration} by #${pr}`);
-      if (!ctx.plan) {
-        if (issue.labels.some((l) => l.name === "needs-changes"))
-          await ctx.api.rest("DELETE", `repos/${ctx.repo.full_name}/issues/${n}/labels/needs-changes`);
-        await ctx.api.rest("POST", `repos/${ctx.repo.full_name}/issues/${n}/comments`, {
-          body: `Merged into \`${integration}\` by #${pr}.`,
-        });
-        await ctx.api.rest("PATCH", `repos/${ctx.repo.full_name}/issues/${n}`, {
-          state: "closed",
-          state_reason: "completed",
-        });
-      }
-    }
+    if (issue.state.toLowerCase() === "open")
+      await closeIssue(
+        ctx,
+        n,
+        pr,
+        integration,
+        issue.labels.map((l) => l.name),
+      );
     await move(n, "Done");
   };
   // A push of PUSH_BEFORE..PUSH_AFTER into the integration branch lands every pull request into the staging branch

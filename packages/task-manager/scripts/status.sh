@@ -41,7 +41,13 @@
 #                                           earlier commit (new branch) or one GitHub cannot compare (rewritten) closes nothing
 #   push to RELEASE_BRANCH               -> Complete     for every Done item
 #   issue reopened or labeled needs-changes  -> In Progress
-#   backfill                             -> closed: Done; open and assigned: Next Up from Todo or none;
+#   backfill                             -> an open ticket follows its pull requests and branches first, strongest
+#                                           first: a merged PR whose merge commit is in INTEGRATION_BRANCH closes it,
+#                                           then Done; a PR merged into STAGING_BRANCH, not in INTEGRATION_BRANCH yet,
+#                                           Review; an open PR, Review (ready) or In Progress (draft); a pushed
+#                                           numbered branch, In Progress from Todo, Next Up or none. A needs-changes
+#                                           ticket skips its merged PRs. With none of these:
+#                                           closed: Done; open and assigned: Next Up from Todo or none;
 #                                           open and unassigned with no Status: Todo; everything else kept
 # A PR's linked issues are its closing references plus the issue its branch is named after, when that number is an
 # issue of this repository: a branch named after another repo's issue or after a pull request is skipped, not failed on.
@@ -219,9 +225,10 @@ start_work() { # start_work <n>: In Progress, the same step a numbered branch ta
 
 close_merged() { # close_merged <n> <pr>
   local state
-  state=$(issue_info "$1" | cut -f3)
+  state=$(issue_info "$1") || die "could not read #$1"
+  state=$(printf '%s\n' "$state" | cut -f3)
   if [ "$state" != "OPEN" ]; then say "kept  #$1: already closed"; move "$1" Done; return 0; fi
-  if [ -n "$DRY_RUN" ]; then say "would close #$1 (merged into $INTEGRATION_BRANCH by #$2)"; return 0; fi
+  if [ -n "$DRY_RUN" ]; then say "would close #$1 (merged into $INTEGRATION_BRANCH by #$2)"; move "$1" Done; return 0; fi
   if has_label "$1" needs-changes; then gh issue edit "$1" -R "$REPO" --remove-label needs-changes >/dev/null; say "removed needs-changes from #$1"; fi
   gh issue close "$1" -R "$REPO" --comment "Merged into \`$INTEGRATION_BRANCH\` by #$2." >/dev/null
   say "closed #$1: merged into $INTEGRATION_BRANCH by #$2"
@@ -309,11 +316,109 @@ promote() { # every Done item -> Complete
   say "promoted $moved item(s) to Complete on push to $RELEASE_BRANCH"
 }
 
+# git_facts: the pull requests and numbered branches backfill reads. Sets LINKS, one line per pull request and ticket
+# it works on ("<n> <pr> <merged|draft|ready> <base> <merge sha>", tab-separated; a closed unmerged PR is left out),
+# and BRANCHES, ",<n>,..." for every pushed <type>/<n>-<slug> branch. A PR works on its branch's number and on the
+# issues its body closes; "Refs #n" is not one of them.
+git_facts() {
+  local page=1 rows pr head base state draft merged sha body kind n count
+  LINKS=""
+  while :; do
+    rows=$(gh api "repos/$REPO/pulls?state=all&per_page=100&page=$page" \
+             --jq '.[] | [.number, .head.ref, .base.ref, .state, (.draft|tostring), (.merged_at // "-"),
+                          (.merge_commit_sha // "-"), ("body:" + ((.body // "") | gsub("\\s+"; " ")))] | @tsv') ||
+      die "could not list the pull requests"
+    [ -n "$rows" ] || break
+    while IFS=$'\t' read -r pr head base state draft merged sha body; do
+      if [ "$merged" != "-" ]; then kind=merged
+      elif [ "$state" = "open" ]; then if [ "$draft" = "true" ]; then kind=draft; else kind=ready; fi
+      else continue; fi
+      for n in $(branch_issue "$head") $(body_issues "${body#body:}"); do
+        LINKS="$LINKS$n"$'\t'"$pr"$'\t'"$kind"$'\t'"$base"$'\t'"$sha"$'\n'
+      done
+    done <<<"$rows"
+    count=$(printf '%s\n' "$rows" | wc -l)
+    [ "$count" -ge 100 ] || break
+    page=$((page + 1))
+  done
+  BRANCHES=","; page=1
+  while :; do
+    rows=$(gh api "repos/$REPO/branches?per_page=100&page=$page" --jq '.[].name') || die "could not list the branches"
+    [ -n "$rows" ] || break
+    while IFS= read -r head; do n=$(branch_issue "$head"); [ -z "$n" ] || BRANCHES="$BRANCHES$n,"; done <<<"$rows"
+    [ "$(printf '%s\n' "$rows" | wc -l)" -ge 100 ] || break
+    page=$((page + 1))
+  done
+}
+
+in_integration() { # in_integration <sha>: true when INTEGRATION_BRANCH holds the commit (compare is identical or behind)
+  local out
+  if ! out=$(gh api "repos/$REPO/compare/$INTEGRATION_BRANCH...$1" --jq .status 2>&1); then
+    case "$out" in *"HTTP 404"*|*"Not Found"*|*"No common ancestor"*) return 1 ;; esac
+    die "could not compare $INTEGRATION_BRANCH...$1: $out"
+  fi
+  case "$out" in identical|behind) return 0 ;; esac
+  return 1
+}
+
+# git_status <n> <labels> <status>: what git says about open ticket #n, strongest first. Prints "close <pr>", a
+# Status, "keep" (git found work, the ticket stays), or nothing (git knows nothing; today's rules apply).
+git_status() {
+  local n=$1 labels=$2 status=$3 links pr kind base sha skip_merged="" to=""
+  links=$(printf '%s' "$LINKS" | awk -F'\t' -v n="$n" '$1 == n')
+  case ",$labels," in *,needs-changes,*) skip_merged=1 ;; esac
+  if [ -n "$links" ] && [ -z "$skip_merged" ]; then
+    while IFS=$'\t' read -r _ pr kind base sha; do
+      [ "$kind" = merged ] && [ "$sha" != "-" ] || continue
+      if in_integration "$sha"; then printf 'close %s\n' "$pr"; return 0; fi
+    done <<<"$links"
+    if [ -n "$STAGING_BRANCH" ] && printf '%s\n' "$links" | awk -F'\t' -v b="$STAGING_BRANCH" '$3 == "merged" && $4 == b' | grep -q .; then
+      to=Review
+    fi
+  fi
+  if [ -z "$to" ] && [ -n "$links" ]; then
+    if printf '%s\n' "$links" | awk -F'\t' '$3 == "ready"' | grep -q .; then to=Review
+    elif printf '%s\n' "$links" | awk -F'\t' '$3 == "draft"' | grep -q .; then to="In Progress"; fi
+  fi
+  if [ -z "$to" ]; then
+    case "$BRANCHES" in *,"$n",*) ;; *) return 0 ;; esac
+    case "$status" in -|Todo|"Next Up") to="In Progress" ;; *) to=keep ;; esac
+  fi
+  if [ "$to" = Review ]; then case ",$labels," in *,wayfinder:research,*) to=keep ;; esac; fi
+  printf '%s\n' "$to"
+}
+
+# from_git <n> <labels> <status>: apply git_status. Sets DECIDED when git decided the ticket, empty to fall back to
+# today's rules. Call it as a plain command, never as a condition, so set -e still stops a failed write inside it.
+from_git() {
+  local got
+  DECIDED=""
+  got=$(git_status "$1" "$2" "$3") || exit 1
+  [ -n "$got" ] || return 0
+  DECIDED=1
+  case "$got" in
+    keep) say "kept  #$1 at $3 (git work found)" ;;
+    close\ *) close_merged "$1" "${got#close }" ;;
+    *) move "$1" "$got" ;;
+  esac
+}
+
 backfill() {
-  local item status n state a to seen="," board open
+  local item status n state a to seen="," board open labels
   board=$(items) || die "could not read the board"
+  open=$(gh issue list -R "$REPO" --state open --limit 1000 --json number,assignees,labels \
+           --jq '.[] | [.number, (.assignees|length), ([.labels[].name] | join(",") | if . == "" then "-" else . end)] | @tsv') ||
+    die "could not list the open issues"
+  git_facts
   while IFS=$'\t' read -r item status n state a; do
+    [ -n "$n" ] || continue
     seen="$seen$n,"
+    if [ "$state" = "OPEN" ]; then
+      labels=$(printf '%s\n' "$open" | awk -F'\t' -v n="$n" '$1 == n { print $3 }')
+      case ",$labels," in *,wayfinder:map,*|*,phase,*) continue ;; esac
+      from_git "$n" "${labels:--}" "$status"
+      [ -z "$DECIDED" ] || continue
+    fi
     to=""
     if [ "$state" = "CLOSED" ]; then
       case "$status" in Done|Complete) ;; *) to=Done ;; esac
@@ -326,11 +431,11 @@ backfill() {
     if [ -n "$DRY_RUN" ]; then say "would move #$n: $status -> $to"; else set_status "$item" "$(option_id "$to")"; say "moved #$n: $status -> $to"; fi
   done <<<"$board"
   # Open issues not on the board yet (Auto-add off, or older than the project).
-  open=$(gh issue list -R "$REPO" --state open --limit 1000 --json number,assignees --jq '.[] | [.number, (.assignees|length)] | @tsv') ||
-    die "could not list the open issues"
-  while IFS=$'\t' read -r n a; do
+  while IFS=$'\t' read -r n a labels; do
     [ -n "$n" ] || continue
     case "$seen" in *,"$n",*) continue ;; esac
+    from_git "$n" "${labels:--}" "-"
+    [ -z "$DECIDED" ] || continue
     if [ "$a" -gt 0 ]; then move "$n" "Next Up"; else move "$n" Todo; fi
   done <<<"$open"
   say "backfill done"

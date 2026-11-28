@@ -39,6 +39,10 @@ case "${1:-} ${2:-}" in
       *"items(first:100"*) cat "$FX/items" 2>/dev/null || true ;;
       *) echo "fake gh: no fixture answers: $query" >&2; exit 1 ;;
     esac ;;
+  "api repos/acme/widgets/compare/dev..."*)
+    # Backfill's question: is this merge commit in dev? "behind" when a fixture says so.
+    sha=${2##*...}
+    if [ -f "$FX/in-dev-$sha" ]; then echo behind; else echo diverged; fi ;;
   "api repos/acme/widgets/compare/"*)
     [ ! -f "$FX/compare-missing" ] || { echo "gh: Not Found (HTTP 404)" >&2; exit 1; }
     [ ! -f "$FX/compare-broken" ] || { echo "gh: Server Error (HTTP 500)" >&2; exit 1; }
@@ -47,8 +51,14 @@ case "${1:-} ${2:-}" in
   "api repos/acme/widgets/pulls?"*)
     base=$(printf '%s' "$2" | sed -nE 's/.*[?&]base=([^&]+).*/\1/p')
     page=$(printf '%s' "$2" | sed -nE 's/.*[?&]page=([0-9]+).*/\1/p')
-    case "$2" in *state=closed*) ;; *) echo "fake gh: pulls without state=closed: $2" >&2; exit 1 ;; esac
-    cat "$FX/pulls-$base-$page" 2>/dev/null || true ;;
+    case "$2" in
+      *state=all*) cat "$FX/pulls-all-$page" 2>/dev/null || true ;;
+      *state=closed*) cat "$FX/pulls-$base-$page" 2>/dev/null || true ;;
+      *) echo "fake gh: pulls without state=all or state=closed: $2" >&2; exit 1 ;;
+    esac ;;
+  "api repos/acme/widgets/branches?"*)
+    page=$(printf '%s' "$2" | sed -nE 's/.*[?&]page=([0-9]+).*/\1/p')
+    cat "$FX/branches-$page" 2>/dev/null || true ;;
   "issue list") cat "$FX/open-issues" 2>/dev/null || true ;;
   "repo view") printf 'acme/widgets\n' ;;
   *) echo "fake gh: write refused: gh $*" >&2; exit 1 ;;
@@ -72,6 +82,11 @@ body() { printf 'body:%s\n' "$2" >> "$FX/pr-$1"; }
 staged() { printf '%s\t%s\t%s\n' "$3" "$4" "${5:--}" >> "$FX/pulls-$1-$2"; }
 # commits <page> <total> <sha>...: one page of the compare PUSH_BEFORE...PUSH_AFTER (total_commits, then the SHAs).
 commits() { local page=$1; shift; printf '%s\n' "$@" > "$FX/compare-$page"; }
+# pull <n> <head> <base> <open|closed> <draft> <merged_at or -> <merge sha or -> [body]: one pull request of the
+# repository, as backfill lists them; in_dev <sha> marks a merge commit dev holds; branch <name> is a pushed branch.
+pull() { printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\tbody:%s\n' "$1" "$2" "$3" "$4" "$5" "$6" "$7" "${8:-}" >> "$FX/pulls-all-1"; }
+in_dev() { touch "$FX/in-dev-$1"; }
+branch() { printf '%s\n' "$1" >> "$FX/branches-1"; }
 # item <item id> <status> <n> <state> <assignees>: one line of the whole-board listing.
 item() { printf '%s\t%s\t%s\t%s\t%s\n' "$@" >> "$FX/items"; }
 reset() { rm -f "$FX"/*; }
@@ -266,6 +281,56 @@ reset; touch "$FX/project-401"
 check "a refused token stops the run" "status.sh: gh could not read the GitHub project linked to acme/widgets" EVENT=issues ACTION=assigned ISSUE=3
 check "with exit 1" "(exit 1)" EVENT=issues ACTION=assigned ISSUE=3
 check "after printing gh's error" "gh: Bad credentials (HTTP 401)" EVENT=issues ACTION=assigned ISSUE=3
+
+# ---------------------------------------------------------------- backfill from pull requests and branches (#253)
+
+bf=(EVENT=workflow_dispatch BACKFILL=true)
+m=2026-11-27T12:00:00Z
+
+reset; item PVTI_41 Todo 41 OPEN 0; issue 41 Todo; pull 51 feat/41-widget dev closed false "$m" s51; in_dev s51
+check "backfill closes an open ticket whose merged PR is in dev" "would close #41 (merged into dev by #51)" "${bf[@]}"
+check "and moves it to Done" "would move #41: Todo -> Done" "${bf[@]}"
+
+reset; item PVTI_42 Todo 42 OPEN 0; issue 42 Todo; pull 52 chore/tidy next closed false "$m" s52 "Tidy. Fixes: #42"; in_dev s52
+check "a body Closes line links a PR whose branch names no ticket" "would close #42 (merged into dev by #52)" "${bf[@]}"
+
+reset; item PVTI_43 Todo 43 OPEN 0; issue 43 Todo; pull 53 chore/tidy dev closed false "$m" s53 "Refs #43"; in_dev s53
+refute "a Refs-only PR closes nothing" "would close #43" "${bf[@]}"
+refute "and moves nothing" "would move #43" "${bf[@]}"
+
+reset; item PVTI_44 Todo 44 OPEN 0; issue 44 Todo; pull 54 feat/44-widget next closed false "$m" s54
+check "a PR merged into next, not in dev yet, is Review" "would move #44: Todo -> Review" STAGING_BRANCH=next "${bf[@]}"
+refute "and is not closed" "would close #44" STAGING_BRANCH=next "${bf[@]}"
+
+reset; item PVTI_45 Todo 45 OPEN 0; item PVTI_46 Review 46 OPEN 0; issue 45 Todo; issue 46 Review
+pull 55 feat/45-widget next open false - -; pull 56 feat/46-widget next open true - -
+check "an open ready PR is Review" "would move #45: Todo -> Review" "${bf[@]}"
+check "an open draft PR is In Progress" "would move #46: Review -> In Progress" "${bf[@]}"
+
+reset; item PVTI_47 Todo 47 OPEN 0; issue 47 Todo; pull 57 feat/47-widget dev closed false - s57; in_dev s57
+refute "a closed, unmerged PR counts for nothing" "#47:" "${bf[@]}"
+
+reset; item PVTI_48 Todo 48 OPEN 0; item PVTI_49 Review 49 OPEN 0; issue 48 Todo; issue 49 Review; branch feat/48-widget; branch feat/49-widget
+check "a pushed numbered branch is In Progress" "would move #48: Todo -> In Progress" "${bf[@]}"
+check "and never pulls Review back" "kept  #49 at Review (git work found)" "${bf[@]}"
+
+reset; item PVTI_50 Done 50 OPEN 0; issue 50 Done OPEN needs-changes; printf '50\t0\tneeds-changes\n' > "$FX/open-issues"; pull 60 feat/50-widget dev closed false "$m" s60; in_dev s60
+refute "a reopened needs-changes ticket is not closed by its old PR" "would close #50" "${bf[@]}"
+
+reset; item PVTI_61 Review 61 CLOSED 0; issue 61 Review CLOSED; pull 62 feat/61-widget dev closed false "$m" s62; in_dev s62
+check "a closed ticket keeps today's rule" "would move #61: Review -> Done" "${bf[@]}"
+refute "and is not closed again" "would close #61" "${bf[@]}"
+
+reset; printf '63\t0\t-\n' > "$FX/open-issues"; issue 63 -; pull 64 feat/63-widget next open false - -
+check "an open issue missing from the board takes its git Status" "would move #63: - -> Review" "${bf[@]}"
+
+reset; item PVTI_65 Todo 65 OPEN 0; issue 65 Todo OPEN phase; printf '65\t0\tphase\n' > "$FX/open-issues"; pull 66 feat/65-widget dev closed false "$m" s66; in_dev s66
+refute "a phase is never closed" "#65" "${bf[@]}"
+
+reset; item PVTI_67 Todo 67 OPEN 0; issue 67 Todo; pull 68 feat/67-widget dev closed false "$m" s68; in_dev s68
+for i in $(seq 200 299); do printf '%s\tchore/x\tdev\tclosed\tfalse\t-\t-\tbody:\n' "$i" >> "$FX/pulls-all-1"; done
+mv "$FX/pulls-all-1" "$FX/pulls-all-tmp"; tail -n 100 "$FX/pulls-all-tmp" > "$FX/pulls-all-1"; head -n 1 "$FX/pulls-all-tmp" > "$FX/pulls-all-2"; rm "$FX/pulls-all-tmp"
+check "every page of pull requests is read" "would close #67 (merged into dev by #68)" "${bf[@]}"
 
 printf '\n%d passed, %d failed\n' "$pass" "$fail"
 [ "$fail" -eq 0 ]
